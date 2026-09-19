@@ -116,6 +116,10 @@ def local_model_available() -> bool:
     not something a capability probe should do behind someone's back."""
     import importlib.util
 
+    # The test session sets this (conftest.py): with `auto` the default,
+    # every test building a Config would otherwise load the real model.
+    if os.environ.get("SIMORGH_NO_LOCAL_EMBEDDER"):
+        return False
     return importlib.util.find_spec("sentence_transformers") is not None
 
 

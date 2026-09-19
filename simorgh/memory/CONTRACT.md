@@ -4,7 +4,7 @@ One-line status: layer 2 · 1,901 lines · 12 test files · lock: `memory` in do
 
 ## Purpose
 
-Memory owns what Sim remembers across turns: durable episodic, semantic and procedural records, one Ledger event per record on `memory:<kind>`, and the in-process conversation window (`WorkingMemory`) keyed per (channel, person). It answers `memory.retrieve` by scoring every live record (similarity times decayed confidence, plus a recency term), writes a record for every chat `turn.completed`, and consolidates (flag contradictions, prune, optionally distil a summary through Cognition). It must never physically delete or rewrite a record: forgetting and pruning are tombstone events on `memory:tombstones`, and a contradiction is an event on `memory:contradictions`, never an edit. It must never store something nobody said: a distillation that names specifics absent from its transcript is dropped whole (`consolidation.py::untraceable`). The shaping decision is that the Ledger is the store and the index is a cache: `recall.py` keeps a per-kind cursor and in-memory inverted index so a recall does not re-read or re-embed the store, and the default embedder is the dependency-free hashing trick (`config.py:64`), which matches vocabulary, not meaning.
+Memory owns what Sim remembers across turns: durable episodic, semantic and procedural records, one Ledger event per record on `memory:<kind>`, and the in-process conversation window (`WorkingMemory`) keyed per (channel, person). It answers `memory.retrieve` by scoring every live record (similarity times decayed confidence, plus a recency term), writes a record for every chat `turn.completed`, and consolidates (flag contradictions, prune, optionally distil a summary through Cognition). It must never physically delete or rewrite a record: forgetting and pruning are tombstone events on `memory:tombstones`, and a contradiction is an event on `memory:contradictions`, never an edit. It must never store something nobody said: a distillation that names specifics absent from its transcript is dropped whole (`consolidation.py::untraceable`). The shaping decision is that the Ledger is the store and the index is a cache: `recall.py` keeps a per-kind cursor and in-memory inverted index so a recall does not re-read or re-embed the store, and the default embedder is `auto`: a local model when installed (warmed in a thread, vectors persisted, dense scores fused with BM25), the dependency-free hashing trick otherwise, which matches vocabulary, not meaning.
 
 ## Files
 
@@ -71,7 +71,7 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 | `working_max_turns` | `20` | yes |
 | `working_max_chars` | `8000` | yes |
 | `default_k` | `5` | yes |
-| `embedder` | `'hashing'` | yes |
+| `embedder` | `'auto'` (local sentence-transformers when installed, else hashing; since 2026-09-19; tests get hashing via `SIMORGH_NO_LOCAL_EMBEDDER`) | yes |
 | `recency_weight` | `0.1` | yes |
 | `consolidate_after_start_s` | `120.0` | yes |
 
@@ -125,7 +125,8 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 - Stage 4 (session stream): the `session:<id>` stream becomes the working tier; `WorkingMemory` as fed today is the stopgap it replaces.
 - Stage 5 item 1 done 2026-09-19: a local embedder loads in a thread after the index is built (`MemoryEngine.warm_embedder`); until then `Embedder.embed` answers from hashing at once, and afterwards the hashed records are re-embedded in batches (`RecallIndex.upgrade`, `Embedder.embed_many`) and persisted to `memory:vectors`, which a restart reads instead of re-embedding. The default embedder stays `hashing` until item 2's matrix makes a dense recall cheap.
-- Stage 5 (memory tiers), all under the `memory` lock: item 1 (above); item 2 a float32 matrix plus BM25 fused by reciprocal rank; item 3 a `memory:facts` store (`Fact{subject, predicate, object, valid_from, valid_to, superseded_by, ...}`) extracted at consolidation, replacing `memory.contradiction.flagged`; item 4 an entity-linked facts block and per-person digest; item 7 person namespaces on every channel; item 8 forgetting by score, never a linked fact. This file is to be rewritten for the four tiers when stage 5 lands.
+- Stage 5 item 2 done 2026-09-19: with a dense embedder `retrieve` scores a kind with one float32 matrix product (`KindIndex.dense_scores`) and BM25 over words (`KindIndex.bm25`, stopwords dropped), fused by reciprocal rank (`recall.fused`, k=60, scaled 0..1) as the similarity in the existing score. The hashing path is unchanged (indexed score = full-scan score).
+- Stage 5 (memory tiers), all under the `memory` lock: items 1-2 (above); item 2 a float32 matrix plus BM25 fused by reciprocal rank; item 3 a `memory:facts` store (`Fact{subject, predicate, object, valid_from, valid_to, superseded_by, ...}`) extracted at consolidation, replacing `memory.contradiction.flagged`; item 4 an entity-linked facts block and per-person digest; item 7 person namespaces on every channel; item 8 forgetting by score, never a linked fact. This file is to be rewritten for the four tiers when stage 5 lands.
 
 ## Working on this module
 

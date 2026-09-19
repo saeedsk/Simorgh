@@ -122,6 +122,13 @@ class KindIndex:
         self.vectors: list[tuple[str, tuple[float, ...] | array]] = []
         # Dense vectors computed here and not yet persisted: (ref, provider, vector).
         self.fresh: list[tuple[str, str, tuple]] = []
+        # BM25 over words, for the dense path's hybrid ranking (stage 5
+        # item 2): term -> (positions, term frequencies), and each record's
+        # length in words. Stdlib only.
+        self.terms: dict[str, tuple[array, array]] = {}
+        self.lengths = array("i")
+        # The dense vectors as one float32 matrix, rebuilt when they change.
+        self._matrix = None
 
     def __len__(self) -> int:
         return len(self.records)
@@ -137,6 +144,18 @@ class KindIndex:
                 posting[0].append(position)
                 posting[1].append(weight)
         else:
+            self._matrix = None
+            words = _words(record.content)
+            self.lengths.append(len(words))
+            counts: dict[str, int] = {}
+            for word in words:
+                counts[word] = counts.get(word, 0) + 1
+            for word, count in counts.items():
+                posting = self.terms.get(word)
+                if posting is None:
+                    posting = self.terms[word] = (array("i"), array("i"))
+                posting[0].append(position)
+                posting[1].append(count)
             current = getattr(embedder, "provider", None)
             if persisted is not None and persisted[0] == current:
                 # Embedded once, by an earlier process (stage 5 item 1).
@@ -192,6 +211,48 @@ class KindIndex:
                 else:
                     bucketed.append(product)
         return {position: sum(values) for position, values in terms.items()}
+
+    def bm25(self, query: str, *, k1: float = 1.2, b: float = 0.75) -> dict[int, float]:
+        """`{position: BM25 score}` for the records sharing a word with `query`."""
+        n = len(self.lengths)
+        if not n:
+            return {}
+        average = (sum(self.lengths) / n) or 1.0
+        scores: dict[int, float] = {}
+        import math
+
+        for word in set(_words(query)):
+            posting = self.terms.get(word)
+            if posting is None:
+                continue
+            idf = math.log(1.0 + (n - len(posting[0]) + 0.5) / (len(posting[0]) + 0.5))
+            for position, tf in zip(posting[0], posting[1]):
+                norm = tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * self.lengths[position] / average))
+                scores[position] = scores.get(position, 0.0) + idf * norm
+        return scores
+
+    def dense_scores(self, query_pair) -> list[float]:
+        """Every record's cosine against the query, from one matrix product
+        (stage 5 item 2): the per-record Python loop cost 47 ms at 2,422
+        records. Rows whose vector is from another embedder than the query
+        (hashed before warm-up) fall back exactly as `dense_similarity`."""
+        query_provider, query_vec, _text = query_pair
+        try:
+            import numpy as np
+        except ImportError:  # pragma: no cover -- numpy arrives with any dense embedder
+            return [self.dense_similarity(i, query_pair) for i in range(len(self.vectors))]
+        if not self.vectors:
+            return []
+        rows = [i for i, (provider, _v) in enumerate(self.vectors) if comparable(query_provider, provider)]
+        out = [0.0] * len(self.vectors)
+        if rows and len(rows) == len(self.vectors):
+            if self._matrix is None or self._matrix.shape[0] != len(self.vectors):
+                self._matrix = np.asarray([np.asarray(v, dtype=np.float32) for _p, v in self.vectors], dtype=np.float32)
+            products = self._matrix @ np.asarray(query_vec, dtype=np.float32)
+            return [float(x) for x in products]
+        for i in range(len(self.vectors)):
+            out[i] = self.dense_similarity(i, query_pair)
+        return out
 
     def dense_similarity(self, position: int, query_pair) -> float:
         """The dense path, using the vector stored at index time.
@@ -352,6 +413,45 @@ class RecallIndex:
             self.penalties[ref] = self.penalties.get(ref, 1.0) * 0.5
 
 
+_WORD = __import__("re").compile(r"[a-z0-9\u0600-\u06ff]+")
+
+
+#: Words BM25 ignores. Without them, measured on a 500-record fixture with
+#: the real local model (2026-09-19): dense alone found 10/10 paraphrased
+#: facts in the top 3, fused with BM25 only 6/10 -- "the", "for", "what"
+#: matched filler records and outvoted the meaning. With them, 10/10.
+_STOPWORDS = frozenset(
+    "a about am an and are as at be been but by can could did do does for from had has have he her him his how i "
+    "if in into is it its just me must my no not now of on or our she should so than that the their them then "
+    "there these they this those to us was we were what when where which who will with would you your".split())
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in _WORD.findall((text or "").lower()) if w not in _STOPWORDS]
+
+
+#: Reciprocal rank fusion's constant: the usual 60.
+RRF_K = 60
+
+
+def fused(dense: list[float], lexical: dict[int, float]) -> list[float]:
+    """Reciprocal rank fusion of the dense and the BM25 rankings, scaled
+    to 0..1 (1 = first in both). A record with no word in common with the
+    query gets only its dense share, so a paraphrase still ranks."""
+    order = sorted(range(len(dense)), key=lambda i: dense[i], reverse=True)
+    dense_rank = {position: rank for rank, position in enumerate(order, start=1)}
+    lexical_rank = {position: rank for rank, position in
+                    enumerate(sorted(lexical, key=lexical.get, reverse=True), start=1)}
+    best = 2.0 / (RRF_K + 1)
+    out = []
+    for position in range(len(dense)):
+        score = 1.0 / (RRF_K + dense_rank[position])
+        if position in lexical_rank:
+            score += 1.0 / (RRF_K + lexical_rank[position])
+        out.append(score / best)
+    return out
+
+
 #: Dense vectors, persisted once each (stage 5 item 1): `vector.stored`
 #: events `{ref, provider, v}` with `v` the float32 vector in base64 --
 #: 384 dimensions is 2 KB, inside the Ledger's inline limit.
@@ -378,4 +478,4 @@ def decode_vector(text: str):
     return array("d", floats)
 
 
-__all__ = ["KindIndex", "Record", "RecallIndex", "RefSet", "VECTOR_STREAM", "decode_vector", "encode_vector"]
+__all__ = ["KindIndex", "RRF_K", "Record", "RecallIndex", "RefSet", "VECTOR_STREAM", "decode_vector", "encode_vector", "fused"]

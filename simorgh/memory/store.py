@@ -304,6 +304,13 @@ class MemoryEngine:
             # shares no bucket with the query. An empty query scores
             # every record 1.0, exactly as before.
             sims = index.similarities(query) if (query and self._index.hashing) else {}
+            hybrid: list[float] = []
+            if query_pair is not None and not self._index.hashing and index.records:
+                # Stage 5 item 2: the dense ranking (one matrix product) and
+                # BM25 over words, fused by reciprocal rank.
+                from .recall import fused
+
+                hybrid = fused(index.dense_scores(query_pair), index.bm25(query))
             for position, record in enumerate(index.records):
                 if record.ref in tombstoned:
                     continue
@@ -325,6 +332,8 @@ class MemoryEngine:
                     similarity = 1.0
                 elif self._index.hashing:
                     similarity = sims.get(position, 0.0)
+                elif hybrid:
+                    similarity = hybrid[position]
                 else:
                     similarity = index.dense_similarity(position, query_pair)
                 # The `MemoryItem` for a record that will not be

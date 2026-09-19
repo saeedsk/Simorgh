@@ -57,7 +57,14 @@ class Config:
     # 0.750 -> 0.893 and stayed the highest score in the set. Better ranking
     # among related memories, no fix for the case it was chosen for.
     # `[memory] embedder = "local"` still opts in deliberately.
-    embedder: str = "hashing"  # auto | local | openai | voyage | gemini | hashing
+    #
+    # auto again since 2026-09-19 (stage 5 items 1-2), because both costs
+    # above are gone: the model loads in a thread after boot while recall
+    # answers from hashing, vectors are persisted so it happens once, and a
+    # dense recall is one matrix product fused with BM25 (13 ms p50 at 500
+    # records). What it buys, measured with the real model on a 500-record
+    # fixture: paraphrased facts in the top 3, hashing 0/10, hybrid 10/10.
+    embedder: str = "auto"  # auto | local | openai | voyage | gemini | hashing
     recency_weight: float = 0.1  # scoring: similarity*confidence + recency_weight*recency_bonus
     # Seconds after start before the first consolidation pass (flag
     # contradictions, prune each kind to its keep count). Consolidation

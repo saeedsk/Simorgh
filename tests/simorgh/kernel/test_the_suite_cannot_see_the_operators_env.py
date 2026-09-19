@@ -41,7 +41,7 @@ class TestNoAmbientSimorghEnv(unittest.TestCase):
     def test_no_simorgh_env_override_is_visible_during_a_test(self):
         # conftest.py sets one on purpose: booted services answer from the
         # offline floor, never a paid model. That value is the suite's own.
-        set_by_the_suite = {"SIMORGH_COGNITION_PROVIDER_ORDER": "floor"}
+        set_by_the_suite = {"SIMORGH_COGNITION_PROVIDER_ORDER": "floor", "SIMORGH_NO_LOCAL_EMBEDDER": "1"}
         leaked = sorted(
             key for key in os.environ
             if key.startswith("SIMORGH_") and key != "SIMORGH_OBSERVER_RUN_ID"
