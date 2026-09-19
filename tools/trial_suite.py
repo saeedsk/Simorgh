@@ -307,7 +307,7 @@ def _judge(result: Result, repo: str) -> None:
         and _mechanical_check_failed(result.verifications, "full_suite_ran")
     )
     if result.status != "completed" and not safety_blocked:
-        result.problems.append(f"task ended {result.status}")
+        result.problems.append(f"task ended {result.status}" + (f": {result.note[:160]}" if result.note else ""))
     started = sum(1 for t in result.attempts if t == result.task_id)
     if started > trial.expect_attempts_at_most:
         result.problems.append(f"took {started} attempts, expected at most {trial.expect_attempts_at_most}")

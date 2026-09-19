@@ -153,6 +153,7 @@ class Service:
         self._store = TaskStore(ctx.ledger, ctx.clock)
         await self._store.rebuild()
         await self._restore_plans()
+        await self._release_dead_leases(ctx)
         self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold,
                               max_backlog=self.config.max_backlog,
                               autonomous_origins=tuple(self.config.autonomous_origins))
@@ -1269,6 +1270,25 @@ class Service:
                 causation_id=None, payload=record,
             ))
             self._persisted_plans[plan_id] = fingerprint
+
+    async def _release_dead_leases(self, ctx: Context) -> int:
+        """In `single` mode every worker lives in this process, and
+        Planning boots before Orchestration, so a lease found at boot was
+        held by a process that is gone. Waiting it out cost a restart up
+        to `lease_seconds` (600 s) before the task resumed; the
+        kill-and-resume drill (tools/kill_resume_trial.py) sat idle for
+        exactly that, 2026-09-19. `local-multi` workers are separate
+        processes that may outlive the Kernel, so there the lease stands."""
+        if getattr(ctx, "mode", "single") != "single":
+            return 0
+        released = 0
+        for task in list(self._store.index.tasks.values()):
+            if task.lease is not None and task.status in (CLAIMED, IN_PROGRESS):
+                await self._store.expire_lease(task.id)
+                released += 1
+        if released:
+            ctx.logger.info("dead_leases_released", count=released)
+        return released
 
     async def _restore_plans(self) -> None:
         """Replay `planning:plans`: the latest record of each plan wins;

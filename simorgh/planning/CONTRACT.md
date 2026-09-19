@@ -147,6 +147,7 @@ Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus
 - A re-grounding non-answer is never treated as drift: only a clear `no` supersedes a child.
 - `tasks clear` forgets every record and the forgetting survives a restart; the streams themselves remain.
 - While the system is paused nothing is offered; while `autonomous_paused`, tasks of `autonomous_origins` are not offered.
+- In `single` mode a lease found at boot belonged to a dead process and is released at once (`_release_dead_leases`), so a restart resumes a task without waiting out `lease_seconds`. In `local-multi` it stands.
 
 ## Contract tests
 
