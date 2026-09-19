@@ -63,7 +63,7 @@ Retention for every stream is decided here, in `compaction.py:47-53` `DEFAULT_RE
 | `verify:`, `reflect:` | 90d |
 | everything else | forever (truncated to snapshot minus `keep_tail` only if a snapshot exists) |
 
-How a window applies depends on the name (`compaction.py:124`): a name containing `:` is treated as per-id and is deleted whole once its last event is older than the window; a name without `:` (`activity`) is truncated to the window.
+How a window applies depends on activity, not on the name (since 2026-09-19, commit 6ce1c78): a stream whose last event is older than its window is deleted whole; otherwise events older than the window are truncated. (It used to depend on the name -- any `:` meant delete-only -- so the long-lived `metrics:history`, `curiosity:ticks` and friends were never trimmed.)
 
 ## Config
 
@@ -127,13 +127,13 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - B1 (high): the blob sweep read every stream file on the event loop. Fixed 2026-09-18, commit `aa05475` (stage 0 item 24): `to_thread`. The "skip when nothing was removed" half of the recommendation is not done; the sweep still runs on every pass.
 - B9 (low): the compaction record omitted `blobs_swept`. Fixed 2026-09-18, commit `aa05475`.
 - B3 (high): retention only ever deleted trace streams; "forever" streams grow. Partly fixed 2026-09-18 (stage 0 item 6, commit `62318d3`: more prefixes in `DEFAULT_RETENTION`). Still open for forever streams without a snapshot, and see the per-id problem below.
-- B19 (low): `metrics:history` had no retention. A 7d entry was added 2026-09-18 (item 6), but it has no effect while the stream is written: see the per-id problem below.
+- B19 (low): `metrics:history` had no retention. Fixed 2026-09-19: the 7d entry (item 6) takes effect since compaction decides by activity (commit `6ce1c78`).
 - B7 (medium): the ledger is an untyped, unguarded second channel; one unbound client for everyone; stream names duplicated as strings. Open; stage 1 item 8.
 - B8 (low): the `sqlite` and `dynamodb` backends and cross-process `tail` polling serve modes nothing selects. Open; stage 1 item 10 freezes dynamodb.
 - B2 / W4 (medium / high): one file plus an idempotency sidecar per trace id makes the jsonl ledger mostly trace files. Open; stage 1 item 3 (the bus stops writing `trace:` streams).
 - L4 (medium): ~20 fsync'd appends per tool call and read-back of the action stream. Open.
 
-Found while writing this contract (not in the catalogue): every retention entry whose name contains `:` but is really one long-lived stream (`metrics:history`, `voice:turns`, `curiosity:ticks`, `persona:state`, `execution:tools`, `execution:inflight`, `cognition:budget:<provider>`) is handled as per-id (`compaction.py:124`, `streams.py:60`) and is only deleted whole once idle past its window; while in use it is never truncated. Measured: 20 days of daily `metrics:history` events with the default 7d policy, `run_compaction` removed 0 events.
+Found while writing this contract, fixed 2026-09-19 (commit `6ce1c78`): retention on a long-lived stream whose name contains `:` (`metrics:history`, `voice:turns`, `curiosity:ticks`, ...) did nothing while it was written, because compaction treated every such name as per-id and delete-only. Pinned in `tests/simorgh/ledger/test_retention_truncates_live_streams.py`.
 
 Also not in the catalogue: `Service.publish_health()` (`service.py:171`) has no caller anywhere, so the declared `system.health` is never published by the ledger; and `run_compaction` itself still does a synchronous `scandir` + `stat` of every stream file (`jsonl.py:604-613`) and a synchronous snapshot read per forever stream on the event loop, the same stall shape as B1 at smaller cost.
 

@@ -57,7 +57,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:111-131`, pinned by `t
 | `voice.transcript`, `voice.spoken`, `voice.listening` | `messages/voice.py` | service.py:1038, 1135, 1158 | Shows what was heard (one line rewritten in place), said, and the floor state |
 | `ui.tv.state`, `ui.tv.speech` | `messages/ui.py` | httpapi.py:681-682 | Serves the TV page's state and speech queue |
 | `ui.dash.state`, `ui.dash.key` | `messages/ui.py` | httpapi.py:683-684 | Dashboard state and remote keys for the page |
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | httpapi.py:695-698 | Dashboard activity feed. Subscribed in a loop, so the manifest test cannot see it; missing from `Service.consumes` |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | httpapi.py:695-698 | Dashboard activity feed. Subscribed in a loop when HTTP starts; declared in `Service.consumes` since 618191e |
 
 Replies received by request/reply: `task.list.reply`, `task.create.reply`, `system.status.reply`, `guardian.posture.reply`, `benchmark.*.reply`, `voice.*.reply`, `world.env.query.reply`, `curiosity.interest.list.reply`.
 
@@ -181,7 +181,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 ## Known issues (2026-09-18 evaluation)
 
-- S15 / V2: camera stills and live HLS served without the token on a `0.0.0.0` bind. Fixed 2026-09-18 for `/api/dash/streams`, `/cameras/snap/`, `/tv/hls|media/` (commit 62318d3); still open for `/api/dash/data`, which is in `_OPEN_ROUTES` and returns every camera, relay stream, Ring camera and Ring event (`httpapi.py:84, 312-317`; `dashfeeds.py:1100-1103`).
+- S15 / V2: camera stills and live HLS served without the token on a `0.0.0.0` bind. Fixed 2026-09-18 for `/api/dash/streams`, `/cameras/snap/`, `/tv/hls|media/` (commit 62318d3); and on 2026-09-19 for `/api/dash/data`, which stays open for the news tiles but withholds cameras, streams, Ring cameras and events without the token (commit 618191e).
 - S13 / V9: `sim_command` lets the model run any parsed CLI verb; Guardian sees only the wrapper; `skills install/update/approve/remove` mutate `~/.simorgh/skills` and `git clone` outside the action path. Open (stage 9 item 3). `apply_skill` itself always asks since 2026-09-18 (8fb3d21, Guardian side).
 - S14 / V5: `dashfeeds.py` fetches ~14 web endpoints from its own threads, outside Execution and Guardian. Open.
 - V3: four session models (CLI uuid per line, HTTP client-chosen, Telegram/WhatsApp in-memory per chat); Telegram and WhatsApp drop the sender after the allow-list. Open (stage 4 item 3, stage 5 item 7).

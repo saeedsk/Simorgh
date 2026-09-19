@@ -109,7 +109,7 @@ Events Guardian writes on `action:<id>`: `received` (the proposal, oversize stri
 - `simorgh.guardian.config.Config`: imported by `kernel/service.py:44, 491` and `kernel/configcheck.py:217`.
 - `approval_question` in `service.py` (module function; tests only).
 - Nothing Guardian owns is in `simorgh/contracts`; the token format is `contracts/security.py`, the physical class is `contracts/home/policy.py::classify_call`.
-- Module-level mutable state: `rules._bandit_cache` (dict, bounded to 256 entries, process-wide, keyed by code text). Per-instance state lost at restart: posture (not replayed from `guardian:trust`), `_decided` (action-id dedupe, up to 50,000), `_tasks`, budgets, failure streaks.
+- Module-level mutable state: `rules._bandit_cache` (dict, bounded to 256 entries, process-wide, keyed by code text). Per-instance state lost at restart: `_decided` (action-id dedupe, up to 50,000), `_tasks`, budgets, failure streaks.
 
 ## Invariants
 
@@ -161,7 +161,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - T5 -- the reversibility taxonomy never changed a verdict (0 escalations). Addressed with S1 for the house.
 - L4 -- one tool call is ~13 bus messages and ~20 appends, including Guardian's `received`/`decided` pair. Open; stage 1.
 - B10 -- Guardian going down never paused the system. **Fixed 2026-09-18** in the Kernel (`3beb2a5`).
-- Not in the catalogue, found while writing this: posture is not replayed from `guardian:trust` at start (`posture.py:35` `apply_event` has no caller), so a restart silently returns a locked or guarded posture to baseline, a loosening path that is neither a human nor the lock TTL. And if a classifier were ever wired (`pipeline.py:40`), its `ALLOW` would approve any escalation, including `HumanOnlyRule` and `PhysicalRule` ones that promise a person in every posture.
+- Found while writing this, fixed 2026-09-19 (commit eff2620): posture was not replayed from `guardian:trust` at start, so a restart (which Execution may request) returned a locked or guarded posture to baseline; start now replays it and re-arms a lock's expiry. And a classifier's `ALLOW` would have settled `HumanOnlyRule` and `PhysicalRule` escalations; those layers are exempt (`pipeline.py::_PERSON_ONLY_LAYERS`). Pinned in `test_posture_survives_a_restart.py`.
 
 ## Planned changes (roadmap)
 
