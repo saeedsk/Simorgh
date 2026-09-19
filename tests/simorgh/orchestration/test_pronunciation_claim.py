@@ -7,7 +7,7 @@ from __future__ import annotations
 import types
 import unittest
 
-from simorgh.orchestration.session import claimed_to_note_a_pronunciation
+from simorgh.orchestration.stophook import claimed_to_note_a_pronunciation
 
 
 def _session(*tools: str):

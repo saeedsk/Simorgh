@@ -97,7 +97,8 @@ class Service:
                             skills_enabled=self.config.skills_enabled,
                             skills_catalog_max_chars=self.config.skills_catalog_max_chars,
                             skills_roots=tuple(self.config.skills_roots),
-                            skills_channels=tuple(self.config.skills_channels))
+                            skills_channels=tuple(self.config.skills_channels),
+                            telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)

@@ -437,7 +437,7 @@ class ClaimedTvActTestCase(unittest.TestCase):
         # Live 2026-09-13: "The K-pop chart's running on the TV now" with no tool call; the TV sat idle.
         from simorgh.orchestration import profiles
         from simorgh.orchestration.api import Session, Step
-        from simorgh.orchestration.session import claimed_tv_act
+        from simorgh.orchestration.stophook import claimed_tv_act
         session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.VOICE_CHAT, worker_id="w",
                           user_text="Sim played the K-pop chart.", channel="voice")
         self.assertTrue(claimed_tv_act("The K-pop chart's running on the TV now, Saeed.", session).startswith("'s running"))
@@ -485,7 +485,7 @@ class DashboardOnTvClaimTestCase(unittest.TestCase):
         # Live 2026-09-14: "The dashboard's back on the TV now -- home view." after only dash_view.
         from simorgh.orchestration import profiles
         from simorgh.orchestration.api import Session, Step
-        from simorgh.orchestration.session import claimed_tv_act
+        from simorgh.orchestration.stophook import claimed_tv_act
         session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT, worker_id="w",
                           user_text="the TV switched to home screen, but it didn't switch to your dashboard", channel="cli")
         session.record(Step(1, "act", "the dashboard shows home", tool="dash_view", ok=True))
