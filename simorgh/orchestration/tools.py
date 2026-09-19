@@ -71,7 +71,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # `voice set` over the bus: the service validates, the change is live
     # and undone by setting it back.
     "voice_setting": ("reversible", False),
-    "apply_skill": ("reversible", False),
+    "apply_skill": ("irreversible", False),
     "git_commit": ("reversible", False),
     # Reads three git commands and cannot write: no checkout, no fetch,
     # no arbitrary subcommand. Sim asking what it changed is not an act.

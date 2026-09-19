@@ -2431,7 +2431,7 @@ class ApplySkillTool:
     name = "apply_skill"
     description = "Write a drafted skill's complete module source to its subject path within the skill scope."
     read_only = False
-    reversibility = "reversible"
+    reversibility = "irreversible"  # persistent code outside any test gate (S4)
     args_schema = {
         "type": "object", "required": ["subject", "code"],
         "properties": {"subject": {"type": "string"}, "code": {"type": "string"}},

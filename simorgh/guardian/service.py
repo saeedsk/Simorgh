@@ -642,8 +642,12 @@ class Service:
         return rule_defs.similarity(code, self._rejected_excerpts, self._config.immunity_similarity_threshold)
 
     async def _remember_rejection(self, proposal: Proposal, reasons, layer: str, *, source: str) -> None:
-        code = proposal.args.get("code")
-        if not isinstance(code, str) or not code:
+        # The same payload text the rules read: `code` AND `command`.
+        # Reading only `code` meant a denied `run_shell`/`run_container`
+        # was never remembered, so a reworded retry could never match
+        # (2026-09-18 evaluation, S9: 10 shell denials dropped).
+        code = rule_defs._code_text(proposal)  # noqa: SLF001 -- one definition of "the payload"
+        if not code:
             return
         excerpt = code[:4096]
         await self._ctx.ledger.append(REJECTED_STREAM, self._event(REJECTED_STREAM, "rejected", {

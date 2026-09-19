@@ -142,6 +142,13 @@ class Config:
     )
     # Physical tools that are `human` by name: sirens, and the setup or
     # pairing steps that store a credential or bind a device.
+    # Tools a person approves in EVERY posture, whatever the code switch
+    # says (rules.py::HumanOnlyRule). `apply_skill` installs persistent
+    # code that later runs outside any worktree or test gate -- unlike a
+    # patch, which lands only through the suite (2026-09-18 evaluation,
+    # S4). The forerunner of stage 6's tier 3; `[guardian] human_only_tools
+    # = []` returns to the old behaviour.
+    human_only_tools: tuple[str, ...] = ("apply_skill",)
     physical_always_human_tools: tuple[str, ...] = (
         "cam_siren", "ring_siren", "cam_setup", "ring_setup", "cast_setup", "tv_pair",
     )
@@ -195,7 +202,7 @@ class Config:
             kwargs["protected_subjects"] = tuple(kwargs["protected_subjects"])
         if "autonomous_origins" in kwargs:
             kwargs["autonomous_origins"] = tuple(kwargs["autonomous_origins"])
-        for key in ("physical_tool_prefixes", "physical_observe_tools", "physical_always_human_tools"):
+        for key in ("physical_tool_prefixes", "physical_observe_tools", "physical_always_human_tools", "human_only_tools"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
         # `[guardian.physical]` is its own table so the house has its own

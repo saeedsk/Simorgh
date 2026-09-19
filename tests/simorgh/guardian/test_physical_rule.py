@@ -135,3 +135,24 @@ class TheConfigTable(unittest.TestCase):
         self.assertFalse(cfg.physical_auto_approve)
         self.assertIn("cam_siren", cfg.physical_always_human_tools)
         self.assertIn("home_", cfg.physical_tool_prefixes)
+
+
+class InstallingASkillAlwaysAsks(unittest.IsolatedAsyncioTestCase):
+    """`apply_skill` installs persistent code that later runs outside any
+    worktree or test gate (2026-09-18 evaluation, S4)."""
+
+    async def test_a_skill_install_reaches_a_person_even_in_trusted_mode(self):
+        pipeline = Pipeline(DEFAULT_PIPELINE)
+        for cfg in (Config(irreversible_requires_human=False), Config(mode="trusted", irreversible_requires_human=False)):
+            proposal = _proposal("apply_skill", {"name": "weather", "code": "def run(a):\n    return a\n"},
+                                 reversibility="reversible")
+            verdict = await pipeline.decide(proposal, _with_tool(_ctx(cfg), proposal))
+            self.assertEqual(verdict.kind, "needs_human", cfg.mode)
+            self.assertEqual(verdict.layer, "human_only")
+
+    async def test_the_list_is_the_switch(self):
+        pipeline = Pipeline(DEFAULT_PIPELINE)
+        cfg = Config.from_mapping({"irreversible_requires_human": False, "human_only_tools": []})
+        proposal = _proposal("apply_skill", {"name": "weather", "code": "def run(a):\n    return a\n"})
+        verdict = await pipeline.decide(proposal, _with_tool(_ctx(cfg), proposal))
+        self.assertEqual(verdict.kind, "approved")

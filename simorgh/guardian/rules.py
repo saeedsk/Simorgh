@@ -717,6 +717,25 @@ class BudgetRule:
         return Decision("abstain", self.layer)
 
 
+class HumanOnlyRule:
+    """Tools a person approves in every posture (`config.human_only_tools`).
+
+    Escalates; never allows. The trusted mode and the Kernel's
+    `irreversible_requires_human=False` do not reach it, because the
+    reason these tools are listed is that the automatic gates cannot
+    judge them (2026-09-18 evaluation, S4). Locked denies them."""
+
+    name = "human_only"
+    layer = "human_only"
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        if proposal.tool not in ctx.config.human_only_tools:
+            return Decision("abstain", self.layer)
+        if ctx.posture.level == "locked" or ctx.config.mode == "locked":
+            return Decision("deny", self.layer, (f"locked: {proposal.tool} is denied",))
+        return Decision("escalate", self.layer, (f"{proposal.tool} always needs a person",))
+
+
 class PhysicalRule:
     """The house has its own gate (2026-09-18 evaluation, S1/S6/S8).
 
@@ -803,6 +822,7 @@ DEFAULT_PIPELINE: tuple = (
     GrantRule(),
     ImmunityRule(),
     BudgetRule(),
+    HumanOnlyRule(),
     PhysicalRule(),
     ReversibilityRule(),
 )
