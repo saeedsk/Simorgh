@@ -140,10 +140,10 @@ class ToolListTestCase(_ToolCommandTestCase):
         for name in ("kb_search", "kb_ask", "home_call", "read_file"):
             await self._register(name)
         listed = await self._tool("")
-        self.assertIn("documents:", listed)
-        self.assertIn("the house:", listed)
+        self.assertIn("Documents", listed)
+        self.assertIn("The house", listed)
         self.assertIn("kb_search", listed)
-        self.assertIn("4 tools", listed)
+        self.assertIn(" · 4", listed)
 
     async def test_it_says_that_guardian_still_applies(self):
         await self._register("kb_search")

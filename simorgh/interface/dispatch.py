@@ -1195,16 +1195,19 @@ async def _tool_list(ledger: LedgerClient) -> Outcome:
     known = await _known_tools(ledger)
     if not known:
         return Outcome("no tools registered yet -- they announce themselves just after boot.")
-    groups: dict[str, list[str]] = {}
+    marks = {"read_only": "good", "reversible": "busy", "irreversible": "warn"}
+    groups: dict[str, list] = {}
     for tool_name, row in sorted(known.items()):
-        groups.setdefault(_tool_group(tool_name), []).append(
-            f"  {tool_name:22} {row.get('reversibility', '')}")
-    lines = [f"{len(known)} tools. `tool <name> <args>` runs one; Guardian gates it the same "
-             f"way it gates the model."]
-    for group in sorted(groups):
-        lines.append(f"\n{group}:")
-        lines.extend(groups[group])
-    return Outcome("\n".join(lines))
+        reversibility = str(row.get("reversibility", ""))
+        groups.setdefault(_tool_group(tool_name), []).append(render_mod.PanelRow(
+            tool_name, (reversibility.replace("_", " "),), str(row.get("description") or ""),
+            marks.get(reversibility, "idle")))
+    sections = [render_mod.PanelSection(group[:1].upper() + group[1:], rows) for group, rows in sorted(groups.items())]
+    return Outcome(render_mod.panel(
+        "Tools", sections, count=str(len(known)),
+        legend=(("good", "read only"), ("busy", "reversible"), ("warn", "irreversible")),
+        footer="\u00b7 `tool <name> <args>` runs one; Guardian gates it as it gates the model",
+        enabled=render_mod.color_enabled(), unicode=render_mod.unicode_mode() != "off"))
 
 
 #: Prefix -> the heading it is listed under. A flat list of fifty names

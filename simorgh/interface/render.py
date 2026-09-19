@@ -964,7 +964,7 @@ class PanelSection:
 
 
 def panel(title: str, sections: list[PanelSection], *, count: str = "", footer: str = "",
-          enabled: bool = True, unicode: bool = True) -> str:
+          legend: tuple[tuple[str, str], ...] = (), enabled: bool = True, unicode: bool = True) -> str:
     """Render a panel. Columns are aligned across all sections; each column
     is at most 28 wide; the detail takes what is left and is cut at a word."""
     width = terminal_width() - 1
@@ -1009,8 +1009,14 @@ def panel(title: str, sections: list[PanelSection], *, count: str = "", footer: 
         if heading:
             lines.append(heading)
         lines += [line(row) for row in section.rows]
+    tail = []
+    for mark, label in legend:
+        glyph, plain, colour = _MARKS[mark]
+        tail.append(style(glyph if unicode else plain, colour, enabled=enabled) + " " + style(label, "dim", enabled=enabled))
     if footer:
-        lines += ["", style(footer, "dim", enabled=enabled)]
+        tail.append(style(footer, "dim", enabled=enabled))
+    if tail:
+        lines += ["", "  ".join(tail)]
     return "\n".join(lines)
 
 
