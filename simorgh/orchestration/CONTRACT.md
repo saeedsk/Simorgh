@@ -127,6 +127,7 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 11. Every terminal outcome publishes exactly one `task.*` terminal message and one `turn.completed`, including a cancelled or crashed chat turn (`worker.py:405-420`); a requeued (preempted) task reports nothing.
 12. A worker runs one claimed task at a time (`max_inflight=1`), and a percept chat runs as its own asyncio task so the bus handler timeout cannot cancel it (`service.py:266-290`).
 13. Each verify request uses a fresh `verification_id` per attempt (`session.py:1748`), so Verification never replays an old verdict.
+- Traces (stage 1 item 2, 2026-09-19): every message a session sends carries `Session.trace`, which is the task id for a task and the percept's own `trace_id` for a chat turn (`run_percept_chat(trace_id=...)`), so one turn is one trace from `percept.text.received` to `turn.completed`.
 
 ## Contract tests
 

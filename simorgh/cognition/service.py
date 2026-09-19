@@ -314,7 +314,7 @@ class Service:
                 purpose=purpose.value, messages=payload["messages"],
                 task_rules=payload.get("task_rules", ""),
                 last_step=payload.get("last_step", False),
-                steps_left=payload.get("steps_left"),
+                steps_left=payload.get("steps_left"), trace_id=message.trace_id,
             )
             protected = [b for b in assembled.blocks if b.protected]
             protected_tokens = sum(b.tokens for b in protected)

@@ -1331,7 +1331,7 @@ class SessionRunner:
                 "allow_summarize": is_chat,
                 **self._tier(session),
             },
-            trace_id=session.task_id, clock=self._clock,
+            trace_id=session.trace, clock=self._clock,
         )
         reply = await self._bus.request_or_error(req, timeout=self._think_timeout_s)
         # Every think is billed, and `cognition.think.reply` says what it
@@ -1577,7 +1577,7 @@ class SessionRunner:
                 "expected": "text", "budget": {"max_tokens": 1500, "max_cost_usd": 0.1},
                 "require_real_provider": True, "last_step": False, "steps_left": session.budget.steps_left,
             },
-            trace_id=session.task_id, clock=self._clock,
+            trace_id=session.trace, clock=self._clock,
         )
         reply = await self._bus.request_or_error(req, timeout=self._think_timeout_s)
         session.spent_usd += float(reply.payload.get("cost_usd") or 0.0)
@@ -1666,7 +1666,7 @@ class SessionRunner:
         msg = Message.new(
             topics.ACTION_PROPOSED, source=self._bus.source,
             payload=payload, partition_key=f"task:{session.task_id}",
-            trace_id=session.task_id, clock=self._clock,
+            trace_id=session.trace, clock=self._clock,
         )
         await self._bus.publish(msg)
         tool_name = call.get("tool")
@@ -1793,7 +1793,7 @@ class SessionRunner:
                     "verification_id": verification_id, "task_id": session.task_id,
                     "kind": "task", "subject_ref": subject_ref,
                 },
-                partition_key=f"task:{session.task_id}", trace_id=session.task_id, clock=self._clock,
+                partition_key=f"task:{session.task_id}", trace_id=session.trace, clock=self._clock,
             )
             await self._bus.publish(msg)
             result = await self._waiter.wait(
@@ -1985,11 +1985,11 @@ class SessionRunner:
     async def _append(self, session: Session, type_: str, payload: dict) -> None:
         msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}",
-                          trace_id=session.task_id, clock=self._clock)
+                          trace_id=session.trace, clock=self._clock)
         await self._ledger.append(f"task:{session.task_id}", Event.from_message(msg, f"task:{session.task_id}"))
 
     async def _publish(self, session: Session, type_: str, payload: dict) -> None:
         msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}",
-                          trace_id=session.task_id, clock=self._clock)
+                          trace_id=session.trace, clock=self._clock)
         await self._bus.publish(msg)

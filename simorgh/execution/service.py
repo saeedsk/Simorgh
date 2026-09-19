@@ -889,6 +889,7 @@ class Service:
             await self._ctx.bus.publish(Message.new(
                 topics.TOOL_INVOKED, source="execution",
                 payload={"name": tool.name, "action_id": action_id, "duration_ms": duration_ms, "ok": result.ok},
+                trace_id=message.trace_id,
             ))
             if tool.name == "apply_skill" and result.ok:
                 # A skill becomes callable the moment it is written, not

@@ -178,6 +178,17 @@ class Session:
     # Who Sim answered last, so the prompt can ask for the name when the
     # voice changes and not when it does not.
     speaker_before: str = ""
+    # The trace this session's messages carry. A task's trace is its task
+    # id; a chat turn's is the percept's own trace, so one spoken or typed
+    # turn is one trace from percept to turn.completed (stage 1 item 2).
+    # Before, a chat session used its conversation id, so every turn of a
+    # conversation shared one trace and "why was that turn slow" had no
+    # single answer.
+    trace_id: str = ""
+
+    @property
+    def trace(self) -> str:
+        return self.trace_id or self.task_id
 
     def next_step_no(self) -> int:
         return len(self.steps) + 1

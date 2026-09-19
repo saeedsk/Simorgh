@@ -45,20 +45,24 @@ class PromptAssembler:
 
     async def assemble(
         self, *, purpose: str, messages: list[dict], task_rules: str = "", last_step: bool = False,
-        steps_left: int | None = None,
+        steps_left: int | None = None, trace_id: str = "",
     ) -> AssembledContext:
+        # `trace_id`: the think's own trace, carried onto the context
+        # requests it makes (persona voice, self summary, user profile) so
+        # they belong to the turn that caused them (stage 1 item 2). Passed
+        # down, not stored: one assembler serves concurrent thinks.
         blocks: list[PromptBlock] = [self._block("constitution", CONSTITUTION_SUMMARY, protected=True)]
 
-        voice = await self._try_request(topics.PERSONA_VOICE, {"context": "chat" if purpose == "chat" else "notice"})
+        voice = await self._try_request(topics.PERSONA_VOICE, {"context": "chat" if purpose == "chat" else "notice"}, trace_id)
         if voice is not None:
             blocks.append(self._block("voice", voice.get("style_block", ""), protected=True))
 
-        summary = await self._try_request(topics.SELF_SUMMARY, {"budget_tokens": 300})
+        summary = await self._try_request(topics.SELF_SUMMARY, {"budget_tokens": 300}, trace_id)
         if summary is not None:
             blocks.append(self._block("self_summary", summary.get("text", ""), protected=True))
 
         if purpose == "chat":
-            profile_text = await self._user_profile_text()
+            profile_text = await self._user_profile_text(trace_id)
             if profile_text:
                 blocks.append(self._block("user_profile", profile_text, protected=True))
 
@@ -93,8 +97,8 @@ class PromptAssembler:
 
         return AssembledContext(blocks=tuple(blocks))
 
-    async def _user_profile_text(self) -> str:
-        reply = await self._try_request(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}})
+    async def _user_profile_text(self, trace_id: str = "") -> str:
+        reply = await self._try_request(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}}, trace_id)
         if reply is None:
             return ""
         facets = reply.get("facets", {})
@@ -109,9 +113,9 @@ class PromptAssembler:
     def _block(self, name: str, text: str, *, protected: bool) -> PromptBlock:
         return PromptBlock(name=name, text=text, protected=protected, tokens=estimate_tokens(text))
 
-    async def _try_request(self, type_: str, payload: dict) -> dict | None:
+    async def _try_request(self, type_: str, payload: dict, trace_id: str = "") -> dict | None:
         try:
-            message = Message.new(type_, source=self._source, payload=payload)
+            message = Message.new(type_, source=self._source, payload=payload, trace_id=trace_id or None)
             reply = await self._bus.request(message, timeout=self._timeout)
         except Exception as exc:  # noqa: BLE001 -- BusTimeout or "nobody answers this yet": omit, never fail assembly
             if self._logger is not None:

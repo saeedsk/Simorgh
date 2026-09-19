@@ -107,6 +107,7 @@ Environment: `SIMORGH_COGNITION_PROVIDER_ORDER` (the test session sets it to `fl
 - A change of answering provider between text calls publishes one `ui.notice`.
 - A verdict reply with no standalone YES/NO is `non_answer=True`, never a rejection.
 - No test may reach a real provider: the session sets `SIMORGH_COGNITION_PROVIDER_ORDER=floor` and providers take injectable transports.
+- The context requests made while assembling a prompt (`persona.voice`, `self.summary`, `world.env.query`) carry the think request's `trace_id` (stage 1 item 2).
 
 ## Contract tests
 
