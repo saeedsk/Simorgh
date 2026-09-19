@@ -65,15 +65,44 @@ def _expected_spec(payload: dict) -> dict:
 # (`orchestration/tools.py::marker_hint`, threaded through by `session.
 # py`) is the fix -- a short, hand-maintained, per-tool addendum for the
 # handful of tools that actually need one.
-def _tool_instruction_block(payload: dict) -> str | None:
+def _argument_shape(schema: dict | None) -> str:
+    """One short phrase for a tool's arguments, from its schema: the model
+    was shown bare upper-cased names and had to guess (stage 2 item 2)."""
+    props = (schema or {}).get("properties") or {}
+    if not isinstance(props, dict) or not props:
+        return ""
+    required = set((schema or {}).get("required") or ())
+    if len(props) == 1:
+        (name,) = props
+        return f"argument: {name}"
+    fields = [name if name in required else f"{name}?" for name in props]
+    return "arguments: " + ", ".join(fields[:8]) + (", ..." if len(fields) > 8 else "")
+
+
+def _tool_line(tool: str, spec: dict | None) -> str:
+    if not spec:
+        return f"- {tool.upper()}"
+    description = " ".join(str(spec.get("description") or "").split())
+    if len(description) > 90:
+        description = description[:87].rsplit(" ", 1)[0] + "..."
+    shape = _argument_shape(spec.get("input_schema"))
+    return f"- {tool.upper()}: {description}" + (f" ({shape})" if shape else "")
+
+
+def _tool_instruction_block(payload: dict, specs: dict | None = None) -> str | None:
     if payload.get("expected") != "tool_calls":
         return None
     tools = tuple(payload.get("tools") or ())
     if not tools:
         return None
-    names = ", ".join(sorted(tool.upper() for tool in tools))
+    specs = specs or {}
+    # One line per tool: its name, what it does, and its arguments -- from
+    # `tool.registered` (stage 2 item 2). Before, only the upper-cased
+    # names were shown, so the model knew what a tool was called and had
+    # to guess what it did and what it took.
+    listing = "\n".join(_tool_line(tool, specs.get(tool)) for tool in sorted(tools))
     lines = [
-        "Tools available this turn: " + names + ". To use one, write its name "
+        "Tools available this turn:\n" + listing + "\n\nTo use one, write its name "
         "in capitals, a colon, then your argument, as the very first line of "
         "your reply -- nothing before it. For example:\nWEB_FETCH: https://example.com\n"
         "Only do this when you genuinely need that tool right now; otherwise "
@@ -114,6 +143,7 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.COGNITION_THINK, topics.COGNITION_COMPACT_REQUEST,
         topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SECOND, topics.SYSTEM_STARTED,
+        topics.TOOL_REGISTERED,
     )
     # Requests count as produced: the assembler sends persona.voice,
     # self.summary and world.env.query and waits for their replies.
@@ -128,6 +158,7 @@ class Service:
         self._config_from_caller = config
         self._config = config or Config()
         self._injected_providers = providers
+        self._tool_specs: dict[str, dict] = {}
         self._paused = False
         self._no_real_provider_since: float | None = None
         self._tick_seconds = 0
@@ -250,13 +281,17 @@ class Service:
         # (watched, 2026-09-08). `system.started` fires once every layer
         # is up, so repeating the broadcast there reaches all of them.
         self._sub_started = await ctx.bus.subscribe(topics.SYSTEM_STARTED, self._on_system_started)
+        # What each tool does and takes, for the prompt (stage 2 item 2) and
+        # for the native dialects (item 4). Cognition boots before Execution
+        # registers anything, so nothing is missed.
+        self._sub_tools = await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered)
         self._real_providers = list(real_providers)
         for provider in real_providers:
             await self._emit_status(provider)
 
     async def stop(self) -> None:
         for sub in (self._sub_think, self._sub_compact, self._sub_state, self._sub_tick,
-                    getattr(self, "_sub_started", None)):
+                    getattr(self, "_sub_started", None), getattr(self, "_sub_tools", None)):
             if sub is not None:
                 await sub.unsubscribe()
 
@@ -280,6 +315,12 @@ class Service:
         return Health.ok()
 
     # -- handlers ---------------------------------------------------------------------
+    async def _on_tool_registered(self, message: Message) -> None:
+        p = message.payload
+        if p.get("name"):
+            self._tool_specs[p["name"]] = {"name": p["name"], "description": p.get("description", ""),
+                                           "input_schema": p.get("input_schema") or {"type": "object"}}
+
     async def _on_think(self, message: Message) -> None:
         payload = message.payload
         try:
@@ -366,7 +407,7 @@ class Service:
             # something with real system-prompt authority overrides it
             # (see that provider's own module docstring).
             protected_text = "\n\n".join(b.text for b in protected)
-            tool_instructions = _tool_instruction_block(payload)
+            tool_instructions = _tool_instruction_block(payload, self._tool_specs)
             think_messages: list[dict] = []
             if protected_text:
                 think_messages.append({"role": "system", "content": protected_text})
