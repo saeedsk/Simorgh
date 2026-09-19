@@ -177,3 +177,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 Lock it first (`python tools/modlock.py claim guardian --by <you> --task "..."`), commit the lock, edit only `simorgh/guardian/`, `tests/simorgh/guardian/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py guardian` before committing; commit subject `guardian: <what changed>`.
 
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
+
+- Telemetry (stage 1 item 4, 2026-09-19): each decision is a span `guardian.decide` (attrs `tool`, `mode`, `verdict`, `layer`), parented to the `action.proposed` message. Recording never affects the verdict.

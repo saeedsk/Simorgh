@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections import deque
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from simorgh.contracts.envelope import Event, Message, canonical_json
 from simorgh.contracts.protocols import Ledger
@@ -39,14 +39,20 @@ class TraceWriter:
         buffer_size: int = 10_000,
         rng: Rng | None = None,
         enabled: bool = True,
+        telemetry: Any | None = None,
+        backend: str = "telemetry",
     ) -> None:
         self._ledger = ledger
+        # A span per message instead of a ledger stream per trace (stage 1
+        # item 3): 88,356 `trace:` streams, 76% of them single-event, were
+        # the evaluation's B2. Only when a store is given.
+        self._telemetry = telemetry if backend == "telemetry" else None
         self._sample = dict(sample or {})
         self._blob_threshold = blob_threshold
         self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=queue_size)
         self._buffer: deque[Event] = deque(maxlen=buffer_size)  # fallback when the ledger is down
         self._rng = rng or random.random
-        self._enabled = enabled and ledger is not None
+        self._enabled = enabled and (ledger is not None or self._telemetry is not None)
         self._task: asyncio.Task | None = None
         self.dropped = 0
         self.written = 0
@@ -89,6 +95,18 @@ class TraceWriter:
         (`BusClient.publish`). Sampling here too kept `r**2` of messages
         at a fractional rate `r` (found writing CONTRACT.md, 2026-09-19)."""
         if not self._enabled:
+            return
+        if self._telemetry is not None:
+            # The store batches off the loop itself; nothing to queue here.
+            attrs = {"source": message.source}
+            if message.payload.get("payload_ref"):
+                attrs["payload_ref"] = message.payload["payload_ref"]
+            try:
+                self._telemetry.event(message.type, trace_id=message.trace_id, span_id=message.id,
+                                      parent_id=message.causation_id, ts=message.ts, attrs=attrs)
+                self.written += 1
+            except Exception:  # noqa: BLE001 -- tracing must never break delivery
+                self.failed += 1
             return
         if self._enabled and self._task is None:
             self._task = asyncio.create_task(self._drain(), name="bus-trace-writer")
@@ -165,8 +183,8 @@ class TraceWriter:
         """For oversized payloads: store the body as a blob and return the
         ref. Called by the client *before* `write()` so the trace event can
         carry `payload_ref` instead of `_blob_pending`."""
-        if self._ledger is None:
-            return None
+        if self._ledger is None or self._telemetry is not None:
+            return None  # a span keeps no body, so none is stored
         body = canonical_json(message.payload).encode("utf-8")
         if len(body) <= self._blob_threshold:
             return None

@@ -78,10 +78,10 @@ def make_backend(config: Config, *, clock: Clock | None = None, session: Any | N
 def make_client(
     backend: BusBackend, *, source: str, config: Config | None = None, ledger: Ledger | None = None,
     clock: Clock | None = None, policy: BusPolicy | None = None, trace: TraceWriter | None = None,
-    metrics: Metrics | None = None,
+    metrics: Metrics | None = None, telemetry: Any | None = None,
 ) -> BusClient:
     return BusClient(backend, source=source, config=config, ledger=ledger, clock=clock, policy=policy,
-                     trace=trace, metrics=metrics)
+                     trace=trace, metrics=metrics, telemetry=telemetry)
 
 
 def make_bus(config: Config | None = None, *, source: str = "kernel", ledger: Ledger | None = None,

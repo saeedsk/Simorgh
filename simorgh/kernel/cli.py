@@ -272,6 +272,19 @@ async def _cmd_status(config_path: str | None, timeout: float) -> int:
 
 async def _cmd_trace(config_path: str | None, trace_id: str) -> int:
     config = load_config(config_path)
+    # Spans in the telemetry store first (stage 1 item 3), read-only; the
+    # ledger's old `trace:<id>` streams for what was recorded before.
+    from simorgh.telemetry import FILENAME as TELEMETRY_FILENAME
+    from simorgh.telemetry.store import read_trace
+
+    spans = read_trace(config.runtime.data_dir / TELEMETRY_FILENAME, trace_id)
+    if spans:
+        first = spans[0]["start"]
+        for span in spans:
+            took = (span["end"] or span["start"]) - span["start"]
+            who = span["attrs"].get("source", "")
+            print(f"+{span['start'] - first:8.3f}s  {took * 1000:7.1f} ms  {span['name']:30s}  {who}  {span['status']}")
+        return 0
     from simorgh.ledger.factory import make_ledger
 
     ledger = make_ledger({"backend": "jsonl", "data_dir": str(config.runtime.data_dir / "ledger")})

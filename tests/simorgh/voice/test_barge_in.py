@@ -42,7 +42,7 @@ class _Bus:
                 pass
         return _Sub()
 
-    def new(self, topic, payload):
+    def new(self, topic, payload, **_kw):
         return Message.new(topic, source="voice", payload=payload)
 
     async def publish(self, message):

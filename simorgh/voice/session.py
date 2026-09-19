@@ -70,6 +70,9 @@ class TurnClock:
     confidence: float = 1.0
     engine_stt: str = ""
     language: str = ""
+    # The turn's trace, minted when Sim is asked, so the percept, the think
+    # and this turn's stage spans are one trace (stage 1 items 2 and 4).
+    trace_id: str = ""
 
     def metrics(self, report=None) -> dict:
         out: dict = {}
@@ -357,6 +360,26 @@ class VoiceSession:
 
     def _now(self) -> float:
         return time.monotonic()
+
+    def _record_stage_spans(self, clock: "TurnClock", report) -> None:
+        """The turn's stages as timed spans in its trace (stage 1 item 4):
+        stt, think (the wait for Sim), synth to first audio, and playback.
+        The clock is monotonic; the store keeps wall time."""
+        telemetry = getattr(self._pipeline, "telemetry", None)
+        if telemetry is None or not clock.trace_id:
+            return
+        to_wall = time.time() - time.monotonic()
+        spoken_end = clock.first_audio_at + float(getattr(report, "seconds", 0.0) or 0.0) if clock.first_audio_at else 0.0
+        stages = (("voice.stt", clock.speech_end, clock.final_at), ("voice.think", clock.final_at, clock.reply_at),
+                  ("voice.first_audio", clock.reply_at, clock.first_audio_at),
+                  ("voice.playback", clock.first_audio_at, spoken_end))
+        try:
+            for name, start, end in stages:
+                if start and end and end >= start:
+                    telemetry.event(name, trace_id=clock.trace_id, span_id=uuid.uuid4().hex, ts=start + to_wall,
+                                    end=end + to_wall, attrs={"turn": clock.turn_id})
+        except Exception:  # noqa: BLE001 -- measuring a turn must never break it
+            pass
 
     def _log(self, level: str, event: str, **fields) -> None:
         if self._logger is not None:
@@ -1153,9 +1176,10 @@ class VoiceSession:
         before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
         self._last_ask_addressed = bool(speaker) or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)
         try:
+            clock.trace_id = clock.trace_id or uuid.uuid4().hex
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
                                              speaker_name=speaker, speaker_relation=relation, room=room,
-                                             speaker_before=before)
+                                             speaker_before=before, trace_id=clock.trace_id)
         finally:
             self._outstanding.pop(turn_id, None)
             still.cancel()
@@ -1917,6 +1941,7 @@ class VoiceSession:
             named = (self.last_speaker if self.last_identification is not None
                      and self.last_identification.name else "")
         self.stats.last_metrics = metrics
+        self._record_stage_spans(clock, report)
         engine = getattr(self._tts, "last_engine", "") or self._tts.name
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": said, "seconds": report.seconds, "engine": engine, "device": self._config.device,

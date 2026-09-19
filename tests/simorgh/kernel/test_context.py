@@ -241,3 +241,23 @@ class TestScopedSecretGlobs(unittest.TestCase):
                 default_secrets=DEFAULT_SECRETS)
             self.assertEqual(factory.build("execution").secrets.get("vault:imap:home:password"), "p1")
             self.assertIsNone(factory.build("cognition").secrets.get("vault:imap:home:password"))
+
+
+class TestEveryContextLedgerIsBound(unittest.IsolatedAsyncioTestCase):
+    """Stage 1 item 8: the Context a subsystem gets writes only its own streams."""
+
+    async def test_a_reflection_context_cannot_write_the_self_model(self):
+        from simorgh.contracts.envelope import Event
+        from simorgh.ledger.bound import BoundLedger, WriterViolation
+        from simorgh.ledger.factory import make_ledger
+
+        inner = make_ledger({"backend": "memory"})
+        await inner.start()
+        with tempfile.TemporaryDirectory() as tmp:
+            factory = _factory(tmp)
+            factory._ledger = inner  # noqa: SLF001
+            ctx = factory.build("reflection")
+            self.assertIsInstance(ctx.ledger, BoundLedger)
+            with self.assertRaises(WriterViolation):
+                await ctx.ledger.append("self:model", Event(stream="self:model", type="x", ts=1.0, trace_id="t",
+                                                            causation_id=None, payload={}))

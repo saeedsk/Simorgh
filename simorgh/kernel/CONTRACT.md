@@ -72,8 +72,8 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 | `system` | simorgh/kernel/service.py:400 (`system.state` events) | the Kernel at boot (`_restore_autonomous_pause`); `simorgh status` when nothing answers (`statusread.py`, the files read directly, read-only) | forever |
 | `schedule` | simorgh/kernel/scheduler.py:33 (`schedule.added/cancelled/fired`) | the Scheduler at start (`materialize`) | forever |
 | `config:effective` | simorgh/kernel/service.py:473 | simorgh/interface/dispatch.py (`config` command) | forever |
-| `metrics:history` | simorgh/kernel/metrics.py:45 (a `MetricsTable` snapshot every `metrics_every_s`) | simorgh/interface/httpapi.py, simorgh/execution/tools.py, `simorgh status` offline (`statusread.py`, last sample only) | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
-| `trace:<id>` | read only, simorgh/kernel/cli.py:271 (`simorgh trace`) | written by bus/trace.py | 2d |
+| `metrics:history` | simorgh/kernel/metrics.py, only when there is no telemetry store; otherwise each snapshot is the telemetry sample series `metrics.history` (stage 1 item 3) | simorgh/interface/httpapi.py, simorgh/execution/tools.py, `simorgh status` offline (`statusread.py`, last sample only) | 7d in DEFAULT_RETENTION, but not applied while written (see ledger/CONTRACT.md) |
+| `trace:<id>` | read only, `simorgh trace`, after the telemetry store (`telemetry.store.read_trace`) finds nothing | written by bus/trace.py only with `[bus] trace_backend = "ledger"` | 2d |
 
 Not a ledger stream: the Kernel opens `<data_dir>/telemetry.sqlite` (spans and samples, `simorgh/telemetry/CONTRACT.md`) at boot, after the ledger, and closes it at shutdown after the subsystems stop and before the bus backend and ledger.
 
@@ -167,7 +167,7 @@ Found while writing this contract (not in the catalogue): `[runtime] subsystems`
 
 ## Planned changes (roadmap)
 
-- Stage 1 item 3: `MetricsHistoryWriter` writes telemetry samples instead of `metrics:history`.
+- Stage 1 item 3 done 2026-09-19: `MetricsHistoryWriter(telemetry=...)` writes the sample series `metrics.history`; `simorgh status` offline reads its last sample read-only (`telemetry.store.last_sample`) before the old stream.
 - Stage 1 item 8: `ContextFactory` builds a `LedgerClient` bound to each subsystem's `source`.
 - Stage 1 item 10: `WorkerKernel` (plan calls it `kernel/worker.py`; it lives in `service.py`) and the identity registry move under `simorgh/_frozen/`.
 - Stage 4 item 4: the Kernel injects in-process reader interfaces (persona, self, memory) for the ContextBuilder.
@@ -179,3 +179,5 @@ Found while writing this contract (not in the catalogue): `[runtime] subsystems`
 Lock it first (`python tools/modlock.py claim kernel --by <you> --task "..."`), commit the lock, edit only `simorgh/kernel/`, `tests/simorgh/kernel/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py kernel` before committing; commit subject `kernel: <what changed>`.
 
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
+
+- `ContextFactory.build` gives each subsystem a `BoundLedger` for its name (stage 1 item 8); the Kernel's own client is unbound.

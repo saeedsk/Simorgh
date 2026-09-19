@@ -218,8 +218,12 @@ class Kernel:
             # subsystem) -- it needs the same treatment or its first
             # publish/subscribe below raises `PolicyViolation`.
             policy.authenticate("kernel", identities.issue("kernel"))
+        # `config=`: the `[bus]` table. Without it the Kernel's client --
+        # whose trace writer every subsystem's client shares -- ran on
+        # `bus.Config()` defaults, so `trace_sample`/`trace_enabled` in
+        # simorgh.toml changed nothing (found doing stage 1 item 3).
         self.bus = make_bus_client(self._bus_backend, source="kernel", ledger=self.ledger, clock=self._clock.now,
-                                   policy=policy)
+                                   policy=policy, config=self._bus_config(), telemetry=self.telemetry)
 
         # `sim.sh`'s own default, deliberately looser than `GuardianConfig`'s
         # own dataclass default (`irreversible_requires_human=True`, kept
@@ -324,7 +328,7 @@ class Kernel:
         await self._process_metrics.start()
         self._metrics_history = MetricsHistoryWriter(
             ledger=self.ledger, clock=self._clock, metrics=self._metrics_table,
-            interval_s=self.runtime.metrics_every_s,
+            interval_s=self.runtime.metrics_every_s, telemetry=self.telemetry,
         )
         await self._metrics_history.start()
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_PAUSE, self._on_pause))

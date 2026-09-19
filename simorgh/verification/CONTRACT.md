@@ -142,3 +142,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim verification --by <you> --task "..."`), commit the lock, edit only `simorgh/verification/`, `tests/simorgh/verification/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py verification` before committing; commit subject `verification: <what changed>`.
+
+- Telemetry (stage 1 item 4, 2026-09-19): each verification is a span `verification.verify`, parented to the `verify.requested` message.

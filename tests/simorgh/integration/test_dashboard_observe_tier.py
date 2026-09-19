@@ -148,13 +148,17 @@ class TestDashboardObserveTier(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(body["events"]), 1)
         self.assertTrue(any(e["payload"].get("state") == "running" for e in body["events"]))
 
-    async def test_streams_endpoint_eventually_lists_the_metrics_history_stream(self):
+    async def test_metrics_history_is_telemetry_not_a_ledger_stream(self):
+        # Stage 1 item 3: the snapshots are samples in the telemetry store;
+        # once history points exist, the decision log still has no
+        # `metrics:history` stream.
         async def _check():
-            status, body = await _get(self.port, "/api/streams")
-            return body if "metrics:history" in body.get("streams", []) else None
+            status, body = await _get(self.port, "/api/history?subsystem=process&minutes=10")
+            return body if body.get("points") else None
 
-        body = await _wait_until(_check)
-        self.assertIsNotNone(body, "metrics:history never appeared in /api/streams within the timeout")
+        self.assertIsNotNone(await _wait_until(_check), "no history points appeared within the timeout")
+        status, body = await _get(self.port, "/api/streams")
+        self.assertNotIn("metrics:history", body["streams"])
         self.assertIn("system", body["streams"])
 
     async def test_history_endpoint_eventually_returns_process_points(self):

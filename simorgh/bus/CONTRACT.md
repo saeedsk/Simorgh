@@ -24,7 +24,7 @@ The bus carries every typed `Message` between subsystems: publish, subscribe wit
 | `simorgh/bus/policy.py` | `AllowAllPolicy` (tests and the zero-config floor) |
 | `simorgh/bus/router.py` | which subscriptions a message reaches; replies go only to their inbox |
 | `simorgh/bus/service.py` | the bus's `Service`: periodic metrics and health |
-| `simorgh/bus/trace.py` | `TraceWriter`: messages to `trace:<trace_id>` streams, blobs for big bodies |
+| `simorgh/bus/trace.py` | `TraceWriter`: a span per traced message in the telemetry store (default), or `trace:<trace_id>` ledger streams with `trace_backend = "ledger"` |
 
 ## Consumes
 
@@ -63,6 +63,7 @@ The `group:<grp>:<pattern>` strings in `backends/sqlite.py` are sqlite subscript
 | `handler_timeout_seconds` | `300.0` | yes (memory backend only) |
 | `drain_seconds` | `10.0` | NO (declared, never read; `BusClient.stop(drain_seconds=)` ignores its argument and no caller passes it; `kernel/configcheck.py:80-94` lists it) |
 | `trace_enabled` | `True` | yes |
+| `trace_backend` | `'telemetry'` | yes: `telemetry` (span name = type, span id = message id, parent = causation id, attrs `source` and any `payload_ref`; no body kept) or `ledger`; `telemetry` with no store falls back to the ledger |
 | `trace_sample` | `field(default_factory=lambda: {'system.tick.second': 0.0, 's` | yes |
 | `trace_blob_threshold_bytes` | `4096` | yes |
 | `dedupe_window` | `5000` | yes |
@@ -106,6 +107,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/bus/test_router.py` -- broadcast vs group fan-out, `*`/`#` matching, replies only to their inbox.
 - `tests/simorgh/bus/test_client.py` -- publish validation, policy hook, request/reply and timeouts, explicit nack, backpressure, stopping.
 - `tests/simorgh/bus/test_backends_parity.py` -- memory and sqlite give the same delivery semantics (ordering, at-least-once, dead letters with the ledger mirror, preemption, TTL, pause, dedupe).
+- `tests/simorgh/bus/test_trace_goes_to_telemetry.py` -- a traced message is a span with id, parent and source; the ledger switch still writes streams.
 - `tests/simorgh/bus/test_trace.py` -- sampling rules, `trace:<id>` stream with message-id idempotency, outage buffering, blob refs, drop-on-overflow.
 - `tests/simorgh/bus/test_service_and_factory.py` -- config defaults and env overrides, backend selection, one shared backend, the Service's `produces` and health.
 - `tests/simorgh/bus/test_a_long_handler_is_not_cut_off.py` -- `UNBOUNDED` handlers are not timed out; the default still guards hangs.
@@ -127,7 +129,7 @@ Found while writing this contract (not in the catalogue), fixed 2026-09-19: a tr
 
 ## Planned changes (roadmap)
 
-- Stage 1 item 3: `TraceWriter` writes a span per message to the new telemetry store instead of `trace:<id>` streams; `trace_sample` becomes a sampling rate per topic prefix; rollback switch `[bus] trace_backend = "ledger"` for one bless cycle.
+- Stage 1 item 3 done 2026-09-19: `TraceWriter` writes a span per message to the telemetry store; `trace:<id>` streams are written only with `[bus] trace_backend = "ledger"` (the rollback switch, one bless cycle). The Kernel's client now reads `[bus]` (it used `Config()` defaults, so `trace_sample` in simorgh.toml had no effect). Open: per-prefix fractional rates.
 - Stage 1 item 5: `Message` gains an optional `deadline`; `BusClient.request` sets it from its timeout.
 - Stage 1 item 10: `backends/aws.py` (and the identity registry) move under `simorgh/_frozen/`; the protocol and the sqlite backend stay.
 - Stage 3 item 2: `session.delta` is bus-only with trace sampling 0.
@@ -135,3 +137,5 @@ Found while writing this contract (not in the catalogue), fixed 2026-09-19: a tr
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim bus --by <you> --task "..."`), commit the lock, edit only `simorgh/bus/`, `tests/simorgh/bus/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py bus` before committing; commit subject `bus: <what changed>`.
+
+- `request(message, timeout=...)` stamps `deadline = min(existing, now + timeout)` on the message (stage 1 item 5).

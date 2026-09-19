@@ -67,6 +67,7 @@ No environment variables. The file path is fixed: `<[runtime] data_dir>/telemetr
   - `async start()`, `async stop()` (flushes, then closes; a row recorded after stop is dropped and counted).
   - `span(name, *, trace_id, parent_id=None, attrs=None)`: async context manager yielding a `RecordingSpan` (`trace_id`, `span_id` 16 hex, `parent_id`, `name`, `start`, `attrs`, `set(key, value)`). Without `parent_id`, the innermost open span of the same trace in this task (a `contextvars` variable, inherited by child tasks) is the parent.
   - `sample(series, value, ts=None)`: `value` any JSON-able; `ts` defaults to the clock's now.
+  - `event(name, *, trace_id, span_id, parent_id=None, ts=None, attrs=None)`: a finished zero-length span with the caller's id. The bus writes one per traced message (stage 1 item 3). `store.read_trace(path, trace_id)` reads a file read-only (`simorgh trace`).
   - `async query(trace_id) -> list[dict]`: flushes first; keys `trace_id, span_id, parent_id, name, start, end, status, attrs`; ordered by `start`, a parent before its children on equal starts.
   - `async series(series, *, since=None, until=None) -> list[dict]`: flushes first; keys `series, ts, value`.
   - `async flush()`, `async maintain(now=None) -> {"spans", "samples", "downsampled"}`, `async on_sleep_tick() -> dict | None`.
@@ -108,3 +109,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim telemetry --by <you> --task "..."`), commit the lock, edit only `simorgh/telemetry/`, `tests/simorgh/telemetry/` and this file; a change to the `Telemetry` protocol in `simorgh/contracts/` needs the `contracts` lock and a note in the kernel's CONTRACT.md. Run `python tools/modtest.py telemetry` before committing; commit subject `telemetry: <what changed>`.
+
+- Series written today (stage 1 item 3): `metrics.history` (the Kernel's `MetricsHistoryWriter`) and `curiosity.tick` (Curiosity). `persona:state` stays in the ledger on purpose: it is what restores mood after a restart, and it is written only on a change of at least `decay_announce_delta`. Spans: one per traced bus message. `store.last_sample(path, series)` reads the newest sample read-only.
+
+- `event(..., end=None)`: with `end`, a timed span measured elsewhere (voice's stages).

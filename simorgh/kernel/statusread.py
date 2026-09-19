@@ -214,10 +214,23 @@ def from_ledger(config: LoadedConfig, *, why_not_live: str = "") -> dict:
     for key in ("previous", "reason", "requested_by", "scope"):
         if payload.get(key) is not None:
             snapshot[key] = payload[key]
+    history = None
     try:
-        history = last_event(config, HISTORY_STREAM)
+        # Metrics history is a telemetry sample since stage 1 item 3; the
+        # ledger stream holds what was recorded before.
+        from simorgh.telemetry import FILENAME as TELEMETRY_FILENAME
+        from simorgh.telemetry.store import last_sample
+
+        sample = last_sample(config.runtime.data_dir / TELEMETRY_FILENAME, "metrics.history")
+        if sample is not None:
+            history = {"ts": sample["ts"], "payload": sample["value"]}
     except Exception:  # noqa: BLE001 -- the metrics are extra; the state is the answer
         history = None
+    if history is None:
+        try:
+            history = last_event(config, HISTORY_STREAM)
+        except Exception:  # noqa: BLE001
+            history = None
     if history is not None and isinstance((history.get("payload") or {}).get("metrics"), dict):
         snapshot["metrics"] = history["payload"]["metrics"]
         snapshot["metrics_as_of"] = _iso(history.get("ts"))

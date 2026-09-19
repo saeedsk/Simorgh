@@ -152,7 +152,7 @@ class HttpApi:
     def __init__(
         self, bus, *, ledger=None, host: str = "127.0.0.1", port: int = 8765,
         clock=None, status_timeout_s: float = 3.0, chat_timeout_s: float = 130.0,
-        history_stream: str = "metrics:history", history_default_minutes: float = 10.0,
+        history_stream: str = "metrics:history", history_default_minutes: float = 10.0, telemetry=None,
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
         token: str = "", max_body_bytes: int = 1_000_000, logger=None, feeds=None,
         cameras_live: bool = False, cameras_live_delay_s: float = 20.0, cameras_live_every_s: float = 120.0,
@@ -170,6 +170,10 @@ class HttpApi:
         self._timeout = status_timeout_s
         self._chat_timeout = chat_timeout_s
         self._history_stream = history_stream
+        # Metrics history lives in the telemetry store when there is one
+        # (stage 1 item 3); the ledger stream is the fallback for data
+        # recorded before, and for a Kernel with telemetry off.
+        self._telemetry = telemetry
         self._history_default_minutes = history_default_minutes
         self._history_max_points = max(1, history_max_points)
         self._logs_default_limit = logs_default_limit
@@ -1222,6 +1226,22 @@ class HttpApi:
         except ValueError:
             minutes = self._history_default_minutes
         minutes = max(0.5, min(minutes, 24 * 60.0))
+        cutoff = self._now() - minutes * 60.0
+        series = getattr(self._telemetry, "series", None)
+        if series is not None:
+            try:
+                rows = (await series("metrics.history", since=cutoff))[-self._history_max_points:]
+            except Exception:  # noqa: BLE001 -- fall through to the ledger
+                rows = []
+            if rows:
+                points = []
+                for row in rows:
+                    entry = ((row.get("value") or {}).get("metrics") or {}).get(subsystem)
+                    if entry is not None:
+                        points.append({"ts": row["ts"], "counters": entry.get("counters", {}),
+                                       "gauges": entry.get("gauges", {})})
+                return json.dumps({"subsystem": subsystem, "minutes": minutes, "points": points},
+                                  default=str).encode("utf-8")
         if self._ledger is None:
             return json.dumps({"subsystem": subsystem, "minutes": minutes, "points": [],
                                 "error": {"code": "ledger_unavailable"}}).encode("utf-8")

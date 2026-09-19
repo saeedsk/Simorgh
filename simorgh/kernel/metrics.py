@@ -43,6 +43,8 @@ from .state import SystemStateMachine
 from .supervisor import Supervisor
 
 HISTORY_STREAM = "metrics:history"
+#: The telemetry series the snapshots go to when a store exists (stage 1 item 3).
+HISTORY_SERIES = "metrics.history"
 HISTORY_EVENT_TYPE = "system.metrics_history"
 
 
@@ -222,8 +224,12 @@ class MetricsHistoryWriter:
     many subsystems are reporting -- cheap, and keeps `/api/history`'s
     read side to one stream instead of fanning out per subsystem."""
 
-    def __init__(self, *, ledger: Ledger, clock: Clock, metrics: MetricsTable, interval_s: float) -> None:
+    def __init__(self, *, ledger: Ledger, clock: Clock, metrics: MetricsTable, interval_s: float,
+                 telemetry=None) -> None:
         self._ledger = ledger
+        # With a telemetry store the snapshot is a sample (series
+        # `HISTORY_SERIES`), not a decision-log event (stage 1 item 3).
+        self._telemetry = telemetry
         self._clock = clock
         self._metrics = metrics
         self._interval = max(1.0, interval_s)
@@ -246,6 +252,9 @@ class MetricsHistoryWriter:
         if not self._metrics.per_subsystem:
             return  # nothing reported yet -- an empty snapshot is noise, not signal
         now = self._clock.now()
+        if self._telemetry is not None:
+            self._telemetry.sample(HISTORY_SERIES, {"metrics": copy.deepcopy(self._metrics.per_subsystem)}, ts=now)
+            return
         await self._ledger.append(HISTORY_STREAM, Event(
             stream=HISTORY_STREAM, type=HISTORY_EVENT_TYPE, ts=now, trace_id=str(uuid.uuid4()),
             causation_id=None, payload={"metrics": copy.deepcopy(self._metrics.per_subsystem)},
@@ -261,6 +270,6 @@ class MetricsHistoryWriter:
 
 
 __all__ = [
-    "HISTORY_EVENT_TYPE", "HISTORY_STREAM", "MetricsHistoryWriter", "MetricsTable", "ProcessMetricsPublisher",
+    "HISTORY_EVENT_TYPE", "HISTORY_SERIES", "HISTORY_STREAM", "MetricsHistoryWriter", "MetricsTable", "ProcessMetricsPublisher",
     "StatusServer", "process_gauges",
 ]

@@ -385,7 +385,8 @@ class Worker:
             self.current_task_id, self.current_kind = None, None
 
     async def run_percept_chat(self, session_id: str, text: str, *, channel: str = "", speaker: str = "",
-                               speaker_relation: str = "", room: str = "", speaker_before: str = "") -> None:
+                               speaker_relation: str = "", room: str = "", speaker_before: str = "",
+                               trace_id: str = "") -> None:
         """Flow 1 (02 section 5): a plain conversational percept has no
         Planning task behind it -- only the `batch`/`evolve`/`plan`
         commands go through `intent.goal.stated` -> Intake -> a real
@@ -403,6 +404,7 @@ class Worker:
             task_id=session_id, kind="chat", mode="execute", profile=profile,
             worker_id=self.worker_id, user_text=text, channel=channel,
             speaker=speaker, speaker_relation=speaker_relation, room=room, speaker_before=speaker_before,
+            trace_id=trace_id,
         )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions
@@ -478,7 +480,7 @@ class Worker:
 
         msg = Message.new(type_, source=self._bus.source, payload=payload,
                           partition_key=f"task:{session.task_id}",
-                          trace_id=session.task_id, clock=self._clock)
+                          trace_id=session.trace, clock=self._clock)
         # Live-caught (the creator: "step 1 final answer ok [31.5s]" then a
         # minute of "still thinking" and no reply): the Ledger refuses any
         # inline string over its threshold (4096 chars by default), so a
@@ -501,7 +503,7 @@ class Worker:
                 payload={"kind": "procedural", "content": procedure,
                          "tags": ["procedure", f"task:{session.task_id}"],
                          "source_ref": session.task_id},
-                trace_id=session.task_id, clock=self._clock,
+                trace_id=session.trace, clock=self._clock,
             ))
 
         # `turn.completed` was published for `session.kind == "chat"`
@@ -546,7 +548,7 @@ class Worker:
                 # memory is kept per person on this.
                 "speaker": getattr(session, "speaker", "") or "",
             },
-            partition_key=f"task:{session.task_id}", trace_id=session.task_id, clock=self._clock,
+            partition_key=f"task:{session.task_id}", trace_id=session.trace, clock=self._clock,
         )
         await self._bus.publish(turn)
 

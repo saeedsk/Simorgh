@@ -142,7 +142,7 @@ class ContextFactory:
         data_dir.mkdir(parents=True, exist_ok=True)
         return Context(
             name=name, instance_id=instance_id, run_id=self._run_id, mode=self._runtime.mode,
-            bus=bus, ledger=self._ledger, config=self._config.section(name), secrets=secrets,
+            bus=bus, ledger=_bind_ledger(self._ledger, source), config=self._config.section(name), secrets=secrets,
             clock=self._clock, logger=make_logger(name), data_dir=data_dir, subsystem_token=token,
             telemetry=self._telemetry,
         )
@@ -172,3 +172,13 @@ class HmacSecretStore:
 
 
 __all__ = ["ContextFactory", "HmacSecretStore", "make_logger"]
+
+
+def _bind_ledger(ledger, source: str):
+    """Each subsystem's ledger is bound to its name (stage 1 item 8):
+    writes are checked against `contracts.streamnames.WRITERS`."""
+    if ledger is None or not hasattr(ledger, "append"):
+        return ledger
+    from simorgh.ledger.bound import BoundLedger
+
+    return BoundLedger(ledger, source)

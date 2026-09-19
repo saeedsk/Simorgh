@@ -36,8 +36,8 @@ from pathlib import Path
 
 from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
-from simorgh.contracts.envelope import Event, Message
-from simorgh.contracts.protocols import Health, ToolContext
+from simorgh.contracts.envelope import Event, Message, time_left
+from simorgh.contracts.protocols import Health, ToolContext, NULL_TELEMETRY
 
 from . import pathsafety
 from .config import Config
@@ -98,6 +98,13 @@ def timeout_for(tool, constraints: dict, default_s: float) -> float:
     if isinstance(own, (int, float)) and own > 0:
         return float(own)
     return float(default_s)
+
+
+def within_deadline(timeout: float, message: Message, now: float) -> float:
+    """`timeout`, shrunk to what the proposer will still wait when the
+    approval carries a deadline (stage 1 item 5); never below 0.1 s."""
+    left = time_left(message, now)
+    return float(timeout) if left is None else max(0.1, min(float(timeout), left))
 
 
 class Service:
@@ -824,14 +831,22 @@ class Service:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "started", {"action_id": action_id, "tool": tool.name}))
             start = time.monotonic()
             timeout = timeout_for(tool, approved.get("constraints") or {}, self._config.default_timeout_s)
+            # Never outlast the proposer's wait (stage 1 item 5): an
+            # approval caused by a proposal carries its deadline.
+            now = self._ctx.clock.now() if hasattr(self._ctx.clock, "now") else self._ctx.clock()
+            timeout = within_deadline(timeout, message, now)
             root = self._worktrees.root_for(task_id) if self._worktrees is not None else None
             ctx = ToolContext(
                 action_id=action_id, task_id=task_id, scope=scope, constraints=approved.get("constraints") or {},
                 data_dir=self._config.repo_root, clock=self._ctx.clock, logger=self._ctx.logger,
                 ledger=self._ctx.ledger, bus=self._ctx.bus, root=root,
             )
+            telemetry = getattr(self._ctx, "telemetry", None) or NULL_TELEMETRY
             try:
-                result = await asyncio.wait_for(tool.run(args or {}, ctx=ctx), timeout=timeout)
+                async with telemetry.span("execution.tool", trace_id=message.trace_id, parent_id=message.id,
+                                          attrs={"tool": tool.name}) as span:
+                    result = await asyncio.wait_for(tool.run(args or {}, ctx=ctx), timeout=timeout)
+                    span.set("ok", bool(result.ok))
             except asyncio.TimeoutError:
                 await self._finish(action_id)
                 await self._publish_result(message, action_id, ok=False, error="timeout",
@@ -889,6 +904,7 @@ class Service:
             await self._ctx.bus.publish(Message.new(
                 topics.TOOL_INVOKED, source="execution",
                 payload={"name": tool.name, "action_id": action_id, "duration_ms": duration_ms, "ok": result.ok},
+                trace_id=message.trace_id,
             ))
             if tool.name == "apply_skill" and result.ok:
                 # A skill becomes callable the moment it is written, not

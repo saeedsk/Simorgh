@@ -340,3 +340,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 Lock it first (`python tools/modlock.py claim execution --by <you> --task "..."`), commit the lock, edit only `simorgh/execution/`, `tests/simorgh/execution/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py execution` before committing; commit subject `execution: <what changed>`.
 
 This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run agent may, with the lock, because a person is accountable for the commit.
+
+- Telemetry (stage 1 item 4, 2026-09-19): each approved tool run is a span `execution.tool` (attrs `tool`, `ok`; status `error` on a timeout), parented to the `action.approved` message.
+
+- Deadline (stage 1 item 5, 2026-09-19): a tool's timeout is `within_deadline(timeout_for(...), approved, now)`, so a run never outlasts the proposer's wait. An approval Guardian publishes for a person's answer is caused by the answer, carries no deadline, and is not cut short.

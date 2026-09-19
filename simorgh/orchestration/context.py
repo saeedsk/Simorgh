@@ -271,12 +271,12 @@ class Assembler:
         matched_call = self._request_with_reason(
             topics.MEMORY_RETRIEVE,
             {"query": query, "kinds": matched_kinds, "k": _MEMORY_MATCHED_K},
-            trace_id=session.task_id,
+            trace_id=session.trace,
         )
         recent_call = self._request_with_reason(
             topics.MEMORY_RETRIEVE,
             {"query": "", "kinds": ["episodic"], "k": _MEMORY_RECENT_K},
-            trace_id=session.task_id,
+            trace_id=session.trace,
         )
         speaker = str(getattr(session, "speaker", "") or "")
         calls = [matched_call, recent_call]
@@ -288,7 +288,7 @@ class Assembler:
                 topics.MEMORY_RETRIEVE,
                 {"query": query, "kinds": ["episodic", "semantic"], "k": _MEMORY_PERSON_K,
                  "filters": {"tags": [f"person:{speaker}"]}},
-                trace_id=session.task_id,
+                trace_id=session.trace,
             ))
         results = await asyncio.gather(*calls)
         (matched, why), (recent, _recent_why) = results[0], results[1]
@@ -356,7 +356,7 @@ class Assembler:
         reply, _why = await self._request_with_reason(
             topics.MEMORY_RETRIEVE,
             {"query": "", "kinds": ["working"], "k": _WORKING_K, "filters": {"session_id": key}},
-            trace_id=session.task_id,
+            trace_id=session.trace,
         )
         if reply is None:
             return ""

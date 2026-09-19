@@ -47,7 +47,7 @@ class _Replies:
         self.calls: list[dict] = []
 
     async def ask(self, text, *, session_id=None, speaker_name: str = "", confidence: float = 1.0,
-                  speaker_relation: str = "", room: str = "", speaker_before: str = "") -> str:
+                  speaker_relation: str = "", room: str = "", speaker_before: str = "", **_kw) -> str:
         self.asked.append((text, speaker_name))
         self.calls.append({"text": text, "speaker": speaker_name, "relation": speaker_relation, "room": room,
                            "before": speaker_before})

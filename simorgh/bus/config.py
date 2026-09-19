@@ -36,6 +36,12 @@ class Config:
     handler_timeout_seconds: float = 300.0  # memory backend per-handler default
     drain_seconds: float = 10.0
     trace_enabled: bool = True
+    # Where a traced message goes (stage 1 item 3): "telemetry", a span in
+    # the telemetry store (name = type, span id = message id, parent = the
+    # causing message), or "ledger", the old `trace:<id>` stream, kept for
+    # one bless cycle. With no telemetry store (tests, `enabled = false`)
+    # "telemetry" falls back to the ledger rather than tracing nothing.
+    trace_backend: str = "telemetry"
     # Per-pattern sample rate; default 1.0 for anything not listed (03
     # section 5 "Tracing"). The zeroed entries are all heartbeats and
     # periodic broadcasts: they root a trace of their own but cause
