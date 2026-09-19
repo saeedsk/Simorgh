@@ -12,15 +12,20 @@ from typing import Any
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import ProviderUnavailable
+from ..api import ProviderUnavailable, Capabilities
 
 DEFAULT_MODEL = "gemini-3.8-flash"
 # Output room for thought, on top of the caller's max_tokens (see _complete_sync).
 THINKING_RESERVE_TOKENS = 2048
 
 
+from . import native  # noqa: E402
+
+
 class GeminiProvider:
     name = "gemini"
+    capabilities = Capabilities(supports_tools=True, supports_streaming=True, supports_images=True,
+                                context_window=1_000_000, cache_prefix=True)
 
     def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL, client: Any | None = None) -> None:
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -38,10 +43,10 @@ class GeminiProvider:
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
     ) -> ProviderResponse:
         prompt = "\n\n".join(m.get("content", "") for m in messages if m.get("content"))
-        return await asyncio.to_thread(self._complete_sync, prompt, max_tokens, timeout)
+        return await asyncio.to_thread(self._complete_sync, prompt, max_tokens, timeout, tools)
 
     def _complete_sync(
-        self, prompt: str, max_tokens: int = 0, timeout: float | None = None,
+        self, prompt: str, max_tokens: int = 0, timeout: float | None = None, tools: list[dict] | None = None,
     ) -> ProviderResponse:
         if not self._api_key:
             raise ProviderUnavailable("no Gemini API key configured (GEMINI_API_KEY)")
@@ -64,6 +69,11 @@ class GeminiProvider:
             config["max_output_tokens"] = int(max_tokens) + THINKING_RESERVE_TOKENS
         if timeout:
             config["http_options"] = {"timeout": int(timeout * 1000)}  # the SDK counts in milliseconds
+        if tools:
+            # Native function declarations (stage 2 item 4). The SDK must not
+            # call anything itself: every call goes through Guardian.
+            config["tools"] = native.gemini_declarations(tools)
+            config["automatic_function_calling"] = {"disable": True}
         try:
             client = self._get_client()
             try:
@@ -84,14 +94,18 @@ class GeminiProvider:
         # budget under-count every call.
         output_tokens = ((getattr(usage, "candidates_token_count", 0) or 0)
                          + (getattr(usage, "thoughts_token_count", 0) or 0)) if usage else 0
-        text = getattr(response, "text", None) or ""
-        if not text and _finished_on_max_tokens(response):
+        try:
+            text = getattr(response, "text", None) or ""
+        except Exception:  # noqa: BLE001 -- the SDK raises on `.text` for a function-call-only reply
+            text = ""
+        calls = native.gemini_calls(response, native.names_back(tools))
+        if not text and not calls and _finished_on_max_tokens(response):
             # An empty answer is not an answer: fail over rather than hand
             # the caller "" as if the model had chosen to say nothing.
             raise ProviderUnavailable(
                 f"Gemini spent its {config.get('max_output_tokens')} output tokens thinking and returned no text")
         return ProviderResponse(
-            text=text, provider=self.name,
+            text=text, provider=self.name, tool_calls=calls,
             input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=None,
         )
 

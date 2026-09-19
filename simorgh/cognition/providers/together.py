@@ -44,7 +44,7 @@ from typing import Any
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import ProviderUnavailable
+from ..api import ProviderUnavailable, Capabilities
 
 DEFAULT_MODEL = "zai-org/GLM-5.3-Flash"
 DEFAULT_BASE_URL = "https://api.together.ai/v1"
@@ -76,8 +76,14 @@ PRICE_OUT = 0.50
 PRICE_CACHED_IN = 0.03
 
 
+from . import native  # noqa: E402
+
+
 class TogetherProvider:
     name = "together"
+    # OpenAI-compatible `tools`/`tool_choice` and streaming; the GLM chat
+    # models Sim uses read text only.
+    capabilities = Capabilities(supports_tools=True, supports_streaming=True, cache_prefix=True)
 
     def __init__(
         self, api_key: str | None = None, model: str = DEFAULT_MODEL, *,
@@ -116,19 +122,19 @@ class TogetherProvider:
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
     ) -> ProviderResponse:
-        return await asyncio.to_thread(self._complete_sync, messages, max_tokens, timeout)
+        return await asyncio.to_thread(self._complete_sync, messages, max_tokens, timeout, tools)
 
     # -- the call ---------------------------------------------------------------
-    def _complete_sync(self, messages: list[dict], max_tokens: int, timeout: float | None) -> ProviderResponse:
+    def _complete_sync(self, messages: list[dict], max_tokens: int, timeout: float | None,
+                       tools: list[dict] | None = None) -> ProviderResponse:
         if not self._api_key:
             raise ProviderUnavailable("no Together API key configured (TOGETHER_API_KEY)")
-        body = {
-            "model": self._model,
-            "messages": [
-                {"role": m.get("role", "user"), "content": m.get("content", "")}
-                for m in messages if m.get("content")
-            ] or [{"role": "user", "content": ""}],
-        }
+        body = {"model": self._model, "messages": native.openai_messages(messages)}
+        # Native tools (stage 2 item 4): only when a caller hands specs, which
+        # nothing does until `tool_dialect = "native"` (item 9).
+        if tools:
+            body["tools"] = native.openai_tools(tools)
+            body["tool_choice"] = "auto"
         if max_tokens:
             body["max_tokens"] = self._room_to_answer(int(max_tokens))
         if self._reasoning_effort:
@@ -142,7 +148,7 @@ class TogetherProvider:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ProviderUnavailable(f"Together returned a non-JSON body: {raw[:200]!r}") from exc
-        return self._to_response(data)
+        return self._to_response(data, native.names_back(tools))
 
     def _post(self, url: str, body: dict, *, timeout: float) -> str:
         payload = json.dumps(body).encode()
@@ -174,13 +180,14 @@ class TogetherProvider:
             raise ProviderUnavailable(f"Together request failed: {exc!r}") from exc
 
     # -- response shaping -------------------------------------------------------
-    def _to_response(self, data: dict) -> ProviderResponse:
+    def _to_response(self, data: dict, back: dict[str, str] | None = None) -> ProviderResponse:
         choices = data.get("choices") or []
         if not choices:
             raise ProviderUnavailable(f"Together returned no choices: {str(data)[:200]}")
         choice = choices[0] or {}
         message = choice.get("message") or {}
         text = message.get("content") or ""
+        calls = native.openai_calls(message, back or {})
 
         usage = data.get("usage") or {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -191,7 +198,7 @@ class TogetherProvider:
         # charging the cached part twice.
         uncached = max(0, prompt_tokens - cached)
 
-        if not text and message.get("reasoning_content"):
+        if not text and not calls and message.get("reasoning_content"):
             # The model spent the whole output budget thinking and never
             # reached an answer. Handing Cognition "" would look exactly
             # like a real empty reply and be parsed as a non-answer; saying
@@ -221,7 +228,7 @@ class TogetherProvider:
         return ProviderResponse(
             text=text, provider=self.name,
             input_tokens=uncached, output_tokens=output_tokens, cached_input_tokens=cached,
-            cost_usd=self._bill(uncached, output_tokens, cached),
+            cost_usd=self._bill(uncached, output_tokens, cached), tool_calls=calls,
             metadata={"model": data.get("model") or self._model},
         )
 

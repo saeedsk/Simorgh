@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from simorgh.contracts.protocols import ProviderResponse
 
-from ..api import Purpose
+from ..api import Purpose, Capabilities
 
 TEMPLATES: dict[Purpose, str] = {
     Purpose.CHAT: "[floor] I don't have a real reasoning provider available right now.",
@@ -29,6 +29,7 @@ TEMPLATES: dict[Purpose, str] = {
 
 class FloorProvider:
     name = "floor"
+    capabilities = Capabilities()
     # Not a model at all -- the honest, offline template. Named so
     # anything reporting "what is thinking for me" can say so plainly
     # rather than leaving a blank.

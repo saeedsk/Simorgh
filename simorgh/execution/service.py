@@ -100,6 +100,15 @@ def timeout_for(tool, constraints: dict, default_s: float) -> float:
     return float(default_s)
 
 
+def input_schema_of(tool) -> dict:
+    """The tool's declared argument schema for `tool.registered` (stage 2
+    item 1): an object schema, whatever the tool declared or failed to."""
+    schema = getattr(tool, "args_schema", None)
+    if not isinstance(schema, dict) or schema.get("type") not in (None, "object"):
+        return {"type": "object"}
+    return dict(schema, type="object")
+
+
 def within_deadline(timeout: float, message: Message, now: float) -> float:
     """`timeout`, shrunk to what the proposer will still wait when the
     approval carries a deadline (stage 1 item 5); never below 0.1 s."""
@@ -200,7 +209,8 @@ class Service:
                 topics.TOOL_REGISTERED, source="execution",
                 payload={"name": tool.name, "version": "1", "description": tool.description,
                          "read_only": tool.read_only, "reversibility": tool.reversibility,
-                         "schema_ref": "", "provider": getattr(tool, "provider", "builtin")},
+                         "schema_ref": "", "provider": getattr(tool, "provider", "builtin"),
+                         "input_schema": input_schema_of(tool)},
             ))
             await ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
                 "name": tool.name, "provider": getattr(tool, "provider", "builtin"),
@@ -491,7 +501,7 @@ class Service:
                 payload={"name": tool.name, "version": "1", "description": tool.description,
                          "read_only": tool.read_only, "reversibility": tool.reversibility,
                          "schema_ref": "", "provider": "mcp",
-                         "marker_arg_key": mcp_single_arg_key(tool.args_schema)},
+                         "marker_arg_key": mcp_single_arg_key(tool.args_schema), "input_schema": input_schema_of(tool)},
             ))
             await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
                 "name": tool.name, "provider": "mcp", "reversibility": tool.reversibility,
@@ -620,7 +630,7 @@ class Service:
                 payload={"name": name, "version": "1",
                          "description": f"skill {path.stem!r} from an earlier session (loaded on first use)",
                          "read_only": False, "reversibility": "reversible",
-                         "schema_ref": "", "provider": "skill"},
+                         "schema_ref": "", "provider": "skill", "input_schema": {"type": "object"}},
             ))
             announced += 1
         if announced:
@@ -696,7 +706,8 @@ class Service:
             topics.TOOL_REGISTERED, source="execution",
             payload={"name": tool.name, "version": "1", "description": tool.description,
                      "read_only": tool.read_only, "reversibility": tool.reversibility,
-                     "schema_ref": "", "provider": "skill", "marker_arg_key": tool.marker_arg_key},
+                     "schema_ref": "", "provider": "skill", "marker_arg_key": tool.marker_arg_key,
+                     "input_schema": input_schema_of(tool)},
         ))
         await self._ctx.ledger.append(TOOLS_STREAM, self._event(TOOLS_STREAM, "registered", {
             "name": tool.name, "provider": "skill", "reversibility": tool.reversibility,

@@ -1,6 +1,6 @@
 # Stage 2 -- Schemas to the model, then native tool use behind a capability flag
 
-Status: not started · Depends on: stage 0 item 30 (the gate) · Estimated: 3 weeks · Modules touched: contracts, execution, cognition, orchestration, guardian, benchmark
+Status: **in progress** (2026-09-19: items 1, 3, 4 done, none of which changes behaviour; baseline BFCL recorded) · Depends on: stage 0 item 30 (the gate) · Estimated: 3 weeks · Modules touched: contracts, execution, cognition, orchestration, guardian, benchmark
 
 ## Outcome
 
@@ -15,6 +15,14 @@ Evaluation L1/C5 (no native tool calling; every adapter drops `tools=`), T2 (the
 Run BFCL and BFCL-parallel through `simorgh/benchmark` on the live model with markers (3 repeats) and record the score: that is the number to beat. Read `cognition/parser.py`, `cognition/service.py:322-345` (`tools=None` at :358), `cognition/providers/*.py` (`complete(..., tools, ...)` accepted and dropped), `orchestration/tools.py` (`_TOOL_POLICY`, `_MARKER_ARG_KEY`, `_CODE_BEARING_MARKERS`, `to_action_payload`), `orchestration/session.py::_run` and `_propose_and_await`, `execution/service.py:167-171` (`tool.registered` ships `schema_ref=''`), `execution/mcp.py::mcp_single_arg_key`.
 
 ## Action items
+
+Done 2026-09-19:
+- Baseline (item 0): BFCL-parallel with markers, GLM-5.3-Flash via Together, 20 cases at offset 0: 17, 18 and 18 of 20 (mean 88%), 130-282 s and about $0.04 per run, no floor replies. See `docs/findings/2026-09-19-stage-0-gate.md`.
+- Item 1: `tool.registered` carries `input_schema`; WorldModel keeps it with the description.
+- Item 3: `cognition.api.Capabilities` on every provider.
+- Item 4: `cognition/providers/native.py`; Together and Gemini send and parse native tool calls (fixtures, plus one live call each returning two parallel calls). Unused until item 9.
+
+Next, in order, each behind a trial-suite before/after: item 2 (render name, description and argument shape in the prompt), items 5-6 (typed turns and N calls per turn in `session.py`, native path only), then item 9 (flip VOICE_CHAT on the provider that wins BFCL).
 
 1. **`ToolSpec` on the wire.** *Lock `contracts`, `execution`, `worldmodel`.* (T2)
    - What: `tool.registered` carries `name, description, input_schema, reversibility, read_only, network, cost_class, source, tags`.

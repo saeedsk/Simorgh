@@ -7,6 +7,15 @@
     "description": {
       "type": "string"
     },
+    "input_schema": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "name": {
       "type": "string"
     },
