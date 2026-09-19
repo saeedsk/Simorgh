@@ -25,6 +25,12 @@
             },
             "tokens_before": {
               "type": "integer"
+            },
+            "tokens_limit": {
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           },
           "required": [

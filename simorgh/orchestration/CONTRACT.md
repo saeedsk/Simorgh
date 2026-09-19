@@ -16,6 +16,7 @@ Orchestration owns the agent loop: it claims a task (or takes a conversational p
 | `simorgh/orchestration/config.py` | `[orchestration]` dataclass |
 | `simorgh/orchestration/context.py` | `Assembler`: conversation window, memory block and transcript for one think |
 | `simorgh/orchestration/profiles.py` | CHAT, VOICE_CHAT, PATCH, RESEARCH, PLAN, SKILL profiles and their selection |
+| `simorgh/orchestration/pressure.py` | Compaction by token pressure: stub old tool results at 70%, progress note at 85%; `recall_result` |
 | `simorgh/orchestration/progress.py` | Progress note used by re-grounding and clean revisions |
 | `simorgh/orchestration/resume.py` | Rebuilds a session from its `task:<id>` stream (crash vs retry) |
 | `simorgh/orchestration/scaffolds.py` | Renders the `task_rules` block per scaffold, channel and speaker; tool-down notes |
@@ -127,6 +128,7 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 11. Every terminal outcome publishes exactly one `task.*` terminal message and one `turn.completed`, including a cancelled or crashed chat turn (`worker.py:405-420`); a requeued (preempted) task reports nothing.
 12. A worker runs one claimed task at a time (`max_inflight=1`), and a percept chat runs as its own asyncio task so the bus handler timeout cannot cancel it (`service.py:266-290`).
 13. Each verify request uses a fresh `verification_id` per attempt (`session.py:1748`), so Verification never replays an old verdict.
+- Compaction by token pressure (stage 4 item 5, 2026-09-19): after each think the session reads its pressure, `compaction.tokens_before / compaction.tokens_limit` from `cognition.think.reply`. At 0.70 or more, before the next think, every tool result but the newest `keep_recent_steps` (at least 1) of 400+ characters is written to a ledger blob and replaced by `[stubbed result of <tool>, N chars; ... call recall_result with <ref> ...]`, recorded as a `gather` step. At 0.85 or more with nothing left to stub, a task session (not chat) writes the progress note (`_reground(forced=True)`). `recall_result` is offered only while a stub is in the transcript; it is session-local (like `delegate` and `use_skill`), never proposed to Guardian, and returns the blob in full.
 - Traces (stage 1 item 2, 2026-09-19): every message a session sends carries `Session.trace`, which is the task id for a task and the percept's own `trace_id` for a chat turn (`run_percept_chat(trace_id=...)`), so one turn is one trace from `percept.text.received` to `turn.completed`.
 
 ## Contract tests

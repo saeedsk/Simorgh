@@ -601,6 +601,9 @@ class Service:
                 "layers_applied": [str(n) for n in compacted.layers_applied],
                 "tokens_before": compacted.tokens_before, "tokens_after": compacted.tokens_after,
                 "summary_ref": compacted.summary_ref,
+                # The room the caller's messages had; with tokens_before it
+                # is the session's context pressure (stage 4 item 5).
+                "tokens_limit": elastic_limit,
             },
             # Per-call budget accounting (04 section 7): what this one
             # request actually spent against what it stated it could --

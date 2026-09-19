@@ -49,7 +49,8 @@ CognitionThinkReply = define(t.COGNITION_THINK_REPLY, [
     O("edit_blocks", List(Obj(F("search", Str), F("replace", Str)))),
     O("confidence", Float),
     O("agreement", Bool),
-    O("compaction", Obj(F("layers_applied", List(Str)), F("tokens_before", Int), F("tokens_after", Int))),
+    O("compaction", Obj(F("layers_applied", List(Str)), F("tokens_before", Int), F("tokens_after", Int),
+                        O("tokens_limit", Int))),
 ])
 CognitionCompactRequest = define(t.COGNITION_COMPACT_REQUEST, [F("session_id", Str), F("target_tokens", Int)])
 CognitionCompactReply = define(t.COGNITION_COMPACT_REPLY, [

@@ -37,6 +37,7 @@ class FakeCognition:
             "text": step.get("text", ""), "tool_calls": step.get("tool_calls", []),
             "provider": "fake", "cost_usd": 0.0, "tokens": 10,
             "floor": self._floor, "non_answer": False,
+            **({"compaction": step["compaction"]} if "compaction" in step else {}),
         }
         await self._bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload=payload)
 

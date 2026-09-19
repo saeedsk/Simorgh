@@ -1,6 +1,6 @@
 # Stage 4 -- Session stream, ContextBuilder, compaction, evals package
 
-Status: **in progress** (2026-09-19: items 1-3, 6 and 10 done) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
+Status: **in progress** (2026-09-19: items 1-3, 5, 6 and 10 done) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
 
 ## Outcome
 
@@ -17,6 +17,8 @@ Stage 0 item 30's gate must exist and have before-numbers. Read `orchestration/s
 ## Action items
 
 Done 2026-09-19: item 1 (`contracts/session.py`), item 2 (`orchestration/transcript.py`; a resumed session gets its messages back), item 3 (a conversation per (channel, person) on `session:conv:...`; recall scenario 2/3 -> 3/3). The reply-correlation id stays per line, so Interface and Voice did not change; the plan's wording (stop minting a uuid per line) is met by the conversation id instead.
+
+Done 2026-09-19: item 5 (`orchestration/pressure.py`). Cognition's reply now says how much room the messages had (`compaction.tokens_limit`); at 70% of it the session moves older tool results into ledger blobs behind a one-line stub that `recall_result` reverses, and at 85% with nothing left to stub a task writes its progress note. A 40-read scripted task against a 4k-token window stays under it (`tests/simorgh/orchestration/test_compaction_by_pressure.py`); uncompacted it would be about 20k. The PreCompact hook waits for item 7 (agent definitions) and the chat "conversation so far" flavour of layer B is not built: a chat turn's own transcript is one turn long.
 
 1. **Turn and Block contracts.** *Lock `contracts`.* `Session{id, agent, channel, person_id, parent_id, depth, budget{turns, tokens, usd, wall_s}, state}`, `Turn{seq, role, blocks[], ts, meta{provider, model, in/out tokens, cached_input_tokens, cost}}`, `Block = Text | ToolUse{id, name, input} | ToolResult{tool_use_id, content, is_error, ref, bytes_total} | Image{ref}`; stream events `session.turn.appended`, `session.compacted{summary, dropped_seq_range}`, `session.snapshot`; stream name `session:<id>` in `streamnames.py`. Acceptance: schema tests; both-sides test updated.
 2. **The session stream.** *Lock `orchestration`, `ledger`.* `SessionRunner` appends one event per turn (not per block); a snapshot every 50 turns; `resume.py` folds the stream into `session.messages` (fixes L5: a resumed session has its context). Acceptance: kill a task mid-step in a booted-Kernel test and resume with the same messages.

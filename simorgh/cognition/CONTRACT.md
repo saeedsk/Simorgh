@@ -43,7 +43,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `cognition.think.reply` | `messages/cognition.py::CognitionThinkReply` | simorgh/cognition/service.py:397, 564 | every think: text, tool_calls, provider, cost, floor, compaction, budget; or `error{code}` (`invalid_request`, `paused`, `context_too_large`, `no_real_provider`, `budget_exceeded`) |
+| `cognition.think.reply` | `messages/cognition.py::CognitionThinkReply` | simorgh/cognition/service.py:397, 564 | every think: text, tool_calls, provider, cost, floor, compaction (`tokens_before`, `tokens_after`, `tokens_limit`: the room the caller's messages had, for Orchestration's pressure), budget; or `error{code}` (`invalid_request`, `paused`, `context_too_large`, `no_real_provider`, `budget_exceeded`) |
 | `cognition.compact.reply` | `messages/cognition.py::CognitionCompactReply` | simorgh/cognition/service.py:442 | every compact request |
 | `cognition.compact.pre` | `messages/cognition.py::CognitionCompactPre` | simorgh/cognition/compaction.py:359 | before a layer-5 summary |
 | `cognition.compact.done` | `messages/cognition.py::CognitionCompactDone` | simorgh/cognition/compaction.py:375 | after a layer-5 summary |

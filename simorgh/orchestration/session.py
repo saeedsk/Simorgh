@@ -24,6 +24,7 @@ import uuid
 
 from simorgh.contracts import topics
 
+from . import pressure as pressure_mod
 from . import progress as progress_note
 from simorgh.contracts.pytestfailures import hoist_marker
 from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -- re-export
@@ -1006,6 +1007,8 @@ class SessionRunner:
             if (session.profile.scaffold != "chat" and session.messages and not session.budget.is_last_step
                     and progress_note.due(session.budget.steps_used, session.reground_at, self._reground_every)):
                 await self._reground(session)
+            if session.messages and session.context_pressure >= pressure_mod.STUB_AT:
+                await self._relieve(session)
 
             step_no = session.next_step_no()
             is_last = session.budget.is_last_step
@@ -1126,6 +1129,8 @@ class SessionRunner:
                         ok, summary, detail = await self._delegate(session, call)
                     elif call.get("tool") == "use_skill":
                         ok, summary, detail = await self._use_skill(session, call)
+                    elif call.get("tool") == pressure_mod.RECALL_TOOL:
+                        ok, summary, detail = await self._recall_result(call)
                     else:
                         ok, summary, detail = await self._propose_and_await(session, call, step_no)
                     # `detail` (narration/Ledger, generously bounded) vs `summary`
@@ -1386,6 +1391,8 @@ class SessionRunner:
         catalog = self._catalog(session) if offered and not no_tools else ""
         if catalog and "use_skill" not in offered:
             offered = tuple(offered) + ("use_skill",)
+        if offered and any(str(m.get("content") or "").startswith(pressure_mod.STUB_MARK) for m in session.messages):
+            offered = tuple(offered) + (pressure_mod.RECALL_TOOL,)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         is_chat = session.profile.name == "chat"
         req = Message.new(
@@ -1489,6 +1496,7 @@ class SessionRunner:
             session.last_think_error = str(error.get("code") or "")
             return None
         session.last_think_error = ""
+        session.context_pressure = pressure_mod.pressure(reply.payload)
         return reply
 
     def _skills(self) -> list:
@@ -1624,6 +1632,8 @@ class SessionRunner:
             return await self._delegate(session, call)
         if call.get("tool") == "use_skill":
             return await self._use_skill(session, call)
+        if call.get("tool") == pressure_mod.RECALL_TOOL:
+            return await self._recall_result(call)
         return await self._propose_and_await(session, call, step_no)
 
     async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:
@@ -1716,6 +1726,43 @@ class SessionRunner:
         if last is not None and last.tool == "delegate" and last.ok is False:
             return {"tier": "strong", "tier_reason": "a helper came back without an answer"}
         return {}
+
+    async def _relieve(self, session: Session) -> None:
+        """Compaction by token pressure (orchestration/pressure.py): stub
+        the older tool results; when that finds nothing to stub and the
+        pressure is past `NOTE_AT`, write the progress note instead."""
+        measured = session.context_pressure
+        # Acted on once per measurement; the next reply measures again.
+        session.context_pressure = 0.0
+        stubbed = 0
+        if self._ledger is not None:
+            async def put(data: bytes) -> str:
+                return await self._ledger.put_blob(data, content_type="text/plain")
+            session.messages, stubbed = await pressure_mod.stub_old_results(
+                session.messages, keep_recent=max(1, self._keep_recent_steps), put=put)
+        if stubbed:
+            step = Step(session.next_step_no(), "gather",
+                        f"context at {measured:.0%}: {stubbed} older tool result(s) set aside "
+                        f"(recall_result brings one back)", ok=True)
+            session.record(step)
+            await self._record_step(session, step)
+            return
+        if measured >= pressure_mod.NOTE_AT and session.profile.scaffold != "chat" and not session.budget.is_last_step:
+            await self._reground(session, forced=True)
+
+    async def _recall_result(self, call: dict) -> tuple[bool, str, str]:
+        """`recall_result <ref>`: a tool result set aside under pressure,
+        back in full. Local to the session, so it never goes to Guardian."""
+        ref = pressure_mod.recall_ref(call.get("args") or {})
+        if not ref or self._ledger is None:
+            text = "recall_result needs the ref from a stubbed result"
+            return False, text, text
+        try:
+            data = await self._ledger.get_blob(ref)
+        except Exception as exc:  # noqa: BLE001 -- an unknown ref is the model's mistake, said plainly
+            text = f"no stored result under {ref!r} ({type(exc).__name__})"
+            return False, text, text
+        return True, data.decode("utf-8", errors="replace"), f"recalled a stored result ({len(data)} bytes)"
 
     async def _reground(self, session: Session, *, forced: bool = False) -> bool:
         """Write the progress note and replace the transcript with it.

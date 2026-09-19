@@ -168,6 +168,10 @@ class Session:
     # The last Cognition error code a THINK got, so a `context_too_large`
     # is re-grounded and retried instead of reported as "no real provider".
     last_think_error: str = ""
+    # tokens_before / tokens_limit from the last think reply
+    # (orchestration/pressure.py): 0.7 stubs old tool results, 0.85 writes
+    # the progress note.
+    context_pressure: float = 0.0
     # The git commit this session started from, captured once by
     # `SessionRunner.run`. Travels to Verification in the verify
     # subject so `full_suite_ran` can stage the tree as it was BEFORE
