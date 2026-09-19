@@ -193,7 +193,8 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the s
 | `speaker` | `'auto'` | yes |
 | `fake_transcript` | `'hello sim'` | yes |
 | `overheard_dir` | `'workspace/voice/overheard'` | yes |
-| `overheard_hours` | `48.0` | NO (declared, never read; only a comment in session.py names it, so the overheard store is not pruned by it) |
+
+The four `aec*` keys affect only the legacy `Pipeline` capture path; the live `VoiceSession` never constructs the echo canceller, so in a running Sim they change nothing (V7). There is no `overheard_hours`: the overheard store keeps 48 hours (`contracts/overheard.py` `MAX_AGE_S`) whoever writes it; the unread key was removed on 2026-09-19 rather than kept as a setting that looks live (`tests/simorgh/voice/test_config_keys.py`).
 
 ## Public Python surface
 
@@ -238,7 +239,6 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - V11: kept family audio had no retention (6.4 GB). Fixed 2026-09-18 (commit eb207dc).
 - B15: `getattr(config, ...)` with fallbacks at `session.py` (e.g. `overheard_dir`). Open (stage 0 item 26).
 - P6: no regression number on voice latency is compared run to run, although `voice:turns` carries per-turn metrics. Open (stage 1, stage 4 evals).
-- `overheard_hours` is declared and never read (see Config).
 
 ## Planned changes (roadmap)
 

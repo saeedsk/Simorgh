@@ -238,7 +238,7 @@ class VoiceSession:
         # people talking to each other is a reason to stay quiet.
         self._room: deque = deque(maxlen=16)
         # Durable counterpart: every line not said to Sim, on disk, kept
-        # `overheard_hours` -- "what did we say in the last hour?" asked
+        # 48 hours (`overheard.MAX_AGE_S`) -- "what did we say in the last hour?" asked
         # hours later, after a restart, needs more than a sixteen-line deque.
         # The store is in Contracts, not here, because the tool that ANSWERS
         # that question runs in Execution and no subsystem may import

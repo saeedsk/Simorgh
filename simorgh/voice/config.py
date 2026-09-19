@@ -93,6 +93,9 @@ class Config:
     # the reference, not by being louder than Sim. OFF by default: a
     # simulated echo is not a promise about a real room, and the level
     # gate above is the safe fallback. `voice barge aec` toggles it live.
+    # All four keys reach only the legacy `Pipeline` capture path; the
+    # live `VoiceSession` never builds the canceller, so today they change
+    # nothing in a running Sim (evaluation V7).
     aec: bool = True
     aec_taps: int = 1024
     aec_mu: float = 0.3
@@ -331,12 +334,13 @@ class Config:
     # What the fake recogniser "hears", for tests and audio-less machines.
     fake_transcript: str = "hello sim"
 
-    #: Where overheard speech is kept, and for how long. The creator
-    #: asked for "one day, two days ... then purge them"; two days is the
-    #: default and the store purges itself on every write, so nothing has
-    #: to remember to run.
+    #: Where overheard speech is kept. How long is not a Voice setting:
+    #: the store (`contracts/overheard.py`) keeps 48 hours (`MAX_AGE_S`,
+    #: the creator's "one day, two days ... then purge them") and purges
+    #: itself on every write, from Voice and Execution alike. An
+    #: `overheard_hours` key here was never read and was removed on
+    #: 2026-09-19; making retention configurable is a Contracts change.
     overheard_dir: str = "workspace/voice/overheard"
-    overheard_hours: float = 48.0
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, object] | None) -> "Config":
