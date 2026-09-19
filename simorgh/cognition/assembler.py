@@ -12,11 +12,9 @@ Model's `user_profile` facet (fed by Persona's `persona.user_model.updated`
 -- "call me X", "I prefer X" statements extracted by
 `persona/user_model.py`). Before this, nothing ever read that facet back:
 Persona wrote it and forgot it, so a user who said "call me Al" got no
-different a reply than one who never had. `_MIN_FACET_CONFIDENCE` mirrors
-`persona.config.Config.user_model_min_confidence`'s default (0.5) --
-Cognition does not import Persona's config, so this is restated rather
-than shared, same reasoning as `persona/service.py`'s own
-`_load_identity_summary`."""
+different a reply than one who never had. `_MIN_FACET_CONFIDENCE` (0.5) is
+the only confidence floor for those facets: Persona's own
+`user_model_min_confidence` was never read and was removed 2026-09-19."""
 
 from __future__ import annotations
 
