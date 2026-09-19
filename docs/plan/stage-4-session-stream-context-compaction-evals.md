@@ -1,6 +1,6 @@
 # Stage 4 -- Session stream, ContextBuilder, compaction, evals package
 
-Status: **in progress** (2026-09-19: items 1-3, 5, 6, 7 and 10 done; items 4 and 8 in part) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
+Status: **in progress** (2026-09-19: items 1-3, 5, 6, 7, 10 and 11 done; items 4 and 8 in part; item 9 open) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
 
 ## Outcome
 
@@ -36,7 +36,7 @@ Item 7 done 2026-09-19: `agents/{chat,voice_chat,patch,research,plan,skill}.md`,
 8. **One Stop hook, one trajectory check.** *Lock `orchestration`, `verification`.* A generic Stop hook: "final text claims an effect and this turn has no successful mutating ToolResult" bounces once naming the tools that could do it; Verification's trajectory check over the session stream replaces `claimed_to_commit`, `claimed_tv_act`, `promised_behaviour` on native paths (each police function deleted there when its span counter reads zero for a bless cycle). Acceptance: the police tests move to the hook.
 9. **`simorgh/evals/`.** *Lock `benchmark`, `tools`, `simloader`.* Merge `benchmark/`, `tools/trial.py`, `tools/trial_suite.py`, `tools/observer_kit.py`, `tools/bench_instance.py`; suites: household (the recall scenario; lights/TV/reminders/mail/camera against fake devices), conversation, tool-use (BFCL), research (GAIA), code (SWE-bench Verified slice), long-task (60 turns; kill -9 and resume), voice (50 recorded turns); ≥3 repeats and a bootstrap CI; floor-answered cases skipped; a replay tier with a `FixtureProvider` keyed by session turn seq and tool_use id; `simloader.py bless` runs the suite by default with a post-handoff watch counting SLO breaches. Acceptance: `python -m simorgh.evals run household --repeats 3` prints a table; the loader's decision log records the eval result.
 10. **Lease protocol behind a flag.** *Lock `orchestration`.* (L9) With `workers=1` on the memory bus, claims and heartbeats are skipped; the code stays for `local-multi`. Acceptance: task streams stop carrying lease events in single mode.
-11. **Findings entry.**
+11. **Findings entry.** Done 2026-09-19: `docs/findings/2026-09-19-stage-4-live-fixes-and-stage-5-recall.md` (the trial rounds, the stable prefix's cache hit, compaction, the agents as files, the Stop hook, and the live voice session's fixes).
 
 ## Measurements after
 
