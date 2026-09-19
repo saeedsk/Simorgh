@@ -5,8 +5,8 @@ section 4, enforced by AST rather than convention:
    below) may import `simorgh.contracts.*`, `simorgh.bus.client`,
    `simorgh.ledger.client`, the standard library, and itself.
 2. `simorgh.contracts` imports only the standard library (and itself).
-3. `simorgh.bus` and `simorgh.ledger` import only `simorgh.contracts`,
-   the standard library, and themselves.
+3. `simorgh.bus`, `simorgh.ledger` and `simorgh.telemetry` import only
+   `simorgh.contracts`, the standard library, and themselves.
 4. `simorgh.kernel` -- the composition root -- and the top-level
    `simorgh/__init__.py` / `simorgh/__main__.py` may import any
    `simorgh.*`.
@@ -31,6 +31,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "simorgh"
 SUBSTRATE_CLIENTS = ("bus.client", "ledger.client")  # relative to the package
 COMPOSITION_ROOTS = {"kernel", "__init__", "__main__"}
+# Layer-0 packages the Kernel owns: contracts, stdlib and themselves only.
+SUBSTRATE = {"bus", "ledger", "telemetry"}
 STDLIB = set(sys.stdlib_module_names) | set(sys.builtin_module_names)
 
 
@@ -66,8 +68,8 @@ def _is_allowed(importer: str, target: str) -> bool:
         return True
     if target_pkg == "contracts":
         return True  # everyone may import contracts (contracts itself was handled above)
-    if importer_pkg in {"contracts", "bus", "ledger"}:
-        return False  # contracts: stdlib only; bus/ledger: contracts + self only
+    if importer_pkg == "contracts" or importer_pkg in SUBSTRATE:
+        return False  # contracts: stdlib only; bus/ledger/telemetry: contracts + self only
     # any other subsystem: the substrate's type-level clients only
     return target in {f"{PACKAGE}.{client}" for client in SUBSTRATE_CLIENTS}
 
@@ -187,6 +189,17 @@ class TestCheckerSelfTest(unittest.TestCase):
             "pkg/ledger/client.py": "",
         })
         self.assertEqual(violations(root, "pkg"), ["pkg.bus: pkg.ledger.client"])
+
+    def test_telemetry_may_import_contracts_only(self):
+        root = self._tree({
+            "pkg/__init__.py": "",
+            "pkg/contracts/__init__.py": "",
+            "pkg/telemetry/__init__.py": "from pkg.contracts import protocols\nfrom . import store\n",
+            "pkg/telemetry/store.py": "import sqlite3\nfrom pkg.bus.client import BusClient\n",
+            "pkg/bus/__init__.py": "",
+            "pkg/bus/client.py": "",
+        })
+        self.assertEqual(violations(root, "pkg"), ["pkg.telemetry.store: pkg.bus.client"])
 
     def test_subsystem_may_use_substrate_clients_and_kernel_may_import_anything(self):
         root = self._tree({

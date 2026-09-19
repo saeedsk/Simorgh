@@ -23,7 +23,7 @@ Tiers, smallest first:
 
 Path -> module mapping: simorgh/<m>/... and tests/simorgh/<m>/... -> m;
 tests/simorgh/test_*.py -> shared; simloader.py -> simloader; tools/ -> tools;
-docs and markdown -> nothing.  Touching a substrate module (bus, ledger,
+docs and markdown -> nothing.  Touching a substrate module (bus, ledger, telemetry,
 kernel, contracts) also pulls in the integration files the boot gate
 runs, because every other module sits on them.
 
@@ -41,7 +41,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 TESTS = REPO / "tests" / "simorgh"
-SUBSTRATE = {"bus", "ledger", "kernel", "contracts"}
+SUBSTRATE = {"bus", "ledger", "kernel", "contracts", "telemetry"}
 
 # Tests every module change must keep green: the import rule, the config
 # rule, and session isolation are properties of the whole tree.

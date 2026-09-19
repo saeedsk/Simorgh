@@ -48,7 +48,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/world.py` | `world.*` (4) |
 | `simorgh/contracts/overheard.py` | the store of speech not addressed to Sim, grouped into conversations (file IO under a lock) |
 | `simorgh/contracts/places.py` | house name and known networks, read from and written to `simorgh.toml` (IO) |
-| `simorgh/contracts/protocols.py` | `Bus`, `Ledger`, `Clock`, `Logger`, `Health`, `Context`, `Subsystem`, `Provider`, `ProviderResponse`, `Tool`, `ToolContext`, `ToolResult` |
+| `simorgh/contracts/protocols.py` | `Bus`, `Ledger`, `Clock`, `Logger`, `Span`, `Telemetry` (and the no-op `NullTelemetry`/`NULL_TELEMETRY`), `Health`, `Context`, `Subsystem`, `Provider`, `ProviderResponse`, `Tool`, `ToolContext`, `ToolResult` |
 | `simorgh/contracts/pytestfailures.py` | a failed-test marker that survives output truncation |
 | `simorgh/contracts/registry.py` | `define()`, `MessageSpec`, `get_spec`, `all_specs`, `error_reply_payload`, `ContractError` |
 | `simorgh/contracts/schemagen.py` | generates and checks `schema/*.v1.json` from the registry |
@@ -85,7 +85,8 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 - Envelope: `Message` (`new`, `reply`, `caused`, `with_`, `to_dict/to_json/from_dict/from_json`), `Event`, `canonical_json`, `validate`, `ContractError`, `CATALOG_VERSION`.
 - Catalogue: every topic constant in `topics.py`, `CATALOG`, `DOMAINS`, `SUBSYSTEMS`, `matches`, `reply_type_for`, `is_reply`, `may_subscribe`, `may_publish`, `source_name`, `PREEMPT_PRIORITY`, `PREEMPTING_TYPES`.
 - Registry: `define`, `get_spec`, `all_specs`, `MessageSpec` (`validate(payload)`, dataclass, schema), `error_reply_payload`.
-- Protocols (structural; subsystems import these, never a concrete Bus or Ledger): `Bus`, `Subscription`, `Ledger`, `Clock`, `Logger`, `Health`, `Context`, `Subsystem`, `Provider`, `ProviderResponse` (has `tool_calls`, never filled by any provider, L1), `Tool`, `ToolContext`, `ToolResult` (`ok` plus free-text `error`, T9).
+- Telemetry (stage 1 item 1): `Telemetry` with `span(name, *, trace_id, parent_id=None, attrs=None)` (async context manager yielding a `Span`: `trace_id`, `span_id`, `parent_id`, `name`, `set(key, value)`; status `ok`/`error`/`cancelled`, the exception re-raised; a nested span of the same trace defaults its parent to the enclosing span), `sample(series, value, ts=None)`, `async query(trace_id) -> list[dict]`. `NullTelemetry` records nothing; `NULL_TELEMETRY` is the default of `Context.telemetry`, so a hand-built Context needs no store. The implementation is `simorgh/telemetry/`, owned by the Kernel.
+- Protocols (structural; subsystems import these, never a concrete Bus or Ledger): `Bus`, `Subscription`, `Ledger`, `Clock`, `Logger`, `Health`, `Context` (fields incl. `telemetry`), `Subsystem`, `Provider`, `ProviderResponse` (has `tool_calls`, never filled by any provider, L1), `Tool`, `ToolContext`, `ToolResult` (`ok` plus free-text `error`, T9).
 - Security: `approval_token`, `verify_approval_token`, `canonical_args_sha256`, `ReplayGuard`, `new_run_secret`, `subsystem_token`, `verify_subsystem_token`.
 - Module-level mutable singletons (risks): `registry._REGISTRY` (filled by importing `messages`; a type defined twice or late changes validation for the whole process), `compat._TRANSLATORS` (`clear()` exists for tests), `overheard._lock` (a `threading.Lock` around a file), `console._since_check` (a counter mutated on every printed line from the event loop). These are the four module-level singletons of B20.
 
@@ -116,6 +117,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/contracts/test_validation.py` -- the JSON Schema subset the registry relies on.
 - `tests/simorgh/contracts/test_security.py` -- approval tokens verify, forgeries and expired or altered tokens fail, replays are refused.
 - `tests/simorgh/contracts/test_toolargs.py` -- the shared marker-to-arguments tables the model path and the CLI both use.
+- `tests/simorgh/contracts/test_telemetry_protocol.py` -- `NullTelemetry` conforms to `Telemetry`, records nothing, lets a span's exception through; a hand-built `Context` carries `NULL_TELEMETRY`.
 
 ## Known issues (2026-09-18 evaluation)
 

@@ -6,9 +6,10 @@ a concrete Bus or Ledger class, only these.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, Protocol, runtime_checkable
+from typing import Any, AsyncContextManager, AsyncIterator, Awaitable, Callable, Mapping, Protocol, runtime_checkable
 
 from .envelope import Event, Message
 
@@ -80,6 +81,87 @@ class Logger(Protocol):
     def error(self, event: str, **fields: Any) -> None: ...
 
 
+@runtime_checkable
+class Span(Protocol):
+    """One timed operation inside a trace, as `Telemetry.span` yields it.
+    `set` adds an attribute before the span ends (a result size, a rule
+    name); the row is written when the span closes."""
+
+    trace_id: str
+    span_id: str
+    parent_id: str | None
+    name: str
+
+    def set(self, key: str, value: Any) -> None: ...
+
+
+@runtime_checkable
+class Telemetry(Protocol):
+    """Spans and samples: operational measurements that are not
+    decisions, kept out of the ledger (stage 1 item 1). Writes never
+    block and never raise into the caller; rows are batched and written
+    off the event loop.
+
+    - `span(name, trace_id=..., parent_id=None, attrs=None)` is an async
+      context manager. It records start and end on exit with status
+      `ok`, `error` when the body raised an `Exception` (re-raised), or
+      `cancelled` on cancellation. A span opened inside another span of
+      the same trace takes the outer span as its parent unless
+      `parent_id` is given.
+    - `sample(series, value, ts=None)` records one JSON-able value of a
+      named series (a gauge reading, a tick's counters) at `ts`, default
+      now.
+    - `query(trace_id)` returns every span of the trace, oldest start
+      first, as dicts with the table's columns (`attrs` decoded); rows
+      still buffered are included.
+    """
+
+    def span(
+        self, name: str, *, trace_id: str, parent_id: str | None = None,
+        attrs: Mapping[str, Any] | None = None,
+    ) -> AsyncContextManager[Span]: ...
+
+    def sample(self, series: str, value: Any, ts: float | None = None) -> None: ...
+
+    async def query(self, trace_id: str) -> list[dict]: ...
+
+
+class NullSpan:
+    """The span `NullTelemetry` yields: carries its names, records nothing."""
+
+    def __init__(self, name: str, trace_id: str, parent_id: str | None) -> None:
+        self.name = name
+        self.trace_id = trace_id
+        self.parent_id = parent_id
+        self.span_id = ""
+
+    def set(self, key: str, value: Any) -> None:
+        return None
+
+
+class NullTelemetry:
+    """A `Telemetry` that records nothing: the default on every `Context`
+    built by hand (tests, tools) and what the Kernel hands out when
+    `[telemetry] enabled = false`. Exceptions still propagate from a
+    span's body; nothing else happens."""
+
+    @asynccontextmanager
+    async def span(
+        self, name: str, *, trace_id: str, parent_id: str | None = None,
+        attrs: Mapping[str, Any] | None = None,
+    ) -> AsyncIterator[NullSpan]:
+        yield NullSpan(name, trace_id, parent_id)
+
+    def sample(self, series: str, value: Any, ts: float | None = None) -> None:
+        return None
+
+    async def query(self, trace_id: str) -> list[dict]:
+        return []
+
+
+NULL_TELEMETRY = NullTelemetry()
+
+
 @dataclass(frozen=True)
 class Health:
     status: str  # ok | degraded | down
@@ -117,6 +199,9 @@ class Context:
     logger: Logger
     data_dir: Path
     subsystem_token: str = ""
+    # Spans and samples (stage 1 item 1). The Kernel passes its one
+    # store; a Context built by hand records nothing.
+    telemetry: Telemetry = NULL_TELEMETRY
 
     @property
     def source(self) -> str:
@@ -204,5 +289,6 @@ class Tool(Protocol):
 
 __all__ = [
     "Bus", "Clock", "Context", "EventHandler", "Handler", "Health", "Ledger", "Logger",
-    "Provider", "ProviderResponse", "Subscription", "Subsystem", "Tool", "ToolContext", "ToolResult",
+    "NULL_TELEMETRY", "NullSpan", "NullTelemetry", "Provider", "ProviderResponse", "Span",
+    "Subscription", "Subsystem", "Telemetry", "Tool", "ToolContext", "ToolResult",
 ]

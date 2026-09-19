@@ -11,6 +11,7 @@ The unit of ownership is the module. An agent locks a module, changes only what 
 | bus | 0 | `simorgh/bus/` | `tests/simorgh/bus/` | `bus` |
 | ledger | 0 | `simorgh/ledger/` | `tests/simorgh/ledger/` | `ledger` |
 | kernel | 0 | `simorgh/kernel/` | `tests/simorgh/kernel/` | `kernel` |
+| telemetry | 0 | `simorgh/telemetry/` | `tests/simorgh/telemetry/` | `telemetry` |
 | contracts | shared | `simorgh/contracts/` | `tests/simorgh/contracts/` | `contracts` |
 | cognition | 2 | `simorgh/cognition/` | `tests/simorgh/cognition/` | `cognition` |
 | memory | 2 | `simorgh/memory/` | `tests/simorgh/memory/` | `memory` |

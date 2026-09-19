@@ -9,7 +9,7 @@
 | Tier | What runs | When | Cost (12 cores) |
 |---|---|---|---|
 | **contract** | The 3 to 8 files a module's `CONTRACT.md` lists under "Contract tests", plus the two shared pins (`test_module_boundaries.py`, `test_every_subsystem_reads_its_config.py`) | While iterating; before every commit as the minimum | seconds |
-| **module** | `tests/simorgh/<module>/` for each touched module, plus the shared pins; for a substrate module (bus, ledger, kernel, contracts) also the four boot-gate integration files | Before every commit | 5 to 60 s |
+| **module** | `tests/simorgh/<module>/` for each touched module, plus the shared pins; for a substrate module (bus, ledger, telemetry, kernel, contracts) also the four boot-gate integration files | Before every commit | 5 to 60 s |
 | **core** | `simloader.gate_selection()`: what every boot gates on (contracts, bus, ledger, kernel, guardian, cognition, memory, orchestration, planning, verification, execution minus domains, key interface files, five integration flows, the loader's own tests) | When you touched a substrate module; before pushing a stage item that spans modules | ~45 s, 3,348 tests |
 | **full** | `tests/` minus `live` | Before `python simloader.py bless`; nightly; after a `contracts` change | minutes (target under 5 once v1 is gone) |
 | **live** | Tests marked `live`: real network, Docker, a browser, this machine's engines | By hand, when working on that integration | varies |

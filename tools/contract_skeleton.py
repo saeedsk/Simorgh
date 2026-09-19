@@ -32,7 +32,7 @@ _PUB = re.compile(r"publish|request\(|request_or_error|Message\.new|reply\(|repl
 _SUB = re.compile(r"subscribe\s*\(|consumes|_on_[a-z_]+|case\s+topics\.|==\s*topics\.")
 _STREAM = re.compile(r'''["']([a-z][a-z0-9_]*:[a-z0-9_:<>{}.\-]*)["']''')
 
-LAYERS = {"bus": 0, "ledger": 0, "kernel": 0, "contracts": "shared", "cognition": 2, "memory": 2, "worldmodel": 2,
+LAYERS = {"bus": 0, "ledger": 0, "kernel": 0, "telemetry": 0, "contracts": "shared", "cognition": 2, "memory": 2, "worldmodel": 2,
           "planning": 3, "guardian": 3, "execution": 3, "verification": 3, "learning": 4, "reflection": 4,
           "curiosity": 4, "persona": 5, "benchmark": 5, "voice": 5, "interface": 5, "orchestration": "X"}
 PROTECTED = {"guardian", "execution", "contracts", "kernel"}
