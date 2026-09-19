@@ -45,7 +45,7 @@ class _MediaTool(_HomeTool):
         from simorgh.contracts.timewindow import parse_quiet_hours
 
         try:
-            return parse_quiet_hours(str(getattr(self._config, "media_quiet_hours", "")))
+            return parse_quiet_hours(str(getattr(self._config, "media_quiet_hours", "22:00-07:00")))
         except ValueError:
             return None
 

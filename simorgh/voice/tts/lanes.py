@@ -116,7 +116,7 @@ class LaneSynthesiser:
         delay = float(getattr(self._config, "expressive_warm_delay_s", 90.0) or 0.0)
         if delay > 0:
             await asyncio.sleep(delay)
-        voice = str(getattr(self._config, "tts_voice", "") or "")
+        voice = str(getattr(self._config, "tts_voice", "af_jessica") or "")
         started = time.monotonic()
         try:
             from . import _with_tone

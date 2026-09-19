@@ -1270,7 +1270,7 @@ class VoiceSession:
         middle of it" (the creator, 2026-09-15): while it is live, none of the
         quiet rules apply to that person -- they are talking to Sim, and the
         pace of the exchange says so more reliably than any wording test."""
-        window = float(getattr(self._config, "conversation_window_s", 0.0) or 0.0)
+        window = float(getattr(self._config, "conversation_window_s", 180.0) or 0.0)
         if window <= 0 or not speaker:
             # An unplaceable voice is never "mid-conversation": the quiet
             # rules are exactly what it needs, and this check is what
@@ -1360,7 +1360,7 @@ class VoiceSession:
         # book's `lean`, so a colleague at 0.18 never qualifies; and Sim
         # must have spoken within `exchange_window_s`, so this lasts
         # seconds rather than the conversation window's three minutes.
-        if getattr(self._config, "unplaced_follows_conversation", False):
+        if getattr(self._config, "unplaced_follows_conversation", True):
             ident = self.last_identification
             closest = str(getattr(ident, "runner_up", "") or "") if ident is not None else ""
             lean = float(getattr(self._speakers, "lean", 0.45) or 0.45)

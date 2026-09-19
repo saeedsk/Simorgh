@@ -138,7 +138,7 @@ class MisoSynthesiser(SubprocessSynthesiser):
     load_timeout_s = 1800.0   # 16 GB of weights the first time
 
     def __init__(self, config) -> None:
-        self._repo = str(getattr(config, "miso_repo", "") or DEFAULT_REPO)
+        self._repo = str(getattr(config, "miso_repo", "workspace/voice/engines/MisoTTS") or DEFAULT_REPO)
         ok, why = available(getattr(config, "venv_dir", DEFAULT_VENV_DIR), self._repo)
         if not ok:
             raise ImportError(why)
@@ -147,7 +147,7 @@ class MisoSynthesiser(SubprocessSynthesiser):
                          timeout_s=float(getattr(config, "expressive_timeout_s", 180.0)) * 3)
         self._device = str(getattr(config, "miso_device", "") or "")
         os.environ["MISO_REPO"] = str(Path(self._repo).resolve())
-        tokenizer = str(getattr(config, "miso_tokenizer", "") or "")
+        tokenizer = str(getattr(config, "miso_tokenizer", "unsloth/Llama-3.2-1B") or "")
         if tokenizer:
             os.environ["MISO_TOKENIZER"] = tokenizer
         if self._device:

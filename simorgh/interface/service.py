@@ -504,7 +504,7 @@ class Service:
         Reading a voice log back, "17:29" is what says when Sim heard
         something; on every line it would bury the conversation (the
         creator, 2026-09-15)."""
-        gap = float(getattr(self.config, "time_marker_minutes", 0.0) or 0.0)
+        gap = float(getattr(self.config, "time_marker_minutes", 15.0) or 0.0)
         if gap <= 0:
             return ""
         now = time.time()
@@ -1119,7 +1119,7 @@ class Service:
         if p.get("speaker_probable"):
             who += "?"      # named by the lean rule, under the threshold
         score = p.get("speaker_score")
-        if getattr(self.config, "show_speaker_score", False) and isinstance(score, (int, float)) and p.get("speaker"):
+        if getattr(self.config, "show_speaker_score", True) and isinstance(score, (int, float)) and p.get("speaker"):
             tail += f"  ({float(score):.2f})"
         self._out(render_mod.style(f"🎤 {who}: {text}{tail}", "cyan", enabled=self._color))
         if p.get("speaker_learnt"):

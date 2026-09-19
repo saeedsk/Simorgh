@@ -136,7 +136,7 @@ def _what_you_will_hear(config: Config, key: str) -> list[str]:
     """
     if key not in ("tts", "expressive_lane", "expressive_min_chars"):
         return []
-    engine = str(getattr(config, "tts", "") or "")
+    engine = str(getattr(config, "tts", "auto") or "")
     if engine not in SLOW_ENGINES:
         return []
     lane = str(getattr(config, "expressive_lane", "auto") or "auto")

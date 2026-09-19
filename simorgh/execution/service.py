@@ -531,7 +531,7 @@ class Service:
         tv_show_on_start` is true. The delay lets the interface's page
         server come up first -- the TV fetches the dashboard from it.
         Returns whether the dashboard went on."""
-        if not getattr(self._config, "tv_show_on_start", True):
+        if not getattr(self._config, "tv_show_on_start", False):
             return False
         if not str(getattr(self._config, "cast_device", "") or "").strip():
             return False
