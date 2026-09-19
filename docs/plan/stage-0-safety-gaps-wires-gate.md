@@ -1,6 +1,6 @@
 # Stage 0 -- Close the safety gaps, wire what exists, promote the gate
 
-Status: **in progress** (started 2026-09-18 evening; items 1-25 and 27 done, 28 and 30 partly, 26, 29, 31 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
+Status: **in progress** (started 2026-09-18 evening; items 1-28 done except V7, 30 partly, 29 and 31 open) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
 
 ## Outcome
 
@@ -53,11 +53,13 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 25. **Manifests match the code; the both-sides test reads the running bus.** 28 manifest discrepancies fixed; `tests/simorgh/test_manifests_match_the_code.py`; the both-sides test now reads subscriptions from a booted system. Commit `b5c2671`. (V4, W7)
 30. *Partly:* `tools/recall_scenario.py` (18 turns, floor provider, 1.5 s, deterministic) with baseline **2 of 3** (the fact asked about in different words 13 turns later is not seen); pinned in `tests/tools/test_recall_scenario.py`. Commit `96e328d`. Open: the kill-and-resume trial and a trial-suite + GAIA run, both of which need a real model.
 
+26. **No config fallback contradicts its default; `getattr(config, ...)` reads only go down.** Ten contradicting fallbacks aligned (`shell` keeps a safer one, allow-listed); `tests/simorgh/test_config_is_read_typed.py` ratchets the count at 127. Commit `f8195fe`. (B15)
+28. **Voice.** V1 (`1f68f37`), V11 (retention), V8 (per-turn facts keyed by turn id, `68e5ea4`). Open: V7 below.
+
 ### Open
 
-26. **`getattr(config, ...)` is forbidden.** *Lock `shared`, `execution`, `voice`.* (B15) `tests/simorgh/test_config_is_read_typed.py` fails on `getattr(<config>, "x", default)` outside an allow-list; replace the 123 sites with attribute reads, module by module under each lock.
-28. **Voice hygiene, the rest.** *Lock `voice`.* (V8, V7) `_last_speech_s`, `_last_pcm`, `_last_skip` move onto the turn record (they are set per turn in `_identify` and read after awaits by `_ask_and_speak`, `_enroll_take`, `_introduce_step`); the NLMS echo canceller is either wired into `VoiceSession` or deleted (measure echo false-positives with it on first; record in findings). V1 and V11 are done (above).
-29. **Test-suite consolidation, one directory at a time.** *Parallel per module; lock the module.* Using `docs/testing.md` section 3 and the per-directory analysis in `docs/reviews/2026-09-18/tests/` when it exists: mark `slow`, `integration`, `contract`; merge duplicate shape tests; delete tests that test a mock or a constant; name the contract tier in the module's `CONTRACT.md`. Target: full tier under 5 minutes; module tier under 60 s for every module. Acceptance: `python tools/modtest.py --tier full` time recorded in findings.
+28. **The echo canceller.** *Lock `voice`.* (V7) The NLMS canceller is built only in `Pipeline`'s speak path, which the live `VoiceSession` never runs: wire it into `VoiceSession` or delete it. Decide by measuring echo false-positives with it on and off on speakers (needs the microphone; record in findings).
+29. **Test-suite consolidation, one directory at a time.** (Done so far: v1 tests deleted; full tier 1:34-1:52; module tier skips `slow`; the 30 s cast test takes 0.2 s.) *Parallel per module; lock the module.* Using `docs/testing.md` section 3 and the per-directory analysis in `docs/reviews/2026-09-18/tests/` when it exists: mark `slow`, `integration`, `contract`; merge duplicate shape tests; delete tests that test a mock or a constant; name the contract tier in the module's `CONTRACT.md`. Target: full tier under 5 minutes; module tier under 60 s for every module. Acceptance: `python tools/modtest.py --tier full` time recorded in findings.
 30. **The rest of the gate.** *Lock `tools`, `docs`.* A kill-and-resume trial (`tools/trial.py --kill-at-step N`: kill -9 mid-task in a repo copy; the resumed task must not redo a step or repeat an irreversible action) and a trial-suite run (3 repeats) plus one GAIA slice through the benchmark unit, all with the real model; record the numbers with the recall scenario's in `docs/findings/`.
 31. **CONTRACT.md prose.** *Parallel per module; lock the module.* Fill Purpose, the Files "For" column, the Consumes/Produces "Does/When" columns, Invariants, the contract-test list with what each pins, Known issues (catalogue ids) and Planned changes (stage numbers). The tables are generated; correct any over-match (a topic listed under Consumes that the module only publishes).
 
