@@ -17,15 +17,22 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Health, NULL_TELEMETRY
 
 from . import rules as rule_defs
-from .api import BudgetStatus, DecisionContext, Proposal, ToolInfo
+from .api import BudgetStatus, DecisionContext, Proposal
 from .charter import load_charter
 from .config import Config
 from .pipeline import Pipeline
 from .posture import Posture
+from .registry import ToolRegistry
 from .tokens import TokenIssuer
 
 REJECTED_STREAM = "guardian:rejected"
 TRUST_STREAM = "guardian:trust"
+#: Execution's record of every tool it registered
+#: (`execution/service.py::TOOLS_STREAM`); replayed at start for the
+#: registrations announced before Guardian subscribed. Kept in step by
+#: name, as `interface/dispatch.py` does, rather than by importing
+#: Execution.
+TOOLS_STREAM = "execution:tools"
 
 # `action.denied`'s wire schema (contracts/messages/action.py's DENY_LAYER)
 # only enumerates {policy, denylist, immunity, budget, paused, scope,
@@ -37,6 +44,20 @@ TRUST_STREAM = "guardian:trust"
 # genuine spec/contract naming gap, noted in 09-guardian.md section 12
 # rather than resolved by editing the shared contract unilaterally.
 _WIRE_DENY_LAYER = {"mode": "policy", "protected": "policy", "reversibility": "policy"}
+
+
+def _wire_layer(layer: str) -> str:
+    """The `action.denied` layer for a pipeline layer. Every layer the
+    wire enum does not name goes out as `policy`. Only the three above
+    were mapped until 2026-09-19, so a denial at `static_analysis`,
+    `shellcheck`, `package`, `grant`, `human_only` or `physical` failed
+    the bus's contract validation on publish and reached nobody; the new
+    `schema` layer would have too. The rule that fired stays in
+    `reasons` and on the `decided` record."""
+    from simorgh.contracts.messages.action import DENY_LAYER
+
+    wire = _WIRE_DENY_LAYER.get(layer, layer)
+    return wire if wire in DENY_LAYER.enum else "policy"
 
 
 @dataclass
@@ -107,6 +128,9 @@ class Service:
         topics.SYSTEM_RESUME,
         topics.GUARDIAN_POSTURE_REQUEST,
         topics.UI_PROMPT_ANSWERED,
+        # The tool registry the rules read (stage 2 item 7): class,
+        # read-only flag and argument schema, as Execution registered them.
+        topics.TOOL_REGISTERED,
     )
     produces = (
         topics.ACTION_APPROVED,
@@ -156,6 +180,7 @@ class Service:
         # same morning).
         self._decided: dict[str, tuple[str, bool]] = {}
         self.charter_text = ""
+        self._tools = ToolRegistry()
 
     async def start(self, ctx) -> None:
         self._ctx = ctx
@@ -166,6 +191,12 @@ class Service:
         self._tokens = TokenIssuer(self._secret, ttl_s=self._config.approval_ttl_s, clock=ctx.clock)
         self.charter_text = load_charter()
 
+        # First, before anything else awaits: Guardian and Execution start
+        # concurrently in the same boot layer, and every tool Execution
+        # announces before this subscription exists is heard only through
+        # the ledger replay below, which carries no argument schema.
+        self._subs.append(await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered))
+        await self._replay_tool_registrations()
         await self._rebuild_rejected_index()
         await self._restore_posture()
 
@@ -201,6 +232,24 @@ class Service:
         return Health.ok(f"posture={self._posture.level}")
 
     # -- projections ---------------------------------------------------
+
+    async def _on_tool_registered(self, message: Message) -> None:
+        self._tools.note(dict(message.payload), live=True)
+
+    async def _replay_tool_registrations(self) -> None:
+        """Execution's `execution:tools` records, for the registrations
+        made before Guardian subscribed (orchestration and the CLI read
+        the same stream the same way). A record fills only a name no
+        live `tool.registered` has announced, because the stream spans
+        earlier boots. A missing or unreadable stream is a fresh install:
+        the live subscription still carries everything from now on."""
+        try:
+            events = await self._ctx.ledger.read(TOOLS_STREAM)
+        except Exception:  # noqa: BLE001 -- no such stream on a fresh install is normal
+            return
+        for event in events:
+            if event.type == "registered":
+                self._tools.note(dict(event.payload or {}), live=False)
 
     async def _restore_posture(self) -> None:
         """Replay `guardian:trust`, so a restart is not a way to loosen.
@@ -535,14 +584,13 @@ class Service:
             # the only tools a plan session has. So plan sessions could
             # not read a single file, which is why all 20 of the creator's
             # projects sat at 0/0 steps: nothing could ever produce a plan
-            # to decompose. The proposal already carries the declared
-            # reversibility Execution registered for that tool, which is
-            # exactly the fact the rule needs.
-            tool=ToolInfo(
-                name=proposal.tool,
-                read_only=proposal.reversibility == "read_only",
-                reversibility=proposal.reversibility,
-            ),
+            # to decompose.
+            #
+            # Since stage 2 item 7 (evaluation S6) the facts come from the
+            # tool registry Execution announced, not from the proposal:
+            # the proposal's label is used only for a tool nothing has
+            # registered, and the decision's notes say so.
+            tool=self._tools.info_for(proposal.tool, proposal.reversibility),
         )
 
         stream = f"action:{action_id}"
@@ -610,7 +658,7 @@ class Service:
             if verdict.layer in ("protected", "denylist", "immunity"):
                 await self._remember_rejection(proposal, verdict.reasons, verdict.layer, source="action")
             reasons = () if verdict.layer == "classifier" else verdict.reasons
-            wire_layer = _WIRE_DENY_LAYER.get(verdict.layer, verdict.layer)
+            wire_layer = _wire_layer(verdict.layer)
             payload = {"action_id": action_id, "reasons": list(reasons), "layer": wire_layer, "tool": proposal.tool}
             # Carry the task_id through so a consumer that tracks
             # per-task state (Reflection's DriftTracker) can attribute

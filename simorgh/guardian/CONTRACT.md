@@ -1,10 +1,10 @@
 # guardian -- contract
 
-One-line status: layer 3 · 1,965 lines · 13 test files · lock: `guardian` in docs/modules/locks.toml
+One-line status: layer 3 · 2,402 lines · 15 test files · lock: `guardian` in docs/modules/locks.toml
 
 ## Purpose
 
-Guardian is the approval gate: the only subsystem allowed to subscribe to `action.proposed`, and (with the Kernel) the only one allowed to publish `action.approved`. Every proposed tool call runs through one fixed rule pipeline and ends as exactly one of approved (with an HMAC approval token bound to the action id, tool, argument hash and expiry), denied, or needs a human (a `ui.prompt` whose answer Guardian resolves itself). It also owns the trust posture (tightened by failure streaks, drift, critical health findings and budget pressure; loosened only by a human `system.resume` or a lock's own expiry), adaptive immunity (rejected code and commands remembered on `guardian:rejected`), and the `guardian.review` denylist check Verification asks for. It must never execute anything, never loosen posture on an autonomous message, and never let its own package, the constitution or the machine's secrets be edited by Sim. The shaping decision is structural approval: Execution runs nothing without a token it verifies independently (`execution/verifier.py`), so Guardian's verdict is enforced by the bus topology and the token, not by callers' good behaviour. Its known weakness is that the rules read the proposal's text and the proposer's reversibility label, not typed arguments and the tool registry (S3, S6).
+Guardian is the approval gate: the only subsystem allowed to subscribe to `action.proposed`, and (with the Kernel) the only one allowed to publish `action.approved`. Every proposed tool call runs through one fixed rule pipeline and ends as exactly one of approved (with an HMAC approval token bound to the action id, tool, argument hash and expiry), denied, or needs a human (a `ui.prompt` whose answer Guardian resolves itself). It also owns the trust posture (tightened by failure streaks, drift, critical health findings and budget pressure; loosened only by a human `system.resume` or a lock's own expiry), adaptive immunity (rejected code and commands remembered on `guardian:rejected`), and the `guardian.review` denylist check Verification asks for. It must never execute anything, never loosen posture on an autonomous message, and never let its own package, the constitution or the machine's secrets be edited by Sim. The shaping decision is structural approval: Execution runs nothing without a token it verifies independently (`execution/verifier.py`), so Guardian's verdict is enforced by the bus topology and the token, not by callers' good behaviour. Since stage 2 item 7 (2026-09-19) the rules judge a proposal by the tool registry Execution announces on `tool.registered` (class, read-only flag, argument schema), not by the proposer's label, and check its arguments against the tool's `input_schema`; its remaining weakness is that protected paths are still checked on the proposal's text, not on the diff that lands (S3).
 
 ## Files
 
@@ -16,7 +16,8 @@ Guardian is the approval gate: the only subsystem allowed to subscribe to `actio
 | `simorgh/guardian/config.py` | `[guardian]` dataclass, `DEFAULT_PROTECTED_SUBJECTS`, `DEFAULT_DENYLIST`, `[guardian.physical]`, `SIMORGH_GUARDIAN_AUTO_APPROVE` |
 | `simorgh/guardian/pipeline.py` | runs the rules in order and folds decisions into one verdict |
 | `simorgh/guardian/posture.py` | `Posture`: tighten-only trust level, reset to baseline |
-| `simorgh/guardian/rules.py` | the fourteen rules, `DEFAULT_PIPELINE`, bandit and shellcheck adapters, path and payload extraction |
+| `simorgh/guardian/registry.py` | `ToolRegistry` (name -> registered class, read-only flag, `input_schema`), `ToolInfo` for a proposal, the enforced part of a schema (`enforced_schema`, `schema_errors`), the schema's file arguments (`schema_subject_keys`) |
+| `simorgh/guardian/rules.py` | the fifteen rules, `DEFAULT_PIPELINE`, bandit and shellcheck adapters, path and payload extraction |
 | `simorgh/guardian/service.py` | the bus subsystem: decide once per action id, record, mint, escalate, posture triggers, review |
 | `simorgh/guardian/tokens.py` | `TokenIssuer` over `contracts.security.approval_token` |
 | `simorgh/guardian/README.md` | older narrative notes (pipeline order there predates five rules; this file is current) |
@@ -39,6 +40,7 @@ Authority: `Service.consumes` in `service.py:97-110`.
 | `reflect.drift.detected` | `messages/reflect.py::ReflectDriftDetected` | simorgh/guardian/service.py | tightens to guarded |
 | `reflect.health.finding` | `messages/reflect.py::ReflectHealthFinding` | simorgh/guardian/service.py | `severity=critical` tightens to `health_critical_tightens_to` |
 | `cognition.provider.status` | `messages/cognition.py::CognitionProviderStatus` | simorgh/guardian/service.py | records budget fraction per provider; at `budget_pressure_tighten_at` tightens to guarded |
+| `tool.registered` | `messages/tool.py::ToolRegistered` | simorgh/guardian/service.py | keeps `{input_schema, reversibility, read_only}` per tool in `registry.ToolRegistry`; subscribed first in `start` (Guardian and Execution boot concurrently in one layer) and backed by a replay of `execution:tools` |
 
 The generated draft also listed `guardian.posture.reply` and `ui.prompt` here; Guardian only publishes those.
 
@@ -54,7 +56,7 @@ The generated draft also listed `guardian.posture.reply` and `ui.prompt` here; G
 | `guardian.posture.reply` | `messages/guardian.py::GuardianPostureReply` | simorgh/guardian/service.py | reply to `guardian.posture.request` |
 | `guardian.review.reply` | `messages/guardian.py::GuardianReviewReply` | simorgh/guardian/service.py | reply to every `guardian.review` |
 
-Wire deny layers: the pipeline's `mode`, `protected` and `reversibility` layers are sent as `policy` (`service.py:39`); the other layer names pass through.
+Wire deny layers (`service.py::_wire_layer`): `mode`, `protected`, `reversibility`, and every layer `action.denied`'s `DENY_LAYER` does not name (`schema`, `static_analysis`, `shellcheck`, `package`, `grant`, `human_only`, `physical`) are sent as `policy`; `paused`, `denylist`, `immunity`, `budget`, `scope`, `classifier` pass through. The rule that fired is in `reasons` and on the `decided` record. Until 2026-09-19 only the first three were mapped, so a denial at any of the others failed the bus's contract validation on publish and reached nobody.
 
 ## Ledger streams
 
@@ -62,7 +64,8 @@ Wire deny layers: the pipeline's `mode`, `protected` and `reversibility` layers 
 |---|---|---|---|
 | `action:<action_id>` | simorgh/guardian/service.py | simorgh/execution/service.py (reads `received` args, appends `verified`), simorgh/execution/verifier.py, simorgh/verification, simorgh/voice/service.py, simorgh/interface | `action:` 30d |
 | `guardian:rejected` | simorgh/guardian/service.py:27 | read back by Guardian at boot (`_rebuild_rejected_index`) | forever |
-| `guardian:trust` | simorgh/guardian/service.py:28 | nothing (not replayed at boot) | forever |
+| `guardian:trust` | simorgh/guardian/service.py:28 | replayed by Guardian at start (`_restore_posture`) | forever |
+| `execution:tools` | simorgh/execution/service.py (writer) | read by Guardian at start (`_replay_tool_registrations`, `service.py::TOOLS_STREAM`); also orchestration and interface | 30d |
 
 Events Guardian writes on `action:<id>`: `received` (the proposal, oversize string args spilled to blobs), `decided` (kind, layer, notes), `duplicate`, `answered`.
 
@@ -113,10 +116,13 @@ Events Guardian writes on `action:<id>`: `received` (the proposal, oversize stri
 
 ## Invariants
 
-The pipeline, in order (`rules.py:813-828`): `PausedRule` (deny when paused or stopping) -> `ModeRule` (observe denies all; locked denies non-read-only; plan-mode tasks read only) -> `ProtectedRule` (deny any write-like subject or code payload naming a protected subject) -> `ScopeRule` (always abstains today) -> `DenylistRule` (regexes over the `code`/`command` payload, only the changed lines for an existing file) -> `StaticAnalysisRule` (bandit at `static_analysis_min_severity`, abstains if bandit is absent) -> `ShellcheckRule` (abstains if absent) -> `PackageRule` (`install_package` spec must be a plain name) -> `GrantRule` (`grant_capability` never over `os`/`subprocess`/...; MCP launch commands allow-listed) -> `ImmunityRule` (deny at `immunity_similarity_threshold` similarity to a remembered rejection) -> `BudgetRule` (model-costing tools denied when a provider is at its cap) -> `HumanOnlyRule` (tools in `human_only_tools` escalate in every posture, denied when locked) -> `PhysicalRule` (house tools: class recomputed from arguments; `human` class escalates in every posture unless `[guardian.physical] auto_approve`; denied when locked) -> `ReversibilityRule` (read-only and reversible allow; irreversible allows in trusted, denies in locked, escalates in guarded only when `irreversible_requires_human`).
+The pipeline, in order (`rules.py::DEFAULT_PIPELINE`): `PausedRule` (deny when paused or stopping) -> `SchemaRule` (deny when the arguments fail the registered tool's `input_schema` as `registry.enforced_schema` enforces it; abstains, with a note, for a tool with no registered schema) -> `ModeRule` (observe denies all; locked denies non-read-only; plan-mode tasks read only; read-only here means registered `read_only` AND class `read_only`) -> `ProtectedRule` (deny any write-like subject or code payload naming a protected subject; the subject is read from the schema's file arguments plus `subject`/`path`) -> `ScopeRule` (always abstains today) -> `DenylistRule` (regexes over the `code`/`command` payload, only the changed lines for an existing file) -> `StaticAnalysisRule` (bandit at `static_analysis_min_severity`, abstains if bandit is absent) -> `ShellcheckRule` (abstains if absent) -> `PackageRule` (`install_package` spec must be a plain name) -> `GrantRule` (`grant_capability` never over `os`/`subprocess`/...; MCP launch commands allow-listed) -> `ImmunityRule` (deny at `immunity_similarity_threshold` similarity to a remembered rejection) -> `BudgetRule` (model-costing tools denied when a provider is at its cap) -> `HumanOnlyRule` (tools in `human_only_tools` escalate in every posture, denied when locked) -> `PhysicalRule` (house tools: class recomputed from arguments; `human` class escalates in every posture unless `[guardian.physical] auto_approve`; denied when locked) -> `ReversibilityRule` (on `ToolInfo.reversibility`, not the proposal's label; read-only and reversible allow; irreversible allows in trusted, denies in locked, escalates in guarded only when `irreversible_requires_human`).
 
 Protected subjects (`config.py:21-51`), matched case-folded as substrings of the raw and normalised path: `docs/SOUL.md`, `simorgh/guardian/`, `simorgh/execution/`, `simorgh/contracts/`, `simorgh/kernel/`, `simorgh.toml`, `simloader.py`, `sim.sh`, `.simorgh/secrets.toml`, `.simorgh/vault`, `.simorgh/ledger`, `.git/hooks`, `/.ssh/`, `/.aws/`, `/.gnupg/`.
 
+- A proposal is judged by the tool registry (`registry.ToolRegistry.info_for`), not by itself (S6): `ToolInfo.read_only` is the registered flag and `ToolInfo.reversibility` is the stricter of the registered class and the proposal's claim, so a proposer can tighten a call (orchestration's per-call `home_call` class) but never loosen it. Only a tool nothing has registered falls back to the claim, and the decision's notes say so. A live `tool.registered` always wins over a replayed `execution:tools` record.
+- The schema check (`registry.enforced_schema`) enforces that the arguments are an object, that every required argument is present, and that no argument is a list or object where a scalar is declared (a list-valued `path` would otherwise slip past `ProtectedRule`, which reads strings). It tolerates what today's callers send and the tools accept: extra arguments, a scalar written as text (`CAST_VOLUME: 35` -> `{"level": "35"}`) or a number where text is declared, text where a list is declared, null, any enum/const value; and for a tool with a marker shape (`contracts/toolargs.py`) only the required arguments that shape always supplies (`CAM_PTZ: front left` has no `command`, and the tool reads it from the text). A schema Guardian cannot read is a note, not a denial.
+- The rules' file arguments come from the registered schema (`registry.schema_subject_keys`: string or list-of-string properties named `subject`, `path`, `file_path`, `target`, `destination`, ... or ending `_path`/`_file`/`_dir`); `_SUBJECT_ARG_KEYS` (`subject`, `path`) is the fallback for an unregistered tool and is also always checked by `ProtectedRule`. An http(s) URL with no `..` segment is not read as a path (the creator's repository URL contains `simorgh/kernel/`).
 - Only `guardian` may subscribe to `action.proposed` (`contracts/topics.py` SUBSCRIBE_ONLY_BY). Only `guardian` or `kernel` may publish `action.approved`; only `guardian` or `execution` may publish `action.denied`, and Execution only with `layer="token"` (PUBLISH_ONLY_BY, PUBLISH_PAYLOAD_CONSTRAINTS).
 - The first deny wins and stops the pipeline; an escalate is kept while later rules still run; no deny and no escalate is approval (`pipeline.py`).
 - Each action id is decided once: an identical redelivery is recorded as `duplicate` and not answered again; the same id with a different tool or arguments is denied.
@@ -140,6 +146,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/guardian/test_pipeline.py` -- deny short-circuits, escalate is kept, classifier handling, default approval.
 - `tests/simorgh/guardian/test_physical_rule.py` -- the drill against the real `DEFAULT_PIPELINE`: a mislabelled unlock reaches a person, a light does not, the auto-approve env var does not reach the house.
 - `tests/simorgh/guardian/test_code_payload_paths.py` -- a protected file cannot be written through a program or shell payload.
+- `tests/simorgh/guardian/test_typed_tool_args.py` -- the registration beats the claim, a missing required argument is denied at `schema`, today's marker shapes still pass, a protected path under a schema-known key is caught, every layer is publishable.
 - `tests/simorgh/guardian/test_posture.py` -- posture only tightens; reset returns to baseline.
 - `tests/simorgh/guardian/test_tokens.py` -- minted tokens verify with `contracts.security`, as Execution checks them.
 - `tests/simorgh/guardian/test_review.py` -- `guardian.review` is answered with the denylist verdict.
@@ -151,7 +158,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - S2 -- the vault, the ledger, `.git/hooks` and credentials were outside the protected list. **Fixed 2026-09-18** (`19f69ce`); `tests/` is still writable by patch tasks.
 - S3 -- protected paths are enforced on the proposal's text, not on the diff that lands; `worktree_land` never re-checks. Open; stage 2 item 7 (typed args) and a landing-time check.
 - S4 -- skills were `reversible` and auto-approved. **Fixed 2026-09-18** (`8fb3d21`: `HumanOnlyRule`); scanning a skill call's arguments is not done.
-- S6 / T1 / T10 -- Guardian trusts the proposer's reversibility label and derives `read_only` from it (`service.py`, `ToolInfo(...)` in `_on_proposed`); it does not consume `tool.registered`. Fixed for physical tools only (`8916e82`). Open; stage 2 item 7.
+- S6 / T1 / T10 -- Guardian trusted the proposer's reversibility label and derived `read_only` from it. **Fixed 2026-09-19** (stage 2 item 7): `ToolInfo` comes from `tool.registered`. Open edge: Execution's `execution:tools` records carry no `input_schema`, so a tool announced before Guardian subscribed (possible: both boot in one layer) or loaded lazily after approval (a skill) has its class checked but not its arguments.
 - S7 -- the HMAC token is ceremony within one process. Keep.
 - S8 -- physical tools gated like code. **Partly fixed 2026-09-18** (`8916e82`); tiers 0-3 are stage 6 item 5.
 - S9 -- immunity never learned from shell rejections. **Fixed 2026-09-18** (`8fb3d21`).
@@ -166,7 +173,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Planned changes (roadmap)
 
 - Stage 1 item 4: Guardian's decide step becomes a span with `rule`, `tier`, `posture` attributes. Stage 1 item 6 (execution/interface) takes Ring signalling off the approval path.
-- Stage 2 item 7: `ProtectedRule`, `ScopeRule` and `DenylistRule` validate `proposal.args` against the tool's `input_schema` from `tool.registered` and read exact fields; `ToolInfo` is built from the registry, not the proposal (S3, S6).
+- Stage 2 item 7: done 2026-09-19 (see Invariants). `ScopeRule` still abstains: there is no task scope to compare against until Planning sends one.
 - Stage 4 item 7: `agents/` joins the protected subjects.
 - Stage 6 item 5: `guardian/tiers.py`, tiers 0-3 from the ToolSpec plus overrides; `PhysicalRule` folds into the tier computation; `PersonRule` (requester's role) and `PresenceRule` (a voice approval needs the approver present and speaker-verified).
 - Stage 8: policy adoption lands through `action.proposed(policy_adopt)`; `rules/`, `simorgh_skills/`, `agents/`, hooks and evals config become protected.

@@ -24,11 +24,36 @@ import tempfile
 from pathlib import Path
 
 from .api import Decision, DecisionContext, Proposal
+from .registry import schema_errors, schema_subject_keys, subject_values
 
 # Tools whose subject argument names a file this proposal would touch --
 # used by the protected/scope rules to find "the path" in an otherwise
 # tool-specific args dict without hardcoding every tool's exact schema.
+# Since stage 2 item 7 this is the FALLBACK: a tool registered with an
+# `input_schema` names its file arguments there (`_subject_keys`).
 _SUBJECT_ARG_KEYS = ("subject", "path")
+
+
+def _subject_keys(ctx: DecisionContext) -> tuple[str, ...]:
+    """The argument names that name a file for this proposal's tool: the
+    schema's own (`registry.schema_subject_keys`) when the tool is
+    registered with one that declares any, else `_SUBJECT_ARG_KEYS`."""
+    tool = ctx.tool
+    if tool is not None and getattr(tool, "registered", False):
+        keys = schema_subject_keys(getattr(tool, "input_schema", None))
+        if keys:
+            return keys
+    return _SUBJECT_ARG_KEYS
+
+
+def _diff_subject(proposal: Proposal, ctx: DecisionContext) -> str | None:
+    """The one existing file a whole-file-replace payload is diffed
+    against: the first file-naming argument that is set."""
+    for key in _subject_keys(ctx):
+        subject = proposal.args.get(key)
+        if isinstance(subject, str) and subject:
+            return subject
+    return None
 
 # Guardian's own location is fixed within the checkout regardless of
 # process cwd (mirrors execution/config.py's find_repo_root fallback,
@@ -209,11 +234,18 @@ def _looks_like_a_write(text: str) -> bool:
     return bool(_WRITE_SIGNS.search(text or ""))
 
 
-def _subject_paths(proposal: Proposal) -> list[str]:
+def _subject_paths(proposal: Proposal, ctx: DecisionContext | None = None) -> list[str]:
     paths = list(proposal.scope.get("paths") or [])
-    for key in _SUBJECT_ARG_KEYS:
-        value = proposal.args.get(key)
-        if isinstance(value, str) and value not in paths:
+    # The schema's file arguments AND the old guess: a registered tool's
+    # schema says exactly which arguments name a file, and the fallback
+    # names cost nothing to check as well -- this scan's trade is to
+    # over-match rather than under-match. A registered `path` that is a
+    # list is refused before this rule by `SchemaRule`; the list form is
+    # read here too, for the tools that declare one (`paths`, `files`).
+    keys = _subject_keys(ctx) if ctx is not None else _SUBJECT_ARG_KEYS
+    keys = keys + tuple(k for k in _SUBJECT_ARG_KEYS if k not in keys)
+    for value in subject_values(proposal.args, keys):
+        if value not in paths:
             paths.append(value)
     # `run_python_sandboxed` and `run_shell` carry no path argument at
     # all, so `ProtectedRule` abstained on them, `reversibility` said
@@ -242,6 +274,34 @@ class PausedRule:
         return Decision("abstain", self.layer)
 
 
+class SchemaRule:
+    """A proposal's arguments against the tool's registered `input_schema`
+    (stage 2 item 7). Runs before every rule that reads an argument, so
+    those rules read arguments of the declared kind: a `path` that is a
+    list is refused here rather than slipping past `ProtectedRule`,
+    which reads strings.
+
+    How much of the schema is enforced is `registry.enforced_schema`:
+    required arguments and the kind of each value, with the tolerances
+    today's marker-dialect calls need. A tool Guardian has no schema for
+    (not registered yet, or registered by an older Execution) is not
+    checked, and the decision says so."""
+
+    name = "schema"
+    layer = "schema"
+
+    async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
+        tool = ctx.tool
+        notes = tuple(getattr(tool, "notes", ()) or ())
+        if tool is None or not getattr(tool, "registered", False):
+            return Decision("abstain", self.layer, notes)
+        errors, note = schema_errors(proposal.tool, proposal.args, getattr(tool, "input_schema", None))
+        if errors:
+            return Decision("deny", self.layer, tuple(
+                f"arguments do not match {proposal.tool}'s schema: {error}" for error in errors))
+        return Decision("abstain", self.layer, notes + ((note,) if note else ()))
+
+
 class ModeRule:
     name = "mode"
     layer = "mode"
@@ -254,7 +314,13 @@ class ModeRule:
         if ctx.posture.level == "locked" and proposal.origin in ctx.config.autonomous_origins:
             effective_mode = "locked"
 
-        read_only = bool(ctx.tool and ctx.tool.read_only)
+        # Read-only for this rule means BOTH registered facts: the tool
+        # writes nothing (`read_only`) and its class is `read_only`.
+        # `run_python_sandboxed`, `run_js_sandboxed` and `run_tests` are
+        # registered read_only=True but `reversible` -- they run a program
+        # -- and were never allowed in plan or locked mode; taking the
+        # registered flag alone (stage 2 item 7) would have let them in.
+        read_only = bool(ctx.tool and ctx.tool.read_only and getattr(ctx.tool, "reversibility", "read_only") == "read_only")
 
         if effective_mode == "observe":
             return Decision("deny", self.layer, ("mode=observe: nothing is auto-approved",))
@@ -299,7 +365,7 @@ class ProtectedRule:
             and not any(_code_arg_text(proposal.args.get(k)) for k in _CODE_ARG_KEYS)
         ):
             return Decision("abstain", self.layer)
-        for path in _subject_paths(proposal):
+        for path in _subject_paths(proposal, ctx):
             # Canonicalized before comparison: `"simorgh//guardian/rules.py"`
             # and `"simorgh/./guardian/rules.py"` resolve to the identical
             # protected file (`pathsafety`'s own `.resolve()` collapses
@@ -384,13 +450,11 @@ class DenylistRule:
         # `apply_skill`) both names a subject and hands over a complete
         # new body, which is what makes a same-file, unrelated-line diff
         # meaningful here.
-        for key in _SUBJECT_ARG_KEYS:
-            subject = proposal.args.get(key)
-            if isinstance(subject, str) and subject:
-                old_text = _existing_text(subject)
-                if old_text is not None:
-                    scan_text = _added_or_changed_lines(old_text, code)
-                break
+        subject = _diff_subject(proposal, ctx)
+        if subject:
+            old_text = _existing_text(subject)
+            if old_text is not None:
+                scan_text = _added_or_changed_lines(old_text, code)
         reasons = tuple(
             f"denied: {explanation}"
             for pattern, explanation in ctx.config.denylist.items()
@@ -508,13 +572,11 @@ class StaticAnalysisRule:
         if findings is None:
             return Decision("abstain", self.layer)
         changed: set[int] | None = None
-        for key in _SUBJECT_ARG_KEYS:
-            subject = proposal.args.get(key)
-            if isinstance(subject, str) and subject:
-                old_text = _existing_text(subject)
-                if old_text is not None:
-                    changed = _changed_line_numbers(old_text, code)
-                break
+        subject = _diff_subject(proposal, ctx)
+        if subject:
+            old_text = _existing_text(subject)
+            if old_text is not None:
+                changed = _changed_line_numbers(old_text, code)
         floor = _SEVERITY_RANK.get(str(ctx.config.static_analysis_min_severity).upper(), 3)
         reasons = tuple(
             f"denied: bandit {f['test_id']} ({f['severity'].lower()} severity, line {f['line']}): {f['text']}"
@@ -792,7 +854,12 @@ class ReversibilityRule:
     layer = "reversibility"
 
     async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
-        r = proposal.reversibility
+        # The registry's class (the stricter of the registration and the
+        # claim, `registry.ToolRegistry.info_for`), not the proposer's
+        # label: a proposal that says `read_only` for `run_shell` is still
+        # irreversible (evaluation S6). The claim alone only for a tool
+        # nothing has registered.
+        r = getattr(ctx.tool, "reversibility", None) or proposal.reversibility
         mode = ctx.config.mode if ctx.posture.level != "locked" else "locked"
         if r == "read_only":
             return Decision("allow", self.layer)
@@ -812,6 +879,7 @@ class ReversibilityRule:
 
 DEFAULT_PIPELINE: tuple = (
     PausedRule(),
+    SchemaRule(),
     ModeRule(),
     ProtectedRule(),
     ScopeRule(),

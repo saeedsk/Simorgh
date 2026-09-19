@@ -35,9 +35,25 @@ class Proposal:
 
 @dataclass(frozen=True)
 class ToolInfo:
+    """What Guardian knows about the tool a proposal names.
+
+    Built by `registry.ToolRegistry.info_for` from `tool.registered`, not
+    from the proposal (stage 2 item 7, evaluation S6): `read_only` is the
+    registered flag, `reversibility` the stricter of the registered class
+    and the proposal's claim (a proposer may tighten, never loosen).
+    `registered` is False only for a tool Execution has not announced;
+    then both facts are the proposal's own claim and `notes` says so."""
+
     name: str
     read_only: bool
     reversibility: str
+    # The tool's argument schema from `tool.registered`, or None when the
+    # tool is unregistered or announced none (an older ledger record).
+    input_schema: dict | None = None
+    registered: bool = False
+    # Said on the decision: an unregistered tool, a proposal that claimed
+    # a looser class than the registration.
+    notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
