@@ -111,7 +111,7 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.UI_NOTICE, topics.UI_PROMPT, topics.ACTION_NEEDS_HUMAN, topics.ACTION_DENIED,
         topics.PERSONA_STATE_CHANGED, topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_METRICS,
-        topics.SYSTEM_HEALTH, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
+        topics.PERCEPT_TEXT_RECEIVED, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED,
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.COGNITION_PROVIDER_STATUS,
         topics.PERCEPT_TIME_SCHEDULED, topics.UI_COMMAND_REQUEST,
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
@@ -131,7 +131,7 @@ class Service:
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.SYSTEM_PAUSE,
-        topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.UI_PROMPT_ANSWERED, topics.SYSTEM_HEALTH,
+        topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.UI_PROMPT_ANSWERED,
         topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST, topics.BENCHMARK_SUITES_REQUEST,
         topics.BENCHMARK_LOAD_REQUEST, topics.BENCHMARK_STOP_REQUEST,
     )

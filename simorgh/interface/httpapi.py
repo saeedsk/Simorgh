@@ -83,6 +83,9 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: S15/V2). The dash and TV pages already append `?token=` to those URLs.
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
                                           "/api/dash/state", "/api/dash/keys", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner"})
+#: What `/api/dash/data` withholds from a request without the token.
+_HOUSE_KEYS: tuple[str, ...] = ("cameras", "streams", "ring_cameras", "events")
+
 #: Prefix routes served without the token. Wallpapers only.
 _OPEN_PREFIXES: tuple[str, ...] = ("/wallpapers/",)
 
@@ -309,11 +312,20 @@ class HttpApi:
                                if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".avif") and not f.name.startswith("."))
             return 200, json.dumps({"wallpapers": names}).encode("utf-8"), "application/json"
 
-        async def _dash_data(_query, _body, _headers):
+        async def _dash_data(query, _body, headers):
             if self._feeds is None:
                 body = {"now": self._now(), "off": True, "feeds": {}, "markets": None, "news": {}}
             else:
                 body = self._feeds.snapshot()
+                if not self._authorized(headers, query):
+                    # The route stays open for the news and markets tiles; the
+                    # house does not. It listed every camera, relay stream URL,
+                    # Ring camera and Ring event without the token, on a
+                    # 0.0.0.0 bind too (found writing interface's CONTRACT.md,
+                    # 2026-09-19; the 2026-09-18 S15 fix gated only streams,
+                    # stills and HLS). The dash page sends its token.
+                    for key in _HOUSE_KEYS:
+                        body.pop(key, None)
             return 200, json.dumps(body, default=str).encode("utf-8"), "application/json"
 
         async def _dash_state_get(_query, _body, _headers):

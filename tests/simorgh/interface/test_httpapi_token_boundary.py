@@ -69,3 +69,29 @@ class ALanBindWithoutATokenServesOnlyTheOpenRoutes(_Base):
         api = await self._start(host="127.0.0.1", token="")
         self.assertTrue(api.loopback_bind)
         self.assertNotEqual((await self._get(api, "/api/dash/streams")).status, 401)
+
+
+class TheDashDataRouteWithholdsTheHouse(_Base):
+    async def test_without_the_token_no_camera_is_listed(self):
+        class _Feeds:
+            async def start(self, *a, **k):
+                return None
+
+            async def stop(self, *a, **k):
+                return None
+
+            def snapshot(self):
+                return {"news": {"top": ["x"]}, "cameras": [{"name": "Front"}], "streams": [{"url": "/tv/hls/1/"}],
+                        "ring_cameras": [{"name": "Porch"}], "events": [{"camera": "Porch"}]}
+
+        import json
+
+        api = HttpApi(_FakeBus({}), host="127.0.0.1", port=0, token="secret", feeds=_Feeds())
+        await api.start()
+        self.addAsyncCleanup(api.stop)
+        open_body = json.loads((await self._get(api, "/api/dash/data")).body)
+        self.assertEqual(open_body["news"], {"top": ["x"]}, "the news tiles stay open")
+        for key in ("cameras", "streams", "ring_cameras", "events"):
+            self.assertNotIn(key, open_body)
+        full = json.loads((await self._get(api, "/api/dash/data?token=secret")).body)
+        self.assertEqual(full["cameras"], [{"name": "Front"}])
