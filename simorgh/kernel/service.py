@@ -295,6 +295,15 @@ class Kernel:
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_STOP, self._on_stop))
         self._subs.append(await self.bus.subscribe(topics.SYSTEM_RESTART, self._on_restart))
+        # The health ticker: `[runtime] health_every_s` was parsed and
+        # never read, and `Supervisor.poll_once` had no production caller,
+        # so a subsystem that went `down` after boot was never restarted
+        # and Guardian going down never paused the system (2026-09-19).
+        if self.runtime.health_every_s > 0:
+            self._health_task = asyncio.create_task(
+                self._supervisor.run_ticker(self.runtime.health_every_s, self._on_health_changed),
+                name="kernel.health_ticker",
+            )
 
         self.progress.done()
         change = self.state.boot_complete()
@@ -524,7 +533,23 @@ class Kernel:
         except Exception as exc:  # noqa: BLE001 -- see the docstring
             make_logger("kernel").warning("config.effective_not_recorded", error=repr(exc))
 
+    async def _on_health_changed(self, supervised) -> None:
+        health = supervised.last_health
+        await self.bus.publish(validate(Message.new(
+            topics.SYSTEM_HEALTH, source="kernel",
+            payload={"subsystem": supervised.name, "status": supervised.status,
+                     "detail": (health.detail if health is not None else "")[:500]},
+            clock=self._clock.now,
+        )))
+
     async def shutdown(self) -> None:
+        task = getattr(self, "_health_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         for sub in self._subs:
             await sub.unsubscribe()
         if self._process_metrics is not None:

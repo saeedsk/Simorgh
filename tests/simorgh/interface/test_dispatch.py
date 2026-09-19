@@ -111,7 +111,7 @@ class TestMcpApprove(_McpDispatchTestCase):
         await self._append_proposal()
         with tempfile.TemporaryDirectory() as tmp:
             toml_path = Path(tmp) / "simorgh.toml"
-            with unittest.mock.patch.object(dispatch_module, "_SIMORGH_TOML_PATH", toml_path):
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path):
                 out = await self._mcp("approve abc123")
             self.assertIn("approved", out)
             self.assertIn("restart", out)
@@ -128,7 +128,7 @@ class TestMcpApprove(_McpDispatchTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             toml_path = Path(tmp) / "simorgh.toml"
             toml_path.write_text('[runtime]\nmode = "single"  # a human comment\n')
-            with unittest.mock.patch.object(dispatch_module, "_SIMORGH_TOML_PATH", toml_path):
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path):
                 await self._mcp("approve abc123")
             content = toml_path.read_text()
         self.assertIn('mode = "single"  # a human comment', content)
@@ -138,7 +138,7 @@ class TestMcpApprove(_McpDispatchTestCase):
         await self._append_proposal(env_keys=["BRAVE_API_KEY"])
         with tempfile.TemporaryDirectory() as tmp:
             toml_path = Path(tmp) / "simorgh.toml"
-            with unittest.mock.patch.object(dispatch_module, "_SIMORGH_TOML_PATH", toml_path):
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path):
                 await self._mcp("approve abc123")
             content = toml_path.read_text()
         self.assertIn("BRAVE_API_KEY", content)
@@ -148,7 +148,7 @@ class TestMcpApprove(_McpDispatchTestCase):
         await self._append_proposal()
         with tempfile.TemporaryDirectory() as tmp:
             toml_path = Path(tmp) / "simorgh.toml"
-            with unittest.mock.patch.object(dispatch_module, "_SIMORGH_TOML_PATH", toml_path):
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path):
                 await self._mcp("approve abc123")
                 second = await self._mcp("approve abc123")
         self.assertIn("no pending proposal", second)
@@ -163,7 +163,7 @@ class TestMcpReject(_McpDispatchTestCase):
         await self._append_proposal()
         with tempfile.TemporaryDirectory() as tmp:
             toml_path = Path(tmp) / "simorgh.toml"
-            with unittest.mock.patch.object(dispatch_module, "_SIMORGH_TOML_PATH", toml_path):
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path):
                 out = await self._mcp("reject abc123 too risky")
             self.assertFalse(toml_path.exists())
         self.assertIn("rejected", out)

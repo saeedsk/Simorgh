@@ -169,8 +169,30 @@ class Stopper:
                            payload={"reason": "signal", "requested_by": "signal"}, priority=9)
 
 
+def _configure_logging(config) -> None:
+    """`[runtime] log_level` reaches Python's logging once, here. Nothing
+    configured the root logger before 2026-09-19, so every subsystem's
+    INFO log was dropped and the setting was inert (evaluation B21).
+    Structured lines go to stderr, which the TUI keeps below the prompt."""
+    import logging
+
+    level_name = "info"
+    try:
+        level_name = str(config.section("runtime").get("log_level", "info"))
+    except Exception:  # noqa: BLE001 -- a broken section must not stop the boot
+        pass
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    root = logging.getLogger()
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s", "%H:%M:%S"))
+        root.addHandler(handler)
+    root.setLevel(level)
+
+
 async def _cmd_run(config_path: str | None) -> int:
     config = load_config(config_path)
+    _configure_logging(config)
     kernel = Kernel(config, interactive=True)
     await kernel.boot()
 

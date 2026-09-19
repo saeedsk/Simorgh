@@ -69,14 +69,17 @@ TOOLS_STREAM = "execution:tools"
 ALERTS_STREAM = "reflection:alerts"
 # And `kernel/service.py::Kernel.CONFIG_STREAM`.
 CONFIG_STREAM = "config:effective"
-# `simorgh.toml`'s primary search location (`kernel/config.py::find_
-# config_path`'s first candidate, `./simorgh.toml`) -- this command
-# targets the same file a normal `sim.sh` boot would read next, but
-# doesn't replicate that function's full `$SIMORGH_CONFIG`/`${data_dir}`
-# fallback search (kernel-only code `interface` may not import); `mcp
-# approve` says exactly where it wrote, so a non-default setup is a
-# visible, honest mismatch to notice and move by hand, not a silent one.
-_SIMORGH_TOML_PATH = Path("simorgh.toml")
+# Where `mcp approve` appends a server block: the config the Kernel
+# reads, resolved by `contracts.settings.config_path` in the Kernel's own
+# order ($SIMORGH_CONFIG, ./simorgh.toml if it exists, ~/.simorgh). Until
+# 2026-09-19 this was the literal `Path("simorgh.toml")`, which under
+# sim.sh is the repo root, where no config exists -- so an approval
+# created a second config there that the Kernel then preferred over the
+# real one on the next boot (evaluation B11).
+def _simorgh_toml_path() -> Path:
+    from simorgh.contracts.settings import config_path
+
+    return config_path()
 
 
 @dataclass
@@ -2164,13 +2167,14 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
         proposal = pending.get(proposal_id)
         if proposal is None:
             return Outcome(f"no pending proposal {proposal_id!r} -- see `mcp` for the current list")
-        with _SIMORGH_TOML_PATH.open("a", encoding="utf-8") as fh:
+        toml_path = _simorgh_toml_path()
+        with toml_path.open("a", encoding="utf-8") as fh:
             fh.write(_mcp_server_toml_block(proposal))
         await ledger.append(MCP_PROPOSALS_STREAM, Event(
             stream=MCP_PROPOSALS_STREAM, type="approved", ts=clock.now(), trace_id="", causation_id=None,
             payload={**proposal, "status": "approved"},
         ))
-        return Outcome(f"approved: wrote {proposal['name']!r} to {_SIMORGH_TOML_PATH} -- restart Sim to load it")
+        return Outcome(f"approved: wrote {proposal['name']!r} to {toml_path} -- restart Sim to load it")
 
     if sub in ("reject", "deny"):
         if len(parts) < 2 or not parts[1].strip():

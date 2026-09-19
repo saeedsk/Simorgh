@@ -44,6 +44,7 @@ class Supervisor:
         self._backoff = backoff_s or (1.0,)
         self._max_restarts = max_restarts_per_window
         self._on_critical_down = on_critical_down
+        self._contexts: dict[str, Callable[[str], Context]] = {}
         self._boot_timeout_s = boot_timeout_s
         self.services: dict[str, Supervised] = {}
         self._health_task: asyncio.Task | None = None
@@ -54,6 +55,8 @@ class Supervisor:
         all of them to report healthy (or `boot_ok`-degraded) before
         returning -- the next layer never starts on top of a layer that
         isn't actually up (section 5.1)."""
+        for name in layer:
+            self._contexts[name] = make_context
         starts = []
         for name in layer:
             service = factories[name]()
@@ -117,11 +120,39 @@ class Supervisor:
             await supervised.service.stop()
         except Exception:  # noqa: BLE001 -- best-effort; the service is already unhealthy
             pass
-        # The concrete restart (re-`start()`) is driven by the caller
-        # (Kernel service loop), which owns the Context and can rebuild
-        # one if a subsystem's own state needs a fresh start; this method
-        # marks the intent and paces the backoff, since Context
-        # construction is subsystem-specific and lives in `context.py`.
+        # Until 2026-09-19 this stopped the service and never started it
+        # again, and nothing called `poll_once` in production, so the
+        # Supervisor supervised nothing (2026-09-18 evaluation, B10).
+        # `make_context` is handed in at `start_layer`; a service is
+        # restarted with a fresh Context of its own.
+        make_context = self._contexts.get(supervised.name)
+        if make_context is None:
+            return
+        try:
+            await asyncio.wait_for(supervised.service.start(make_context(supervised.name)), timeout=self._boot_timeout_s)
+            health = await supervised.service.health()
+        except Exception as exc:  # noqa: BLE001 -- a restart that fails is a `down` the next poll will see
+            supervised.last_health = Health.down(f"restart failed: {exc!r}")
+            supervised.status = "degraded"
+            self._logger.error("kernel.supervisor.restart_failed", subsystem=supervised.name, error=repr(exc))
+            return
+        supervised.last_health = health
+        supervised.status = health.status if health.status in ("ok", "degraded") else "degraded"
+        self._logger.warning("kernel.supervisor.restarted", subsystem=supervised.name, status=supervised.status)
+
+    async def run_ticker(self, every_s: float, on_change) -> None:
+        """Poll health every `every_s` seconds for the life of the
+        process; `on_change(supervised)` is awaited for each service
+        whose status changed (the Kernel publishes `system.health`)."""
+        while True:
+            await self._clock.sleep(every_s)
+            try:
+                for supervised in await self.poll_once():
+                    await on_change(supervised)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- the ticker outlives any one bad poll
+                self._logger.error("kernel.supervisor.poll_failed", error=repr(exc))
 
     async def stop_all(self, layers_reversed: list[tuple[str, ...]], *, grace_s: float) -> None:
         """Stop every layer, top down, within `grace_s` IN TOTAL.
