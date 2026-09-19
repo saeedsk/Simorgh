@@ -1209,7 +1209,7 @@ class Service:
                 # -- a beat, not a reply.
                 self._out(render_mod.style(f"  🔊 {text}", "dim", enabled=self._color))
                 return
-            if self._voice_reply_settled(tail=tail):
+            if self._voice_reply_settled(tail=tail, said=text):
                 return
             if self._voice_replies_shown > 0:
                 # Already on screen from `turn.completed`.
@@ -1578,6 +1578,15 @@ class Service:
         p = message.payload
         self._streaming.pop(str(p.get("session_id") or ""), None)
         text = str(p.get("text") or "").strip()
+        from simorgh.contracts.settings import is_quiet_reply
+        from simorgh.contracts.tone import strip_tone
+
+        if p.get("channel") == "voice" and (not strip_tone(text).strip() or is_quiet_reply(strip_tone(text))):
+            # QUIET is Sim choosing not to answer: nothing is said and
+            # nothing goes on screen (live 2026-09-19, "🔊 sim: QUIET").
+            self._streaming.pop(str(p.get("session_id") or ""), None)
+            self._invalidate()
+            text = ""
         if p.get("channel") == "voice" and text and not p.get("cancelled") and getattr(self._live, "enabled", False):
             # Live screen: the whole reply stays in the grey live rows while
             # Sim says it; `_on_voice_spoken` turns it green when it ends.
@@ -1608,13 +1617,18 @@ class Service:
         if fut is not None and not fut.done():
             fut.set_result(p.get("text", ""))
 
-    def _voice_reply_settled(self, session_id: str | None = None, tail: str = "") -> bool:
+    def _voice_reply_settled(self, session_id: str | None = None, tail: str = "", said: str = "") -> bool:
         """Print a spoken reply green and take it out of the live rows: the
-        oldest one, or `session_id`'s (the fallback timer, for a reply whose
-        speech never reported). False when there was none waiting."""
+        one whose words were `said`, else the oldest, or `session_id`'s (the
+        fallback timer, for a reply whose speech never reported). False when
+        there was none waiting."""
         if not self._voice_speaking:
             return False
         index = 0
+        head = " ".join(said.split())[:24].lower()
+        if head:
+            index = next((i for i, (_, t) in enumerate(self._voice_speaking)
+                          if head in " ".join(t.split()).lower()), 0)
         if session_id is not None:
             index = next((i for i, (sid, _) in enumerate(self._voice_speaking) if sid == session_id), -1)
             if index < 0:

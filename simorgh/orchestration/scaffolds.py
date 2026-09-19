@@ -179,7 +179,8 @@ _TOOL_NOTES: dict[str, str] = {
                "tell them to type it rather than running it yourself",
     "cast_volume": "the TV's volume, 0-100",
     "dash_view": "turn the dashboard on the TV to a view (home, news, markets, cameras, media, ambient...), a chart "
-                 "timeframe or symbol, or set it rotating; action=remote gives the phone remote's link",
+                 "timeframe or symbol, or set it rotating (it casts the dashboard first when the TV is showing something "
+                 "else); action=remote gives the phone remote's link",
     "dash_key": "press a remote key on the dashboard on the TV: left/right/up/down, ok (open a tab, a box or a "
                 "video full screen), back (step out), playpause/next/prev for the video; the TV's own remote cannot",
     "cast_use": "remember which Cast device is the TV, by name",
@@ -192,7 +193,9 @@ _TOOL_NOTES: dict[str, str] = {
     "overheard": "what was said near you that was not said TO you, and kept memos: `2 hours`, `from Ira`, `memos`; kept two days then gone",
     "overheard_note": "`memo <text>` keeps something on purpose; `wipe` forgets all overheard speech now",
     "console_tail": "the last lines Sim printed on its own console, the only way to answer a question about its own screen or output: `<count>` or `<count> <word to filter>`, e.g. `30 error`",
-    "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`",
+    "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`. "
+                  "The house rule (the creator, 2026-09-19): ONE named camera asked for on the TV/screen is `<camera> full`; "
+                  "\"the cameras\" is `CAST_SHOW: cameras`",
     "cam_light": "a camera's spotlight: `<camera> on|off`",
     "cam_ir": "a camera's infrared night lights: `<camera> on|off`",
     "cam_siren": "sound a camera's siren for a few seconds: `<camera> [seconds]` -- loud; only when asked",

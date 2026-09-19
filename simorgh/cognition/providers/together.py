@@ -65,6 +65,9 @@ DEFAULT_REASONING_EFFORT = "low"
 #: time. It is a ceiling, not a target: a model that finishes in 200
 #: tokens is billed for 200.
 MIN_REASONING_MAX_TOKENS = 4_000
+#: Longest a stream may go without sending a line before it counts as
+#: stalled and the Router fails over (see `stream`).
+STREAM_SILENCE_S = 12.0
 USER_AGENT = "Simorgh/2.0 (+https://github.com/saeedsk/Simorgh)"
 
 # Per 1M tokens (Together's published GLM-5.3-Flash pricing). Mirrored in
@@ -176,10 +179,17 @@ class TogetherProvider:
         done = object()
         url = f"{self._base_url}/chat/completions"
         wait = timeout if timeout is not None else self._timeout_seconds
+        # The socket timeout is per read: on a stream it is the longest
+        # silence allowed, not the whole call. A healthy stream sends a line
+        # every few hundred ms (reasoning tokens included); one that says
+        # nothing for STREAM_SILENCE_S has stalled, and waiting out the whole
+        # purpose budget on it is what made voice turns take 23-31 s before
+        # failing over (live, 2026-09-19).
+        silence = min(wait, STREAM_SILENCE_S)
 
         def _read() -> None:
             try:
-                for line in self._stream_lines(url, body, timeout=wait):
+                for line in self._stream_lines(url, body, timeout=silence):
                     loop.call_soon_threadsafe(queue.put_nowait, line)
             except Exception as exc:  # noqa: BLE001 -- handed to the consumer
                 loop.call_soon_threadsafe(queue.put_nowait, exc)

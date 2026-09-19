@@ -72,6 +72,12 @@ class SentenceStream:
             self.tone = self.tone or tone
             if not sentence.strip():
                 return
+            from simorgh.contracts.settings import is_quiet_reply
+
+            if is_quiet_reply(sentence):
+                # "QUIET." streamed as a first sentence is Sim choosing
+                # silence, never a word to say aloud.
+                return
         if self._queued >= self._max:
             self._capped = True
             self._emit(MORE_ON_SCREEN.get(self._language, MORE_ON_SCREEN["en"]))

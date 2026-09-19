@@ -207,6 +207,25 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out.getvalue().count("sim: The kettle is on."), 1)
         self.assertEqual(self.service._streaming_rows(), [])  # noqa: SLF001
 
+    async def test_a_quiet_voice_reply_never_reaches_the_screen(self):
+        """Live 2026-09-19: "🔊 sim: QUIET" printed by the fallback timer."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        live = mock.MagicMock()
+        live.enabled = True
+        self.service._live = live  # noqa: SLF001
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            for text in ("QUIET", "[warm] QUIET."):
+                await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                    "session_id": "q1", "task_id": "q1", "text": text, "channel": "voice",
+                    "kind": "chat", "floor": False, "tool_steps": 0}))
+            await self._pump()
+        self.assertNotIn("QUIET", out.getvalue())
+        self.assertEqual(self.service._voice_speaking, [])  # noqa: SLF001
+
     async def test_a_reply_being_written_shows_in_the_live_rows_and_goes_when_done(self):
         """Stage 3 item 3: deltas grow one line above the prompt; a reset
         takes it back; the finished turn clears it."""

@@ -66,6 +66,25 @@ class CastTestCase(unittest.IsolatedAsyncioTestCase):
                                                cast=cast, reachable=lambda url: reachable, env={"SIM_API_TOKEN": "s3"})}
         return tools, cast, _Bus()
 
+    async def test_turning_the_dashboard_casts_it_when_the_tv_is_not_showing_it(self):
+        """Live 2026-09-19: "put the cameras on screen" ran dash_view alone
+        and the TV stayed on its screensaver. Now dash_view casts the
+        dashboard first when the TV is running anything else."""
+        tools, cast, bus = self._tools()
+        cast.app_id = lambda name: ""          # screensaver: no app in front
+        result = await tools["dash_view"].run({"view": "cameras"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        self.assertIn(("show_page", "Living Room TV", "http://10.0.0.5:8765/dash?token=s3"), cast.calls)
+        self.assertIn("cast the dashboard", result.output)
+        self.assertIn("the dashboard shows cameras", result.output)
+
+    async def test_an_up_dashboard_is_only_turned(self):
+        tools, cast, bus = self._tools()
+        cast.app_id = lambda name: "84912283"  # DashCast in front
+        result = await tools["dash_view"].run({"view": "cameras"}, ctx=_ctx(bus))
+        self.assertTrue(result.ok, result.error)
+        self.assertFalse([c for c in cast.calls if c[0] == "show_page"])
+
     async def test_devices_are_listed_by_name(self):
         tools, cast, bus = self._tools(("Living Room TV", "Bedroom"))
         result = await tools["cast_devices"].run({}, ctx=_ctx(bus))

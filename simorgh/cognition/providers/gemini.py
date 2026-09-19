@@ -22,6 +22,11 @@ THINKING_RESERVE_TOKENS = 2048
 from . import native  # noqa: E402
 
 
+
+def _client_closed(exc: BaseException) -> bool:
+    """The SDK's HTTP client was closed, which a fresh client fixes."""
+    return "client has been closed" in str(exc)
+
 class GeminiProvider:
     name = "gemini"
     capabilities = Capabilities(supports_tools=True, supports_streaming=True, supports_images=True,
@@ -69,12 +74,23 @@ class GeminiProvider:
         done = object()
 
         def _read() -> None:
-            try:
-                for chunk in self._get_client().models.generate_content_stream(
-                        model=self._model, contents=prompt, config=config or None):
-                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
-            except Exception as exc:  # noqa: BLE001 -- handed to the consumer
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
+            for attempt in (1, 2):
+                sent = False
+                try:
+                    for chunk in self._get_client().models.generate_content_stream(
+                            model=self._model, contents=prompt, config=config or None):
+                        sent = True
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                except Exception as exc:  # noqa: BLE001 -- handed to the consumer
+                    if attempt == 1 and not sent and _client_closed(exc):
+                        # The SDK's HTTP client was closed under us (live
+                        # 2026-09-19: "Cannot send a request, as the client
+                        # has been closed" on every failover to Gemini). A
+                        # fresh client, once.
+                        self._client = None
+                        continue
+                    loop.call_soon_threadsafe(queue.put_nowait, exc)
+                break
             loop.call_soon_threadsafe(queue.put_nowait, done)
 
         loop.run_in_executor(None, _read)
@@ -109,6 +125,7 @@ class GeminiProvider:
 
     def _complete_sync(
         self, prompt: str, max_tokens: int = 0, timeout: float | None = None, tools: list[dict] | None = None,
+        _fresh_client: bool = False,
     ) -> ProviderResponse:
         if not self._api_key:
             raise ProviderUnavailable("no Gemini API key configured (GEMINI_API_KEY)")
@@ -148,6 +165,10 @@ class GeminiProvider:
                 # and the Router now enforces its own deadline regardless.
                 response = client.models.generate_content(model=self._model, contents=prompt)
         except Exception as exc:  # noqa: BLE001 -- missing SDK, network, API error: all degrade to the next provider
+            if _client_closed(exc) and not _fresh_client:
+                self._client = None     # closed under us: a fresh client, once
+                return self._complete_sync(prompt, max_tokens=max_tokens, timeout=timeout, tools=tools,
+                                           _fresh_client=True)
             raise ProviderUnavailable(f"Gemini request failed: {exc!r}") from exc
 
         usage = getattr(response, "usage_metadata", None)

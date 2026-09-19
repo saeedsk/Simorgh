@@ -220,6 +220,12 @@ class PyChromecast:
             if done.get("ok") is False:
                 raise RuntimeError("the device did not load the page")
 
+    def app_id(self, name: str) -> str:
+        """The Cast app in front on `name` ("" when none: a screensaver, the
+        TV's own launcher, or asleep)."""
+        with self._lock:
+            return str(getattr(self._cast(name), "app_id", "") or "")
+
     def play(self, name: str, url: str, *, content_type: str, title: str) -> None:
         with self._lock:
             cast = self._cast(name)
@@ -982,6 +988,9 @@ class DashViewTool(_CastTool):
     VIEWS = DASH_VIEWS
     ALIASES = {**DASH_ALIASES, "tv": "home", "terminal": "home"}
 
+    async def _dashboard_up(self, ctx: ToolContext) -> str:
+        return await _dashboard_up_impl(self, ctx)
+
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         action = str(args.get("action") or "").strip().lower()
         if action == "remote":
@@ -1046,8 +1055,18 @@ class DashViewTool(_CastTool):
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult.unconfigured("refused: no bus to reach the dashboard")
-        await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload=payload))
         said = []
+        if "view" in payload:
+            # Turning a page nobody can see is not showing it. Live
+            # 2026-09-19: "put the cameras on screen" ran this alone, the
+            # reply said the cameras were up, and the TV sat on its
+            # screensaver. The creator: wake the TV, cast the dashboard, then
+            # change the view. So when the dashboard is not what the TV is
+            # running, it is cast first.
+            cast_note = await self._dashboard_up(ctx)
+            if cast_note:
+                said.append(cast_note)
+        await bus.publish(Message.new(topics.DASH_STATE, source="execution", payload=payload))
         if payload.get("view") == "charts" and len(payload) == 1:
             # The Charts view auto-plays (the creator, 2026-09-13): K-pop first.
             started = await self._start_chart(ctx, "kpop")
@@ -1072,6 +1091,39 @@ class DashViewTool(_CastTool):
         if "video_quality" in payload:
             said.append(f"embedded video {payload['video_quality']}")
         return ToolResult(ok=True, output="; ".join(said), side_effects=("dash_view",), metadata=payload)
+
+
+async def _dashboard_up_impl(tool, ctx: ToolContext) -> str:
+    """Cast the dashboard when the TV is not already running it; the words
+    for the result, or "" when it was already up or this cannot tell."""
+    try:
+        backend = tool._backend()
+        name, problem = await asyncio.to_thread(tool._device, backend, "")
+    except Exception:  # noqa: BLE001 -- no TV to ask: the view change still stands
+        return ""
+    if problem or not hasattr(backend, "app_id"):
+        return ""
+    try:
+        from pychromecast.config import APP_DASHCAST
+    except ImportError:
+        APP_DASHCAST = "84912283"
+    try:
+        if await asyncio.to_thread(backend.app_id, name) == APP_DASHCAST:
+            return ""
+    except Exception:  # noqa: BLE001
+        return ""
+    url = tool._page_url("dash")
+    why = await asyncio.to_thread(tool._page_reachable, url)
+    if why:
+        return f"the dashboard is NOT on the TV: it could not fetch Sim's page ({why})"
+    woke = await tool._wake(backend, name)
+    tool._bump()
+    try:
+        await asyncio.to_thread(backend.show_page, name, url)
+    except Exception as exc:  # noqa: BLE001
+        return f"the dashboard is NOT on the TV: {name} would not show it ({exc})"
+    await tool._publish_state(ctx, "none")
+    return f"cast the dashboard to {name}" + (" (woke the TV)" if woke else "")
 
 
 class CastUseTool(_CastTool):
