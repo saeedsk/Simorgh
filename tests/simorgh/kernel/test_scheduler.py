@@ -113,6 +113,15 @@ class TestSchedulerTicks(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(len(self.received), 1)
         self.assertGreaterEqual(self.received[0].payload["idle_seconds"], 10.0)
 
+    async def test_since_last_idle_tick_is_the_gap_not_zero(self):
+        # It was computed after `_last_idle_tick = now` and so was always 0.
+        for _ in range(20):
+            await _pump(200)
+            if len(self.received) >= 2:
+                break
+        self.assertGreaterEqual(len(self.received), 2)
+        self.assertGreaterEqual(self.received[1].payload["since_last_idle_tick"], 3.0)
+
 
 class TestSchedulerTicksWhenNotRunning(unittest.IsolatedAsyncioTestCase):
     async def test_no_idle_tick_when_not_running(self):

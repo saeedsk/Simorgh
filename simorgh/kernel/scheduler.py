@@ -308,10 +308,14 @@ class Scheduler:
             idle = self.activity.idle_seconds()
             now = self._clock.now()
             if idle >= self._idle_threshold_s and (now - self._last_idle_tick) >= self._idle_tick_cooldown_s:
+                # Measured before the update: it was computed after it and
+                # so was always 0 (found writing kernel/CONTRACT.md). The
+                # first tick of a run has no previous one: it reports `idle`.
+                since = (now - self._last_idle_tick) if self._last_idle_tick else idle
                 self._last_idle_tick = now
                 await self._bus.publish(Message.new(
                     topics.SYSTEM_TICK_IDLE, source=self._source,
-                    payload={"idle_seconds": idle, "since_last_idle_tick": now - self._last_idle_tick},
+                    payload={"idle_seconds": idle, "since_last_idle_tick": since},
                     clock=self._clock.now,
                 ))
 
