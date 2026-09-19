@@ -157,8 +157,6 @@ SELF_GAPS_REPLY = "self.gaps.reply"
 SELF_MODEL_UPDATED = "self.model.updated"
 SELF_OBSERVATION = "self.observation"
 # --- 4.11 learn -----------------------------------------------------------
-LEARN_PIPELINE_RUN = "learn.pipeline.run"
-LEARN_PIPELINE_COMPLETED = "learn.pipeline.completed"
 LEARN_STRATEGY_SUGGEST = "learn.strategy.suggest"
 LEARN_STRATEGY_SUGGEST_REPLY = "learn.strategy.suggest.reply"
 LEARN_OUTCOME_RECORDED = "learn.outcome.recorded"

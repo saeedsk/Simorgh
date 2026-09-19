@@ -1,11 +1,12 @@
-"""`Service`: wires `OutcomeRecorder`, `CompetenceTable`, strategy
-suggestion, and the patch/skill pipeline runner into the real Bus/Ledger
-(spec section 5). Scope note (see README build log): this build
-implements the outcome/competence/strategy core and the full patch and
-skill pipeline (Flow 4); `evolve` batch pipelines, hot-swap experiments,
-and knowledge distillation are not yet built -- `learn.pipeline.run{kind:
-evolve}` is acknowledged and rejected with an honest `floor` outcome
-rather than silently mishandled.
+"""`Service`: wires `OutcomeRecorder`, `CompetenceTable` and strategy
+suggestion into the real Bus/Ledger. Outcomes in, competence out.
+
+Sim's own code changes land through Orchestration's worktree path
+(`orchestration/session.py::_land`), which publishes
+`learn.self_patch.applied`; this subsystem records the outcome. The
+autonomous PatchPipeline that used to live here was retired on
+2026-09-19: nothing published its trigger and its drafting tool was
+never registered (2026-09-18 evaluation, C1/C14).
 """
 
 from __future__ import annotations

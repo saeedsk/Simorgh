@@ -6,20 +6,6 @@ from ..fields import Bool, Enum, F, Float, Int, List, O, Obj, Str
 from ..registry import define
 from .. import topics as t
 
-LearnPipelineRun = define(t.LEARN_PIPELINE_RUN, [
-    F("task_id", Str),
-    F("kind", Enum("patch", "skill", "evolve")),
-    F("description", Str),
-    O("subject", Str),
-    O("prior_reasons", List(Str)),
-], doc="Command; consumer group `learning`. A Worker hands a patch/skill task to Learning (Flow 4).")
-LearnPipelineCompleted = define(t.LEARN_PIPELINE_COMPLETED, [
-    F("task_id", Str),
-    F("outcome", Enum("applied", "researched", "rejected", "reverted", "floor")),
-    F("detail", Str),
-    O("commit", Str),
-    O("verification_ref", Str),
-])
 LearnStrategySuggest = define(t.LEARN_STRATEGY_SUGGEST, [F("task_type", Str), O("context", Obj())])
 LearnStrategySuggestReply = define(t.LEARN_STRATEGY_SUGGEST_REPLY, [
     F("success_rate", Float),

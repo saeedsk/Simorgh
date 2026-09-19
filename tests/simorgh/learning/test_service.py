@@ -1,13 +1,4 @@
-"""Learning's own health report.
-
-`status` showed Learning green while its whole purpose was unreachable.
-Two independent reasons, either fatal on its own (wave-21 observer
-W21-12): nothing anywhere publishes `learn.pipeline.run`, and
-`PatchPipeline` proposes a `draft_candidate` action for a tool that is
-not registered. Answering "0 pipeline(s) running" was technically true
-and entirely misleading -- the honesty rule this project keeps
-relearning is that nothing may succeed while saying nothing true.
-"""
+"""Learning's `Service`: outcomes in, competence out, and honest health."""
 
 from __future__ import annotations
 
@@ -32,22 +23,3 @@ class TestLearningSaysWhatItCannotDo(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("draft_candidate", {t.name for t in builtin_tools(ExecConfig())})
 
-    def test_nothing_publishes_the_message_that_would_start_a_pipeline(self):
-        """If someone wires a publisher later this fails, and the health
-        string above needs revisiting -- which is the point of pinning
-        it. Looks for real publish SITES (`Message.new(topics.X` or
-        `.publish(... topics.X`), not mere mentions: the topic
-        legitimately appears in `topics.py`, in its message definition,
-        and in Learning's own multi-line `consumes` tuple."""
-        import pathlib
-        import re
-
-        root = pathlib.Path(__file__).resolve().parents[3] / "simorgh"
-        publish_site = re.compile(
-            r"(?:Message\.new|\.publish|bus\.new)\s*\(\s*(?:\n\s*)?topics\.LEARN_PIPELINE_RUN")
-        offenders = [
-            str(path.relative_to(root))
-            for path in root.rglob("*.py")
-            if publish_site.search(path.read_text())
-        ]
-        self.assertEqual(offenders, [], f"a publisher now exists: {offenders}")
