@@ -108,8 +108,18 @@ class Service:
     topics.DASH_STATE,
     topics.UI_HOOK_RECEIVED,
 )
-    produces = (topics.ACTION_RESULT, topics.ACTION_DENIED, topics.TOOL_REGISTERED, topics.PERCEPT_WEB_FETCHED, topics.SYSTEM_METRICS, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,
-                topics.UI_NOTICE, topics.COGNITION_THINK, topics.VOICE_SPEAK_REQUEST,)
+    # Every topic a message is built on anywhere in the package, requests
+    # included; pinned by tests/simorgh/execution/test_produces_manifest.py.
+    produces = (
+        topics.ACTION_RESULT, topics.ACTION_DENIED,
+        topics.TOOL_REGISTERED, topics.TOOL_INVOKED, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,
+        topics.SYSTEM_METRICS, topics.PERCEPT_WEB_FETCHED, topics.LEARN_SKILL_ACQUIRED,
+        topics.UI_NOTICE, topics.VOICE_SPEAK_REQUEST, topics.COGNITION_THINK, topics.MEMORY_RETRIEVE,
+        topics.CAMERA_EVENT, topics.TV_STATE, topics.DASH_STATE, topics.UI_DASH_KEY,
+        topics.SYSTEM_SCHEDULE_ADD, topics.WORLD_ENV_QUERY,
+        topics.TASK_CREATE, topics.TASK_LIST_REQUEST, topics.TASK_CANCEL, topics.UI_COMMAND_REQUEST,
+        topics.MEMORY_FORGET, topics.VOICE_VOICES_REQUEST, topics.VOICE_CONTROL_REQUEST,
+    )
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
                  connectors: list | None = None) -> None:
@@ -657,7 +667,9 @@ class Service:
         # truncation notice the moment it ran). `read_source` returns the
         # file's real, uncapped content -- capping belongs to the
         # tool-output path, not to what actually gets executed.
-        source, refusal = pathsafety.read_source(self._config.repo_root, path, readable_roots=self._config.readable_roots)
+        source, refusal = pathsafety.read_source(self._config.repo_root, path,
+                                                 readable_roots=self._config.readable_roots,
+                                                 root_files=self._config.readable_root_files)
         if refusal:
             self._ctx.logger.warning("skill_load_refused", name=name, path=path, detail=refusal)
             return existing

@@ -133,10 +133,11 @@ class TestTheWholeConfigAudit(unittest.TestCase):
         # Read by cognition's provider-status tick since 2026-09-19.
         self.assertEqual(dead_fields(_Config({"cognition": {"availability_poll_seconds": 5.0}})), [])
 
-    def test_execution_approval_max_age_s_and_readable_root_files_are_flagged(self) -> None:
+    def test_execution_approval_max_age_s_is_flagged_and_readable_root_files_is_not(self) -> None:
+        # `readable_root_files` is read by every path-safety call since 2026-09-19.
         self.assertEqual(
             dead_fields(_Config({"execution": {"approval_max_age_s": 5.0, "readable_root_files": ("x",)}})),
-            [("execution", "approval_max_age_s"), ("execution", "readable_root_files")],
+            [("execution", "approval_max_age_s")],
         )
 
     def test_guardian_reversible_auto_in_guarded_and_classifier_timeout_are_flagged(self) -> None:

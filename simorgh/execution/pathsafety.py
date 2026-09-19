@@ -49,9 +49,12 @@ _MAX_PATH_CHARS = 4096
 _MAX_READ_CHARS = 20_000
 # A hard stop so a pathological file cannot be slurped into memory. Far
 # above any source file; this is a guard, not a policy.
-# Files at the repository root that any read tool may open. Reading
-# them is safe; whether they may be WRITTEN is a separate question that
-# `write_scopes_source` and Guardian's protected list answer -- and
+# Files at the repository root that any read tool may open, when the
+# caller does not pass `root_files`. Every tool passes
+# `Config.readable_root_files` (`[execution] readable_root_files`), so this
+# is only the default for direct callers and mirrors that field's default.
+# Reading them is safe; whether they may be WRITTEN is a separate question
+# that `write_scopes_source` and Guardian's protected list answer -- and
 # simloader.py and sim.sh are protected there precisely because they are
 # the mechanism that undoes a bad change.
 ROOT_FILES: frozenset[str] = frozenset({
@@ -101,7 +104,8 @@ def looks_like_credential_path(parts: Iterable[str]) -> bool:
     return name in _CREDENTIAL_DIRECTORIES
 
 
-def hides_a_credential(repo_root: Path, path: Path, *, readable_roots: tuple[str, ...]) -> bool:
+def hides_a_credential(repo_root: Path, path: Path, *, readable_roots: tuple[str, ...],
+                       root_files: Iterable[str] = ROOT_FILES) -> bool:
     """Whether reading this file would return something a direct
     `read_file` on it would refuse.
 
@@ -124,7 +128,7 @@ def hides_a_credential(repo_root: Path, path: Path, *, readable_roots: tuple[str
     except (OSError, ValueError):
         return True     # resolves outside the repository, or cannot be resolved
     parts = target.parts
-    inside = (len(parts) == 1 and parts[0] in ROOT_FILES) or (parts and parts[0] in readable_roots)
+    inside = (len(parts) == 1 and parts[0] in tuple(root_files)) or (parts and parts[0] in readable_roots)
     if not inside or looks_like_credential_path(parts):
         return True
     try:
@@ -134,8 +138,10 @@ def hides_a_credential(repo_root: Path, path: Path, *, readable_roots: tuple[str
 
 
 def resolve_safe_path(
-    repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...], max_path_chars: int = _MAX_PATH_CHARS
+    repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...], max_path_chars: int = _MAX_PATH_CHARS,
+    root_files: Iterable[str] = ROOT_FILES,
 ) -> tuple[Path | None, str | None]:
+    root_files = tuple(root_files)
     if len(raw_path) > max_path_chars:
         return None, f"refused: path is {len(raw_path)} chars -- too long to be a real path"
     try:
@@ -151,11 +157,11 @@ def resolve_safe_path(
     # sim.sh were readable by nothing -- Sim could not read its own
     # bootloader, and a chat session spent its whole budget hunting for
     # a README it was standing on (observer, 2026-09-08).
-    if len(rel.parts) == 1 and rel.parts[0] in ROOT_FILES:
+    if len(rel.parts) == 1 and rel.parts[0] in root_files:
         pass
     elif not rel.parts or rel.parts[0] not in readable_roots:
         return None, (f"refused: {raw_path!r} is outside the readable areas "
-                      f"({', '.join(readable_roots)}, and these files at the root: {', '.join(ROOT_FILES)})")
+                      f"({', '.join(readable_roots)}, and these files at the root: {', '.join(root_files)})")
     if looks_like_credential_path(rel.parts):
         return None, f"refused: {raw_path!r} looks like a credentials path"
 
@@ -189,7 +195,7 @@ def resolve_safe_path(
         # credential-SHAPED by name, it is simply somewhere Sim may not
         # read (observer, 2026-09-10).
         parts = relative_target.parts
-        inside = (len(parts) == 1 and parts[0] in ROOT_FILES) or (parts and parts[0] in readable_roots)
+        inside = (len(parts) == 1 and parts[0] in root_files) or (parts and parts[0] in readable_roots)
         if not inside:
             return None, (f"refused: {raw_path!r} resolves to {relative_target.as_posix()!r}, "
                           f"which is outside the readable areas")
@@ -211,7 +217,8 @@ def resolve_safe_path(
     return target, None
 
 
-def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> tuple[str, str]:
+def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
+                root_files: Iterable[str] = ROOT_FILES) -> tuple[str, str]:
     """`(text, refusal)` -- the file's WHOLE content, uncapped.
 
     The capping belongs to the caller, because how much to return
@@ -220,7 +227,8 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
     `_MAX_READ_CHARS` became unreachable by any range, so 61% of
     `execution/tools.py` could not be read at all and `read_file`
     reported the file as 433 lines instead of 1101."""
-    target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots)
+    target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots,
+                                        root_files=root_files)
     if refusal is not None:
         return "", f"[{refusal}]"
     if not target.is_file():
@@ -260,8 +268,9 @@ def read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ..
         return "", f"[refused: could not read {raw_path!r}: {exc!r}]"
 
 
-def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> str:
-    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots)
+def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
+                   root_files: Iterable[str] = ROOT_FILES) -> str:
+    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots, root_files=root_files)
     if refusal:
         return refusal
     if len(content) > _MAX_READ_CHARS:
@@ -279,12 +288,12 @@ def safe_read_file(repo_root: Path, raw_path: str, *, readable_roots: tuple[str,
 
 
 def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
-                    readable_roots: tuple[str, ...]) -> str:
+                    readable_roots: tuple[str, ...], root_files: Iterable[str] = ROOT_FILES) -> str:
     """Lines `start`..`end` (1-based, inclusive) of a file, numbered.
 
     Reads the real file and slices BY LINE, so any part of any file is
     reachable and the reported total is the true one."""
-    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots)
+    content, refusal = read_source(repo_root, raw_path, readable_roots=readable_roots, root_files=root_files)
     if refusal:
         return refusal
     lines = content.splitlines()
@@ -313,10 +322,12 @@ def safe_read_lines(repo_root: Path, raw_path: str, *, start: int, end: int,
     return f"[lines {start}-{start + len(chunk) - 1} of {total} in {raw_path}]\n{numbered}"
 
 
-def safe_list_dir(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...]) -> str:
+def safe_list_dir(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, ...],
+                  root_files: Iterable[str] = ROOT_FILES) -> str:
     if not raw_path or raw_path == ".":
         return "\n".join(readable_roots)
-    target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots)
+    target, refusal = resolve_safe_path(repo_root, raw_path, readable_roots=readable_roots,
+                                        root_files=root_files)
     if refusal is not None:
         return f"[{refusal}]"
     if not target.is_dir():

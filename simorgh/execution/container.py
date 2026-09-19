@@ -192,7 +192,8 @@ class RunContainerTool:
         for name in names:
             resolved, refusal = pathsafety.resolve_safe_path(
                 Path(self._config.repo_root), str(name),
-                readable_roots=self._config.readable_roots)
+                readable_roots=self._config.readable_roots,
+                root_files=self._config.readable_root_files)
             if refusal:
                 return refusal
             if not resolved.is_file():

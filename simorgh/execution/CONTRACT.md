@@ -89,7 +89,7 @@ The generated rows for `action.denied`, `action.result`, `cognition.think`, `per
 | `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/execution/pim/tools.py | `remind` |
 | tool-driven requests | `task.create`, `task.list.request`, `task.cancel`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request`, `world.env.query` | simorgh/execution/tools.py | `start_task`, `list_tasks`, `cancel_task`, `sim_command`, `memory_forget`, `voice_setting`, `self_map` |
 
-The Service's `produces` tuple lists only ten of these; the publish direction is not pinned by `tests/simorgh/test_manifests_match_the_code.py`.
+The Service's `produces` tuple lists exactly these 26 topics (since 2026-09-19; it listed ten before). `tests/simorgh/execution/test_produces_manifest.py` pins it both ways against every `Message.new(topics.X` / `.caused(topics.X` / `_publish(ctx, topics.X` in the package, so a new publish without a manifest entry fails.
 
 ## Ledger streams
 
@@ -118,7 +118,7 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 | `repo_root` | `field(default_factory=lambda: find_repo_root())` | yes |
 | `repo_root_named` | `False` | yes |
 | `readable_roots` | `('src', 'docs', 'tests', 'simorgh', 'simorgh_skills', 'paper` | yes |
-| `readable_root_files` | `('README.md', 'CLAUDE.md', 'requirements.txt', 'simorgh.toml` | NO (declared, never read; `pathsafety.py:58` hardcodes `ROOT_FILES`) |
+| `readable_root_files` | `('README.md', 'CLAUDE.md', 'requirements.txt', 'simorgh.toml` | yes (every `pathsafety` call passes it as `root_files`; `pathsafety.ROOT_FILES` is only the default for direct callers) |
 | `write_scopes_source` | `('simorgh/', 'simorgh_skills/', 'tests/', 'tools/', 'docs/',` | yes |
 | `worktrees` | `True` | yes |
 | `worktree_dir` | `''` | yes |
@@ -273,7 +273,7 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 - Execution may publish `action.denied` only with `layer="token"` (`PUBLISH_PAYLOAD_CONSTRAINTS[(action.denied, "execution")]`); it never publishes `action.approved` (`PUBLISH_ONLY_BY`: guardian, kernel). `PUBLISH_ONLY_BY` also allows it `system.restart` and `system.reload`; no code in the package publishes either today.
 - Every verified approval yields exactly one `action.result` (success, error, timeout, crash, `paused`, `unknown tool`); an approval started but unfinished at shutdown yields `error="interrupted by restart"` at the next boot.
 - A tool call's deadline is `constraints.timeout_s`, else the tool's `timeout_s`, else `default_timeout_s` (60 s); the bus handler itself is unbounded so a long gate is not cut from outside.
-- File tools resolve paths inside `repo_root` (or the task's worktree) under `readable_roots` / write scopes; absolute paths, `..`, and credential-shaped names are refused (`test_pathsafety.py`). `run_shell` refuses reads of `~/.simorgh/secrets.toml`, the vault, `.ssh`, `.aws`, `.gnupg` and keychain dumps (`test_shell.py`).
+- File tools resolve paths inside `repo_root` (or the task's worktree) under `readable_roots`, the single root files in `readable_root_files`, and write scopes; absolute paths, `..`, and credential-shaped names are refused (`test_pathsafety.py`, `test_readable_root_files.py`). `run_shell` refuses reads of `~/.simorgh/secrets.toml`, the vault, `.ssh`, `.aws`, `.gnupg` and keychain dumps (`test_shell.py`).
 - `worktree_land` fast-forwards main only after a clean rebase and a green whole-suite gate that `simloader.unit_verdict` (loaded from the main checkout) also accepts: exit 0, no failure in the summary, tests ran, count within 10% of the loader baseline; a missing loader means no second opinion, not a refusal (`test_worktree_land_gate.py`). Worktrees are made only for a named `repo_root`.
 - Execution imports only `simorgh.contracts`, `simorgh.bus.client` (for `UNBOUNDED`, `service.py:37`) and the standard library plus optional third-party SDKs imported lazily (`tests/simorgh/test_module_boundaries.py`).
 
@@ -286,6 +286,8 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/execution/test_worktree_land_gate.py` -- the landing gate refuses nothing-collected, a gutted suite and a forged exit code; no loader means no second opinion.
 - `tests/simorgh/execution/test_worktree.py` -- open from HEAD, edits and commits stay on the task branch, rebase, gate, fast-forward, close.
 - `tests/simorgh/execution/test_pathsafety.py` -- the path boundary never raises and refuses every escape.
+- `tests/simorgh/execution/test_readable_root_files.py` -- `[execution] readable_root_files` decides which root files the read tools open.
+- `tests/simorgh/execution/test_produces_manifest.py` -- `Service.produces` equals the set of topics the package publishes or requests.
 - `tests/simorgh/execution/test_shell.py` -- `run_shell` refuses credential reads.
 - `tests/simorgh/execution/test_tool_unavailable_is_announced.py` -- `tool.unavailable` / `tool.probed` payloads and ordering.
 - `tests/simorgh/execution/test_result_handback.py` -- `action.result` carries `metadata_ref` and stderr; rows go to `results/` capped.
@@ -315,7 +317,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - B18 (low): blocking `subprocess.run` in tools, threaded but not cancellable. Open; stage 7 item 8.
 - P7 (low): an unpatched 30 s constant in `media/cast.py` slows the suite. Open.
 - W10 (low): 21.6k lines holding six product domains next to the verifier. Open; stage 9 item 1.
-- Not in the catalogue: the `produces` manifest omits most published topics (`tool.invoked`, `learn.skill.acquired`, `world.camera.event`, `ui.tv.state`, the tool-driven requests); `stop()` reads `self._vision`, which is only set late in `start()` (`service.py:226, 396`), so a `start()` that fails early makes `stop()` raise.
+- Not in the catalogue: `stop()` reads `self._vision`, which is only set late in `start()` (`service.py:226, 396`), so a `start()` that fails early makes `stop()` raise.
 
 ## Planned changes (roadmap)
 

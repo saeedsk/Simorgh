@@ -149,14 +149,16 @@ class ReadFileTool:
         if span is None:
             content = await asyncio.to_thread(
                 pathsafety.safe_read_file,
-                tool_root(self._config, ctx, path), path, readable_roots=self._config.readable_roots)
+                tool_root(self._config, ctx, path), path, readable_roots=self._config.readable_roots,
+                root_files=self._config.readable_root_files)
         else:
             # Slice the REAL file, never a pre-capped string: that was the
             # bug that made 61% of this very module unreachable.
             content = await asyncio.to_thread(
                 pathsafety.safe_read_lines,
                 tool_root(self._config, ctx, path), path, start=span[0], end=span[1],
-                readable_roots=self._config.readable_roots)
+                readable_roots=self._config.readable_roots,
+                root_files=self._config.readable_root_files)
         ok = not content.startswith("[refused:")
         # A refusal is an error, not output. It used to be BOTH, so the
         # model was shown the same refusal twice in one result.
@@ -197,7 +199,8 @@ class ListDirTool:
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         content = pathsafety.safe_list_dir(
             tool_root(self._config, ctx, args.get("path", "")), args.get("path", ""),
-            readable_roots=self._config.readable_roots)
+            readable_roots=self._config.readable_roots,
+            root_files=self._config.readable_root_files)
         ok = not content.startswith("[refused:")
         return ToolResult(ok=ok, output=content, error=None if ok else content)
 
@@ -309,7 +312,8 @@ def _no_match_note(config) -> str:
 
 
 def _rg_line_is_credential(line: str, root: Path | None = None,
-                           readable_roots: tuple[str, ...] = ()) -> bool:
+                           readable_roots: tuple[str, ...] = (),
+                           root_files: tuple[str, ...] = pathsafety.ROOT_FILES) -> bool:
     """`ripgrep` output is `path:lineno:text`; check the path prefix
     against the same rule `resolve_safe_path` (and `read_file`) enforce,
     so `search_code` cannot grep a `.env`/`credentials.json`/etc. that a
@@ -341,7 +345,8 @@ def _rg_line_is_credential(line: str, root: Path | None = None,
         candidate = root / path_part
         if not candidate.is_file():
             return True     # not a path we parsed correctly -- fail closed
-        return pathsafety.hides_a_credential(root, candidate, readable_roots=readable_roots)
+        return pathsafety.hides_a_credential(root, candidate, readable_roots=readable_roots,
+                                              root_files=root_files)
     return pathsafety.looks_like_credential_path(Path(path_part).parts)
 
 
@@ -452,7 +457,7 @@ class SearchCodeTool:
         lines = [
             _rg_display(ln) for ln in completed.stdout.splitlines()
             if "__pycache__" not in ln and not _rg_line_is_credential(
-                ln, root, self._config.readable_roots)
+                ln, root, self._config.readable_roots, self._config.readable_root_files)
         ]
         truncated = len(lines) > self._config.search_max_matches
         lines = lines[: self._config.search_max_matches]
@@ -474,7 +479,8 @@ class SearchCodeTool:
                 if "__pycache__" in path.parts or not path.is_file():
                     continue
                 if pathsafety.hides_a_credential(root, path,
-                                                 readable_roots=self._config.readable_roots):
+                                                 readable_roots=self._config.readable_roots,
+                                                 root_files=self._config.readable_root_files):
                     continue
                 try:
                     if path.stat().st_size > self._config.search_max_file_bytes:
@@ -1879,12 +1885,11 @@ class StartTaskTool:
             else:
                 dropped = why
 
-        from simorgh.contracts import topics as _topics
         from simorgh.contracts.envelope import Message as _Message
 
         try:
             reply = await ctx.bus.request(
-                _Message.new(_topics.TASK_CREATE, source="execution", payload=payload),
+                _Message.new(topics.TASK_CREATE, source="execution", payload=payload),
                 timeout=10.0)
         except Exception as exc:  # noqa: BLE001 -- a failed handoff is a result, not a crash
             return ToolResult(ok=False, error=f"could not start the task: {exc!r}")
@@ -1939,13 +1944,12 @@ def _truthy(value) -> bool:
 
 async def _task_list(ctx: ToolContext) -> tuple[list[dict], str]:
     """Planning's task list, or why it could not be had."""
-    from simorgh.contracts import topics as _topics
     from simorgh.contracts.envelope import Message as _Message
 
     if ctx.bus is None:
         return [], "the task list needs the bus, which this session has not got"
     try:
-        reply = await ctx.bus.request(_Message.new(_topics.TASK_LIST_REQUEST, source="execution", payload={}), timeout=5.0)
+        reply = await ctx.bus.request(_Message.new(topics.TASK_LIST_REQUEST, source="execution", payload={}), timeout=5.0)
     except Exception as exc:  # noqa: BLE001
         return [], f"Planning did not answer: {exc!r}"
     return list((getattr(reply, "payload", {}) or {}).get("tasks", []) or []), ""
@@ -2015,7 +2019,6 @@ class SimCommandTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        from simorgh.contracts import topics as _topics
         from simorgh.contracts.envelope import Message as _Message
 
         line = str(args.get("command") or "").strip()
@@ -2027,7 +2030,7 @@ class SimCommandTool:
             return ToolResult(ok=False, error="running a command needs the bus, which this session has not got")
         try:
             reply = await ctx.bus.request(_Message.new(
-                _topics.UI_COMMAND_REQUEST, source="execution",
+                topics.UI_COMMAND_REQUEST, source="execution",
                 payload={"line": line, "requested_by": "sim"}), timeout=20.0)
         except Exception as exc:  # noqa: BLE001 -- no interface, or it did not answer
             return ToolResult(ok=False, error=f"the command did not run: {exc!r}")
@@ -2086,11 +2089,10 @@ class MemoryForgetTool:
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult(ok=False, error="refused: no bus to reach memory")
-        from simorgh.contracts import topics as _topics
         from simorgh.contracts.envelope import Message as _Message
 
         try:
-            reply = await bus.request(_Message.new(_topics.MEMORY_FORGET, source="execution", payload={
+            reply = await bus.request(_Message.new(topics.MEMORY_FORGET, source="execution", payload={
                 "minutes": minutes, "containing": containing, "kinds": ["episodic"],
                 "reason": f"asked to forget the last {minutes:g} min" + (f" about {containing!r}" if containing else "")}),
                 timeout=10.0)
@@ -2127,7 +2129,6 @@ class CancelTaskTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        from simorgh.contracts import topics as _topics
         from simorgh.contracts.envelope import Message as _Message
 
         task_id = str(args.get("task_id") or "").strip()
@@ -2179,7 +2180,7 @@ class CancelTaskTool:
         stopped = []
         for t in targets:
             tid = str(t.get("task_id") or "")
-            await ctx.bus.publish(_Message.new(_topics.TASK_CANCEL, source="execution",
+            await ctx.bus.publish(_Message.new(topics.TASK_CANCEL, source="execution",
                                                payload={"task_id": tid, "reason": reason}))
             stopped.append(tid)
         lines = [f"{tid[:12]}  {str(t.get('description') or '')[:90]}" for tid, t in zip(stopped, targets)]
@@ -2212,7 +2213,6 @@ class VoiceSettingTool:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        from simorgh.contracts import topics as _topics
         from simorgh.contracts.envelope import Message as _Message
 
         if ctx.bus is None:
@@ -2224,7 +2224,7 @@ class VoiceSettingTool:
         value = "" if value is None else str(value).strip()
         if not key or key.lower() in ("voices", "list"):
             try:
-                reply = await ctx.bus.request(_Message.new(_topics.VOICE_VOICES_REQUEST, source="execution", payload={}),
+                reply = await ctx.bus.request(_Message.new(topics.VOICE_VOICES_REQUEST, source="execution", payload={}),
                                               timeout=10.0)
             except Exception as exc:  # noqa: BLE001
                 return ToolResult(ok=False, error=f"the voice service did not answer: {exc!r}")
@@ -2238,7 +2238,7 @@ class VoiceSettingTool:
         if not value:
             return ToolResult(ok=False, error=f"say the value for {key}, e.g. key=tts_voice value=af_heart")
         try:
-            reply = await ctx.bus.request(_Message.new(_topics.VOICE_CONTROL_REQUEST, source="execution",
+            reply = await ctx.bus.request(_Message.new(topics.VOICE_CONTROL_REQUEST, source="execution",
                                                        payload={"action": "set", "key": key, "value": value}), timeout=20.0)
         except Exception as exc:  # noqa: BLE001
             return ToolResult(ok=False, error=f"the voice service did not answer: {exc!r}")
@@ -2315,7 +2315,8 @@ class ReplaceInFileTool:
             return ToolResult(ok=False, error=f"refused: {problem}")
 
         root = tool_root(self._config, ctx, subject)
-        content, refusal = pathsafety.read_source(root, subject, readable_roots=self._config.readable_roots)
+        content, refusal = pathsafety.read_source(root, subject, readable_roots=self._config.readable_roots,
+                                                  root_files=self._config.readable_root_files)
         if refusal:
             return ToolResult(ok=False, error=refusal)
 

@@ -607,7 +607,7 @@ class Config:
         if "repo_root" in kwargs:
             kwargs["repo_root"] = Path(kwargs["repo_root"])
             kwargs["repo_root_named"] = True
-        for key in ("readable_roots", "write_scopes_source", "write_scopes_skills",
+        for key in ("readable_roots", "readable_root_files", "write_scopes_source", "write_scopes_skills",
                     "knowledge_cloud_llm_may_see", "pim_cloud_llm_may_see", "pim_accounts",
                     "security_secrets_paths"):
             if key in kwargs:

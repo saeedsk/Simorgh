@@ -262,7 +262,8 @@ class RenderPageTool:
                 target, allow_private=self._config.render_page_allow_private_networks, resolver=self._resolver)
             return target
         resolved, refusal = pathsafety.resolve_safe_path(
-            self._config.repo_root, target, readable_roots=self._config.readable_roots)
+            self._config.repo_root, target, readable_roots=self._config.readable_roots,
+            root_files=self._config.readable_root_files)
         if refusal:
             raise FetchRefused(refusal)
         return resolved.as_uri()

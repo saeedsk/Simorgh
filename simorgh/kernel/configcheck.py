@@ -91,13 +91,9 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     # -- `execution.Config.approval_max_age_s` is never read anywhere to
     # bound anything on the execution side.
     #
-    # `execution/pathsafety.py`'s root-file check (`if len(rel.parts)
-    # == 1 and rel.parts[0] in ROOT_FILES`) reads its own hardcoded
-    # module-level `ROOT_FILES` frozenset, not `config.readable_root_
-    # files` -- the config field parses into a tuple that nothing ever
-    # passes to `resolve_safe_path`/`read_source`/`safe_read_file` (they
-    # all take `readable_roots` only).
-    "execution": frozenset({"approval_max_age_s", "readable_root_files"}),
+    # (`readable_root_files` was listed here until 2026-09-19; every read
+    # tool now passes it to `pathsafety` as `root_files`.)
+    "execution": frozenset({"approval_max_age_s"}),
     # `guardian/rules.py`'s `ReversibilityRule.evaluate` reads `ctx.
     # config.mode` and `ctx.config.irreversible_requires_human` but never
     # `reversible_auto_in_guarded` -- a `reversible` proposal is
