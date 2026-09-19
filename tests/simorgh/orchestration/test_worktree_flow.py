@@ -230,3 +230,58 @@ class TestAPatchTaskLandsThroughItsWorktree(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestALandingTellsTheSelfModel(unittest.TestCase):
+    """The landing path publishes learn.self_patch.applied with the landed
+    commit; a refused landing publishes nothing (evaluation C1: four
+    subsystems subscribed and the real landing path never published)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name)
+        forget_registered()
+        for name in (*profiles.PATCH.tools, "worktree_open", "worktree_land", "worktree_close"):
+            note_registered(name)
+
+    def tearDown(self) -> None:
+        forget_registered()
+        self._tmp.cleanup()
+
+    async def _landed_events(self, *, land_ok: bool) -> list:
+        from simorgh.contracts import topics
+
+        async with Harness() as h:
+            seen: list = []
+
+            async def _see(message) -> None:
+                seen.append(message.payload)
+
+            sub = await h.client("worldmodel").subscribe(topics.LEARN_SELF_PATCH_APPLIED, _see)
+            cognition = FakeCognition(h.client("cognition"), script=_SCRIPT)
+            gx = WorktreeExecution(h.client("guardian"), self.path, land_ok=land_ok)
+            verification = FakeVerification(h.client("verification"), ["pass"])
+            for fake in (cognition, gx, verification):
+                await fake.start()
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now, worktrees=True)
+            session = Session(task_id="t-land", kind="patch", mode="execute", profile=profiles.PATCH,
+                              subject="simorgh/memory/store.py")
+            await runner.run(session, user_text="add X")
+            import asyncio
+
+            await asyncio.sleep(0.05)
+            await sub.unsubscribe()
+            for fake in (cognition, gx, verification):
+                await fake.stop()
+            return seen
+
+    @run
+    async def test_a_landing_publishes_the_commit(self):
+        seen = await self._landed_events(land_ok=True)
+        self.assertEqual(len(seen), 1, seen)
+        self.assertEqual(seen[0]["commit"], "2222222")
+        self.assertEqual(seen[0]["subject"], "simorgh/memory/store.py")
+
+    @run
+    async def test_a_refused_landing_publishes_nothing(self):
+        self.assertEqual(await self._landed_events(land_ok=False), [])
