@@ -56,7 +56,6 @@ _PROJECTS_STREAM = "curiosity:projects"
 @dataclass
 class _BudgetState:
     worst_remaining: float | None = None
-    any_free: bool = False
 
 
 class Service:
@@ -351,18 +350,21 @@ class Service:
         await self._bus.reply(message, type=topics.CURIOSITY_INTEREST_LIST_REPLY, payload={"interests": interests})
 
     async def _on_interest_follow_up_request(self, message) -> None:
+        # The fetch is only proposed here; its item count arrives later on
+        # `curiosity.interest.updated` (after `action.result`). The reply's
+        # `items_found` is therefore always 0: nothing has been read yet.
         topic = message.payload.get("topic")
-        interest = None
         if topic:
             self._interests.note(topic)
-            interest = self._interests.least_recently_followed(now=self._now())
-        found = await self._follow_up_least_recent(topic=topic) if topic else await self._follow_up_least_recent()
-        await self._bus.reply(message, type=topics.CURIOSITY_INTEREST_FOLLOW_UP_REPLY, payload={"items_found": found})
+        await self._follow_up_least_recent(topic=topic)
+        await self._bus.reply(message, type=topics.CURIOSITY_INTEREST_FOLLOW_UP_REPLY, payload={"items_found": 0})
 
-    async def _follow_up_least_recent(self, topic: str | None = None) -> int:
-        target = self._interests.least_recently_followed(now=self._now()) if topic is None else Interest(topic=topic, why="", created_at=self._now())
+    async def _follow_up_least_recent(self, topic: str | None = None) -> None:
+        """Propose a `web_fetch` of `topic` (or the least recently
+        followed interest). Returns nothing: the count arrives later."""
+        target = self._interests.least_recently_followed(now=self._now()) if not topic else Interest(topic=topic, why="", created_at=self._now())
         if target is None or not is_feed_url(target.topic):
-            return 0
+            return
         action_id = f"web_fetch-{hashlib.sha256(target.topic.encode()).hexdigest()[:12]}-{int(self._now())}"
         self._pending_web_fetches[action_id] = target.topic
         await self._publish(topics.ACTION_PROPOSED, {
@@ -370,7 +372,6 @@ class Service:
             "scope": {"paths": [], "network": True}, "reversibility": "read_only",
             "rationale": f"following up on tracked interest {target.topic!r}", "proposed_by": "curiosity",
         })
-        return 0  # async: the count arrives later via action.result -> curiosity.interest.updated
 
     # -- ticks ------------------------------------------------------------------------------
     async def _on_tick_idle(self, message) -> None:
@@ -430,7 +431,7 @@ class Service:
             return []
         boredom = min(1.0, idle_seconds / self._config.boredom_after_seconds) if self._config.boredom_after_seconds > 0 else 0.0
         rate = self._exploration_rate()
-        if rate <= 0.0 and not self._budget.any_free and not force:
+        if rate <= 0.0 and not force:
             await self._record_tick(skipped_reason="budget")
             return []
         # Past every guard: this tick is going to spend cognition, so it
@@ -455,7 +456,7 @@ class Service:
             return created
 
         picked: list[str] = []
-        if force or rate >= 1.0 or self._budget.any_free:
+        if force or rate >= 1.0:
             count = self._config.candidates_per_tick
         else:
             count = round(self._config.candidates_per_tick * rate)
@@ -562,7 +563,11 @@ class Service:
         return goal
 
     async def _emit_candidate(self, candidate_id: str, target: Target, idea) -> None:
-        novelty = 0.0 if self._recent.similar(idea.description) else 1.0
+        # How unlike the recently proposed descriptions this one is:
+        # 1 - the closest difflib ratio (1.0 when nothing is recent). It was
+        # a constant 1.0, because the caller has already dropped anything
+        # `similar` (found writing CONTRACT.md, 2026-09-19).
+        novelty = self._recent.novelty(idea.description)
         await self._append(_CANDIDATES_STREAM, "proposed", {
             "candidate_id": candidate_id, "kind": idea.kind, "subject": target.subject,
             "description": idea.description, "area": target.area,

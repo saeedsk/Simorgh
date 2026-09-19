@@ -49,13 +49,13 @@ Exact subscription list: `_CONSUMES` (`service.py:31-38`), plus `system.tick.sec
 | `curiosity.share.request` | `messages/curiosity.py::CuriosityShareRequest` | simorgh/curiosity/service.py | shares now if the scheduler's next decision is of the asked kind; replies |
 | `curiosity.interest.add` | `messages/curiosity.py::CuriosityInterestAdd` | simorgh/curiosity/service.py | notes a topic or feed URL (published by Interface) |
 | `curiosity.interest.list.request` | `messages/curiosity.py::CuriosityInterestListRequest` | simorgh/curiosity/service.py | replies with interests, scores, last follow-up |
-| `curiosity.interest.follow_up.request` | `messages/curiosity.py::CuriosityInterestFollowUpRequest` | simorgh/curiosity/service.py | proposes a feed fetch; replies `items_found: 0` (the count arrives later) |
+| `curiosity.interest.follow_up.request` | `messages/curiosity.py::CuriosityInterestFollowUpRequest` | simorgh/curiosity/service.py | proposes a feed fetch; replies `items_found: 0` always, because nothing has been read yet: the real count arrives later on `curiosity.interest.updated` after `action.result` |
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `curiosity.candidate` | `messages/curiosity.py::CuriosityCandidate` | simorgh/curiosity/service.py | an exploration tick yields a non-duplicate idea for a sampled target (consumed by Planning) |
+| `curiosity.candidate` | `messages/curiosity.py::CuriosityCandidate` | simorgh/curiosity/service.py | an exploration tick yields a non-duplicate idea for a sampled target (consumed by Planning); `novelty_score` is 1 minus the closest `difflib` ratio to a recent candidate's description (1.0 when none is recent; always above 1 - 0.6, since similar ones are dropped) |
 | `intent.goal.stated` | `messages/intent.py::IntentGoalStated` | simorgh/curiosity/service.py | a project proposal succeeds (`origin: curiosity`, `wants_project: true`) |
 | `curiosity.share.proposed` | `messages/curiosity.py::CuriosityShareProposed` | simorgh/curiosity/service.py | the share scheduler says it is time (idle tick, command or request; consumed by Persona) |
 | `curiosity.interest.updated` | `messages/curiosity.py::CuriosityInterestUpdated` | simorgh/curiosity/service.py | a feed follow-up completes or is denied (allow-listed one-sided: dashboard) |
@@ -129,7 +129,7 @@ All five are write-only from Curiosity's side: interests, backlog, staleness and
 - A non-forced tick is skipped when the system is paused/stopping, autonomy is paused, the backlog is non-empty, the explore cooldown has not elapsed, or the budget rate is 0; a `curiosity.discover.request` bypasses all of these.
 - A skipped tick does not start the explore cooldown; the ticks stream records a skip reason only on the edge (a repeat of the same reason is not appended).
 - The candidate's `subject` is always the sampler's target; the model's reply cannot redirect it.
-- A candidate whose description is similar to a recent one is dropped, not published.
+- A candidate whose description is similar to a recent one is dropped, not published; a published one carries its measured `novelty_score` (`RecentCandidates.novelty`, pinned in `tests/simorgh/curiosity/test_service.py::test_candidate_novelty_is_measured_against_recent_candidates`).
 - Exploration rate: 1.0 when budget is unknown, 0.5 at or below `budget_backoff_below_remaining`, 0 at or below `budget_stop_below_remaining`; a provider with no cap does not count.
 - World Model absent: the tick records `no_world_model` and does not raise. A floor (non-model) Cognition reply yields no idea and no candidate (`idea.py:79-80`).
 - Stage 8 merges this package into `growth/`; every `curiosity.*` topic keeps both its sides through the merge.
@@ -151,6 +151,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - C1 -- `learn.self_patch.applied` had no real publisher, so growth shares never fired from landings; fixed 2026-09-18 (`1e486f1`).
 - C4 -- a paused Curiosity appended `autonomy_paused` every 3 s (161k events, 45 MB); fixed 2026-09-18 (`62318d3`: edge-triggered record, and `curiosity:ticks` retention 7d). No test in `tests/simorgh/curiosity/` pins the edge trigger yet.
 - C9 -- the budget throttle read fields Cognition never sends, so it never throttled; fixed 2026-09-18 (`62318d3`). No consumer-side test pins the field names yet.
+- Found writing this contract, fixed 2026-09-19: `novelty_score` was always 1.0 (computed after the similarity filter had already dropped the similar ones); `_BudgetState.any_free` was never set after the C9 fix and was deleted; the follow-up request handler computed an unused interest and a return value that was always 0, both removed.
 - C14 -- the drives cost health noise without producing decisions; candidate sampling is the part that changes behaviour (open, stage 8).
 
 ## Planned changes (roadmap)

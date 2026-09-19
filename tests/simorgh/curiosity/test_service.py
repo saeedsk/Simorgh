@@ -177,6 +177,18 @@ class CuriosityServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn(candidate["subject"], [p for mods in _AREAS.values() for p in mods])
         self.assertEqual(candidate["area"], "cognition" if candidate["subject"] in _AREAS["cognition"] else "learning")
 
+    async def test_candidate_novelty_is_measured_against_recent_candidates(self):
+        """`novelty_score` was a constant 1.0 (the caller had already dropped
+        anything `similar`). It is now 1 - the closest recent ratio."""
+        self.service._recent.add("x.py", "rewrite a parser")  # ratio 0.47 to "tighten a loop"
+        seen = []
+        sub = await self.requester.subscribe(topics.CURIOSITY_CANDIDATE, lambda m: seen.append(m) or asyncio.sleep(0))
+        await self.bus.publish(self.bus.new(topics.SYSTEM_TICK_IDLE, {"idle_seconds": 5.0}))
+        await self._wait_until(lambda: len(seen) >= 1)
+        await sub.unsubscribe()
+        self.assertEqual(seen[0].payload["description"], "tighten a loop")
+        self.assertAlmostEqual(seen[0].payload["novelty_score"], 1.0 - 7 / 15)
+
     async def test_paused_state_skips_ticks(self):
         await self.bus.publish(self.bus.new(topics.SYSTEM_STATE_CHANGED, {"state": "paused"}))
         await self._pump()

@@ -118,9 +118,15 @@ class RecentCandidates:
         return [s for s, _ in list(self._ring)[-limit:]]
 
     def similar(self, description: str) -> bool:
+        return self._closest(description) >= self._threshold
+
+    def novelty(self, description: str) -> float:
+        """1 minus the highest `difflib` ratio against a recent
+        description; 1.0 when the ring is empty."""
+        return 1.0 - self._closest(description)
+
+    def _closest(self, description: str) -> float:
         import difflib
 
-        return any(
-            difflib.SequenceMatcher(None, description, existing).ratio() >= self._threshold
-            for _, existing in self._ring
-        )
+        return max((difflib.SequenceMatcher(None, description, existing).ratio() for _, existing in self._ring),
+                   default=0.0)
