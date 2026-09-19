@@ -167,7 +167,12 @@ def config_path() -> Path:
         return Path(env).expanduser()
     if Path("simorgh.toml").is_file():
         return Path("simorgh.toml")
-    return Path("~/.simorgh").expanduser() / "simorgh.toml"
+    # The data dir the Kernel uses (kernel/config.py::load_config), not a
+    # literal ~/.simorgh: with SIMORGH_RUNTIME_DATA_DIR set, the two used
+    # to resolve different files and a write here went where the Kernel
+    # never looks (found writing contracts' CONTRACT.md, 2026-09-19).
+    data_dir = Path(os.environ.get("SIMORGH_RUNTIME_DATA_DIR", "~/.simorgh")).expanduser()
+    return data_dir / "simorgh.toml"
 
 
 def _toml_value(value: object) -> str:

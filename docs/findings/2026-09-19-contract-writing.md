@@ -26,7 +26,7 @@ Five general-purpose agents, 19 modules split by layer. Each edited only its own
 | The benchmark runner resolved checkouts against the cwd | benchmark | `3a441a5` |
 | No test pinned that a landing publishes `learn.self_patch.applied` | orchestration | test added |
 | `verification` was a namespace package, invisible to the tools, with no contract | verification | `8b7e4dd` |
-| Verification's own pytest runs inherited Sim's full environment (every provider key) with no resource limits; one of the three runs executes the model's own tests on a copy of the task's tree (the other two run tests already on main, which the agent's report overstated) | verification | this commit |
+| Verification's own pytest runs inherited Sim's full environment (every provider key) with no resource limits; one of the three runs executes the model's own tests on a copy of the task's tree (the other two run tests already on main, which the agent's report overstated) | verification | `fa12464` |
 
 ## Open, by what they risk
 
