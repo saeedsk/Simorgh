@@ -36,11 +36,14 @@ from simorgh.contracts.protocols import Context, Health
 from .api import (
     CHECK_IN_AGAIN_S,
     COMPOSED,
+    COOLDOWN,
+    NOT_NOW_HOLD_S,
     PERSONAL,
     Notice,
     Situation,
     acceptable_line,
     companion_gate,
+    pushback,
     compose_prompt,
     cooldown_key,
     decide,
@@ -52,6 +55,7 @@ VERSION = "0.2.0"
 
 _CONSUMES = (
     topics.CAMERA_EVENT, topics.CAMERA_DESCRIBED, topics.PERCEPT_TIME_SCHEDULED, topics.CURIOSITY_SHARE_PROPOSED,
+    topics.TURN_COMPLETED,
     topics.WORLD_WELLBEING_CHANGED, topics.SYSTEM_TICK_SLEEP,
 )
 _PRODUCES = (topics.ACTION_PROPOSED, topics.INITIATIVE_OFFERED, topics.INITIATIVE_SUPPRESSED,
@@ -78,6 +82,9 @@ class Service:
         #: person -> when Sim last asked how they were, cleared when
         #: they are seen their usual self again (`CHECK_IN_AGAIN_S`).
         self._asked_about: dict[str, float] = {}
+        #: How long after a check-in a "not now" is about the check-in.
+        #: Beyond it, "I'm fine" is an ordinary sentence.
+        self._pushback_window_s = 10 * 60.0
         self._delivered_today = 0
         self._day = 0
         self.do_not_disturb: set[str] = set()
@@ -90,6 +97,7 @@ class Service:
             await ctx.bus.subscribe(topics.PERCEPT_TIME_SCHEDULED, self._on_schedule_fired),
             await ctx.bus.subscribe(topics.CURIOSITY_SHARE_PROPOSED, self._on_share_proposed),
             await ctx.bus.subscribe(topics.WORLD_WELLBEING_CHANGED, self._on_wellbeing_changed),
+            await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
         ]
 
     async def stop(self) -> None:
@@ -126,6 +134,58 @@ class Service:
         kinds = [str(k) for k in (message.payload.get("kinds") or [])]
         kind = "safety_alert" if "person" in kinds and "front" in camera.lower() else "event_fyi"
         await self.offer(Notice(kind=kind, text=f"{camera}: {text}", ref=f"camera:{camera}"))
+
+    async def _on_turn_completed(self, message: Message) -> None:
+        """What the person said after Sim asked how they were.
+
+        A companion that cannot be told to leave it is not a
+        companion, it is a process. "Not now" or "I'm fine" holds
+        check-ins with that person for a day -- they answered, they
+        just do not want to talk about it, and Sim asking again
+        tomorrow is the whole complaint. "Stop asking me" is consent
+        being withdrawn, and Sim does not withdraw consent on
+        somebody's behalf any more than it granted it: that becomes a
+        `people revoke` proposal at tier 3, which the person
+        confirms (stage 10 item 6).
+
+        Only in the window after a check-in, so "I'm fine" in an
+        ordinary conversation is an ordinary sentence.
+        """
+        payload = message.payload or {}
+        person = str(payload.get("speaker") or "").strip()
+        if not person:
+            return
+        asked = self._asked_about.get(person)
+        now = self._ctx.clock.now()
+        if asked is None or now - asked > self._pushback_window_s:
+            return
+        said = pushback(str(payload.get("user_text") or ""))
+        if not said:
+            return
+        if said == "not now":
+            # A hold, through the machinery that already holds things:
+            # the cooldown this class is keyed on for this person.
+            self._last_by_kind[f"check_in:{person}"] = now + NOT_NOW_HOLD_S - COOLDOWN.get("check_in", 0.0)
+            await self._suppress(Notice(kind="check_in", text="", person=person),
+                                 f"{person} said not now; holding check-ins with them for a day")
+            return
+        await self._propose_revoke(person)
+
+    async def _propose_revoke(self, person: str) -> None:
+        """Ask for `wellbeing_checkins` to be withdrawn. Tier 3: the
+        person themselves says yes, exactly as they did to grant it."""
+        ctx = self._ctx
+        await ctx.bus.publish(Message.new(topics.ACTION_PROPOSED, source=ctx.bus.source, payload={
+            "action_id": uuid.uuid4().hex,
+            "tool": "people",
+            "args": {"action": "revoke", "name": person, "permission": "wellbeing_checkins"},
+            "scope": {"paths": [], "network": False},
+            "reversibility": "reversible",
+            "rationale": f"{person} asked Sim to stop checking in on them",
+            "proposed_by": ctx.bus.source,
+            "requester": person, "requester_channel": "voice",
+        }))
+        self._asked_about.pop(person, None)
 
     async def _on_schedule_fired(self, message: Message) -> None:
         payload = message.payload

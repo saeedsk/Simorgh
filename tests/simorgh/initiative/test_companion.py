@@ -438,3 +438,34 @@ class ACameraDoesNotSpeakForItself(unittest.IsolatedAsyncioTestCase):
         if delivery is not None:
             self.assertEqual(delivery.tool, "notify",
                              "a camera at 02:00 with a child asleep must not use the speaker")
+
+
+class BeingToldToLeaveIt(unittest.IsolatedAsyncioTestCase):
+    """A companion that cannot be told to stop is a process.
+
+    Two answers, treated differently on purpose. "Not now" is a hold
+    Sim applies itself -- they answered, they just do not want to
+    talk about it, and asking again tomorrow is the whole complaint.
+    "Stop asking me" is consent being withdrawn, and Sim withdraws
+    consent on nobody's behalf: it proposes the revoke at tier 3 and
+    the person confirms, exactly as they did to grant it.
+    """
+
+    def test_what_counts_as_which(self):
+        from simorgh.initiative.api import pushback
+
+        for said in ("not now", "I'm fine, thanks", "nothing's wrong", "leave it"):
+            self.assertEqual(pushback(said), "not now", said)
+        for said in ("stop asking me that", "please stop checking on me", "don't ask me that again"):
+            self.assertEqual(pushback(said), "stop", said)
+        for said in ("yeah, it was a long week", "fine by me", "I'm going to the shop"):
+            self.assertEqual(pushback(said), "", said)
+
+    def test_a_long_week_is_not_pushback(self):
+        """The words that matter are narrow; an ordinary answer to
+        "how are you" must not read as a refusal, or the one time
+        somebody actually talks is the time Sim stops listening."""
+        from simorgh.initiative.api import pushback
+
+        self.assertEqual(pushback("It's been a lot, honestly"), "")
+        self.assertEqual(pushback("Work is fine, home is the problem"), "")

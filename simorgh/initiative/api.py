@@ -200,6 +200,41 @@ def cost(channel: str, situation: Situation, *, now: float | None = None, privat
     return max(0.0, base)
 
 
+#: How somebody says "not right now" to a check-in. A hold, not a
+#: refusal: they answered, they just do not want to talk about it.
+_NOT_NOW = re.compile(r"\b(?:not now|not right now|i'?m fine|im fine|i am fine|nothing'?s wrong|"
+                      r"nothing is wrong|later|leave it|it'?s nothing|dont worry|don'?t worry)\b", re.I)
+#: And how somebody says stop. This is consent being withdrawn, so it
+#: is never acted on here: it becomes a `people revoke` proposal at
+#: tier 3, which the person themselves confirms.
+_STOP_ASKING = re.compile(r"\b(?:stop asking|don'?t ask me|dont ask me|stop checking|"
+                          r"never ask me|i don'?t want you asking|stop that)\b", re.I)
+
+#: How long "not now" holds check-ins for that person.
+NOT_NOW_HOLD_S: float = 24 * 3600.0
+
+
+def pushback(text: str) -> str:
+    """What somebody just said about being checked in on: `"not now"`,
+    `"stop"`, or `""`.
+
+    The asymmetry is deliberate. "Not now" is a hold Sim applies
+    itself, because it costs nothing and undoing it is one more
+    check-in a day later. "Stop" is consent being withdrawn, and Sim
+    does not get to withdraw consent on somebody's behalf any more
+    than it got to grant it: it proposes the revoke at tier 3 and the
+    person confirms (stage 10 item 6).
+    """
+    text = (text or "").strip()
+    if not text:
+        return ""
+    if _STOP_ASKING.search(text):
+        return "stop"
+    if _NOT_NOW.search(text):
+        return "not now"
+    return ""
+
+
 def cooldown_key(notice: Notice) -> str:
     """What a class's cooldown is keyed on: the class, or for a personal
     class the class and the person -- a check-in with Soodeh does not
@@ -328,6 +363,7 @@ def acceptable_line(text: str) -> tuple[str, str]:
 
 
 __all__ = ["ALONE_DISCOUNT", "CHANNELS", "CHANNEL_COST", "CHECK_IN_AGAIN_S", "COMPOSED", "COOLDOWN",
+           "NOT_NOW_HOLD_S", "pushback",
            "DAILY_CAP", "Delivery",
            "FORBIDDEN_WORDS", "LINE_MAX_CHARS", "NOTHING", "Notice", "PERSONAL", "PRIVATE", "REACH", "Situation",
            "URGENCY",
