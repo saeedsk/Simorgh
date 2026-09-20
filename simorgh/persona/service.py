@@ -76,7 +76,6 @@ class Service:
     )
     produces: tuple[str, ...] = (
         topics.PERSONA_STATE_CHANGED, topics.PERSONA_VOICE_REPLY, topics.PERSONA_USER_MODEL_UPDATED,
-        topics.UI_NOTICE,
     )
 
     def __init__(self, config: Config | None = None) -> None:
