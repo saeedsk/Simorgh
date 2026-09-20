@@ -17,12 +17,6 @@ task = "stage 11 item 8: the latency table"
 since = "2026-09-20T20:09:27+00:00"
 until = "2026-09-21T04:09:27+00:00"
 
-[locks.initiative]
-by = "opus-main"
-task = "stage 10 item 6: not now holds, stop proposes the revoke"
-since = "2026-09-20T23:38:01+00:00"
-until = "2026-09-21T07:38:01+00:00"
-
 [locks.interface]
 by = "opus-main"
 task = "a telegram turn renders as ? · ? · (no description)"
@@ -35,20 +29,8 @@ task = "tell a config that still uses the pre-merge section names"
 since = "2026-09-20T19:50:56+00:00"
 until = "2026-09-21T03:50:56+00:00"
 
-[locks.orchestration]
-by = "opus-main"
-task = "stage 10 item 5: the speaker's own state note in their own turn"
-since = "2026-09-20T23:35:34+00:00"
-until = "2026-09-21T07:35:34+00:00"
-
 [locks.simloader]
 by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
 since = "2026-09-20T19:42:55+00:00"
 until = "2026-09-21T03:42:55+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "stage 6 item 6: an unprompted line waits for the floor"
-since = "2026-09-20T23:33:48+00:00"
-until = "2026-09-21T07:33:48+00:00"
