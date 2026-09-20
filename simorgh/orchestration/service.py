@@ -90,6 +90,7 @@ class Service:
                             keep_recent_steps=self.config.keep_recent_steps,
                             clean_revisions=self.config.clean_revisions,
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
+                            max_children=self.config.max_children_concurrent,
                             delegate_max_steps=self.config.delegate_max_steps,
                             escalate_from_attempt=self.config.escalate_from_attempt, worktrees=self.config.worktrees,
                             escalate_below_posterior=self.config.escalate_below_posterior,

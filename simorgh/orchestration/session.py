@@ -58,7 +58,7 @@ MEMORY_SEARCH = "memory_search"
 #: Guardian never sees them, because none of them has an effect. An agent
 #: file may list `memory_search`; `delegate`, `use_skill` and
 #: `recall_result` are added when the session has something to use them on.
-SESSION_LOCAL = frozenset({MEMORY_SEARCH, "delegate", "use_skill", pressure_mod.RECALL_TOOL})
+SESSION_LOCAL = frozenset({MEMORY_SEARCH, "delegate", "task", "use_skill", pressure_mod.RECALL_TOOL})
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here
@@ -581,7 +581,7 @@ class SessionRunner:
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
         escalate_below_posterior: float = 0.0, escalate_min_samples: int = 8,
-        clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
+        clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3, max_children: int = 4,
         delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"), telemetry=None,
@@ -595,6 +595,9 @@ class SessionRunner:
         #: happens in the house can reach the agent working in it
         #: (stage 6 item 7).
         self._open: dict[str, Session] = {}
+        #: Helper sessions running for a parent task (stage 7 item 1), so
+        #: `max_children_concurrent` is a real cap and not a number in a doc.
+        self._children: dict[str, list] = {}
         # Agent Skills: the catalog rides in `task_rules` and `use_skill` returns
         # one skill's instructions. Off by default -- every THINK pays for the
         # catalog (docs/plans/agent-skills-design.md section 5.2).
@@ -618,6 +621,7 @@ class SessionRunner:
         # session in-process with a fresh context and returns only its report.
         self._delegation = bool(delegation)
         self._max_depth = max(0, int(max_depth))
+        self._max_children = max(1, int(max_children))
         self._delegate_max_steps = max(3, int(delegate_max_steps))
         # A revision after a rejected answer starts from the note and the
         # last few steps, not the whole transcript (design section 4).
@@ -1028,7 +1032,7 @@ class SessionRunner:
                 if len(batch) > 1:
                     summary = await self._run_batch(session, batch, step_no)
                 else:
-                    if call.get("tool") == "delegate":
+                    if call.get("tool") in ("delegate", "task"):
                         ok, summary, detail = await self._delegate(session, call)
                     elif call.get("tool") == "use_skill":
                         ok, summary, detail = await self._use_skill(session, call)
@@ -1431,7 +1435,7 @@ class SessionRunner:
 
     def _parallel_offer(self, offered) -> dict:
         """Which offered tools may run together, when that is switched on."""
-        reads = [tool for tool in offered if tool != "delegate" and is_read_only(tool)]
+        reads = [tool for tool in offered if tool not in ("delegate", "task") and is_read_only(tool)]
         if self._parallel_reads < 2 or len(reads) < 2:
             return {}
         return {"parallel_tools": reads, "max_parallel_tools": self._parallel_reads}
@@ -1453,7 +1457,7 @@ class SessionRunner:
     @staticmethod
     def _batchable(call: dict) -> bool:
         tool = str(call.get("tool") or "")
-        return tool != "delegate" and is_read_only(tool)
+        return tool not in ("delegate", "task") and is_read_only(tool)
 
     def _dropped_rule(self) -> str:
         if self._parallel_reads > 1:
@@ -1492,7 +1496,7 @@ class SessionRunner:
         return [results[i][1] for i in range(len(calls))]
 
     async def _run_one(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
-        if call.get("tool") == "delegate":
+        if call.get("tool") in ("delegate", "task"):
             return await self._delegate(session, call)
         if call.get("tool") == "use_skill":
             return await self._use_skill(session, call)
@@ -1538,9 +1542,24 @@ class SessionRunner:
 
             head, _, rest = str(args["argument"]).partition("\n")
             args = {"job": head.strip(), **_json_rest(rest, "spec")}
-        job = " ".join(str(args.get("job") or args.get("goal") or "").split())
+        job = " ".join(str(args.get("job") or args.get("goal") or args.get("brief") or "").split())
         if not job:
             text = "delegate: refused -- say on the first line what the helper should do"
+            return False, text, text
+        # Which agent the helper is (stage 7 item 1). `research` unless the
+        # caller names one that exists; an unknown name is said rather than
+        # silently swapped, or a typo becomes a different kind of helper.
+        from . import profiles as _agents
+
+        wanted = str(args.get("agent") or "").strip().lower()
+        if wanted and wanted not in _agents.AGENTS:
+            text = (f"delegate: refused -- no agent called {wanted!r}; "
+                    f"the agents are {', '.join(sorted(_agents.AGENTS))}")
+            return False, text, text
+        running = len([t for t in self._children.get(session.task_id, ()) if not t.done()])
+        if running >= self._max_children:
+            text = (f"delegate: refused -- {running} helper(s) already running for this task; "
+                    f"{self._max_children} at once is the cap")
             return False, text, text
         if session.depth >= self._max_depth:
             text = f"delegate: refused -- helpers may not go deeper than {self._max_depth}"
@@ -1550,7 +1569,7 @@ class SessionRunner:
         except (TypeError, ValueError):
             steps = 0
         steps = max(3, min(self._delegate_max_steps, steps or self._delegate_max_steps))
-        n = sum(1 for s in session.steps if s.tool == "delegate") + 1
+        n = sum(1 for s in session.steps if s.tool in ("delegate", "task")) + 1
         child_id = f"{session.task_id}-h{n}"
         goal = (session.progress.split("\n", 1)[0] if session.progress
                 else " ".join(session.user_text.split())[:500]) or "(not stated; the job below is the whole brief)"
@@ -1564,13 +1583,21 @@ class SessionRunner:
             "first the answer in one or two sentences, then the facts behind it as '- ' bullets with "
             "exact paths, names and numbers, including any tests you ran and whether they passed."
         )
+        agent = _agents.AGENTS[wanted] if wanted else _profiles.RESEARCH
         child = Session(
-            task_id=child_id, kind="research", mode="execute",
-            profile=_replace(_profiles.RESEARCH, verify=False, max_steps=steps),
+            task_id=child_id, kind=agent.scaffold if wanted else "research", mode="execute",
+            profile=_replace(agent, verify=False, max_steps=steps),
             budget=_Budget(max_steps=steps), worker_id=session.worker_id, user_text=brief,
             depth=session.depth + 1, parent_id=session.task_id,
         )
-        outcome = await self.run(child, user_text=brief)
+        running_task = asyncio.ensure_future(self.run(child, user_text=brief))
+        self._children.setdefault(session.task_id, []).append(running_task)
+        try:
+            outcome = await running_task
+        finally:
+            siblings = self._children.get(session.task_id) or []
+            if running_task in siblings:
+                siblings.remove(running_task)
         session.spent_usd += child.spent_usd
         session.spent_tokens += child.spent_tokens
         body = (outcome.result_summary or outcome.reason or "(no report)").strip()

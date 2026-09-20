@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-19: item 7 done) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-19: item 7 done, item 1 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 8.1 rows planning and verification; section 9.2 (projects tha
 Stage 4's long-task suite (60 scripted turns, kill-and-resume) is the gate; record its numbers. Read `planning/decomposer.py` (`parse_steps`, the numbered-list regex), `planning/model.py`, `planning/service.py` (rollups, the DAG), `orchestration/session.py::_delegate`, `orchestration/api.py::Session`, `verification/` (plan review, trajectory), `kernel/scheduler.py`.
 
 ## Action items
+
+Done 2026-09-19 (item 1, in part): a helper may be any agent (`delegate`/`task` with `{"agent": ...}`), children run as real asyncio tasks under a concurrency cap read from `max_children_concurrent`, and depth still bounds the chain. Still open in item 1: `isolation: fresh|fork`, a child's own `session:<id>` stream separate from its task stream, and the typed `Task` argument shape.
 
 Done 2026-09-19 (item 7): `session.checkpoint` after every successful action that changes something, and `resume.done_actions` reading them back, so a resumed session answers an already-completed call with what it returned rather than repeating it. A read is never checkpointed.
 

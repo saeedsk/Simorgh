@@ -106,6 +106,9 @@ class Config:
     attempt_max_usd: float = 0.0
     attempt_max_wall_s: float = 0.0
     max_depth: int = 3
+    # How many helpers one task may run at once (stage 7 item 1). Read
+    # since 2026-09-19; it was declared and unread for a year, which is
+    # this codebase's commonest bug.
     max_children_concurrent: int = 4
     # Above Cognition's own `Budget.max_seconds` (180s), with room to
     # spare. It used to sit BELOW it: Cognition allowed each provider
