@@ -918,6 +918,11 @@ class SessionRunner:
             if (session.profile.scaffold != "chat" and session.messages and not session.budget.is_last_step
                     and progress_note.due(session.budget.steps_used, session.reground_at, self._reground_every)):
                 await self._reground(session)
+            if session.replan:
+                # Twice off course, or stuck: this attempt ends and the
+                # subtree is re-planned rather than spending the rest of
+                # the budget going further the wrong way (stage 7 item 6).
+                return Outcome("blocked", reason=f"needs re-planning -- {session.replan}")
             if session.messages and session.context_pressure >= pressure_mod.STUB_AT:
                 await self._relieve(session)
 
@@ -1865,7 +1870,43 @@ class SessionRunner:
                     f"next: {note.next}", ok=True)
         session.record(step)
         await self._record_step(session, step)
+        await self._checkpoint_critic(session, note)
         return True
+
+    async def _checkpoint_critic(self, session: Session, note) -> None:
+        """Ask whether this is still going to work (stage 7 item 6).
+
+        A long task does not fail by returning something wrong; it
+        wanders, and nothing notices until the budget is gone. The critic
+        scores the trajectory against the acceptance criteria at every
+        progress note, on the cheap tier. Two `drifting` verdicts in a
+        row end the attempt for re-planning -- one is a bad patch, two in
+        a row is a direction.
+        """
+        acceptance = [line[len("done when:"):].strip() for line in (session.acceptance or [])]
+        req = Message.new(topics.VERIFY_CHECKPOINT_REQUEST, source=self._bus.source, payload={
+            "task_id": session.task_id, "goal": session.user_text[:500],
+            "acceptance": session.acceptance or [], "trajectory": note.render()[:3000],
+        }, trace_id=session.trace, clock=self._clock)
+        try:
+            reply = await self._bus.request(req, timeout=self._think_timeout_s)
+        except Exception:  # noqa: BLE001 -- no critic is not a verdict
+            return
+        verdict = str(reply.payload.get("verdict") or "insufficient_evidence")
+        session.drifting = session.drifting + 1 if verdict == "drifting" else 0
+        if verdict in ("on_track", "insufficient_evidence"):
+            return
+        unmet = ", ".join(reply.payload.get("unmet") or []) or str(reply.payload.get("why") or "")
+        step = Step(session.next_step_no(), "verify", f"checkpoint: {verdict}" + (f" ({unmet})" if unmet else ""),
+                    ok=verdict != "blocked")
+        session.record(step)
+        await self._record_step(session, step)
+        if verdict == "blocked" or session.drifting >= 2:
+            session.replan = f"{verdict}: {unmet}" if unmet else verdict
+        elif reply.payload.get("next"):
+            session.messages.append({"role": "user", "content": (
+                f"A check of your progress says this is drifting ({unmet or 'no criterion met yet'}). "
+                f"The next thing to do is: {reply.payload['next']}")})
 
     # Live-caught (the creator: "I'd like ... code diffs ... similar UI
     # experience as claude code cli" -- 07-post-cutover-review.md §3.11):

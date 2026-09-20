@@ -212,6 +212,13 @@ class Session:
     #: The session asked to wait (stage 7 item 5): the attempt ends and
     #: Planning parks the task, rather than a worker sleeping on it.
     waiting: bool = False
+    #: What "done" means for this task, from its plan node (stage 7 items
+    #: 3 and 6); the checkpoint critic scores the trajectory against it.
+    acceptance: list = field(default_factory=list)
+    #: Consecutive `drifting` verdicts, and why the attempt is ending for
+    #: re-planning when there were two.
+    drifting: int = 0
+    replan: str = ""
     # The trace this session's messages carry. A task's trace is its task
     # id; a chat turn's is the percept's own trace, so one spoken or typed
     # turn is one trace from percept to turn.completed (stage 1 item 2).

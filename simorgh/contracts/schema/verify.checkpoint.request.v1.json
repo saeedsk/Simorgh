@@ -1,0 +1,33 @@
+{
+  "$id": "https://simorgh.local/schema/verify.checkpoint.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `verify.checkpoint.request` (catalog v1).",
+  "properties": {
+    "acceptance": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "goal": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "trajectory": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "goal",
+    "trajectory"
+  ],
+  "title": "verify.checkpoint.request",
+  "type": "object"
+}

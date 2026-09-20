@@ -100,6 +100,8 @@ Deleted rows: `denied:`, `error:`, `no:cacheprovider`, `run_shell:git`, `run_she
 
 ## Invariants
 
+- The checkpoint critic (stage 7 item 6, 2026-09-19): `verify.checkpoint.request{goal, acceptance, trajectory}` is answered on the cheap tier with `on_track | drifting | blocked | insufficient_evidence`, plus what is unmet and the one thing to do next. A reply that cannot be read as that JSON is `insufficient_evidence`, never approval: reading prose as a verdict is how a checker becomes a stamp. Not done: the majority vote of three samples the plan asks for -- one call per note today.
+
 - One `verify.result` per `verification_id`: a redelivered `verify.requested` re-publishes the verdict stored on `verify:<id>` and runs nothing (`service.py:143-152`).
 - A non-answer is never `fail`: an unanswered checklist item is `"unanswered"`, and too few answered items give `insufficient_evidence` (`verdict.py::combine`); a timeout from Cognition or Guardian becomes `floor`/`ok=False`, never an exception.
 - Mechanical checks run in cost order `free < cheap < expensive` and stop at the first `failed`; `isolated_suite` runs only at FULL rigor.

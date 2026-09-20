@@ -139,6 +139,11 @@ TOOL_INVOKED = "tool.invoked"
 # --- 4.8 verify -----------------------------------------------------------
 VERIFY_REQUESTED = "verify.requested"
 VERIFY_RESULT = "verify.result"
+#: Mid-task, not after it (stage 7 item 6): is this trajectory still
+#: going to meet the acceptance criteria, or has it wandered? Asked at
+#: every progress note, answered on the cheap tier.
+VERIFY_CHECKPOINT_REQUEST = "verify.checkpoint.request"
+VERIFY_CHECKPOINT_REPLY = "verify.checkpoint.reply"
 # --- 4.9 memory -----------------------------------------------------------
 MEMORY_RETRIEVE = "memory.retrieve"
 MEMORY_RETRIEVE_REPLY = "memory.retrieve.reply"

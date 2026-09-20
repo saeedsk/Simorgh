@@ -53,9 +53,10 @@ def _guardian_kind(kind: str) -> str:
 class VerificationService:
     name = "verification"
     version = "0.1.0"
-    consumes = (topics.VERIFY_REQUESTED, topics.PLAN_PROPOSED, topics.SYSTEM_STATE_CHANGED, topics.ACTION_RESULT)
+    consumes = (topics.VERIFY_REQUESTED, topics.VERIFY_CHECKPOINT_REQUEST, topics.PLAN_PROPOSED,
+                topics.SYSTEM_STATE_CHANGED, topics.ACTION_RESULT)
     produces = (
-        topics.VERIFY_RESULT, topics.PLAN_REVIEWED, topics.ACTION_PROPOSED,
+        topics.VERIFY_RESULT, topics.VERIFY_CHECKPOINT_REPLY, topics.PLAN_REVIEWED, topics.ACTION_PROPOSED,
         topics.GUARDIAN_REVIEW, topics.COGNITION_THINK,
     )
 
@@ -86,6 +87,7 @@ class VerificationService:
         if self._config_from_caller is None and ctx.config:
             self._config = VerificationConfig.from_mapping(dict(ctx.config))
         self._subs.append(await ctx.bus.subscribe(topics.VERIFY_REQUESTED, self._on_verify_requested, group="verification"))
+        self._subs.append(await ctx.bus.subscribe(topics.VERIFY_CHECKPOINT_REQUEST, self._on_checkpoint))
         self._subs.append(await ctx.bus.subscribe(topics.PLAN_PROPOSED, self._on_plan_proposed))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_RESULT, self._on_action_result))
@@ -113,6 +115,20 @@ class VerificationService:
         fut = self._pending_actions.pop(action_id, None)
         if fut is not None and not fut.done():
             fut.set_result(message.payload)
+
+    async def _on_checkpoint(self, message: Message) -> None:
+        """Score a trajectory against its acceptance criteria (stage 7
+        item 6), on the cheap tier -- a critic that costs as much as the
+        work is one nobody runs at every note."""
+        from .checkpoint import parse, prompt_for
+
+        p = message.payload
+        reply = await self._think(purpose="reground", prompt=prompt_for(
+            goal=str(p.get("goal") or ""), acceptance=p.get("acceptance") or [],
+            trajectory=str(p.get("trajectory") or "")))
+        answer = ({"verdict": "insufficient_evidence", "why": "no real provider for the critic"}
+                  if (reply.floor or not reply.ok) else parse(reply.text))
+        await self._ctx.bus.reply(message, type=topics.VERIFY_CHECKPOINT_REPLY, payload=answer)
 
     async def _on_verify_requested(self, message: Message) -> None:
         task = asyncio.ensure_future(self._run_verification(message))

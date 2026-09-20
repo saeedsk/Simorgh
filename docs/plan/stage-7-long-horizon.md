@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-19: items 2, 3, 5, 7, 9 done; 1 and 8 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-19: items 2, 3, 5, 7, 9 done; 1, 6, 8 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 8.1 rows planning and verification; section 9.2 (projects tha
 Stage 4's long-task suite (60 scripted turns, kill-and-resume) is the gate; record its numbers. Read `planning/decomposer.py` (`parse_steps`, the numbered-list regex), `planning/model.py`, `planning/service.py` (rollups, the DAG), `orchestration/session.py::_delegate`, `orchestration/api.py::Session`, `verification/` (plan review, trajectory), `kernel/scheduler.py`.
 
 ## Action items
+
+Done 2026-09-19 (item 6, in part): the checkpoint critic. `verify.checkpoint.request/reply` scores a trajectory against its acceptance criteria on the cheap tier at every progress note; two `drifting` verdicts in a row (or one `blocked`) end the attempt for re-planning, and an unreadable reply is `insufficient_evidence` rather than approval. Still open: the majority vote of three cheap samples, and Planning turning `needs re-planning` into a structured subtree revision.
 
 Done 2026-09-19 (item 3): the typed plan artifact. `parse_plan` validates the planner's JSON nodes (six kinds, acceptance criteria, edges by id) and refuses an invalid plan by name; a household goal decomposes into `action` and `wait` nodes with no repo path in them. `parse_steps` is the fallback, not the parser. `PLAN_NODE` is a shape, not a topic: nothing publishes a plan artifact on the bus, and a wire nobody connects should not pretend to exist.
 

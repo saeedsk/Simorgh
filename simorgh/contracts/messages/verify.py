@@ -14,6 +14,14 @@ VerifyRequested = define(t.VERIFY_REQUESTED, [
     F("subject_ref", Str),
     O("checklist_hint", Str),
 ])
+VerifyCheckpointRequest = define(t.VERIFY_CHECKPOINT_REQUEST, [
+    F("task_id", Str), F("goal", Str), F("trajectory", Str), O("acceptance", List(Str)),
+])
+VerifyCheckpointReply = define(t.VERIFY_CHECKPOINT_REPLY, [
+    F("verdict", Enum("on_track", "drifting", "blocked", "insufficient_evidence")),
+    O("unmet", List(Str)), O("next", Str), O("why", Str),
+], doc="Whether the work so far is still going to meet the acceptance criteria. "
+       "`insufficient_evidence` when the trajectory does not say -- never guessed.")
 VerifyResult = define(t.VERIFY_RESULT, [
     F("verification_id", Str),
     F("task_id", Str),
