@@ -36,7 +36,7 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t1", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, _why = await assembler._memory_block("query", session)  # noqa: SLF001
+            mem, _why, _facts = await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertLess(len(mem), len(huge))
@@ -58,7 +58,7 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t2", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, _why = await assembler._memory_block("query", session)  # noqa: SLF001
+            mem, _why, _facts = await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertLessEqual(len(mem), _MEMORY_BLOCK_MAX_CHARS + 800)  # one item's worth of slack at the boundary
@@ -79,7 +79,7 @@ class TestMemoryRetrieveSizeCap(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t3", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, _why = await assembler._memory_block("query", session)  # noqa: SLF001
+            mem, _why, _facts = await assembler._memory_block("query", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertEqual(mem, "- the sky is blue")

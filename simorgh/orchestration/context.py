@@ -91,6 +91,32 @@ WORKING_BLOCK_HEADER = (
 #: stated more confidently -- which is reliably the original, since a
 #: correction is short and the thing it corrects came with a full answer
 #: restating it.
+#: What HOLDS now, ahead of what was said (stage 5 items 3-4). A fact and
+#: an episode disagree only when a correction has not been folded into the
+#: episodes, and the fact is the one that was superseded deliberately.
+FACTS_BLOCK_HEADER = (
+    "What you know to be true right now (each was told to you; the current value first, and "
+    "what it replaced where it replaced something). These are more reliable than the "
+    "conversation lines below, which include things that have since changed:\n"
+)
+
+
+def _fact_lines(facts: list[dict]) -> str:
+    """The facts as lines: the current value, and what it replaced."""
+    lines = []
+    for fact in facts[:8]:
+        line = " ".join(str(fact.get(part) or "") for part in ("subject", "predicate", "object")).strip()
+        if not line:
+            continue
+        who = str(fact.get("person_scope") or "*")
+        if who and who != "*":
+            line = f"{who}: {line}"
+        if fact.get("was"):
+            line += f" (was {fact['was']}, until you were told otherwise)"
+        lines.append(f"- {line}")
+    return "\n".join(lines)
+
+
 MEMORY_BLOCK_HEADER = (
     "Relevant memory, oldest first. Later lines are more recent: where two disagree, the "
     "later one is the current truth and the earlier one has been superseded -- say so rather "
@@ -166,12 +192,14 @@ class Assembler:
         blocks: list[dict] = []
 
         task = session.user_text or user_text
-        (mem, unavailable), working = await asyncio.gather(
+        (mem, unavailable, facts), working = await asyncio.gather(
             self._memory_block(task or session.task_id, session),
             self._working_block(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
         )
         if working:
             blocks.append({"role": "system", "content": working})
+        if facts:
+            blocks.append({"role": "system", "content": FACTS_BLOCK_HEADER + facts})
         if mem:
             blocks.append({"role": "system", "content": MEMORY_BLOCK_HEADER + mem})
         elif unavailable:
@@ -255,8 +283,8 @@ class Assembler:
             return None, _why_not(reply.payload.get("error") or {})
         return reply, ""
 
-    async def _memory_block(self, query: str, session: Session) -> tuple[str, str]:
-        """`(what to show, why there is nothing)`.
+    async def _memory_block(self, query: str, session: Session) -> tuple[str, str, str]:
+        """`(what to show, why there is nothing, the facts block)`.
 
         Two recalls, not one, and they answer different questions.
 
@@ -307,8 +335,11 @@ class Assembler:
         results = await asyncio.gather(*calls)
         (matched, why), (recent, _recent_why) = results[0], results[1]
         person = results[2][0] if speaker else None
+        # The facts the query mentions ride back with the matched recall
+        # (stage 5 item 3): `memory.retrieve.reply.facts`.
+        facts = _fact_lines(matched.payload.get("facts") or []) if matched is not None else ""
         if matched is None and recent is None and person is None:
-            return "", why
+            return "", why, ""
         matched_items = list(matched.payload.get("items", [])) if matched is not None else []
         recent_items = list(recent.payload.get("items", [])) if recent is not None else []
         person_items = list(person.payload.get("items", [])) if person is not None else []
@@ -359,7 +390,11 @@ class Assembler:
         # ...and only now chronologically, which is the half that makes a
         # correction beat the thing it corrects. See MEMORY_BLOCK_HEADER.
         kept.sort(key=lambda i: float(i.get("ts") or 0.0))
-        return "\n".join(f"- {i['content']}" for i in kept), ""
+        return "\n".join(f"- {i['content']}" for i in kept), "", facts
+
+    @staticmethod
+    def _fact_lines(facts: list[dict]) -> str:
+        return _fact_lines(facts)
 
     async def _working_block(self, session: Session) -> str:
         """The last `_WORKING_K` turns of this (channel, person)

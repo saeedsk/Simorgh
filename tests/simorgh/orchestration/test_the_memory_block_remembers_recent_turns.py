@@ -91,7 +91,7 @@ class TestRecentTurnsTravelWithEveryTurn(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t1", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, why = await assembler._memory_block(  # noqa: SLF001
+            mem, why, _facts = await assembler._memory_block(  # noqa: SLF001
                 "what are my two machines called and how much RAM does each have?", session)
             await sub.unsubscribe()
 
@@ -143,7 +143,7 @@ class TestTheSpeakerGetsTheirOwnRecall(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t3", kind="chat", mode="execute", profile=profiles.VOICE_CHAT, channel="voice", speaker="Ira")
-            mem, _why = await assembler._memory_block("weather", session)  # noqa: SLF001
+            mem, _why, _facts = await assembler._memory_block("weather", session)  # noqa: SLF001
             plain = Session(task_id="t4", kind="chat", mode="execute", profile=profiles.CHAT)
             before = len(seen)
             await assembler._memory_block("weather", plain)  # noqa: SLF001
@@ -172,7 +172,7 @@ class TestACorrectionOutranksWhatItCorrects(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t3", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, _why = await assembler._memory_block("when is my sister's birthday?", session)  # noqa: SLF001
+            mem, _why, _facts = await assembler._memory_block("when is my sister's birthday?", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertIn("March 4th", mem)
@@ -222,7 +222,7 @@ class TestACorrectionOutranksWhatItCorrects(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t5", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, _why = await assembler._memory_block("backup window?", session)  # noqa: SLF001
+            mem, _why, _facts = await assembler._memory_block("backup window?", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertEqual(mem.count("02:00 to 04:00"), 1, mem)
@@ -249,7 +249,7 @@ class TestOneRecallFailingDoesNotLoseTheOther(unittest.TestCase):
             sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
             assembler = Assembler(h.client("orchestration"))
             session = Session(task_id="t6", kind="chat", mode="execute", profile=profiles.CHAT)
-            mem, why = await assembler._memory_block("where is the NAS?", session)  # noqa: SLF001
+            mem, why, _facts = await assembler._memory_block("where is the NAS?", session)  # noqa: SLF001
             await sub.unsubscribe()
 
             self.assertIn("/mnt/vault", mem)
