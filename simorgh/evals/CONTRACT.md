@@ -37,6 +37,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
+| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py` |
 
 ## Suites
 
@@ -57,6 +58,16 @@ The three benchmark-backed suites list their cases and report them as
 `skipped` today: the scoring lives in `simorgh/benchmark`'s own runner
 and is reached through `python -m simorgh.benchmark run`. What this
 package adds to them so far is the case list and the shape.
+
+## The household simulator (`house/`, stage 11)
+
+A whole Sim, booted where it can do no harm, driven by a scenario. `Sandbox` boots the real Kernel -- Guardian, the bus, the ledger, memory, the speaker book, all real -- in a temporary data directory with the floor provider, `FakeHomeAssistant`, and the fake voice engines from `voice/fakes.py`. `Director` is the whole surface a scenario touches: `say(person, text)`, `type(text)`, `device(...)`, `advance(...)`, `restart()`, and `settle()`. `Record` is what it leaves behind: every bus message in order, every printed line, every piece the synthesiser was asked for, with a monotonic time on each, so latency comes out of the record rather than out of an instrument.
+
+`say` drives the voice pipeline's own `ask`, which claims the session as a voice session -- that is what makes the reply Sim's to *say* rather than merely to write. Only the microphone and recogniser are skipped; the audio scene (item 3) puts them back, and a scenario written today keeps working then, because what it asserts is what Sim did rather than how the sound arrived.
+
+The observer registers on the bus **backend**, not through a client. A client is policed and `action.proposed` is Guardian's alone -- which is the policy working -- but a sandbox that cannot watch the approval path cannot test the approval path. It only ever reads.
+
+It never touches `~/.simorgh`, never reaches a device, and defaults to a provider that costs nothing.
 
 ## Public Python surface
 

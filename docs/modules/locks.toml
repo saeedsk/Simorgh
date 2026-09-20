@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.evals]
+by = "opus-main"
+task = "stage 11 item 1: sandbox and director"
+since = "2026-09-20T17:19:51+00:00"
+until = "2026-09-21T01:19:51+00:00"
+
 [locks.interface]
 by = "opus-main"
 task = "voice forget all: start voice training fresh"
