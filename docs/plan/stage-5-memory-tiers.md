@@ -22,7 +22,7 @@ Done 2026-09-19: item 2. With a dense embedder, recall is one float32 matrix pro
 
 Done 2026-09-19: item 3. `memory/facts.py` plus `memory:facts`: a fact keyed by (person_scope, subject, predicate), superseded by the next one for its key, with `source_refs` and person scoping; the retrieve reply carries the matching facts and what each replaced; extraction runs at consolidation and keeps only triples quoted from the window. `flag_contradictions` is retired (it buried corrections with what they corrected). The birthday case passes by construction (`tests/simorgh/memory/test_facts.py`).
 
-Item 4 in part, 2026-09-19: the facts block. What holds is rendered before the conversation lines, with the current value and what it replaced (`orchestration/context.py::FACTS_BLOCK_HEADER`). Still open in item 4: the per-person digest regenerated at sleep, and retiring `persona/user_model.py`'s regex extraction.
+Item 4 in part, 2026-09-19: the facts block. What holds is rendered before the conversation lines, with the current value and what it replaced (`orchestration/context.py::FACTS_BLOCK_HEADER`). The digest followed on the same day: a recall carrying `person:<name>` gets that person's live facts too, capped at 8 -- built from the facts, so nothing regenerates it at sleep. Still open in item 4: retiring `persona/user_model.py`'s regex extraction (stage 6 touches persona).
 
 Done 2026-09-19: item 6. `memory_search` is a session-local built-in (no Guardian, it only reads), offered by chat, voice_chat and research; a spoken turn searches under the speaker's tag and gets facts before episodes.
 

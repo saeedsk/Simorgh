@@ -109,3 +109,24 @@ class ForgettingSparesWhatAFactCites(unittest.IsolatedAsyncioTestCase):
         self.assertIn(refs[0], engine._kept_back)  # noqa: SLF001
         found, _ = await engine.retrieve(query="", kinds=["episodic"], k=10, filters=None)
         self.assertIn(refs[0], [item.ref for item in found])
+
+
+class ThePersonDigest(unittest.IsolatedAsyncioTestCase):
+    """Stage 5 item 4: when a person speaks, what holds about THEM comes
+    with the turn, whether or not this sentence mentions it."""
+
+    async def test_a_speakers_facts_come_back_even_unmentioned(self):
+        from simorgh.memory.service import _DIGEST_FACTS
+
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        engine = MemoryEngine(ledger, Config(), clock=_Clock())
+        await engine.store_fact(subject="Iris", predicate="is allergic to", object="peanuts", person_scope="Iris")
+        await engine.store_fact(subject="Iris telescope", predicate="is for", object="her birthday",
+                                person_scope="Iris")
+        await engine.store_fact(subject="Aran", predicate="trains on", object="Thursdays", person_scope="Aran")
+        index = await engine._facts_synced()  # noqa: SLF001
+        hers = index.live_facts(person="Iris")
+        self.assertEqual({f.subject for f in hers}, {"Iris", "Iris telescope"})
+        self.assertNotIn("Aran", {f.subject for f in hers}, "another child's facts are not hers")
+        self.assertLessEqual(len(hers), max(_DIGEST_FACTS, len(hers)))

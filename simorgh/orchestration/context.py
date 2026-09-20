@@ -379,7 +379,12 @@ class Assembler:
         person = results[2][0] if speaker else None
         # The facts the query mentions ride back with the matched recall
         # (stage 5 item 3): `memory.retrieve.reply.facts`.
-        facts = _fact_lines(matched.payload.get("facts") or []) if matched is not None else ""
+        # ...and the person's own facts ride back with the person recall.
+        fact_payloads = list(matched.payload.get("facts") or []) if matched is not None else []
+        if person is not None:
+            known = {f.get("id") for f in fact_payloads}
+            fact_payloads += [f for f in (person.payload.get("facts") or []) if f.get("id") not in known]
+        facts = _fact_lines(fact_payloads)
         if matched is None and recent is None and person is None:
             return "", why, ""
         matched_items = list(matched.payload.get("items", [])) if matched is not None else []

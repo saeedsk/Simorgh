@@ -12,6 +12,10 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from .config import Config
+
+#: How many facts a person's digest may carry into a prompt (stage 5 item
+#: 4). Eight short lines is about 150 tokens, the budget the plan sets.
+_DIGEST_FACTS = 8
 from .consolidation import run_consolidation
 from .store import MemoryEngine
 
@@ -178,7 +182,20 @@ class Service:
             if str(tag).startswith("person:"):
                 person = str(tag)[len("person:"):]
         facts = []
-        for fact, was in await self.engine.facts_for(payload.get("query", ""), person=person):
+        pairs = await self.engine.facts_for(payload.get("query", ""), person=person)
+        if person:
+            # The per-person digest (stage 5 item 4): what holds about the
+            # person speaking, whether or not this sentence mentions it.
+            # Built from the facts themselves, so it is current by
+            # construction -- no sleep job, nothing to regenerate.
+            seen = {fact.id for fact, _was in pairs}
+            index = await self.engine._facts_synced()  # noqa: SLF001
+            for fact in index.live_facts(person=person):
+                if fact.id not in seen and fact.person_scope != "*":
+                    pairs.append((fact, index.previous(fact)))
+                if len(pairs) >= _DIGEST_FACTS:
+                    break
+        for fact, was in pairs:
             entry = {"id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
                      "person_scope": fact.person_scope, "confidence": fact.confidence,
                      "valid_from": fact.valid_from, "source_refs": list(fact.source_refs)}
