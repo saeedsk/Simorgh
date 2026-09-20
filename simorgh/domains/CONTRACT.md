@@ -18,7 +18,7 @@ Nothing about the tools changed: same names, same schemas, same `action.proposed
 | `simorgh/domains/knowledge/` | the creator's own documents, indexed locally; `kb_*` |
 | `simorgh/domains/pim/` | calendar and mail, read-only; `cal_list`, `mail_*`, `remind` |
 | `simorgh/domains/security/` | posture, findings, self-check; `sec_*` |
-| `simorgh/domains/home/` | Home Assistant `home_*`; Reolink `cam_*` (`cameras.py`); Ring `ring_*` (`ring.py`) |
+| `simorgh/domains/home/` | Home Assistant `home_*`; Reolink `cam_*` (`cameras.py`); Ring `ring_*` (`ring.py`). `home_call` and `home_undo` report `after` in their metadata -- what each entity is NOW, not only that it moved -- because the World Model folds it into `world:home` (stage 6 item 3, 2026-09-20): Sim turning the kitchen light on used to leave Sim not knowing the light was on |
 | `simorgh/domains/energy/` | `energy_*` |
 | `simorgh/domains/media/` | players, Cast, the TV, the dashboard, the Mac's Music app |
 
