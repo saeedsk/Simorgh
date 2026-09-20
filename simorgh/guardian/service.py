@@ -571,6 +571,7 @@ class Service:
             action_id=action_id, tool=p["tool"], args=p["args"], scope=p["scope"],
             reversibility=p["reversibility"], rationale=p["rationale"], proposed_by=p["proposed_by"],
             task_id=p.get("task_id"), task_mode=task.mode, origin=task.origin,
+            requester=str(p.get("requester") or ""), requester_channel=str(p.get("requester_channel") or ""),
         )
         ctx = DecisionContext(
             now=self._ctx.clock.now(), system_state=self._system_state, posture=self._posture,

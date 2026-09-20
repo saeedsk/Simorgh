@@ -698,7 +698,8 @@ _strip_code_fence = strip_code_fence
 
 
 def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: str,
-                      proposed_by: str = "orchestration", kind: str = "") -> dict:
+                      proposed_by: str = "orchestration", kind: str = "",
+                      requester: str = "", requester_channel: str = "") -> dict:
     tool = call.get("tool", "")
     args = call.get("args", {})
     if isinstance(args, dict) and set(args) == {"argument"}:
@@ -752,4 +753,7 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         # caller passes its own bound `bus.source`; the default here only
         # covers a caller that never had one (e.g. an ad hoc unit test).
         "proposed_by": proposed_by,
+        # Who asked, for Guardian's PersonRule (stage 6 item 5).
+        **({"requester": requester} if requester else {}),
+        **({"requester_channel": requester_channel} if requester_channel else {}),
     }

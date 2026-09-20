@@ -877,6 +877,8 @@ class ReversibilityRule:
         return Decision("allow", self.layer)
 
 
+from .tiers import PersonRule, TierRule  # noqa: E402 -- the tier rules, beside the rest of the pipeline
+
 DEFAULT_PIPELINE: tuple = (
     PausedRule(),
     SchemaRule(),
@@ -891,6 +893,10 @@ DEFAULT_PIPELINE: tuple = (
     ImmunityRule(),
     BudgetRule(),
     HumanOnlyRule(),
+    # Who is asking, then how far the action reaches (stage 6 item 5),
+    # before the ordinary physical and reversibility rules.
+    PersonRule(),
+    TierRule(),
     PhysicalRule(),
     ReversibilityRule(),
 )

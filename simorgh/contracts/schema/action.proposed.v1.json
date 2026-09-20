@@ -19,6 +19,18 @@
     "rationale": {
       "type": "string"
     },
+    "requester": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requester_channel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "reversibility": {
       "enum": [
         "read_only",

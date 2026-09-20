@@ -1,6 +1,6 @@
 # Stage 6 -- Self and world projections, People, safety tiers, Initiative
 
-Status: not started · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+Status: **in progress** (2026-09-19: item 5 in part) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation C6 (Self Model volatile), V3 (four session models, no identity contra
 Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/competence.py`, `contracts/household.py`, `contracts/places.py`, `contracts/home/policy.py`, `voice/speakers.py` (the speaker book), `voice/session.py` (`_room`, bystander), `curiosity/sharing.py`, `persona/sharing.py`, `execution/vision.py` (the announce step), `kernel/scheduler.py` (reminders). Decide with the creator whether a phone channel (Telegram) is the owner's "ask" path for tier 3; default yes.
 
 ## Action items
+
+Done 2026-09-19 (item 5, in part): `guardian/tiers.py` gives every proposal a tier 0-3 computed from the registry's class, a network flag and a small reach table; `TierRule` sends tier 3 to a person in every posture and denies it when locked; `PersonRule` weighs the requester's role (owner/adult/child/guest/unknown) against a ceiling -- a child asking to unlock escalates to an adult, an unplaced voice is denied. `action.proposed` carries `requester`/`requester_channel`. Still open in item 5: the per-person permission matrix (needs item 4's People store), `PresenceRule` (needs item 3's presence belief), and tier as a span attribute on every decision.
 
 1. **`self:model` as a fold.** *Lock `worldmodel`, `contracts`.* At boot the Self Model is rebuilt from `learn:outcomes`, `self:changes`, `tool.registered` replay, the skills catalog and `system.started`; `Beta(alpha, beta)` per task type and per (task type, strategy) with exponential forgetting (half-life config); calibration as expected calibration error; per-tool p(ok) and latency quantiles from `action.result`; per-provider quality per purpose from `verify.result`; snapshots every N events; the summary renders posteriors with sample counts ("patch:memory 62% over 13, overconfident"). `self.estimate.request/reply` topic for consumers. Acceptance: a restart reproduces the same model version and competence table; the 44 historical landings appear in change history when the archived ledger is replayed.
 2. **Consumers of the estimate.** *Lock `orchestration`, `planning`, `curiosity`.* Routing escalates to the strong tier when the task type's posterior mean is below a threshold; Planning runs a low-posterior node in plan mode with a human gate; Curiosity's gap drive reads `self.gaps` (now real). Acceptance: a test per consumer with a seeded posterior.

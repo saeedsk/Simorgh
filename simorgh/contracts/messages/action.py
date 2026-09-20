@@ -21,6 +21,11 @@ ActionProposed = define(t.ACTION_PROPOSED, [
     F("rationale", Str),
     F("proposed_by", Str),
     O("task_id", Str),
+    # Who asked for it, and where they asked (stage 6 item 5): the person
+    # Sim is talking to, so Guardian can weigh a child's request against
+    # an adult's. Absent means the console, which is the owner's.
+    O("requester", Str),
+    O("requester_channel", Str),
 ])
 ActionApproved = define(t.ACTION_APPROVED, [
     F("action_id", Str),

@@ -1734,6 +1734,11 @@ class SessionRunner:
             action_id=action_id, task_id=session.task_id, call=call,
             rationale=f"step {step_no} of {session.profile.name} session",
             proposed_by=self._bus.source, kind=session.kind,
+            # Who Sim is talking to (stage 6 item 5). A typed turn carries
+            # no speaker and is the owner's console; a spoken one names the
+            # person Voice placed, and an unplaced voice stays unnamed.
+            requester=str(getattr(session, "speaker", "") or ""),
+            requester_channel=str(getattr(session, "channel", "") or ""),
         )
         refused = chat_outside_workspace_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
         if refused:

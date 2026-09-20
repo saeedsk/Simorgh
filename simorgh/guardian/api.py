@@ -31,6 +31,10 @@ class Proposal:
     # proposal with no known task (an Interface command) defaults both.
     task_mode: str = "execute"  # execute | plan
     origin: str = "human"
+    # Who asked, and over which channel (stage 6 item 5): "" is the
+    # console, which is the owner's.
+    requester: str = ""
+    requester_channel: str = ""
 
 
 @dataclass(frozen=True)
