@@ -14,9 +14,9 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 | 3 | [stage-3-streaming.md](stage-3-streaming.md) | Streaming end to end | 2 | in progress (items 1-4, 8 done; streamed speech on by default 2026-09-19) |
 | 4 | [stage-4-session-stream-context-compaction-evals.md](stage-4-session-stream-context-compaction-evals.md) | Session stream, ContextBuilder, compaction, evals package | 1, 2 | in progress (2026-09-19: items 1-3, 5, 6, 7, 10, 11 done; 4 and 8 in part; 9 open) |
 | 5 | [stage-5-memory-tiers.md](stage-5-memory-tiers.md) | Memory tiers | 4 | in progress (2026-09-19: items 1-7, 9 done; 8 in part) |
-| 6 | [stage-6-self-world-people-tiers-initiative.md](stage-6-self-world-people-tiers-initiative.md) | Self and world projections, People, safety tiers, Initiative | 4, 5 | not started |
-| 7 | [stage-7-long-horizon.md](stage-7-long-horizon.md) | Long horizon: sub-agents, plans, waits, checkpoint critic | 4, 6 | not started |
-| 8 | [stage-8-growth-merge-policy-loop.md](stage-8-growth-merge-policy-loop.md) | Growth merge and the policy loop | 4, 6, 7 | not started |
+| 6 | [stage-6-self-world-people-tiers-initiative.md](stage-6-self-world-people-tiers-initiative.md) | Self and world projections, People, safety tiers, Initiative | 4, 5 | in progress (2026-09-19: item 7 done; 1-6 in part) |
+| 7 | [stage-7-long-horizon.md](stage-7-long-horizon.md) | Long horizon: sub-agents, plans, waits, checkpoint critic | 4, 6 | in progress (2026-09-19: items 2, 3, 5, 7, 9 done; 1, 4, 6, 8 in part) |
+| 8 | [stage-8-growth-merge-policy-loop.md](stage-8-growth-merge-policy-loop.md) | Growth merge and the policy loop | 4, 6, 7 | in progress (2026-09-19: items 3-4 in part) |
 | 9 | [stage-9-consolidation-and-breadth.md](stage-9-consolidation-and-breadth.md) | Consolidation and breadth (package moves, HA, Frigate, MCP-first) | all | not started |
 
 **The first month, if nothing else** (evaluation section 12): stage 0 in full, then stage 2 (native tools) and stage 3 (streaming), which are the two changes the family will feel.

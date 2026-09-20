@@ -1,6 +1,6 @@
 # Stage 8 -- Growth merge and the policy loop
 
-Status: not started · Depends on: stages 4, 6, 7 (it consumes the eval sets and the Self Model they build) · Estimated: 3 weeks · Modules touched: learning, reflection, curiosity (merged into growth), guardian, orchestration, contracts, evals
+Status: **in progress** (2026-09-19: items 3-4 in part; the merge, item 1, is not started) · Depends on: stages 4, 6, 7 (it consumes the eval sets and the Self Model they build) · Estimated: 3 weeks · Modules touched: learning, reflection, curiosity (merged into growth), guardian, orchestration, contracts, evals
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation C1/C2/C14 (the open loop), section 8.1 growth row, section 9.5. The j
 Every task type that a policy could target must have a held-out case set with a stored baseline in `simorgh/evals/` (stage 4). Read `learning/competence.py`, `learning/strategy.py`, `reflection/` (pattern mining, `distillation.py`, denial analysis), `curiosity/sampler.py` (diversity by construction; keep it and its regression test verbatim), `curiosity/drives.py`.
 
 ## Action items
+
+Done 2026-09-19 (items 3-4, in part): the `growth` package exists with the two halves that stand alone. `diagnose.py` clusters terminal failures deterministically by (task type, failed check, denied tool, the critic's unmet item), needs three members and a share above the baseline for other task types, drops clusters whose cause nobody recorded, and asks a model only to phrase what the counting found. `policies.py` is the durable record: propose, adopt only against a stored baseline with at least one motivating case fixed, retire (never delete), and expire with the measurement's TTL. Not started: item 1's merge of learning, reflection and curiosity -- those subsystems still run -- and items 2, 5-8.
 
 1. **The merge, topics preserved.** *Lock `learning`, `reflection`, `curiosity`, `growth` (new), `kernel`, `shared`, `docs`.* `simorgh/growth/{estimate,diagnose,policies,explore,monitors,service}.py`; every `learn.*`, `reflect.*`, `curiosity.*` topic still published so no consumer changes; `sampler.py` moved verbatim; LAYERS layer 4 becomes `("growth",)`; boundary test, AGENTS.md table, locks updated. Acceptance: the boot test lists 16 subsystems; every previous topic still has both sides.
 2. **Estimate.** *Lock `growth`.* Posteriors from stage 6's Self Model, fed from two weighted sources: verify-backed task outcomes and eval pass rates; chat self-reports never count. Acceptance: a seeded outcome stream plus an eval history yields the expected posterior.

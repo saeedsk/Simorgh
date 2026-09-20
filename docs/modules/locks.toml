@@ -35,6 +35,12 @@ task = "chat write tools, provider notice, search scope, TUI noise"
 since = "2026-09-19T12:29:46+00:00"
 until = "2026-09-19T20:29:46+00:00"
 
+[locks.growth]
+by = "opus-main"
+task = "stage 8 items 3-4: diagnose and the policy store"
+since = "2026-09-20T05:57:49+00:00"
+until = "2026-09-20T13:57:49+00:00"
+
 [locks.guardian]
 by = "opus-main"
 task = "stage 2 items 7-8 (worktree agents)"
