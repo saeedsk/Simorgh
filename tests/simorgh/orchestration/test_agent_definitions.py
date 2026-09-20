@@ -11,8 +11,10 @@ from simorgh.orchestration.tools import offered_tools
 
 
 class TheFiles(unittest.TestCase):
-    def test_the_six_agents_load(self):
-        self.assertEqual(set(profiles.AGENTS), {"chat", "voice_chat", "patch", "research", "plan", "skill"})
+    def test_the_agents_load(self):
+        self.assertEqual(set(profiles.AGENTS), {"chat", "voice_chat", "patch", "research", "plan", "skill",
+                                                # the helper roles (stage 7 item 2)
+                                                "planner", "verify", "skill-writer", "browser"})
         self.assertEqual(profiles.VOICE_CHAT.name, "chat", "a spoken chat is still a chat to the session")
         self.assertEqual(profiles.VOICE_CHAT.body, profiles.CHAT.body, "extends takes the body")
         self.assertEqual(profiles.VOICE_CHAT.max_steps, 6)
@@ -64,3 +66,31 @@ class Guarded(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheHelperRoles(unittest.TestCase):
+    """Stage 7 item 2: the roles a task can spawn as helpers, each with a
+    tool allowlist that is actually enforced."""
+
+    def test_they_load_with_the_tools_they_are_allowed(self):
+        agents = profiles.AGENTS
+        self.assertEqual(set(agents) >= {"planner", "verify", "skill-writer", "browser"}, True)
+        self.assertTrue(agents["verify"].read_only, "a checker that can change what it checks is not a checker")
+        self.assertNotIn("apply_source_patch", agents["verify"].tools)
+        self.assertIn("browse_page", agents["browser"].tools)
+        self.assertNotIn("run_shell", agents["browser"].tools)
+        self.assertEqual(agents["planner"].scaffold, "plan")
+        self.assertEqual(agents["skill-writer"].scaffold, "skill")
+
+    def test_the_verifier_is_not_itself_verified(self):
+        """Verifying the verifier turns one yes-or-no into four calls."""
+        self.assertFalse(profiles.AGENTS["verify"].verify)
+        self.assertFalse(profiles.AGENTS["browser"].verify)
+
+    def test_the_browser_is_told_what_it_may_not_press(self):
+        body = profiles.AGENTS["browser"].body
+        for rule in ("password", "one-time code", "place an order"):
+            self.assertIn(rule, body)
+
+    def test_the_verifier_may_answer_not_enough_evidence(self):
+        self.assertIn("not enough evidence", profiles.AGENTS["verify"].body.lower())
