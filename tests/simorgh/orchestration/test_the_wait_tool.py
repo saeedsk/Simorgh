@@ -78,3 +78,32 @@ class TheWaitTool(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StandingIntents(unittest.TestCase):
+    """Stage 7 item 9: "tell me when the TV turns off" is a wait on the
+    event, not a model checking in a loop -- a loop costs a call every
+    time round and misses whatever happens between two of them."""
+
+    def test_the_prompt_names_the_events_a_task_may_wait_for(self):
+        from simorgh.orchestration import scaffolds
+
+        offered = tuple(profiles.RESEARCH.tools) + ("wait",)
+        text = scaffolds.render(profiles.RESEARCH, offered=offered, task="tell me when the TV turns off")
+        self.assertIn("world.home.situation_changed", text)
+        self.assertIn("instead of checking in a loop", text)
+
+    def test_a_task_without_wait_is_not_told_about_them(self):
+        from simorgh.orchestration import scaffolds
+
+        text = scaffolds.render(profiles.CHAT, offered=tuple(profiles.CHAT.tools), task="hello")
+        self.assertNotIn("world.home.situation_changed", text)
+
+    def test_every_waitable_event_is_a_real_topic(self):
+        from simorgh.contracts import topics
+        from simorgh.orchestration.scaffolds import WAITABLE_EVENTS
+
+        known = {value for name, value in vars(topics).items() if name.isupper() and isinstance(value, str)}
+        for name, _what in WAITABLE_EVENTS:
+            with self.subTest(event=name):
+                self.assertIn(name, known, "a task waiting for a topic nobody publishes waits for ever")

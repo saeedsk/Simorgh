@@ -134,6 +134,8 @@ _TOOL_NOTES: dict[str, str] = {
     "voice_setting": "change Sim's own voice live when asked: key=tts_voice value=af_heart (or bf_emma, am_adam, "
                      "af_bella...), key=tts_speed value=1.2, key=volume value=1.3; `voices` alone lists the voices "
                      "-- never say you cannot change your voice",
+    # Stage 7 item 9: "tell me when the TV goes off" is a wait, not a
+    # loop. Named here because the model reaches for polling otherwise.
     "wait": "stop and come back later, holding nothing while you wait: `WAIT: 10m`, or "
             "`WAIT: until world.home.situation_changed` to come back when something happens. "
             "The task is parked and resumes with everything it has; use it instead of polling",
@@ -251,6 +253,26 @@ def keyless_sources_block() -> str:
         "fetched, try one of these -- web_fetch returns a JSON body untouched, and "
         "docs/sourcebook.md has the exact URLs:\n" + "\n".join(lines)
     )
+
+
+#: The events a task may wait on by name (stage 7 item 9). Small on
+#: purpose: a name that is not here is a name nobody publishes, and a
+#: task waiting for one would wait for ever.
+WAITABLE_EVENTS: tuple[tuple[str, str], ...] = (
+    ("world.home.situation_changed", "the house changes: the TV starts or stops, it goes quiet, "
+                                     "a child is left alone, somebody comes home"),
+    ("world.camera.event", "a camera sees motion, a person, a vehicle"),
+    ("percept.time.scheduled", "a reminder comes due"),
+    ("task.completed", "some other task finishes"),
+)
+
+
+def waitable_block() -> str:
+    """What `WAIT: until <event>` may name, for the prompt."""
+    lines = "\n".join(f"- {name}: {what}" for name, what in WAITABLE_EVENTS)
+    return ("If the answer depends on something happening rather than on more work, wait for the event "
+            "itself instead of checking in a loop -- a loop costs a model call every time round and "
+            "misses what happens between two of them. The events you can wait for:\n" + lines)
 
 
 BREVITY = """\
@@ -609,6 +631,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     # profile's, plus every skill", which `offered_tools(())` also says.
     offered = offered_tools(profile.tools) if offered is None else tuple(offered)
     lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in offered]
+    if "wait" in offered:
+        body = f"{body}\n\n{waitable_block()}" if body else waitable_block()
     if not lines:
         return body
     # The parser runs the FIRST marker in a reply and ignores the rest.

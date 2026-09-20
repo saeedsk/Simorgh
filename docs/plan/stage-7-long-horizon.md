@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-19: items 2, 5 and 7 done, item 1 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-19: items 2, 5, 7 and 9 done, item 1 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 8.1 rows planning and verification; section 9.2 (projects tha
 Stage 4's long-task suite (60 scripted turns, kill-and-resume) is the gate; record its numbers. Read `planning/decomposer.py` (`parse_steps`, the numbered-list regex), `planning/model.py`, `planning/service.py` (rollups, the DAG), `orchestration/session.py::_delegate`, `orchestration/api.py::Session`, `verification/` (plan review, trajectory), `kernel/scheduler.py`.
 
 ## Action items
+
+Done 2026-09-19 (item 9): standing intents are waits. The prompt names the events a task may wait for (`scaffolds.WAITABLE_EVENTS`, each checked against the topic catalogue by a test) and says to wait for the event rather than check in a loop; the scheduler and Planning do the rest, with no model running in between.
 
 Done 2026-09-19 (item 5): WAITING. `task.waiting{until|event}` parks a task and drops its lease; Planning wakes it when the moment passes, when the topic it named is heard, or on `task.wake`. The session's `wait` tool ends the attempt rather than sleeping with a worker and a context in hand. Not done: `human: question_id` waits (the answer path already exists for approvals).
 
