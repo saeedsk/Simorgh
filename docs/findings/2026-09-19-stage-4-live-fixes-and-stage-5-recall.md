@@ -186,3 +186,33 @@ ones: a subscription nobody declared (the manifest test), Orchestration importin
 Guardian (the module-boundary test — the tier vocabulary moved to `contracts/tiers.py`),
 and two new topics with no consumer (`plan.artifact`, which was deleted: a shape that
 nothing publishes should not pretend to be a topic).
+
+## Stage 4 item 9: the evals package (2026-09-19, evening)
+
+`simorgh/evals/` merges the three ways this project used to ask "did
+that change make Sim better?" into one report shape with a bootstrap
+interval over repeats.
+
+| | before | after |
+|---|---|---|
+| ways to score a change | 3 (benchmark, trial suite, recall scenario), 3 formats | 1 `Report`, 5 registered suites |
+| what a bless measured | 3,886 tests -- shape only | the tests, plus 3/3 household probes |
+| household suite | did not exist (`tools/recall_scenario.py`, run by hand) | `python -m simorgh.evals run household --repeats 3`, 8 s, free |
+| household score | 2/3 (2026-09-19 morning) | **3/3**, the paraphrase probe carried by stage 5's dense recall |
+| eval result in the decision log | no | `sim-good-0027`: "unit suite green (3886 tests ran, none failed); household evals 3/3" |
+| cost of the free gate | -- | $0.00, no network |
+
+Two things the first real bless caught that no test would have:
+
+- the report is indented JSON, so reading `splitlines()[-1]` got `"}"`
+  and the gate warned "the evals produced no report" while passing. A
+  gate that always warns is a gate that is off.
+- booting the whole system twice in one interpreter **segfaults** on the
+  torch models, so `--repeats 2` died. Each repeat now runs in its own
+  child process, which is what a repeat should have been anyway.
+
+Deliberately not done, and recorded in `simorgh/evals/CONTRACT.md`: the
+physical merge of `tools/trial_suite.py` (it is how every real bug here
+has been found, and moving it needs a paid run to re-verify), scoring
+for the three benchmark-backed suites, and item 9's conversation,
+long-task and voice suites, replay tier and SLO watch.
