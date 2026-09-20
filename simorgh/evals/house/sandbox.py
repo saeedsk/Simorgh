@@ -67,12 +67,20 @@ class Sandbox:
     """One booted Sim, with everything it said and did written down."""
 
     def __init__(self, *, config: dict | None = None, data_dir: str | Path | None = None,
-                 keep: bool = False, spend_cap_usd: float = 0.0) -> None:
+                 keep: bool = False, spend_cap_usd: float = 0.0,
+                 secrets: dict | None = None) -> None:
+        """`secrets` is empty by default and that is the isolation: a
+        sandbox with no keys cannot reach anything that needs one,
+        whatever a config says. A scored benchmark run (`house/bench.py`,
+        `--paid`) passes the real environment in, because a model that
+        cannot be called cannot be measured -- and that is the only
+        thing that ever should."""
         self._extra = dict(config or {})
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._given_dir = Path(data_dir) if data_dir else None
         self._keep = keep
         self._spend_cap_usd = float(spend_cap_usd)
+        self._secrets = dict(secrets) if secrets is not None else {}
         self.data_dir: Path | None = None
         self.kernel = None
         self.record = Record()
@@ -101,7 +109,7 @@ class Sandbox:
                          "voice": {"speakers_dir": str(self.data_dir / "speakers")}},
                         self._extra)
         with _voice_fakes(self._voice_fakes):
-            self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore({}),
+            self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore(self._secrets),
                                  clock=self.clock)
             await self.kernel.boot()
         await self._watch()

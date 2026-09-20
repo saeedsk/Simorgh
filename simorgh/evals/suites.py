@@ -115,24 +115,18 @@ def _benchmark_suite(suite: str, level: str = "") -> Runner:
     """
 
     async def runner() -> list[Outcome]:
-        from simorgh.benchmark.datasets import DatasetUnavailable, load  # noqa: PLC0415
+        from .house.bench import score  # noqa: PLC0415
 
-        try:
-            loaded = load(suite)
-        except DatasetUnavailable as exc:
-            # A suite that cannot start says so as one skipped case. An
-            # eval that silently scores zero is worse than one that
-            # admits it never ran.
-            return [Outcome(case=Case(name=suite, kind=suite), status=SKIPPED, why=str(exc)[:200])]
-        outcomes: list[Outcome] = []
-        for case in loaded.cases:
-            if level and str(getattr(case, "level", "")) != level:
-                continue
-            outcomes.append(Outcome(case=Case(name=case.id, kind=suite,
-                                              level=str(getattr(case, "level", ""))),
-                                    status=SKIPPED,
-                                    why="needs a model run: `python -m simorgh.benchmark run`"))
-        return outcomes
+        # Scored through a sandboxed Sim since stage 11 item 7. Before
+        # that every case came back `skipped: needs a model run` --
+        # the benchmark unit could score and this package could report
+        # intervals, and the two were never connected.
+        # `--paid` reaches here through the environment rather than
+        # the signature: a `Runner` takes no arguments by design, and
+        # `__main__` has already refused a paid suite without the flag.
+        import os  # noqa: PLC0415
+
+        return await score(suite, level=level, paid=bool(os.environ.get("SIMORGH_EVALS_PAID")))
 
     return runner
 
@@ -304,9 +298,13 @@ SUITES: dict[str, Runner] = {
     "ledger": ledger,
     "household": household,
     "trials": trials,
-    "tooluse": _benchmark_suite("bfcl"),
-    "research": _benchmark_suite("gaia"),
-    "code": _benchmark_suite("swebench"),
+    # The dataset names, not the friendly ones: `bfcl` and `swebench`
+    # are not datasets and every case came back "no such benchmark"
+    # from behind a `skipped`, which read as "needs a model run" and
+    # hid the typo for as long as nothing scored (stage 11 item 7).
+    "tooluse": _benchmark_suite("bfcl-parallel"),
+    "research": _benchmark_suite("gaia", level="1"),
+    "code": _benchmark_suite("swebench-verified", level="<15 min fix"),
 }
 
 

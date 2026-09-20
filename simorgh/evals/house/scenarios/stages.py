@@ -127,6 +127,76 @@ REMEMBERED_ACROSS_A_RESTART = Scenario(
     ),
 )
 
+#: A fact early in a long conversation, asked about thirty-five turns
+#: later (stage 11 item 7). The other half of stage 5: the restart
+#: scenario above proves a fact survives the process dying, and this
+#: proves it survives the conversation getting long enough that the
+#: window cannot hold it. Both are recall failures a household
+#: notices; only one of them is about the store.
+#:
+#: The filler turns are deliberately dull and deliberately unrelated:
+#: a compaction that kept the interesting sentence by luck would pass
+#: a scenario whose turns were all about keys.
+_CHATTER = (
+    "what time does the post usually come", "is there any milk left",
+    "remind me the bins are Thursday", "what was the weather like today",
+    "did anyone water the plants", "how long does rice take",
+    "what channel is the match on", "is the dishwasher finished",
+)
+
+
+#: Each filler turn is padded to about this many characters. The
+#: number is not arbitrary and the scenario is worthless without it:
+#: the conversation block keeps the last 30 exchanges *within
+#: `_CONVERSATION_CHARS` (6000)*, and thirty-five short turns on the
+#: floor provider (whose answers are empty, so only the person's half
+#: is written) came to 4964 characters -- under the budget, nothing
+#: dropped, the fact still sitting in the window, and a probe about
+#: recall that never made anything recall. Long turns push the early
+#: fact out, which is the only way "it was remembered" means the
+#: store rather than the window.
+_FILLER_CHARS = 320
+
+
+def _long_conversation() -> tuple:
+    beats = [Beat(who="Mara", says="Sim, the spare key lives in the blue tin on the shelf.",
+                  ask_directly=True)]
+    # Thirty-five turns of nothing in particular, in one session, each
+    # long enough that together they overflow the window the early
+    # fact would otherwise still be sitting in.
+    beats += [Beat(who="Mara", says=_padded_chatter(i), ask_directly=True) for i in range(35)]
+    beats.append(Beat(who="Mara", says="Sim, where do we keep the spare key?", ask_directly=True,
+                      expect=(answered(), remembered("blue tin"))))
+    return tuple(beats)
+
+
+def _padded_chatter(i: int) -> str:
+    """One ordinary question, said at length. People do talk like this;
+    the length is what matters."""
+    ask = _CHATTER[i % len(_CHATTER)]
+    tail = (" I keep meaning to write it down somewhere sensible but then the day gets away from me "
+            "and by the evening I have forgotten all about it again, which is roughly how this "
+            "week has gone from start to finish, if I am honest about it")
+    text = f"Sim, {ask}? "
+    while len(text) < _FILLER_CHARS:
+        text += tail
+    return text[:_FILLER_CHARS].rsplit(" ", 1)[0] + "."
+
+
+REMEMBERED_ACROSS_A_LONG_CONVERSATION = Scenario(
+    id="stage5/remembered-across-a-long-conversation",
+    stage="5",
+    because="a fact thirty-five turns back is exactly what compaction decides to drop",
+    # Checked, because the first version of this was vacuous: at the
+    # last turn the conversation block is full at 6002 of its 6000
+    # characters and does NOT contain the fact, and "blue tin" arrives
+    # in the recall block instead, under the "where two disagree, the
+    # later one is the current truth" preamble. So the window really
+    # has dropped it and the store really has found it again
+    # (2026-09-20).
+    beats=_long_conversation(),
+)
+
 # ---------------------------------------------------------------- stage 6
 #: The same person, twice, and Sim should know them both times.
 THE_SAME_PERSON_TWICE = Scenario(
@@ -163,6 +233,7 @@ SCENARIOS = (
     THE_OWNER_IS_ASKED_NOT_REFUSED,
     TWO_PEOPLE_AND_THEN_SIM,
     REMEMBERED_ACROSS_A_RESTART,
+    REMEMBERED_ACROSS_A_LONG_CONVERSATION,
     THE_SAME_PERSON_TWICE,
     THE_TERMINAL_STAYS_SANE,
 )

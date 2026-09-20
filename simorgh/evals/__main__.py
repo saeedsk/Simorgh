@@ -65,16 +65,16 @@ def main(argv: list[str]) -> int:
                 return 2
             # In THIS process, so the parent can capture it: the parent
             # is what gives each scenario its own interpreter.
-            table = None
+            timings = None
             with contextlib.redirect_stdout(io.StringIO()):
                 if args.timing:
                     from .house.run import run_with_timing
 
-                    outcomes, table = asyncio.run(run_with_timing(scenario))
+                    outcomes, timings = asyncio.run(run_with_timing(scenario))
                 else:
                     outcomes = asyncio.run(run_one(scenario))
-            if table is not None and not args.json:
-                print(table.render())
+            if timings is not None and not args.json:
+                print(timings.render())
                 print()
         else:
             from .house.scenarios import fast
@@ -98,7 +98,8 @@ def main(argv: list[str]) -> int:
     if args.command == "arcs":
         import json as _json
 
-        from .house.arcs import play, table
+        from .house.arcs import play
+        from .house.arcs import table as arc_table
         from .house.scenarios.companion import ARCS, WANT_RECALL
 
         chosen = [a for a in ARCS if not args.only or a.person.lower() == args.only.lower()]
@@ -124,7 +125,7 @@ def main(argv: list[str]) -> int:
                                 "nagging": p.nagging, "forbidden": p.forbidden}
                                for p in played], indent=1))
         else:
-            print(table(played))
+            print(arc_table(played))
         # The two rules that are not rates: nobody who did not say yes,
         # and nobody asked twice in one stretch.
         strict = sum(p.forbidden + p.nagging for p in played)
@@ -137,6 +138,13 @@ def main(argv: list[str]) -> int:
 
         return scenario_main([*(["--json"] if args.json else []), *(["--verbose"] if args.verbose else []), *rest])
 
+    if args.paid:
+        # The suites that reach a model read this: a `Runner` takes no
+        # arguments, and threading a flag through the registry for one
+        # caller would be worse than one variable set right here.
+        import os
+
+        os.environ["SIMORGH_EVALS_PAID"] = "1"
     if args.suite in PAID and not args.paid:
         print(f"{args.suite} calls a real model and costs money; pass --paid to run it", file=sys.stderr)
         return 2

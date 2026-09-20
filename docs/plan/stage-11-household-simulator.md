@@ -126,6 +126,20 @@ Falsified by breaking `may_check_in` to always allow: the child's arc goes red w
 
 *`initiative.offered` exists now.* There was no way to count what Sim decided to send: a suppression carried its `kind` and a delivery did not, so from the bus you could see every word held back and not one that went out. `topics.py` said as much in a comment about the suppression, one line above the gap.
 
+## Item 7 as built (2026-09-20)
+
+| suite | dataset | cases | result |
+|---|---|---|---|
+| tooluse | BFCL parallel | 5 | **5/5**, 38.7 s, about \$0.02 |
+| research | GAIA level 1 | 5 | **4/5** (95% CI 40-100%), 187.5 s; the failure is "verification failed after max revisions" |
+| code | SWE-bench Verified, `<15 min fix` | 5 | skipped: the Docker daemon is not running |
+
+Three things this turned up, none of them about the models:
+
+1. **The suite names were not dataset names.** `bfcl` and `swebench` do not exist (`bfcl-parallel`, `swebench-verified` do), and had not since the suites were registered. The error was real and arrived wearing a `skipped`, which read as "needs a model run".
+2. **A sandbox with no keys scores nothing and says nothing.** Every provider fell through to the floor, whose answers the runner correctly refuses to score, so a paid run looked exactly like an unavailable dataset. `--paid` now passes the environment through, and `PAID_PROVIDERS` drops `floor` so there is nothing to fall through to.
+3. **The short-term memory probe was vacuous when written.** `stage5/remembered-across-a-long-conversation` puts a fact at turn 1 and asks at turn 37; with short turns the whole conversation came to 4964 characters, under the 6000-character window, so nothing was ever dropped and "it remembered" meant "it could still see it". The filler turns are padded to 320 characters each for that reason. Checked after: at the last turn the conversation block is full at 6002 characters and does not contain the fact, which arrives in the recall block instead.
+
 ## Measurements after
 
 | Number | Target |
@@ -149,7 +163,7 @@ Falsified by breaking `may_check_in` to always allow: the child's arc goes red w
 ## Definition of done
 
 - [ ] Items 1-4: a scenario runs end to end through the director, with people, noise, and per-expectation outcomes; the five live-log failures reproduced.
-- [x] Item 6: the companion arcs, five of them, with recall per stretch and two counts that are not rates. Items 5 and 7: a scenario pack per stage, the companion arcs with precision/recall, the benchmarks scoring through the sandbox.
+- [x] Item 6: the companion arcs, five of them, with recall per stretch and two counts that are not rates. Item 7: the three benchmark suites score through the sandbox, and the short-term memory probe is a stage-5 scenario. Item 5: a scenario pack per stage, the companion arcs with precision/recall, the benchmarks scoring through the sandbox.
 - [ ] Items 8-9: the latency table and the TUI grammar as expectations.
 - [ ] Items 10-11: findings written and clustered from a run; `house-fast` in the bless.
 - [ ] Item 12: findings entry with the tables above.
