@@ -96,6 +96,9 @@ WORKING_BLOCK_HEADER = (
 #: itself, because "the TV is off" and "I have not looked" are different
 #: answers and only one of them is honest.
 WORLD_NOW_HEADER = "The house right now, as far as you can tell:\n"
+#: How the person speaking has seemed lately -- theirs only, and
+#: only if they said Sim may keep a read on it (stage 10 item 5).
+HOW_THEY_SEEM_HEADER = ("How they have seemed lately, from how they talk rather than what they say. Something to be aware of, not something to announce or diagnose:\n")
 
 
 #: What HOLDS now, ahead of what was said (stage 5 items 3-4). A fact and
@@ -202,17 +205,24 @@ class Assembler:
         blocks: list[dict] = []
 
         task = session.user_text or user_text
-        (mem, unavailable, facts), working, house = await asyncio.gather(
+        (mem, unavailable, facts), working, house, mood = await asyncio.gather(
             self._memory_block(task or session.task_id, session),
             self._working_block(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
             # The house, for a turn a person is having in it. A task
             # session is not in the room and does not pay for this.
             self._world_now(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
+            self._how_they_seem(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
         )
         if working:
             blocks.append({"role": "system", "content": working})
         if house:
             blocks.append({"role": "system", "content": WORLD_NOW_HEADER + house})
+        if mood:
+            # The speaker's own line, and only theirs (stage 10 item 5).
+            # In the per-turn note rather than the cacheable prefix, and
+            # never anybody else's: how one person has seemed this week
+            # is not context for another person's question.
+            blocks.append({"role": "system", "content": mood})
         if facts:
             blocks.append({"role": "system", "content": FACTS_BLOCK_HEADER + facts})
         if mem:
@@ -517,6 +527,30 @@ class Assembler:
         if flags:
             lines.append("- " + ", ".join(flags))
         return "\n".join(lines)
+
+    async def _how_they_seem(self, session: Session) -> str:
+        """One line about the person who is speaking, if Sim is allowed
+        to keep a read on them at all (stage 10 item 5).
+
+        Only the speaker's own, only when the voice was placed, and
+        only when they granted `wellbeing_checkins` -- the facet
+        refuses everybody else before this asks. A typed turn with no
+        speaker gets nothing, because a baseline belongs to a person
+        and not to a keyboard.
+
+        The words come from the facet (`now_block`), which renders
+        what it noticed and the numbers under it and never a word the
+        person said. Silence on a slow answer: a missing line costs
+        nothing and a late one costs the turn.
+        """
+        speaker = str(getattr(session, "speaker", "") or "").strip()
+        if not speaker:
+            return ""
+        reply = await self.world_facet("wellbeing", {"person": speaker}, trace_id=session.trace)
+        if not reply or reply.get("ok") is False:
+            return ""
+        note = str(reply.get("note") or "").strip()
+        return f"{HOW_THEY_SEEM_HEADER}{note}" if note else ""
 
     async def world_facet(self, what: str, args: dict | None = None, *, trace_id: str | None = None) -> dict | None:
         reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}}, trace_id=trace_id)

@@ -29,6 +29,12 @@ task = "tell a config that still uses the pre-merge section names"
 since = "2026-09-20T19:50:56+00:00"
 until = "2026-09-21T03:50:56+00:00"
 
+[locks.orchestration]
+by = "opus-main"
+task = "stage 10 item 5: the speaker's own state note in their own turn"
+since = "2026-09-20T23:35:34+00:00"
+until = "2026-09-21T07:35:34+00:00"
+
 [locks.simloader]
 by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"

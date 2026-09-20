@@ -54,6 +54,7 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `cognition.think` | `messages/cognition.py::CognitionThink` | session.py:1246 | Each think (request, `think_timeout_s`), plus progress notes and wrap-up |
 | `memory.retrieve` | `messages/memory.py::MemoryRetrieve` | context.py:272-288, 357 | Each think: matched, recent, per-person and working-window recalls (0.25 s) |
 | `world.env.query` | `messages/world.py::WorldEnvQuery` | context.py:369 | `Assembler.world_facet` (request) |
+| `world.env.query` | `messages/world.py::WorldEnvQuery` | context.py `_how_they_seem` | `what: wellbeing, args: {person}` -- how the person SPEAKING has seemed lately, as one line in their own per-turn note (stage 10 item 5). Only the speaker's, only for a placed voice, and only for somebody who granted `wellbeing_checkins`; the facet refuses everybody else before this asks. A slow answer is dropped: a missing line costs nothing, a late one costs the turn |
 | `task.claim` | `messages/task.py::TaskClaim` | worker.py:271 | Request to Planning on every `task.available` |
 | `task.lease_heartbeat` | `messages/task.py::TaskLeaseHeartbeat` | worker.py:374 | Every `min(heartbeat_s, lease/3)` while a claimed task runs |
 | `task.started` | `messages/task.py::TaskStarted` | session.py:890 | Start of every attempt (also appended to the ledger) |

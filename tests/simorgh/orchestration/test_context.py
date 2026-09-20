@@ -283,3 +283,57 @@ class TheLostMemoryBlockSaysSoTestCase(unittest.TestCase):
             blocks = await assembler.assemble(session, "chat")
             await sub.unsubscribe()
             self.assertEqual([b for b in blocks if "could not be consulted" in b["content"]], [])
+
+
+class HowThePersonSpeakingHasSeemed(unittest.IsolatedAsyncioTestCase):
+    """Stage 10 item 5: the speaker's own line, in their own turn.
+
+    A companion that notices somebody is quieter than usual has to
+    have that in front of it when it answers them -- otherwise the
+    noticing lives in a facet nobody reads and Sim replies as though
+    nothing were different. Only theirs, though: how one person has
+    seemed this week is not context for another person's question.
+    """
+
+    @run
+    async def test_the_speakers_own_line_is_asked_for_and_included(self):
+        async with Harness() as h:
+            world_bus = h.client("worldmodel")
+            asked = []
+
+            async def _responder(message):
+                asked.append(dict(message.payload.get("args") or {}))
+                await world_bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "wellbeing", "as_of": 0.0, "ok": True, "tracked": True,
+                    "note": "- Mara seems quieter than usual lately (62% of about 5 recent turns)"})
+
+            sub = await world_bus.subscribe(topics.WORLD_ENV_QUERY, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT)
+            session.speaker = "Mara"
+            note = await assembler._how_they_seem(session)  # noqa: SLF001
+            await sub.unsubscribe()
+
+            self.assertEqual([a.get("person") for a in asked], ["Mara"], "one person's line, not the house's")
+            self.assertIn("quieter than usual", note)
+            self.assertNotIn("62% of about 5 recent turns", note.split("\n")[0],
+                             "the header comes first; the numbers are the facet's line")
+
+    @run
+    async def test_a_typed_turn_with_no_speaker_asks_for_nothing(self):
+        async with Harness() as h:
+            world_bus = h.client("worldmodel")
+            asked = []
+
+            async def _responder(message):
+                asked.append(message)
+                await world_bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={"facet": "wellbeing", "as_of": 0.0, "ok": True})
+
+            sub = await world_bus.subscribe(topics.WORLD_ENV_QUERY, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT)
+            note = await assembler._how_they_seem(session)  # noqa: SLF001
+            await sub.unsubscribe()
+
+            self.assertEqual(note, "")
+            self.assertEqual(asked, [], "a baseline belongs to a person, not to a keyboard")

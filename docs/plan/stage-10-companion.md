@@ -106,7 +106,7 @@ Done 2026-09-20 (item 3, first cut): Initiative classes `check_in` (urgency 0.8,
 
 - [ ] Items 1-3 with tests, `CONTRACT.md` for contracts, worldmodel and initiative (**first cut done 2026-09-20 on a branch; the branch has not landed**).
 - [ ] Item 4: the tool verbs, the CLI, the onboarding step, with the creator's wording.
-- [ ] Item 5: the state note for the speaker only.
+- [x] Item 5: the state note for the speaker only -- `context.py::_how_they_seem`, one line in the per-turn note, asked for by name, dropped if slow; a typed turn with no speaker asks for nothing (2026-09-20).
 - [ ] Item 6: composition rules, the guard, "not now" and "stop", the HOLD.
 - [ ] Items 7-8: interests learnt and confirmed; unprompted conversation sought under a cap.
 - [ ] Item 9: the corpus named, indexed, cited; the open web excluded from this path.
