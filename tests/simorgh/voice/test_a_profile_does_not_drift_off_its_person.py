@@ -64,3 +64,47 @@ class TheCapHolds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StartingAgain(unittest.TestCase):
+    """A profile that has drifted off its person cannot be repaired by
+    adding takes to it, so there has to be a way back to nothing
+    (`voice forget all`, 2026-09-20)."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        from simorgh.voice.speakers import SpeakerBook
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = Path(self.tmp.name)
+        self.book = SpeakerBook(self.folder)
+        self.book.enroll("Saeed", _voice(1.0))
+        self.book.enroll("Ira", _other())   # a different direction: two voices, not one twice
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_it_names_what_it_erased(self):
+        self.assertEqual(self.book.forget_everyone(), ["Ira", "Saeed"],
+                         "a person deserves to be told exactly what went")
+
+    def test_nothing_is_left_on_disk_or_in_memory(self):
+        from simorgh.voice.speakers import SpeakerBook
+
+        self.book.forget_everyone()
+        self.assertEqual(self.book.people(), [])
+        self.assertEqual(SpeakerBook(self.folder).people(), [], "and it stays gone across a restart")
+        self.assertEqual(list(self.folder.glob("*.json")), [])
+
+    def test_erasing_an_empty_book_says_so_rather_than_pretending(self):
+        self.book.forget_everyone()
+        self.assertEqual(self.book.forget_everyone(), [])
+
+    def test_a_backup_beside_the_book_is_not_a_voice(self):
+        """The repaired profiles left `.json.bak` files in the folder;
+        the book must neither load nor erase them."""
+        (self.folder / "Saeed.poisoned-20260920.json.bak").write_text("{}")
+        self.book.forget_everyone()
+        self.assertTrue((self.folder / "Saeed.poisoned-20260920.json.bak").exists())

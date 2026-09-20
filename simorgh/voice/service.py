@@ -453,7 +453,19 @@ class Service:
             return True, how
         if action == "forget":
             if not name:
-                return False, "usage: voice forget <name>"
+                return False, "usage: voice forget <name>   (or `voice forget all` to start again)"
+            if name.strip().lower() == "all":
+                # Starting over, on purpose. A profile that has drifted
+                # off its person cannot be repaired by adding takes to
+                # it -- the creator's had 21 whose median agreement with
+                # each other was 0.37 -- so there has to be a way back
+                # to nothing (2026-09-20).
+                gone = book.forget_everyone()
+                if not gone:
+                    return False, "nobody is enrolled"
+                return True, (f"forgot every voice: {', '.join(gone)}. "
+                              f"`voice enroll <name>` to start again -- three sentences each, "
+                              f"and say them the way you normally talk to me rather than carefully")
             return (True, f"forgot {name}'s voice") if book.forget(name) else (False, f"nobody called {name!r} is enrolled")
         if session is None or not getattr(session, "run", None) or self._loop_task is None:
             return False, "the microphone is not listening -- `voice on` first"

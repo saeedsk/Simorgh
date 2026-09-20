@@ -4,3 +4,15 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.interface]
+by = "opus-main"
+task = "voice forget all: start voice training fresh"
+since = "2026-09-20T15:48:23+00:00"
+until = "2026-09-20T23:48:23+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "voice forget all: start voice training fresh"
+since = "2026-09-20T15:48:23+00:00"
+until = "2026-09-20T23:48:23+00:00"

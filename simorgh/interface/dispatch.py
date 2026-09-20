@@ -511,7 +511,7 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
                               timeout=10.0, render=voiceview.controlled)
     if verb == "forget":
         if not rest.strip():
-            return Outcome("usage: voice forget <name>")
+            return Outcome("usage: voice forget <name>   (or `voice forget all` to erase every voice and start again)")
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "forget", "name": rest.strip()}, timeout=10.0,
                               render=voiceview.controlled)
     if verb in ("people", "who", "family"):

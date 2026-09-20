@@ -323,6 +323,22 @@ class SpeakerBook:
             pass
         return True
 
+    def forget_everyone(self) -> list[str]:
+        """Every voice, gone, so training can start from nothing.
+
+        The names are returned because a person deserves to be told
+        exactly what was erased -- and because "forget all my voices"
+        should never be a command whose result is a shrug. Pronunciations
+        go with the voice: they live on the same record, and a fresh
+        enrolment sets them again.
+        """
+        self._load()
+        names = sorted(person.name for person in self._people.values())
+        for person in list(self._people.values()):
+            self.forget(person.name)
+        self._people.clear()
+        return names
+
     def enroll(self, name: str, embedding: Sequence[float], *, relation: str = "", insist: bool = False) -> tuple[Person, str]:
         """Add one take to `name`. Returns the person and a note: "" when
         the take was accepted, else why it was refused -- only ever
