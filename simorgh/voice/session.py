@@ -2222,6 +2222,34 @@ class VoiceSession:
         self._last_segments = []
         self._clocks.pop(turn_id, None)
 
+    async def _wait_for_the_floor(self) -> bool:
+        """Wait, briefly, for somebody who is mid-sentence to finish.
+
+        `say()` is how everything Sim decided to say on its own
+        reaches the room -- a check-in, a camera, a reminder, a share
+        -- and it took the speech lock and talked, whatever the state
+        of the room. A person mid-sentence was talked over by a
+        machine that had been waiting all evening for something to
+        mention (stage 6 item 6, the HOLD this plan has asked for
+        since it was written).
+
+        Bounded by `hold_unprompted_max_s`, and then it speaks
+        anyway: a safety alert that waits for a quiet room is a
+        safety alert nobody hears. A reply to a spoken turn does not
+        come through here -- it has `HOLD_REPLY` and a much shorter
+        patience, because somebody is waiting for that one.
+        """
+        limit = float(self._config.hold_unprompted_max_s or 0.0)
+        if limit <= 0.0 or self.turns.state not in (USER_SPEAKING, THINKING):
+            return True
+        deadline = self._now() + limit
+        while self._now() < deadline:
+            await asyncio.sleep(0.1)
+            if self.turns.state not in (USER_SPEAKING, THINKING):
+                return True
+        self._log("info", "voice.spoke_over_the_floor", state=self.turns.state, waited_s=round(limit, 1))
+        return False
+
     async def say(self, text: str, *, request_id: str = "", lane: str = "") -> str:
         """Speak something that is not a reply to a spoken turn -- a typed
         turn's reply, `voice test` -- THROUGH the session, so the turn
@@ -2232,6 +2260,7 @@ class VoiceSession:
                              pieces=tuple((c.text, c.pause_ms) for c in plan.chunks),
                              voice=self._config.tts_voice, speed=self._config.tts_speed,
                              lane=self._lane_for(plan.text, spoken_turn=False, explicit=lane == "expressive"))
+        await self._wait_for_the_floor()
         entered_from = self.turns.state
         if entered_from == LISTENING:
             self.turns.state = AGENT_SPEAKING

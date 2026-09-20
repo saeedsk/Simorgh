@@ -1027,3 +1027,53 @@ class TestASlowStageIsABreach(unittest.TestCase):
         self.assertEqual(breach[0]["attrs"]["stage"], "stt")
         fast = TurnClock(turn_id=2, speech_end=100.0, final_at=100.5, first_audio_at=101.0, trace_id="t2")
         self.assertEqual(session._check_budgets(fast), [])  # noqa: SLF001
+
+
+class AnUnpromptedLineWaitsForTheFloor(unittest.IsolatedAsyncioTestCase):
+    """Sim decided to say something. Somebody is mid-sentence.
+
+    `say()` is how everything Sim says on its own initiative reaches
+    the room -- a check-in, a camera, a reminder, a share -- and it
+    took the speech lock and talked, whatever the room was doing. A
+    person mid-sentence was talked over by a machine that had been
+    waiting all evening for something to mention. Stage 6 item 6 has
+    asked for this HOLD since it was written.
+    """
+
+    def _session(self, **settings):
+        config = Config(enabled=True, **settings)
+        return _session(config, _Script([]), _Replies(["hello"]))[0]
+
+    async def test_it_waits_while_somebody_is_speaking(self):
+        from simorgh.voice.turns import LISTENING, USER_SPEAKING
+
+        session = self._session(hold_unprompted_max_s=5.0)
+        session.turns.state = USER_SPEAKING
+
+        async def _let_them_finish():
+            await asyncio.sleep(0.25)
+            session.turns.state = LISTENING
+
+        freed = asyncio.create_task(_let_them_finish())
+        waited = await session._wait_for_the_floor()  # noqa: SLF001
+        await freed
+        self.assertTrue(waited, "it should have got the floor once they stopped")
+        self.assertEqual(session.turns.state, LISTENING)
+
+    async def test_it_speaks_anyway_rather_than_waiting_forever(self):
+        """A safety alert that waits for a quiet room is one nobody hears."""
+        from simorgh.voice.turns import USER_SPEAKING
+
+        session = self._session(hold_unprompted_max_s=0.2)
+        session.turns.state = USER_SPEAKING
+        waited = await session._wait_for_the_floor()  # noqa: SLF001
+        self.assertFalse(waited, "past the deadline it speaks over them, deliberately")
+
+    async def test_a_quiet_room_is_not_waited_on_at_all(self):
+        from simorgh.voice.turns import LISTENING
+
+        session = self._session(hold_unprompted_max_s=5.0)
+        session.turns.state = LISTENING
+        started = asyncio.get_running_loop().time()
+        self.assertTrue(await session._wait_for_the_floor())  # noqa: SLF001
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.05)

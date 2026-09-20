@@ -129,6 +129,13 @@ class Config:
     # sound (measured 2026-09-13, `before_lock`). If it really is a new
     # turn, that turn supersedes this reply anyway (turns.py).
     hold_reply_max_s: float = 1.5
+    # How long something Sim decided to say ON ITS OWN waits for the
+    # floor -- a check-in, a camera, a reminder, a share. A reply has
+    # `hold_reply_max_s` and is short because the person is waiting for
+    # it; nobody is waiting for this one, so it can be patient. Past
+    # the deadline it speaks anyway: a safety alert that waited for a
+    # quiet room would be a safety alert nobody heard (stage 6 item 6).
+    hold_unprompted_max_s: float = 8.0
     semantic_silence_factor: float = 0.75  # a finished sentence needs this much of the silence
     stt_partials: bool = True          # provisional transcripts while the person is still talking
     stt_partial_every_ms: int = 1500

@@ -37,6 +37,6 @@ until = "2026-09-21T03:42:55+00:00"
 
 [locks.voice]
 by = "opus-main"
-task = "the filler fallback said 0 while the default says 2000"
-since = "2026-09-20T22:35:23+00:00"
-until = "2026-09-21T06:35:23+00:00"
+task = "stage 6 item 6: an unprompted line waits for the floor"
+since = "2026-09-20T23:33:48+00:00"
+until = "2026-09-21T07:33:48+00:00"

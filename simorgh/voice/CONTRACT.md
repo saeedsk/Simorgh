@@ -128,6 +128,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the s
 | `min_speech_ms` | `250` | yes |
 | `max_turn_ms` | `30000` | yes |
 | `hold_reply_max_s` | `1.5` | yes |
+| `hold_unprompted_max_s` | `8.0` | yes |
 | `semantic_silence_factor` | `0.75` | yes |
 | `stt_partials` | `True` | yes |
 | `stt_partial_every_ms` | `1500` | yes |
@@ -218,7 +219,8 @@ The four `aec*` keys affect only the legacy `Pipeline` capture path; the live `V
 9. Kept audio is bounded: after each kept turn, files older than `keep_audio_days` or beyond `keep_audio_max_mb` are deleted with their transcripts (`session.py` `prune_kept_audio`).
 10. The echo bar is infinite only while a gain has never been MEASURED (`EchoTracker.learnt`), and a reply ending settles whatever it measured (`EchoTracker.settle`, called from `session._play`). A room where the microphone hears nothing of Sim measures zero, which is correct -- Sim is inaudible to itself, so the person is always louder -- and reading that as "not learnt yet" put the bar at infinity for the start of every reply, where nothing anybody says can count as a person. That is the "Sim, can you hear me?" of a quiet kitchen 30 cm from the speaker; the household simulator reproduced it as every other spoken beat going unheard (`live/a-whole-conversation`, 4/6 before the fix, 6/6 after). A zero gain is provisional: `observe` keeps sampling and `expected` takes `max(gain, this reply's middle)`, so a room that does echo raises the bar without waiting for a restart.
 11. A sentence naming who it is for, when that is not Sim, is an aside and the model is never asked (`backchannel.to_someone_else`, `session._named_somebody_else`): a vocative only -- an endearment or a household name, at one end of the sentence, set off by a comma -- and never when Sim is named too, and never inside a conversation Sim is already in. Question-shape does not argue with it: with a real provider "Can you try a bit harder next time, honey." was answered "Sorry, Devin -- tell me what I got wrong and I'll fix it". Every deterministic quiet rule now also stamps `_quiet_on`, so `_continuation` covers the second half of a sentence whisper cut in two; it did not, because only the model's own QUIET used to stamp it.
-12. With the defaults, an unknown voice is never asked for its name unprompted (`introduce_after_turns = 0`), and a voice Sim cannot place is not answered unless it says Sim's name or answers what Sim just asked (`unplaced_needs_name`, `config.py:172-178`).
+12. Anything Sim says on its own initiative waits for the floor: `session.say` holds while the turn manager is in `user_speaking` or `thinking`, up to `hold_unprompted_max_s` (8 s), then speaks anyway and logs `voice.spoke_over_the_floor`. A reply to a spoken turn does not come through here -- it has `HOLD_REPLY` and `hold_reply_max_s` (1.5 s), because somebody is waiting for that one. Without this a check-in, a camera or a reminder took the speech lock mid-sentence (stage 6 item 6's HOLD, added 2026-09-20).
+13. With the defaults, an unknown voice is never asked for its name unprompted (`introduce_after_turns = 0`), and a voice Sim cannot place is not answered unless it says Sim's name or answers what Sim just asked (`unplaced_needs_name`, `config.py:172-178`).
 
 ## Contract tests
 
