@@ -117,6 +117,8 @@ class Service:
         topics.PERCEPT_TEXT_RECEIVED, topics.GUARDIAN_POSTURE_CHANGED, topics.TURN_COMPLETED, topics.SESSION_DELTA,
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_COMPLETED, topics.COGNITION_PROVIDER_STATUS,
         topics.PERCEPT_TIME_SCHEDULED, topics.UI_COMMAND_REQUEST,
+        # Sim changing how it works, said out loud (stage 8 item 4).
+        topics.GROWTH_POLICY_ADOPTED, topics.GROWTH_POLICY_RETIRED,
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
         topics.ACTION_RESULT,
         topics.BENCHMARK_PROGRESS,
@@ -268,6 +270,12 @@ class Service:
             await ctx.bus.subscribe(topics.UI_COMMAND_REQUEST, self._on_command_request),
             await ctx.bus.subscribe(topics.ACTION_NEEDS_HUMAN, self._on_needs_human),
             await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
+            # When Sim changes how it works, the household is told
+            # (stage 8 item 4). A policy adopted or retired is Sim
+            # deciding to behave differently; finding that out from a
+            # ledger stream is not being told.
+            await ctx.bus.subscribe(topics.GROWTH_POLICY_ADOPTED, self._on_policy_changed),
+            await ctx.bus.subscribe(topics.GROWTH_POLICY_RETIRED, self._on_policy_changed),
             await ctx.bus.subscribe(topics.PERSONA_STATE_CHANGED, self._on_persona_state),
             await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed),
             await ctx.bus.subscribe(topics.SYSTEM_METRICS, self._on_metrics),
@@ -1280,6 +1288,29 @@ class Service:
             # silence.
             return
         self._out(render_mod.notice("info", label, "reminder", enabled=self._color))
+
+    async def _on_policy_changed(self, message: Message) -> None:
+        """`growth.policy.adopted` / `.retired`: Sim now does something
+        differently, or has stopped. One line, with the measurement
+        that justified it -- a behaviour change nobody can see is a
+        behaviour change nobody consented to."""
+        payload = message.payload or {}
+        body = render_mod.one_safe_line(str(payload.get("body") or ""))
+        if not body:
+            return
+        about = str(payload.get("task_type") or "").strip()
+        where = f" for {about}" if about else ""
+        if message.type == topics.GROWTH_POLICY_RETIRED:
+            why = render_mod.one_safe_line(str(payload.get("reason") or "it ran out"))
+            self._out(render_mod.notice("info", f"stopped{where}: {body} ({why})", "growth",
+                                        enabled=self._color))
+            return
+        baseline, result = payload.get("baseline"), payload.get("result")
+        on = payload.get("evaluated_on") or 0
+        measured = (f" -- {float(result):.0%} against {float(baseline):.0%} on {on} cases"
+                    if isinstance(result, (int, float)) and isinstance(baseline, (int, float)) else "")
+        self._out(render_mod.notice("info", f"new{where}: {body}{measured}", "growth",
+                                    enabled=self._color))
 
     async def _on_prompt(self, message: Message) -> None:
         """Live-caught (the creator, real use: typed "yes" twice at a

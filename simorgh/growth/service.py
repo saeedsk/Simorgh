@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from simorgh.contracts import topics
 from simorgh.contracts.protocols import Context, Health
 
 from .estimate.service import Service as EstimateService
@@ -70,7 +71,12 @@ class Service:
     name = NAME
     version = VERSION
     consumes: tuple[str, ...] = _union("consumes")
-    produces: tuple[str, ...] = _union("produces")
+    produces: tuple[str, ...] = _union("produces") + (
+        # The subsystem's own, not any part's: what was decided
+        # (stage 8 item 4).
+        topics.GROWTH_LESSON_FOUND, topics.GROWTH_POLICY_PROPOSED,
+        topics.GROWTH_POLICY_ADOPTED, topics.GROWTH_POLICY_RETIRED,
+    )
 
     def __init__(self, **parts) -> None:
         """`Service(estimate=..., monitors=..., explore=...)` replaces a
@@ -80,6 +86,9 @@ class Service:
         for key, factory in PARTS:
             self._parts[key] = parts.get(key) or factory()
         self._started: list[str] = []
+        #: What Sim decided to do differently (stage 8 item 4); built in
+        #: `start` because it needs the ledger and the bus.
+        self.policies = None
         self._failed: dict[str, str] = {}
         self._ctx: Context | None = None
 
@@ -98,6 +107,22 @@ class Service:
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # The policy store belongs to the whole subsystem rather than
+        # to any one part: a lesson can come from any of them, and what
+        # was decided is one record (stage 8 item 4).
+        from simorgh.contracts.envelope import Message
+
+        from .policies import PolicyStore
+
+        async def _announce(topic: str, payload: dict) -> None:
+            await ctx.bus.publish(Message.new(topic, source=ctx.bus.source, payload=payload,
+                                              clock=ctx.clock.now))
+
+        self.policies = PolicyStore(ctx.ledger, clock=ctx.clock, publish=_announce)
+        try:
+            await self.policies.sync()
+        except Exception as exc:  # noqa: BLE001 -- an unreadable stream is not a failed start
+            ctx.logger.warning("growth.policies_unreadable", error=repr(exc))
         for key, _factory in PARTS:
             part = self._parts[key]
             try:

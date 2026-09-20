@@ -1,0 +1,67 @@
+{
+  "$id": "https://simorgh.local/schema/growth.policy.adopted.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `growth.policy.adopted` (catalog v1).",
+  "properties": {
+    "baseline": {
+      "type": "number"
+    },
+    "body": {
+      "type": "string"
+    },
+    "evaluated_on": {
+      "type": "integer"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "rule",
+        "skill",
+        "routing",
+        "patch"
+      ],
+      "type": "string"
+    },
+    "policy_id": {
+      "type": "string"
+    },
+    "result": {
+      "type": "number"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "ttl_s": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "policy_id",
+    "kind",
+    "task_type",
+    "body",
+    "baseline",
+    "result",
+    "evaluated_on"
+  ],
+  "title": "growth.policy.adopted",
+  "type": "object"
+}

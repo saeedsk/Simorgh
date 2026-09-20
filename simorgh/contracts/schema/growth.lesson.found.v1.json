@@ -1,0 +1,44 @@
+{
+  "$id": "https://simorgh.local/schema/growth.lesson.found.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Something that keeps happening, found by counting. Not a decision: nothing has changed because of it yet.",
+  "properties": {
+    "count": {
+      "type": "integer"
+    },
+    "evidence": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "source": {
+      "enum": [
+        "failures",
+        "denials",
+        "patterns"
+      ],
+      "type": "string"
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "what": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "source",
+    "what",
+    "count"
+  ],
+  "title": "growth.lesson.found",
+  "type": "object"
+}

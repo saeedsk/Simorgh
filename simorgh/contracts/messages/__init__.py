@@ -9,6 +9,7 @@ from . import (  # noqa: F401 -- side effect: registration
     benchmark,
     cognition,
     curiosity,
+    growth,
     guardian,
     initiative,
     intent,

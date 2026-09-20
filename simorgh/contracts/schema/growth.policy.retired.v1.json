@@ -1,0 +1,53 @@
+{
+  "$id": "https://simorgh.local/schema/growth.policy.retired.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A policy stopped: its TTL ran out, or the task type it was about got worse. Every policy is reversible and time-bounded, so this is the ordinary end of one, not a failure.",
+  "properties": {
+    "body": {
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "rule",
+        "skill",
+        "routing",
+        "patch"
+      ],
+      "type": "string"
+    },
+    "policy_id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "policy_id",
+    "kind",
+    "task_type",
+    "body",
+    "reason"
+  ],
+  "title": "growth.policy.retired",
+  "type": "object"
+}

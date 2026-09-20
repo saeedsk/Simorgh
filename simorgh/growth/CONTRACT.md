@@ -35,6 +35,19 @@ The bar for a failure cluster is three things at once: at least `MIN_MEMBERS` (3
 
 A model is asked exactly one thing, after the counting, about something already on the list: `candidate_prompt` asks for one sentence of advice and says "nothing you cannot see below".
 
+## Produces
+
+| Topic | Schema | Where | When |
+|---|---|---|---|
+| `growth.lesson.found` | `messages/growth.py::GrowthLessonFound` | `diagnose` through the monitors' pass | something keeps happening and the counting says it is specific enough to name. Not a decision |
+| `growth.policy.proposed` | `messages/growth.py::GrowthPolicyProposed` | `policies.py::PolicyStore._announce` | a policy is written down. It has changed nothing yet |
+| `growth.policy.adopted` | `messages/growth.py::GrowthPolicyAdopted` | `policies.py::PolicyStore._announce` | a policy cleared its measurement: carries `baseline`, `result`, `evaluated_on`, `ttl_s` |
+| `growth.policy.retired` | `messages/growth.py::GrowthPolicyRetired` | `policies.py::PolicyStore._announce` | a TTL ran out, or the task type got worse; carries the reason |
+
+A **refusal** is not announced. It changed nothing, and a household that hears about every rejected idea stops listening for the accepted ones; it is in `growth:policies` for whoever looks. `lesson.found` and `policy.proposed` are allow-listed announcements for the same reason: they are what Sim is thinking about, not what it has done.
+
+`policy.adopted` and `policy.retired` have a real consumer -- the Interface prints one line with the measurement (`_on_policy_changed`). A behaviour change nobody can see is a behaviour change nobody consented to, and finding it out from a ledger stream is not being told.
+
 ## Ledger streams
 
 | Stream | Written by | Read by | Retention |

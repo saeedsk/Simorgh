@@ -1,0 +1,49 @@
+{
+  "$id": "https://simorgh.local/schema/growth.policy.proposed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `growth.policy.proposed` (catalog v1).",
+  "properties": {
+    "body": {
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "rule",
+        "skill",
+        "routing",
+        "patch"
+      ],
+      "type": "string"
+    },
+    "policy_id": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "policy_id",
+    "kind",
+    "task_type",
+    "body"
+  ],
+  "title": "growth.policy.proposed",
+  "type": "object"
+}

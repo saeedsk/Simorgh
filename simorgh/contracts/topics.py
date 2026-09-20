@@ -18,6 +18,10 @@ DOMAINS: tuple[str, ...] = (
     "system", "percept", "intent", "plan", "project", "task", "turn", "session", "action",
     "guardian", "tool", "verify", "memory", "world", "self", "learn", "reflect",
     "curiosity", "persona", "ui", "cognition", "research", "benchmark", "voice", "initiative",
+    # `growth.*` is what Sim decided to do differently (stage 8 item 4).
+    # `learn.*`, `reflect.*` and `curiosity.*` stay as they are: the
+    # merge changed the owner, not the wire.
+    "growth",
 )
 
 SUBSYSTEMS: tuple[str, ...] = (
@@ -222,6 +226,15 @@ REFLECT_ALERT_RAISED = "reflect.alert.raised"
 REFLECT_ALERT_CLEARED = "reflect.alert.cleared"
 REFLECT_REVIEW_REQUEST = "reflect.review.request"
 REFLECT_REVIEW_REPLY = "reflect.review.reply"
+# --- 4.12b growth ---------------------------------------------------------
+# What Sim decided to do differently, and when it stopped (stage 8
+# item 4). A policy is the durable form of a lesson: a memory record
+# changes nothing unless the vocabulary happens to match next time.
+GROWTH_LESSON_FOUND = "growth.lesson.found"
+GROWTH_POLICY_PROPOSED = "growth.policy.proposed"
+GROWTH_POLICY_ADOPTED = "growth.policy.adopted"
+GROWTH_POLICY_RETIRED = "growth.policy.retired"
+
 # --- 4.13 curiosity -------------------------------------------------------
 CURIOSITY_CANDIDATE = "curiosity.candidate"
 CURIOSITY_INTEREST_UPDATED = "curiosity.interest.updated"

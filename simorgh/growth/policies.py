@@ -21,6 +21,8 @@ changes:
 from __future__ import annotations
 
 import time
+
+from simorgh.contracts import topics
 import uuid
 from dataclasses import dataclass, field, replace
 
@@ -81,11 +83,15 @@ def from_dict(data: dict) -> Policy:
 class PolicyStore:
     """The policies, in memory over an append-only stream."""
 
-    def __init__(self, ledger=None, *, clock=None) -> None:
+    def __init__(self, ledger=None, *, clock=None, publish=None) -> None:
         self._ledger = ledger
         self._clock = clock or time.time
         self._policies: dict[str, Policy] = {}
         self._cursor = 0
+        #: `async (topic, payload) -> None`, so a change to how Sim
+        #: works is visible when it happens rather than only in the
+        #: stream (stage 8 item 4). None in a bare store.
+        self._publish = publish
 
     def _now(self) -> float:
         return float(self._clock() if callable(self._clock) else self._clock.now())
@@ -107,7 +113,30 @@ class PolicyStore:
             await self._ledger.append(STREAM, Event(
                 stream=STREAM, type=f"policy.{policy.status}", ts=self._now(), trace_id=policy.id,
                 causation_id=None, payload=policy.to_dict()))
+        await self._announce(policy)
         return policy
+
+    #: status -> topic. `refused` is deliberately absent: a policy that
+    #: did not clear its measurement is in the stream for whoever looks,
+    #: and announcing every refusal would train the household to ignore
+    #: the ones that matter.
+    _TOPICS = {"proposed": topics.GROWTH_POLICY_PROPOSED,
+               "adopted": topics.GROWTH_POLICY_ADOPTED,
+               "retired": topics.GROWTH_POLICY_RETIRED}
+
+    async def _announce(self, policy: Policy) -> None:
+        topic = self._TOPICS.get(policy.status)
+        if self._publish is None or topic is None:
+            return
+        payload = {"policy_id": policy.id, "kind": policy.kind, "task_type": policy.task_type,
+                   "body": policy.body, "why": policy.why,
+                   "evidence_refs": list(policy.evidence_refs)}
+        if policy.status == "adopted":
+            payload.update(baseline=float(policy.baseline or 0.0), result=float(policy.result or 0.0),
+                           evaluated_on=policy.evaluated_on, ttl_s=policy.ttl_s)
+        if policy.status == "retired":
+            payload["reason"] = policy.why or "it ran out"
+        await self._publish(topic, payload)
 
     async def propose(self, *, kind: str, task_type: str, body: str, evidence_refs=(), why: str = "") -> Policy:
         if kind not in KINDS:
