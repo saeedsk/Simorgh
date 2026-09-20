@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.growth]
-by = "opus-main"
-task = "stage 8 items 6-8"
-since = "2026-09-20T13:53:05+00:00"
-until = "2026-09-20T21:53:05+00:00"
