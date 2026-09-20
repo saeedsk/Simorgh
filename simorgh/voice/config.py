@@ -198,7 +198,18 @@ class Config:
     # should be obvious that I'm paying attention to you ... not just, suddenly,
     # this is not for me".
     conversation_window_s: float = 180.0
-    still_after_s: float = 20.0
+    # 6, not 20. Live 2026-09-20, the creator after a twenty-second
+    # silence: "you could say immediately, let me check". Both covers
+    # failed for that turn by construction -- the opening "Okay." was
+    # suppressed by `backchannel_gap_s` (one had been said three
+    # seconds earlier, on the previous turn) and this one waited longer
+    # than the answer took, so it fired as the reply landed. The wait
+    # was a provider failover, not a slow tool, so stage 3 item 5's
+    # spoken filler (`filler_over_ms`, on `tool.started`) did not cover
+    # it either. This one is immune to the gap and only ever speaks
+    # when a turn is genuinely slow, which is exactly when a person
+    # wants to hear something.
+    still_after_s: float = 6.0
     # A tool whose recent p95 is over this says so out loud while it runs
     # (stage 3 item 5): "let me look", once per turn. The wait a person
     # actually sits through is the tool, not the model, and a six-second
