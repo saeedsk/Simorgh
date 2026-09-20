@@ -54,11 +54,15 @@ def _args_hash(args: dict) -> str:
 #: reaches Guardian. Offered by the agents that list it.
 MEMORY_SEARCH = "memory_search"
 
+#: Stop and come back later (stage 7 item 5), holding no worker while
+#: waiting. `WAIT: 10m` or `WAIT: until world.home.situation_changed`.
+WAIT = "wait"
+
 #: Tools the session answers itself: no Execution tool exists for them and
 #: Guardian never sees them, because none of them has an effect. An agent
 #: file may list `memory_search`; `delegate`, `use_skill` and
 #: `recall_result` are added when the session has something to use them on.
-SESSION_LOCAL = frozenset({MEMORY_SEARCH, "delegate", "task", "use_skill", pressure_mod.RECALL_TOOL})
+SESSION_LOCAL = frozenset({MEMORY_SEARCH, WAIT, "delegate", "task", "use_skill", pressure_mod.RECALL_TOOL})
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here
@@ -1048,6 +1052,11 @@ class SessionRunner:
                     step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                     session.record(step)
                     await self._record_step(session, step)
+                    if session.waiting:
+                        # The task is parked (stage 7 item 5). Ending the
+                        # attempt here is what frees the worker; Planning
+                        # wakes the task when its moment or its event comes.
+                        return Outcome("paused", reason=summary)
                 # Two turns, not one. This used to append a single
                 # *assistant* message reading "[tool_call read_file] ->
                 # <the file>", so the model was asked to continue a
@@ -1250,6 +1259,9 @@ class SessionRunner:
                 and session.profile.scaffold in ("patch", "research") and "delegate" not in offered):
             offered = tuple(offered) + ("delegate",)
         catalog = self._catalog(session) if offered and not no_tools else ""
+        if offered and session.profile.scaffold in ("patch", "research", "plan") and WAIT not in offered:
+            # Long work may have to wait for the world (stage 7 item 5).
+            offered = tuple(offered) + (WAIT,)
         if catalog and "use_skill" not in offered:
             offered = tuple(offered) + ("use_skill",)
         if offered and any(str(m.get("content") or "").startswith(pressure_mod.STUB_MARK) for m in session.messages):
@@ -1504,6 +1516,8 @@ class SessionRunner:
             return await self._recall_result(call)
         if call.get("tool") == MEMORY_SEARCH:
             return await self._memory_search(session, call)
+        if call.get("tool") == WAIT:
+            return await self._wait(session, call)
         return await self._propose_and_await(session, call, step_no)
 
     async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:
@@ -1719,6 +1733,43 @@ class SessionRunner:
             return
         if measured >= pressure_mod.NOTE_AT and session.profile.scaffold != "chat" and not session.budget.is_last_step:
             await self._reground(session, forced=True)
+
+    async def _wait(self, session: Session, call: dict) -> tuple[bool, str, str]:
+        """`wait 10m` or `wait until <topic>` -- stop, and come back when
+        there is something to come back for (stage 7 item 5).
+
+        A task that waits by sleeping holds a worker and a model context
+        for as long as it waits, so ten minutes of waiting is ten minutes
+        nothing else runs. This publishes `task.waiting` instead: Planning
+        parks the task, the lease goes, and the wake puts it back on the
+        queue with everything it had.
+        """
+        from simorgh.contracts.durations import parse_duration
+
+        args = call.get("args") or {}
+        raw = " ".join(str(args.get("argument") or args.get("for") or args.get("until") or "").split())
+        if session.profile.scaffold == "chat":
+            text = "wait: a chat turn is answered now; start a task if the answer has to come later"
+            return False, text, text
+        event, seconds = "", None
+        body = raw[len("until"):].strip() if raw.lower().startswith("until") else raw
+        if "." in body and " " not in body:
+            event = body
+        else:
+            seconds = parse_duration(body)
+        if not event and not seconds:
+            text = "wait: say how long (`wait 10m`) or what to wait for (`wait until world.home.situation_changed`)"
+            return False, text, text
+        payload = {"task_id": session.task_id, "why": f"the session asked to wait for {body}"}
+        if seconds:
+            payload["until"] = _epoch(self._clock) + seconds
+        if event:
+            payload["event"] = event
+        await self._publish(session, topics.TASK_WAITING, payload)
+        session.waiting = True
+        text = (f"waiting for {body}; the task is parked and will come back when it is due. "
+                "Say nothing further this turn.")
+        return True, text, text
 
     async def _memory_search(self, session: Session, call: dict) -> tuple[bool, str, str]:
         """`memory_search <what>` -- ask Memory, in the middle of a turn.

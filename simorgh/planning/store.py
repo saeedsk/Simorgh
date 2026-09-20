@@ -78,6 +78,7 @@ class TaskIndex:
                 status=p.get("status", PENDING), created_at=event.ts, updated_at=event.ts,
                 priority=p.get("priority", 0), scope=Scope.from_payload(p.get("scope")),
                 plan_id=p.get("plan_id"), max_steps=p.get("max_steps"),
+                wake_at=p.get("wake_at"), wake_on=str(p.get("wake_on") or ""),
             )
         elif event.type == "status_changed":
             current = self.tasks.get(task_id)
@@ -152,6 +153,7 @@ def _task_to_dict(t: Task) -> dict:
         "lease": {"worker_id": t.lease.worker_id, "until": t.lease.until} if t.lease else None,
         "created_at": t.created_at, "updated_at": t.updated_at, "priority": t.priority,
         "scope": t.scope.to_payload() if t.scope else None, "plan_id": t.plan_id, "max_steps": t.max_steps,
+        "wake_at": t.wake_at, "wake_on": t.wake_on,
     }
 
 
@@ -165,7 +167,7 @@ def _task_from_dict(task_id: str, d: dict) -> Task:
         attempts=d.get("attempts", 0), note=d.get("note", ""), lease=lease,
         created_at=d.get("created_at", 0.0), updated_at=d.get("updated_at", 0.0),
         priority=d.get("priority", 0), scope=Scope.from_payload(d.get("scope")), plan_id=d.get("plan_id"),
-        max_steps=d.get("max_steps"),
+        max_steps=d.get("max_steps"), wake_at=d.get("wake_at"), wake_on=str(d.get("wake_on") or ""),
     )
 
 
@@ -308,6 +310,41 @@ class TaskStore:
         self.index.apply(stream, replace(event, seq=seq))
         await self._maybe_snapshot()
         return self.index.tasks[task_id]
+
+    async def wait(self, task_id: str, *, until: float | None = None, event: str = "", why: str = "") -> Task | None:
+        """Park a task until a moment or an event (stage 7 item 5).
+
+        The lease goes with it: a waiting task holds no worker, which is
+        the whole point -- otherwise one task waiting ten minutes for a
+        calendar event blocks every other task behind it.
+        """
+        from .model import WAITING
+
+        task = self.index.tasks.get(task_id)
+        if task is None or task.status in TERMINAL_STATUSES:
+            return None
+        parked = await self.transition(task_id, WAITING, note=why or "waiting")
+        parked = replace(parked, lease=None, wake_at=until, wake_on=event)
+        self.index.tasks[task_id] = parked
+        return parked
+
+    async def wake(self, task_id: str, *, why: str = "") -> Task | None:
+        """Put a waiting task back on the queue; None when it was not
+        waiting (a cancel, a wake that arrives twice)."""
+        from .model import WAITING
+
+        task = self.index.tasks.get(task_id)
+        if task is None or task.status != WAITING:
+            return None
+        woken = await self.transition(task_id, AVAILABLE, note=why or "woke")
+        woken = replace(woken, wake_at=None, wake_on="")
+        self.index.tasks[task_id] = woken
+        return woken
+
+    def waiting(self) -> list[Task]:
+        from .model import WAITING
+
+        return [t for t in self.index.tasks.values() if t.status == WAITING]
 
     async def claim(self, task_id: str, worker_id: str, lease_seconds: float) -> ClaimResult:
         task = self.index.tasks.get(task_id)

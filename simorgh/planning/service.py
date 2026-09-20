@@ -70,7 +70,7 @@ class Service:
         topics.REFLECT_PATTERNS_FOUND,
         topics.REFLECT_DRIFT_DETECTED,
         topics.LEARN_SELF_PATCH_APPLIED,
-        topics.SYSTEM_TICK_SECOND,
+        topics.SYSTEM_TICK_SECOND, topics.TASK_WAITING, topics.TASK_WAKE,
         topics.SYSTEM_TICK_IDLE,
         topics.SYSTEM_STATE_CHANGED,
         # Subscribed through a handler table, missing from this manifest until 2026-09-19:
@@ -118,6 +118,8 @@ class Service:
         self._prompt_to_plan: dict[str, str] = {}
         self._project_completed_emitted: set[str] = set()
         self._tick_n = 0
+        #: Topics some task is waiting on (stage 7 item 5), subscribed once.
+        self._waited_topics: dict = {}
         # Re-grounding (spec section 5.5): per-project flags consulted by
         # `_maybe_reground_then_available` right before a PENDING child
         # would otherwise become `available` un-checked.
@@ -180,6 +182,8 @@ class Service:
             topics.TASK_COMPLETED: self._on_task_completed,
             topics.TASK_FAILED: self._on_task_failed,
             topics.TASK_BLOCKED: self._on_task_blocked,
+            topics.TASK_WAITING: self._on_task_waiting,
+            topics.TASK_WAKE: self._on_task_wake,
             topics.TASK_CANCEL: self._on_task_cancel,
             topics.TASK_CLEAR_REQUEST: self._on_task_clear,
             topics.PLAN_REVIEWED: self._persisting(self._on_plan_reviewed),
@@ -545,6 +549,62 @@ class Service:
             partition_key=f"task:{task_id}",
             payload={"task_id": task_id, "reason": reason, "terminal": True, "attempts": task.attempts},
         ))
+
+    async def _on_task_waiting(self, message: Message) -> None:
+        """Park a task that is waiting for a time or an event (stage 7
+        item 5). It holds no worker while it waits."""
+        p = message.payload
+        until = p.get("until")
+        event = str(p.get("event") or "")
+        task = await self._store.wait(p["task_id"], until=float(until) if until is not None else None,
+                                      event=event, why=str(p.get("why") or ""))
+        if task is None:
+            return
+        if event:
+            await self._listen_for(event)
+        self._notice("info", f"task {task.id[:8]} is waiting"
+                             + (f" for {event}" if event else "")
+                             + (f" until {until}" if until is not None else ""))
+
+    async def _on_task_wake(self, message: Message) -> None:
+        task = await self._store.wake(str(message.payload.get("task_id") or ""),
+                                      why=str(message.payload.get("why") or ""))
+        if task is not None:
+            await self._dispatch_ready()
+
+    async def _dispatch_ready(self) -> None:
+        if self._scheduler is not None:
+            await self._scheduler.dispatch_ready()
+
+    async def _listen_for(self, topic: str) -> None:
+        """Subscribe to a topic some task is waiting on, once.
+
+        The task waits on the EVENT, not on a model that keeps asking
+        whether it has happened yet: a wait that costs tokens is a wait
+        nobody can afford to leave running.
+        """
+        if topic in self._waited_topics:
+            return
+        try:
+            sub = await self._ctx.bus.subscribe(topic, self._on_awaited_event)
+        except Exception as exc:  # noqa: BLE001 -- an unknown topic is the task's mistake, not a crash
+            self._notice("warning", f"nothing can wait on {topic!r}: {exc!r}")
+            return
+        self._waited_topics[topic] = sub
+
+    async def _on_awaited_event(self, message: Message) -> None:
+        for task in self._store.waiting():
+            if task.wake_on and task.wake_on == message.type:
+                if await self._store.wake(task.id, why=f"{message.type} happened") is not None:
+                    await self._dispatch_ready()
+
+    async def _wake_due(self) -> None:
+        """Wake anything whose moment has come."""
+        now = self._ctx.clock.now()
+        for task in self._store.waiting():
+            if task.wake_at is not None and task.wake_at <= now:
+                if await self._store.wake(task.id, why="the time came") is not None:
+                    await self._dispatch_ready()
 
     async def _on_task_blocked(self, message: Message) -> None:
         # `_retry_or_block` publishes task.blocked itself, on the same
@@ -937,6 +997,7 @@ class Service:
         if self._scheduler is not None:
             await self._scheduler.scan_leases()
         await self._end_cancelled_after_expiry()
+        await self._wake_due()
         await self._reconsider_blocked()
         await self._reconsider_awaiting_human()
         await self._persist_changed_plans()

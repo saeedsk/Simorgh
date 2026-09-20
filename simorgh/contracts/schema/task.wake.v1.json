@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/task.wake.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `task.wake` (catalog v1).",
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "task_id"
+  ],
+  "title": "task.wake",
+  "type": "object"
+}

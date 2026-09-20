@@ -133,6 +133,8 @@ Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus
 
 ## Invariants
 
+- A waiting task holds no worker (stage 7 item 5, 2026-09-19): `task.waiting{until|event}` parks it as `WAITING` and drops its lease; it returns to `AVAILABLE` when the moment passes (checked on the per-second tick), when the named topic is heard (Planning subscribes to it once), or on `task.wake`. `WAITING` is distinct from `PENDING` (waiting on another task) and from `BLOCKED` (an outcome): a waiting task is going fine and is simply not due yet.
+
 - Only `planning` may publish `plan.proposed` (`contracts/topics.py` PUBLISH_ONLY_BY). No other policy entry names planning.
 - Every status change is legal under `_TRANSITIONS` (`model.py:139-169`); a repeat of the current status is a no-op. `completed` and `failed` have no exits: a finished task is never offered, claimed or run again.
 - A completion that arrives after the lease expired (task back at `available` or `claimed`) is still recorded as completed.

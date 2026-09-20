@@ -26,27 +26,16 @@ import uuid
 from dataclasses import dataclass, field
 
 from simorgh.contracts import topics
+from simorgh.contracts.durations import parse_duration as _shared_parse_duration
 from simorgh.contracts.envelope import Event, Message, validate
 from simorgh.contracts.protocols import Bus, Clock, Ledger, Logger
 from simorgh.ledger.api import Projection
 
 SCHEDULE_STREAM = "schedule"
 
-_DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*$", re.IGNORECASE)
-_UNIT_SECONDS = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0}
-
-
-def parse_duration(raw: str, *, max_seconds: float = 86400.0) -> float | None:
-    """Parses "60", "60s", "1m", "2h", "1.5m" into seconds. `None` for
-    anything unparseable, non-positive, or over `max_seconds` -- never
-    raises (v1 `reminders.parse_duration`, verbatim behavior)."""
-    match = _DURATION_RE.match(raw)
-    if not match:
-        return None
-    seconds = float(match.group(1)) * _UNIT_SECONDS[match.group(2).lower()]
-    if seconds <= 0 or seconds > max_seconds:
-        return None
-    return seconds
+#: One parser for "10m", shared with anything else that waits
+#: (`contracts/durations.py`, stage 7 item 5).
+parse_duration = _shared_parse_duration
 
 
 class ActivityClock:

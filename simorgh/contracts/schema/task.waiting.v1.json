@@ -1,0 +1,34 @@
+{
+  "$id": "https://simorgh.local/schema/task.waiting.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "The task is fine and not due yet: it holds no worker until `until` passes or `event` is heard.",
+  "properties": {
+    "event": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "until": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "task_id"
+  ],
+  "title": "task.waiting",
+  "type": "object"
+}

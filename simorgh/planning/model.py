@@ -19,6 +19,10 @@ AVAILABLE = "available"
 CLAIMED = "claimed"
 IN_PROGRESS = "in_progress"
 PAUSED = "paused"
+#: Waiting for a time or an event, holding no worker (stage 7 item 5).
+#: Distinct from PENDING, which waits on another task, and from BLOCKED,
+#: which is an outcome: a waiting task is going fine and is not due yet.
+WAITING = "waiting"
 BLOCKED = "blocked"
 COMPLETED = "completed"
 FAILED = "failed"
@@ -86,6 +90,10 @@ class Task:
     # Steps one attempt may spend, when the task says; else the
     # profile's default (orchestration decides).
     max_steps: int | None = None
+    #: Why this task is WAITING (stage 7 item 5): a wall-clock moment, a
+    #: topic to hear, or both. Cleared when it wakes.
+    wake_at: float | None = None
+    wake_on: str = ""
 
     def with_status(self, status: str, *, note: str = "", updated_at: float, attempt: bool = False) -> "Task":
         # A finished task keeps no lease. It used to: completion left the
@@ -154,14 +162,17 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
     # FAILED is deliberately NOT added here: a completion that lost this
     # race is real work worth keeping, while a failure that lost it
     # would only kill a task somebody has legitimately re-queued.
-    AVAILABLE: frozenset({CLAIMED, PAUSED, BLOCKED, COMPLETED}),
+    AVAILABLE: frozenset({CLAIMED, PAUSED, BLOCKED, COMPLETED, WAITING}),
     # Terminal states are reachable straight from CLAIMED: `task.started`
     # is a separate message, and if recording it is lost the work still
     # really happened. Refusing the completion left the task `claimed`
     # forever -- which is where 109 of the creator's tasks were sitting
     # on 2026-09-07, having genuinely finished. AVAILABLE = lease expired.
-    CLAIMED: frozenset({IN_PROGRESS, AVAILABLE, COMPLETED, FAILED, BLOCKED}),
-    IN_PROGRESS: frozenset({PAUSED, COMPLETED, FAILED, BLOCKED, AVAILABLE}),  # AVAILABLE = lease expired
+    CLAIMED: frozenset({IN_PROGRESS, AVAILABLE, COMPLETED, FAILED, BLOCKED, WAITING}),
+    IN_PROGRESS: frozenset({PAUSED, COMPLETED, FAILED, BLOCKED, AVAILABLE, WAITING}),  # AVAILABLE = lease expired
+    # A waiting task is not due yet and holds no worker (stage 7 item 5);
+    # it goes back on the queue when it wakes, or is cancelled outright.
+    WAITING: frozenset({AVAILABLE, BLOCKED, FAILED, PAUSED}),
     PAUSED: frozenset({AVAILABLE, CLAIMED}),
     BLOCKED: frozenset({AVAILABLE, FAILED}),
     COMPLETED: frozenset(),
@@ -177,6 +188,6 @@ def is_legal_transition(current: str, target: str) -> bool:
 
 __all__ = [
     "AVAILABLE", "BLOCKED", "CLAIMED", "COMPLETED", "FAILED", "IN_PROGRESS", "KINDS", "MODES",
-    "ORIGINS", "PAUSED", "PENDING", "RISKS", "TERMINAL_STATUSES", "Lease", "Scope", "Step", "Task",
+    "ORIGINS", "PAUSED", "PENDING", "RISKS", "TERMINAL_STATUSES", "WAITING", "Lease", "Scope", "Step", "Task",
     "is_legal_transition",
 ]

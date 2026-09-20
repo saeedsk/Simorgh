@@ -131,6 +131,10 @@ TaskFailed = define(t.TASK_FAILED, [
     F("terminal", Bool),
     F("attempts", Int),
 ])
+TaskWaiting = define(t.TASK_WAITING, [
+    F("task_id", Str), O("until", Float), O("event", Str), O("why", Str),
+], doc="The task is fine and not due yet: it holds no worker until `until` passes or `event` is heard.")
+TaskWake = define(t.TASK_WAKE, [F("task_id", Str), O("why", Str)])
 TaskBlocked = define(t.TASK_BLOCKED, [
     F("task_id", Str),
     F("reason", Str),

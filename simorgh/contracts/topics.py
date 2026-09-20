@@ -78,6 +78,12 @@ TURN_COMPLETED = "turn.completed"
 SESSION_DELTA = "session.delta"
 TASK_FAILED = "task.failed"
 TASK_BLOCKED = "task.blocked"
+#: A task that is waiting, holding no worker (stage 7 item 5): until a
+#: moment, or until something happens. `task.wake` puts it back in the
+#: queue -- from the Kernel's scheduler for a time, from Planning hearing
+#: the event for an event.
+TASK_WAITING = "task.waiting"
+TASK_WAKE = "task.wake"
 # Ask a running task to stop. Nothing could, before 2026-09-08: a task
 # that timed out on the caller's side kept its worker for as long as it
 # liked, and since the worker takes one task at a time, every later task

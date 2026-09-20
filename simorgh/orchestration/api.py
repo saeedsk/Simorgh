@@ -209,6 +209,9 @@ class Session:
     #: Irreversible actions this session already completed before a crash
     #: (`resume.done_actions`): `(tool, args hash) -> what it returned`.
     done_actions: dict = field(default_factory=dict)
+    #: The session asked to wait (stage 7 item 5): the attempt ends and
+    #: Planning parks the task, rather than a worker sleeping on it.
+    waiting: bool = False
     # The trace this session's messages carry. A task's trace is its task
     # id; a chat turn's is the percept's own trace, so one spoken or typed
     # turn is one trace from percept to turn.completed (stage 1 item 2).
