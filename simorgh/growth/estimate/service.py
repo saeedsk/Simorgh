@@ -86,10 +86,10 @@ class Service:
             try:
                 found = self.load_evals(candidate)
             except Exception as exc:  # noqa: BLE001 -- no evals is not a failed start
-                ctx.logger.log("warning", "estimate.evals_unreadable", path=str(candidate), error=repr(exc))
+                ctx.logger.warning("estimate.evals_unreadable", path=str(candidate), error=repr(exc))
                 continue
             if found:
-                ctx.logger.log("info", "estimate.evals_loaded", path=str(candidate), suites=found)
+                ctx.logger.info("estimate.evals_loaded", path=str(candidate), suites=found)
                 break
 
     async def stop(self) -> None:

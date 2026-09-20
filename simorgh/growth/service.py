@@ -108,7 +108,7 @@ class Service:
                 # taking the whole subsystem down would stop the
                 # estimates a running task reads.
                 self._failed[key] = repr(exc)
-                ctx.logger.log("error", "growth.part_failed", part=key, error=repr(exc))
+                ctx.logger.error("growth.part_failed", part=key, error=repr(exc))
             else:
                 self._started.append(key)
 

@@ -27,10 +27,19 @@ Each part keeps its own `CONTRACT.md` (`estimate/`, `monitors/`, `explore/`), it
 
 `Service(estimate=..., monitors=..., explore=...)` replaces a part, which is how a test drives one without booting the other two.
 
+## What is worth a lesson (stage 8 item 3)
+
+Three things used to notice that something keeps going wrong, in three shapes nobody could compare: `diagnose.cluster` over terminal failures, the denial miner (the same tool refused for the same reason, again and again) and the pattern miner (a task type whose success rate has fallen). They make the same claim, so they now arrive as one shape -- `diagnose.Candidate{source, subject, what, count, evidence}` -- through one entry point, `diagnose.candidates(failures, denials=, patterns=)`. The monitors keep watching; what counts as a pattern is decided in one place, by counting, so all three are held to the same bar.
+
+The bar for a failure cluster is three things at once: at least `MIN_MEMBERS` (3) members, a share above the baseline for other task types, and **not** seen at strength across `GENERAL_ACROSS` (3) kinds of work. The last one exists because the share test alone does not catch it: a task type whose only failures are timeouts scores a share of 1.0 and looks specific to itself, when "patch tasks time out" is advice nobody can act on.
+
+A model is asked exactly one thing, after the counting, about something already on the list: `candidate_prompt` asks for one sentence of advice and says "nothing you cannot see below".
+
 ## Ledger streams
 
 | Stream | Written by | Read by | Retention |
 |---|---|---|---|
+| `growth:candidates` | `monitors/service.py::_record_candidates` | nothing yet (a person, and item 4's adoption) | forever; one `candidate{source, subject, what, count, evidence}` per pass per candidate |
 | `growth:policies` | `PolicyStore._write` | `PolicyStore.sync` | forever; one event per status change (`policy.proposed`, `policy.adopted`, `policy.refused`, `policy.retired`), never a deletion |
 
 ## Invariants

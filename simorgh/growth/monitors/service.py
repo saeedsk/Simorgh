@@ -79,6 +79,10 @@ CRITIQUE_STREAM_PREFIX = "reflect:critique:"
 DISTILLATION_STREAM = "reflect:distillation"
 CALIBRATION_STREAM = "reflect:calibration"
 PATTERNS_STREAM = "reflect:patterns"
+#: Everything worth a lesson, from every source that notices one
+#: (stage 8 item 3). The monitors keep watching; `growth/diagnose.py`
+#: decides what is a pattern, so there is one bar rather than three.
+CANDIDATES_STREAM = "growth:candidates"
 
 _CRITIQUE_KINDS = frozenset({"patch", "skill", "research", "project"})
 
@@ -570,6 +574,7 @@ class Service:
     async def _run_pass(self, message: Message) -> None:
         now = self._ctx.clock.now() if self._ctx is not None else message.ts
         patterns = self._patterns.mine(now)
+        await self._record_candidates(patterns)
         if patterns:
             await self._append(PATTERNS_STREAM, "mined", {"window": self.config.pattern_window_seconds, "count": len(patterns)})
             await self._publish(message, topics.REFLECT_PATTERNS_FOUND, {
@@ -839,6 +844,29 @@ class Service:
     async def _publish(self, cause: Message, type_: str, payload: dict) -> None:
         assert self._ctx is not None
         await self._ctx.bus.publish(cause.caused(type_, payload, source=self._ctx.source))
+
+    async def _record_candidates(self, patterns) -> list:
+        """What is worth a lesson right now, from every source at once
+        (stage 8 item 3).
+
+        The monitors keep watching -- that is what they are for -- but
+        what counts as a pattern is decided in one place, by counting,
+        so a denial loop and a falling success rate and a cluster of
+        identical failures are held to the same bar instead of three.
+        Written down rather than acted on here: adopting anything is
+        the policy store's job, with a measurement.
+        """
+        from simorgh.growth.diagnose import candidates
+
+        found = candidates([], denials=self._denials.counts(), patterns=patterns,
+                           min_repeats=self.config.denial_min_repeats)
+        for candidate in found:
+            await self._append(CANDIDATES_STREAM, "candidate", {
+                "source": candidate.source, "subject": candidate.subject,
+                "what": candidate.what, "count": candidate.count,
+                "evidence": list(candidate.evidence),
+            })
+        return found
 
     async def _append(self, stream: str, event_type: str, payload: dict) -> None:
         if self._ctx is None:
