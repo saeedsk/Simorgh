@@ -7,9 +7,9 @@
 
 [locks.benchmark]
 by = "opus-main"
-task = "multi-agent wave 1"
-since = "2026-09-19T13:05:46+00:00"
-until = "2026-09-19T21:05:46+00:00"
+task = "stage 4 item 9: simorgh/evals"
+since = "2026-09-20T06:25:39+00:00"
+until = "2026-09-20T14:25:39+00:00"
 
 [locks.bus]
 by = "opus-main"
@@ -91,9 +91,9 @@ until = "2026-09-20T00:15:50+00:00"
 
 [locks.simloader]
 by = "opus-main"
-task = "multi-agent wave 1"
-since = "2026-09-19T13:05:46+00:00"
-until = "2026-09-19T21:05:46+00:00"
+task = "stage 4 item 9: bless runs the evals"
+since = "2026-09-20T06:25:39+00:00"
+until = "2026-09-20T14:25:39+00:00"
 
 [locks.telemetry]
 by = "opus-main"
@@ -103,9 +103,9 @@ until = "2026-09-19T21:05:46+00:00"
 
 [locks.tools]
 by = "opus-main"
-task = "multi-agent wave 1"
-since = "2026-09-19T13:05:46+00:00"
-until = "2026-09-19T21:05:46+00:00"
+task = "stage 4 item 9: simorgh/evals"
+since = "2026-09-20T06:25:39+00:00"
+until = "2026-09-20T14:25:39+00:00"
 
 [locks.voice]
 by = "opus-main"
