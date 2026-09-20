@@ -34,7 +34,10 @@ class ALedgerIsBoundToItsWriter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await bound.read("scratch:notes")), 1)
 
     def test_the_longest_prefix_decides(self):
-        self.assertEqual(writers_for("reflection:alerts"), frozenset({"reflection"}))
-        self.assertEqual(writers_for("reflect:drift:x"), frozenset({"reflection"}))
+        # `growth` since the merge (stage 8 item 1): the prefixes keep
+        # their old names so nothing written before it is orphaned, but
+        # the subsystem that writes them is the merged one.
+        self.assertEqual(writers_for("reflection:alerts"), frozenset({"growth"}))
+        self.assertEqual(writers_for("reflect:drift:x"), frozenset({"growth"}))
         self.assertIsNone(writers_for("somethingelse"))
         self.assertTrue(all(isinstance(v, frozenset) and v for v in WRITERS.values()))

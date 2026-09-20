@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.contracts]
+by = "opus-main"
+task = "growth may not write its own streams since the merge"
+since = "2026-09-20T18:12:56+00:00"
+until = "2026-09-21T02:12:56+00:00"
+
 [locks.evals]
 by = "opus-main"
 task = "stage 11 item 1: sandbox and director"

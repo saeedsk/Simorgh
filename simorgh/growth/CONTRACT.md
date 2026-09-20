@@ -82,6 +82,7 @@ Not built yet: the drafting step (a lesson phrased by the skill-writer agent) an
 
 | Stream | Written by | Read by | Retention |
 |---|---|---|---|
+| `learn:*`, `reflect:*`, `reflection:*`, `curiosity:*` | the parts, under their pre-merge names | as before | forever; the prefixes were kept so nothing written before the merge is orphaned, and `contracts/streamnames.py::WRITERS` names **growth** as their writer (it still named the three removed subsystems until 2026-09-20, and a bound ledger therefore refused every one of these writes) |
 | `growth:candidates` | `monitors/service.py::_record_candidates` | nothing yet (a person, and item 4's adoption) | forever; one `candidate{source, subject, what, count, evidence}` per pass per candidate |
 | `growth:policies` | `PolicyStore._write` | `PolicyStore.sync` | forever; one event per status change (`policy.proposed`, `policy.adopted`, `policy.refused`, `policy.retired`), never a deletion |
 

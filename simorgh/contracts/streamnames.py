@@ -60,10 +60,23 @@ WRITERS: dict[str, frozenset[str]] = {
     "persona:": frozenset({"persona"}),
     "cognition:": frozenset({"cognition"}),
     "verify:": frozenset({"verification"}),
-    "learn:": frozenset({"learning"}),
-    "reflect:": frozenset({"reflection"}),
-    "reflection:": frozenset({"reflection"}),
-    "curiosity:": frozenset({"curiosity"}),
+    # One subsystem writes all four since the growth merge (stage 8
+    # item 1): `learning`, `reflection` and `curiosity` became parts of
+    # `growth` and publish under its name, but this table still said
+    # otherwise -- so from the merge until 2026-09-20 every write to
+    # these prefixes raised `WriterViolation` and growth silently
+    # recorded nothing at all: no outcomes, no findings, no ticks. The
+    # module tiers did not catch it because they build a Service
+    # directly, and only a booted Kernel hands out a BOUND ledger. The
+    # household simulator found it on its second real boot.
+    #
+    # The stream names keep their old prefixes on purpose: renaming
+    # them would orphan every event written before the merge.
+    "learn:": frozenset({"growth"}),
+    "reflect:": frozenset({"growth"}),
+    "reflection:": frozenset({"growth"}),
+    "curiosity:": frozenset({"growth"}),
+    "growth:": frozenset({"growth"}),
     "voice:": frozenset({"voice"}),
     "benchmark:": frozenset({"benchmark"}),
     "execution:": frozenset({"execution"}),
