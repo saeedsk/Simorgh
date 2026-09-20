@@ -17,6 +17,8 @@ World Model owns two read models: the environment facets (the code areas under `
 | `simorgh/worldmodel/facets/capability_map.py` | `capability_map` facet: the areas and modules under `simorgh/`, uncached |
 | `simorgh/worldmodel/facets/file_index.py` | `file_index` facet: bounded tree scan with optional per-path preview, 30 s cache |
 | `simorgh/worldmodel/facets/git_state.py` | `git_state` facet: read-only `git` subprocess observation |
+| `simorgh/worldmodel/facets/home.py` | `home` facet: the entity table, presence beliefs with decay, situation facts, `now_block` (stage 6 item 3) |
+| `simorgh/worldmodel/facets/people.py` | `people` facet: the People store (`people.json`), resolution by identity or name, link/unlink/set_role, and since stage 10 grant/revoke/add_interest/remove_interest |
 | `simorgh/worldmodel/facets/registry_facets.py` | `tools` facet (from `tool.*`) and `user_profile` facet (from Persona) |
 | `simorgh/worldmodel/selfmodel.py` | `SelfModel` dataclass, pure mutators, summary and markdown rendering, `compute_gaps` |
 | `simorgh/worldmodel/service.py` | the bus subsystem: facet queries, Self Model folding, loader-rollback ingestion |
@@ -48,7 +50,7 @@ Authority: `Service.consumes` in `service.py:45-53`.
 | `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/worldmodel/service.py | marks the goal blocked (still outstanding) |
 
 Also read at boot: `SIMORGH_LOADER_NOTES/last_rollback.json`, turned into a limitation once per rollback (`service.py:133-172`).
-| `world.people.update` | `messages/world.py::WorldPeopleUpdate` | simorgh/worldmodel/service.py | link a handle to a person, unlink one, or set a role (stage 6 item 4). The only write in this subsystem; tier 3 on the way in, so a person has already confirmed it |
+| `world.people.update` | `messages/world.py::WorldPeopleUpdate` | simorgh/worldmodel/service.py | link a handle to a person, unlink one, set a role (stage 6 item 4); grant or revoke a permission, add or remove an interest (stage 10 item 1). The only write in this subsystem; tier 3 on the way in, so a person has already confirmed it. A `grant` of a name that is not in `contracts.people.PERMISSIONS` is a `refused` reply |
 
 ## Produces
 
@@ -108,6 +110,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/worldmodel/test_file_index_facet.py` -- the file index answers the path asked and refreshes on its window.
 - `tests/simorgh/worldmodel/test_capability_map.py` -- the capability areas and modules listed from `simorgh/`.
 - `tests/simorgh/worldmodel/test_substrate.py` -- `cognition.provider.status` reaches the Self Model and its rendering.
+- `tests/simorgh/worldmodel/test_people_store.py` and `test_people_consent.py` -- the People store: one person across channels, `unknown` by default; a grant lands on the record and on disk, survives a restart, is refused for a name that is not a permission, and a guest with the flag is still refused by the role gate (stage 10 item 1).
 
 ## Known issues (2026-09-18 evaluation)
 
@@ -130,3 +133,5 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 Lock it first (`python tools/modlock.py claim worldmodel --by <you> --task "..."`), commit the lock, edit only `simorgh/worldmodel/`, `tests/simorgh/worldmodel/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py worldmodel` before committing; commit subject `worldmodel: <what changed>`.
 
 - ToolsFacet keeps each tool's `description` and `input_schema` from `tool.registered` (stage 2 item 1).
+
+- Stage 10 item 1, 2026-09-20: the `people` facet keeps what a person said yes to (`grant`/`revoke` of `contracts.people.PERMISSIONS`) and what they care about (`add_interest`/`remove_interest`), through the same `world.people.update` write and the same tier; `consented(name, permission)` answers the grant half and `contracts.people.may_check_in` the whole gate. `world.env.query{what: "people", args: {name}}` answers by name. A fresh install grants nothing. The store never infers a permission from a turn.

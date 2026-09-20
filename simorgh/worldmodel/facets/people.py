@@ -11,11 +11,17 @@ Resolution is the point of it: `resolve("telegram:saeed")` and
 kitchen is found under their name on Telegram. An identity nobody has
 linked resolves to `None`, which every caller must read as `unknown`
 rather than as a new person.
+
+Stage 10 adds the two things a companion needs to know and may not
+guess: what a person said yes to (`grant`/`revoke`) and what they care
+about (`add_interest`/`remove_interest`). Both arrive only through a
+confirmed `world.people.update`; the store never infers either.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from simorgh.contracts.people import Person, from_dict, household_people, normalise_identity
@@ -92,7 +98,7 @@ class PeopleFacet:
                             role=role or "guest")
         person = person.with_identity(identity)
         if role:
-            person = person.__class__(**{**person.to_dict(), "identities": person.identities, "role": role})
+            person = replace(person, role=role)
         self._people[person.person_id] = person
         self.save()
         return person
@@ -112,19 +118,58 @@ class PeopleFacet:
         person = self.by_name(name)
         if person is None:
             return None
-        from dataclasses import replace
-
         person = replace(person, role=role)
         self._people[person.person_id] = person
         self.save()
         return person
 
+    # -- what they said yes to, and what they care about (stage 10) --------------------
+    def _change(self, name: str, fn) -> Person | None:
+        """Apply `fn(person) -> person` to the named person and write it
+        down; `None` for a name nobody has. `fn` may raise `ValueError`
+        (an unknown permission), which the service turns into a refusal."""
+        self.load()
+        person = self.by_name(name)
+        if person is None:
+            return None
+        person = fn(person)
+        self._people[person.person_id] = person
+        self.save()
+        return person
+
+    def grant(self, name: str, permission: str) -> Person | None:
+        """A person said yes. Only ever called from a confirmed
+        `world.people.update` or the onboarding step -- never from a
+        sentence in a turn."""
+        return self._change(name, lambda p: p.with_permission(permission))
+
+    def revoke(self, name: str, permission: str) -> Person | None:
+        return self._change(name, lambda p: p.without_permission(permission))
+
+    def add_interest(self, name: str, topic: str) -> Person | None:
+        return self._change(name, lambda p: p.with_interest(topic))
+
+    def remove_interest(self, name: str, topic: str) -> Person | None:
+        return self._change(name, lambda p: p.without_interest(topic))
+
+    def consented(self, name: str, permission: str) -> bool:
+        """Whether the named person granted `permission`. The role gate is
+        `contracts.people.may_check_in` / `may_share_interest`; this is
+        only the grant half, for callers that already know the role."""
+        person = self.by_name(name)
+        return person is not None and person.grants(permission)
+
     async def get(self, args: dict) -> dict:
-        """`world.env.query{what: "people"}`."""
+        """`world.env.query{what: "people"}`: by identity, by name, or all."""
         identity = str(args.get("identity") or "")
         if identity:
             person = self.resolve(identity)
             return {"person": person.to_dict() if person else None, "role": self.role_of(identity)}
+        name = str(args.get("name") or "")
+        if name:
+            person = self.by_name(name)
+            return {"person": person.to_dict() if person else None,
+                    "role": person.role if person is not None else "unknown"}
         return {"people": [p.to_dict() for p in self.all()]}
 
 

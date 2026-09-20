@@ -46,6 +46,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/verify.py` | `verify.*` (2) |
 | `simorgh/contracts/messages/voice.py` | `voice.*` (19) |
 | `simorgh/contracts/messages/world.py` | `world.*` (4) |
+| `simorgh/contracts/people.py` | `Person` (identities, role, `permissions`, `interests`), `PERMISSIONS`, the role gates `may_check_in` / `may_share_interest`, `household_people()` (stage 6 item 4, stage 10 item 1) |
 | `simorgh/contracts/overheard.py` | the store of speech not addressed to Sim, grouped into conversations (file IO under a lock) |
 | `simorgh/contracts/places.py` | house name and known networks, read from and written to `simorgh.toml` (IO) |
 | `simorgh/contracts/protocols.py` | `Bus`, `Ledger`, `Clock`, `Logger`, `Span`, `Telemetry` (and the no-op `NullTelemetry`/`NULL_TELEMETRY`), `Health`, `Context`, `Subsystem`, `Provider`, `ProviderResponse`, `Tool`, `ToolContext`, `ToolResult` (with `error_kind` and the helpers `refused/unconfigured/transient/failed/from_exception`), `ERROR_KINDS`, `ToolUnconfigured`, `error_kind_of` |
@@ -117,6 +118,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/contracts/test_validation.py` -- the JSON Schema subset the registry relies on.
 - `tests/simorgh/contracts/test_security.py` -- approval tokens verify, forgeries and expired or altered tokens fail, replays are refused.
 - `tests/simorgh/contracts/test_toolargs.py` -- the shared marker-to-arguments tables the model path and the CLI both use.
+- `tests/simorgh/contracts/test_people.py` -- `Person.permissions` and `interests` are explicit fields; a fresh install grants nothing; `may_check_in` refuses `None`, guest, unknown and child whatever the record says, and an adult without the grant; `may_share_interest` admits a child with a parent's grant and refuses a guest.
 - `tests/simorgh/contracts/test_telemetry_protocol.py` -- `NullTelemetry` conforms to `Telemetry`, records nothing, lets a span's exception through; a hand-built `Context` carries `NULL_TELEMETRY`.
 
 ## Known issues (2026-09-18 evaluation)
@@ -170,3 +172,5 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `session.delta{session_id, seq, text, reset?}` (stage 3 item 2, 2026-09-19): a reply while it is written; bus-only (trace sampling 0), never in the ledger; `reset` retracts what was shown. Producer: cognition. Consumer: interface (voice in item 4). `cognition.think` gains optional `stream` and `stream_to`. New topic domain `session`.
 
 - `contracts/session.py` (stage 4 item 1, 2026-09-19): `Session{id, agent, channel, person_id, parent_id, depth, budget{turns, tokens, usd, wall_s}, state}`, `Turn{seq, role, blocks, ts, meta}`, blocks `Text | ToolUse{id, name, input} | ToolResult{tool_use_id, content, is_error, ref, bytes_total} | Image{ref}` with a `kind` tag; dict round-trips and `validate_turn`/`validate_session`/`validate_pairs`. Stream `session:<id>` (writer: orchestration), events `session.turn.appended`, `session.compacted`, `session.snapshot` -- ledger event types, not bus topics. No consumer yet.
+
+- `contracts/people.py` (stage 10 item 1, 2026-09-20): `Person` gains `permissions: tuple[str, ...]` (of `PERMISSIONS = ("wellbeing_checkins", "interest_shares")`; `grants`, `with_permission` -- raises `ValueError` for a name that is not a permission -- `without_permission`) and `interests: tuple[str, ...]` (`with_interest`/`without_interest`, normalised by `normalise_interest`: lowercase, one line, 60 chars). Both are explicit fields, not `preferences` keys, because a permission is gated on and a preference is read. `from_dict` of an older record reads both as empty. The gates `may_check_in(person) -> (ok, why)` (role in `CHECK_IN_ROLES = ("owner", "adult")` and the grant) and `may_share_interest` (role in `INTEREST_SHARE_ROLES = ("owner", "adult", "child")` and the grant) live here so the wellbeing facet and Initiative give one answer. `world.people.update.action` gains `grant`, `revoke`, `add_interest`, `remove_interest` with optional `permission` and `interest` fields (additive). Consumers: worldmodel (the store and the handler), initiative (the gates; item 3), execution (the `people` tool will grow the verbs; stage 10 item 4, not yet).

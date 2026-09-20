@@ -297,14 +297,43 @@ class Service:
                 if person is None:
                     raise ValueError(f"I do not know anybody called {name!r}")
                 detail = f"{person.name} is {person.role}"
+            elif action in ("grant", "revoke"):
+                # What a person said yes to (stage 10). The grant arrives
+                # here only after a person confirmed it (tier 3); the store
+                # refuses a name that is not a permission.
+                permission = str(payload.get("permission") or "").strip().lower()
+                if not name or not permission:
+                    raise ValueError(f"a {action} needs both a name and a permission")
+                person = (self._people.grant if action == "grant" else self._people.revoke)(name, permission)
+                if person is None:
+                    raise ValueError(f"I do not know anybody called {name!r}")
+                detail = (f"{person.name} said yes to {permission}" if action == "grant"
+                          else f"{person.name} withdrew {permission}")
+                if action == "revoke":
+                    await self._on_permission_revoked(person.name, permission)
+            elif action in ("add_interest", "remove_interest"):
+                interest = str(payload.get("interest") or "").strip()
+                if not name or not interest:
+                    raise ValueError(f"{action} needs both a name and an interest")
+                fn = self._people.add_interest if action == "add_interest" else self._people.remove_interest
+                person = fn(name, interest)
+                if person is None:
+                    raise ValueError(f"I do not know anybody called {name!r}")
+                detail = f"{person.name} cares about: {', '.join(person.interests) or 'nothing recorded'}"
             else:
-                raise ValueError(f"{action!r} is not link, unlink or set_role")
+                raise ValueError(f"{action!r} is not link, unlink, set_role, grant, revoke, "
+                                 "add_interest or remove_interest")
         except Exception as exc:  # noqa: BLE001 -- a bad ask is a reply, never a crash
             await self._ctx.bus.reply(message, type=topics.WORLD_PEOPLE_UPDATE_REPLY,
                                       payload=error_reply_payload("refused", str(exc)))
             return
         await self._ctx.bus.reply(message, type=topics.WORLD_PEOPLE_UPDATE_REPLY,
                                   payload={"ok": True, "person": person.to_dict(), "detail": detail})
+
+    async def _on_permission_revoked(self, name: str, permission: str) -> None:
+        """Withdrawing a permission also drops what was kept under it
+        (stage 10): a revoked `wellbeing_checkins` is not only a flag."""
+        return None
 
     async def _on_provider_status(self, message: Message) -> None:
         """Record what is actually doing the thinking.
