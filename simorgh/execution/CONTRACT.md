@@ -272,6 +272,8 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 
 ## Invariants
 
+- A heavy step takes its children with it (stage 7 item 8, 2026-09-19): `run_tests` starts its child in its own process group and a timeout kills the group, not just the process it launched -- `pytest -n` does its work in workers, which used to survive and keep compiling against a tree the task was discarding. `execution/procs.py::run_child` is the same guarantee for the async paths, with the child's partial output kept when it is killed.
+
 - No tool runs for an `action.approved` whose args (fetched from Guardian's `received` event on `action:<id>`, blob refs resolved) do not hash to `args_sha256`, whose `expires_at` has passed, whose HMAC does not verify with the Kernel's secret, or whose `action_id` was already consumed; each failure publishes `action.denied{layer: "token"}` and appends `verified{outcome: false}` (`service.py:759-773`, `test_verifier.py`).
 - Only Execution subscribes to `action.approved`; it never subscribes to `action.proposed` (`contracts/topics.py` `SUBSCRIBE_ONLY_BY`).
 - A tool runs only in `Service._on_approved` (or inside another tool's own `run`, passing on the approved call's `ToolContext`). Execution's own calls are proposed through `selfaction.SelfActions.run` and wait for their `action.result` / `action.denied` by action id; a denial, a timeout (the tool's budget plus 30 s) or a bus error comes back as `ToolResult(ok=False)`, is logged (`<event>_denied` / `<event>_failed`) and leaves the feature off, never raised. No `ToolContext` is built anywhere else (`test_own_calls_go_through_guardian.py::TestTheScan`).

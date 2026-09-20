@@ -1021,6 +1021,26 @@ def pytest_parallel_args(target: Path) -> list[str]:
     return ["-n", "auto"]
 
 
+def _kill_group(expired) -> None:
+    """Kill everything a timed-out child started (stage 7 item 8).
+
+    `subprocess.run` kills the process it launched; the workers that
+    process launched are somebody else's problem, which in practice means
+    nobody's. With `start_new_session=True` the child leads its own group,
+    so one signal reaches all of it.
+    """
+    import contextlib
+    import os
+    import signal
+
+    pid = getattr(getattr(expired, "process", None), "pid", None) or getattr(expired, "pid", None)
+    if not pid:
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(os.getpgid(pid), sig)
+
+
 def _apply_rlimits(cpu_seconds: int, memory_bytes: int):
     def _set() -> None:
         for res, value in (
@@ -1412,13 +1432,20 @@ class RunTestsTool:
                 # one by threading this call and one by threading the
                 # whole method; merged, the inner `await` sat inside a
                 # plain `def`.
+                # `start_new_session`: its own process group (stage 7 item
+                # 8). `subprocess.run`'s timeout kills the pytest process
+                # and nothing else, and `pytest -n` runs its work in
+                # WORKERS -- so a timed-out suite left several python
+                # processes compiling away against a tree the task was
+                # about to discard.
                 completed = subprocess.run(
                     [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                      *pytest_parallel_args(dest / target), target],
-                    capture_output=True, text=True,
+                    capture_output=True, text=True, start_new_session=True,
                     cwd=dest, timeout=timeout, preexec_fn=preexec, stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired as exc:
+                _kill_group(exc)
                 return ToolResult(
                     ok=False, output=(exc.stdout or "")[-cap:], error="timeout",
                     metadata={"stderr": (exc.stderr or "")[-cap:], "duration_s": time.monotonic() - start},
