@@ -103,3 +103,24 @@ Found by the creator running Sim, in the order they surfaced:
 - Stage 4: the ContextBuilder (item 4), the trajectory check (item 8), the evals package
   (item 9).
 - Barge-in is off in the creator's config, so "stop" while Sim speaks does nothing.
+
+## Stage 5, the rest of the evening (items 3-8)
+
+| Item | State | What it does |
+|---|---|---|
+| 3 — fact store | done | `memory:facts`: a fact keyed by `(person, subject, predicate)`, superseded by the next one for that key. The birthday correction passes by construction, not by scoring. Extraction at consolidation keeps only triples that quote the transcript |
+| 4 — facts block, person digest | done | what holds is rendered before the conversation lines, with `(was X)`; a person's own facts (up to 8, ~150 tokens) come with their turn. Still open: retiring persona's regex extraction |
+| 5 — speculative recall | done | the recall starts at `percept.text.received`, beside session setup, with 1 s instead of 0.25 s inside it. A 0.4 s recall used to be lost and now arrives |
+| 6 — `memory_search` | done | the model can ask memory mid-turn; effect-free, so Guardian never sees it; a spoken turn searches under the speaker's tag |
+| 7 — person on every channel | done | Telegram and WhatsApp put the sender's household name on the percept. A sender matching no household member stays unnamed: an address must never reach the bus |
+| 8 — forgetting | in part | pruning never forgets a record a live fact cites. A score with access counts waits for something to record them |
+
+`flag_contradictions` is retired: it halved both sides of a disagreement, so a
+correction was buried with what it corrected. The recall scenario stays 3/3 and the
+full suite passes in a clean worktree (6,325 tests).
+
+Two guards caught real mistakes while this landed, and both are worth keeping:
+the "every offered tool exists" test (a session-local tool has to say so:
+`SESSION_LOCAL`), and "no phone number ever reaches the bus" (the first version of
+`person_for` fell back to the sender's handle, which would have written chat
+addresses into memory tags for ever).

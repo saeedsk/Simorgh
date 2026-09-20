@@ -1,6 +1,6 @@
 # Stage 5 -- Memory tiers
 
-Status: **in progress** (2026-09-19: items 1-3, 5, 6 and 7 done, 4 and 8 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
+Status: **in progress** (2026-09-19: items 1-7 done except part of 8; item 9 recorded in findings) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
 
 ## Outcome
 
@@ -40,7 +40,7 @@ Item 8 in part, 2026-09-19: pruning never forgets a record a live fact was read 
 6. **`memory_search` built-in.** *Lock `orchestration`, `execution`.* An effect-free tool `memory_search{query, kinds, person, since}` for agentic recall; bypasses Guardian like `delegate` (it has no effect). Acceptance: offered in CHAT and RESEARCH agents; a test that it returns facts and episodes.
 7. **Person namespace on every channel.** *Lock `interface`, `memory`.* Telegram and WhatsApp resolve the sender and put `speaker` on the percept (they already know it for the allow-list); typed CLI turns are the owner. Acceptance: a Telegram turn's episodic record carries `person:<name>`.
 8. **Forgetting.** *Lock `memory`.* Retention by a score (age, access count, confidence), never facts with live links; `memory forget` stays operator-initiated. Acceptance: a test that a linked fact survives a sweep.
-9. **Findings entry** with recall@k, correction-wins rate, recall p50 latency, warm-up time.
+9. **Findings entry** with recall@k, correction-wins rate, recall p50 latency, warm-up time. Done 2026-09-19: `docs/findings/2026-09-19-stage-4-live-fixes-and-stage-5-recall.md` (paraphrase 0/10 -> 10/10, p50 13 ms, model load 7-11 s in a thread, the correction case by construction).
 
 ## Measurements after
 
