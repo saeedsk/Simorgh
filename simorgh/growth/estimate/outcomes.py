@@ -39,6 +39,10 @@ class OutcomeRecorder:
         # "unknown 97%" (2026-09-18 evaluation, C2). They are not
         # outcomes; they are skipped and counted so health can say so.
         self.skipped_unknown = 0
+        #: Completions no verification backed (stage 8 item 2). Counted
+        #: so `growth status` can say how much of the estimate is the
+        #: task's own word rather than evidence.
+        self.unverified = 0
         self._publish = publish  # async fn(type, payload) -> None; set by Service
         self._verify_cache: dict[str, dict] = {}
         self._verify_order: list[str] = []
@@ -130,7 +134,17 @@ class OutcomeRecorder:
         vref = p.get("verification_ref")
         if vref and vref in self._verify_cache:
             verdict = self._verify_cache[vref]["verdict"]
-        await self._record(task_id=task_id, task_type=task_type, succeeded=True, weight=1.0,
+        # A completion nobody checked is the task's own word for it
+        # (stage 8 item 2). It counts, at `unverified_sample_weight`,
+        # because throwing it away would leave whole task types with no
+        # estimate -- but it must not count like evidence, or the
+        # estimate measures how confidently Sim finishes rather than
+        # how often it is right.
+        verified = verdict in ("pass", "passed")
+        weight = 1.0 if verified else self._config.unverified_sample_weight
+        if not verified:
+            self.unverified += 1
+        await self._record(task_id=task_id, task_type=task_type, succeeded=True, weight=weight,
                             verdict=verdict, cost_usd=cost_usd, duration_s=duration_s, strategy=strategy,
                             stated_confidence=p.get("confidence"), run=run)
 

@@ -130,7 +130,24 @@ class CompetenceTable(_Projection):
         stats = self._by_type.get(task_type)
         return stats.n if stats is not None else 0
 
-    def posterior(self, task_type: str, *, strategy: str | None = None) -> tuple[float, float, int]:
+    def record_eval(self, suite: str, *, passed: int, total: int, weight: float = 0.5) -> None:
+        """An eval report as evidence about a task type (stage 8 item 2).
+
+        The second of the two sources a posterior rests on. Kept under
+        its own key (`eval:<suite>`) rather than mixed into the task
+        type's own counts, so "what a fixture says" and "what actually
+        happened in this house" stay separable and either can be read
+        alone. `weight` is per case, and below 1 on purpose: an eval is
+        the same question every time and the house is not in it.
+        """
+        if total <= 0:
+            return
+        stats = self._by_type.setdefault(f"eval:{suite}", TaskTypeStats())
+        stats.n += total
+        stats.successes_w += max(0, min(passed, total)) * max(0.0, weight)
+
+    def posterior(self, task_type: str, *, strategy: str | None = None,
+                  eval_suite: str | None = None, eval_weight: float = 1.0) -> tuple[float, float, int]:
         """`(alpha, beta, samples)` for a task type, or one of its
         strategies (stage 6 item 1).
 
@@ -139,22 +156,41 @@ class CompetenceTable(_Projection):
         successes and failures the outcomes already carry, so a posterior
         is a view of the same projection rather than a second record of
         the same facts.
+
+        `eval_suite` folds that suite's cases in as the second source
+        (stage 8 item 2), scaled by `eval_weight`. Two sources, weighted,
+        and neither of them a chat turn saying it went well: a strategy
+        ranked on self-reports ranks confidence, not competence.
         """
         stats = self._by_type.get(task_type)
-        if stats is None:
-            return 1.0, 1.0, 0
         if strategy is not None:
+            if stats is None:
+                return 1.0, 1.0, 0
             per = stats.strategies.get(strategy)
             if per is None:
                 return 1.0, 1.0, 0
             return 1.0 + per.successes_w, 1.0 + max(0.0, per.n - per.successes_w), per.n
-        return 1.0 + stats.successes_w, 1.0 + max(0.0, stats.n - stats.successes_w), stats.n
+        alpha, beta, samples = 1.0, 1.0, 0
+        if stats is not None:
+            alpha += stats.successes_w
+            beta += max(0.0, stats.n - stats.successes_w)
+            samples += stats.n
+        if eval_suite:
+            from_eval = self._by_type.get(f"eval:{eval_suite}")
+            if from_eval is not None and from_eval.n:
+                scale = max(0.0, eval_weight)
+                alpha += from_eval.successes_w * scale
+                beta += max(0.0, from_eval.n - from_eval.successes_w) * scale
+                samples += from_eval.n
+        return alpha, beta, samples
 
-    def estimate(self, task_type: str, *, strategy: str | None = None) -> dict:
+    def estimate(self, task_type: str, *, strategy: str | None = None,
+                 eval_suite: str | None = None, eval_weight: float = 1.0) -> dict:
         """What Sim believes about its own competence at something, in the
         shape `self.estimate.reply` carries: the posterior mean, how much
         it rests on, and the calibration when there is one."""
-        alpha, beta, samples = self.posterior(task_type, strategy=strategy)
+        alpha, beta, samples = self.posterior(task_type, strategy=strategy,
+                                              eval_suite=eval_suite, eval_weight=eval_weight)
         mean = alpha / (alpha + beta)
         # The variance of a Beta says how much the mean is worth: with two
         # samples it is wide, and a consumer should not escalate on it.
@@ -163,6 +199,8 @@ class CompetenceTable(_Projection):
                "alpha": round(alpha, 3), "beta": round(beta, 3), "spread": round(variance ** 0.5, 4)}
         if strategy is not None:
             out["strategy"] = strategy
+        if eval_suite:
+            out["eval_suite"] = eval_suite
         calibration = self.calibration(task_type)
         if calibration is not None:
             out["calibration"] = calibration

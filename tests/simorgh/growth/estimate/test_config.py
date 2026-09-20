@@ -21,7 +21,9 @@ class TestLearningConfig(unittest.TestCase):
     def test_only_the_live_keys_remain(self) -> None:
         self.assertEqual(
             {f.name for f in dataclasses.fields(Config)},
-            {"explore_bonus", "min_samples_for_trust", "blocked_sample_weight"},
+            {"explore_bonus", "min_samples_for_trust", "blocked_sample_weight",
+             "unverified_sample_weight", "eval_sample_weight", "eval_suites",
+             "evals_record"},
         )
 
     def test_a_retired_key_changes_nothing(self) -> None:

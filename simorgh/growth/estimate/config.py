@@ -1,4 +1,4 @@
-"""`[learning]` config: the three knobs the outcome record and the
+"""`[growth.estimate]` config: the knobs the outcome record and the
 strategy ranking read. The six PatchPipeline keys (`max_draft_attempts`,
 `max_pipeline_wall_seconds`, `action_timeout_seconds`,
 `verify_timeout_seconds`, `hot_swap_slots`, `max_concurrent_pipelines`)
@@ -16,6 +16,26 @@ class Config:
     explore_bonus: float = 0.15
     min_samples_for_trust: int = 5
     blocked_sample_weight: float = 0.5
+    # How much a completion nobody checked is worth, against a verified
+    # one (stage 8 item 2). "The task said it finished" is a
+    # self-report, and an estimate built on self-reports measures
+    # confidence rather than competence -- but throwing the outcome
+    # away entirely would leave whole task types with no estimate at
+    # all, so it counts a little and says how much.
+    unverified_sample_weight: float = 0.25
+    # How much one eval case is worth against one verified task outcome
+    # (stage 8 item 2). Less, because a fixture is a fixture: it is the
+    # same question every time and the house is not in it.
+    eval_sample_weight: float = 0.5
+    # Which eval suite speaks for which task type, when one does.
+    # `posterior("patch")` blends `eval:trials` at `eval_sample_weight`.
+    eval_suites: tuple[tuple[str, str], ...] = (("patch", "trials"), ("research", "research"),
+                                                ("chat", "household"))
+    # Where the eval reports are. The loader writes them here on every
+    # bless, which is before Sim is up -- exactly when the numbers are
+    # worth having. Relative to the working directory; `data_dir` is
+    # also tried, so a test or a sandbox can put its own there.
+    evals_record: str = ".simorgh_loader/evals.jsonl"
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "Config":

@@ -38,7 +38,12 @@ class TestOutcomeRecorder(unittest.IsolatedAsyncioTestCase):
                                     "verification_ref": None})
         await self.recorder.on_task_completed(msg)
 
-        self.assertEqual(self.competence.success_rate("patch:src/memory"), (1 + 1) / (1 + 2))
+        # Nothing verified this one, so it counts at
+        # `unverified_sample_weight` rather than as evidence
+        # (stage 8 item 2): "the task said it finished" is a
+        # self-report.
+        self.assertEqual(self.competence.success_rate("patch:src/memory"), (0.25 + 1) / (1 + 2))
+        self.assertEqual(self.recorder.unverified, 1)
         types = [t for t, _ in self.published]
         self.assertIn("learn.outcome.recorded", types)
         self.assertIn("learn.competence.updated", types)

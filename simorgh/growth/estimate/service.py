@@ -78,6 +78,19 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.VERIFY_RESULT, self._on_verify_result))
         self._subs.append(await ctx.bus.subscribe(topics.LEARN_STRATEGY_SUGGEST, self._on_strategy_suggest))
         self._subs.append(await ctx.bus.subscribe(topics.SELF_ESTIMATE_REQUEST, self._on_estimate))
+        # The second source (stage 8 item 2). Read at start because the
+        # evals run outside the Kernel, before Sim is up.
+        from pathlib import Path
+
+        for candidate in (Path(self._config.evals_record), ctx.data_dir / "evals.jsonl"):
+            try:
+                found = self.load_evals(candidate)
+            except Exception as exc:  # noqa: BLE001 -- no evals is not a failed start
+                ctx.logger.log("warning", "estimate.evals_unreadable", path=str(candidate), error=repr(exc))
+                continue
+            if found:
+                ctx.logger.log("info", "estimate.evals_loaded", path=str(candidate), suites=found)
+                break
 
     async def stop(self) -> None:
         for sub in self._subs:
@@ -111,12 +124,61 @@ class Service:
 
     # -- strategy ---------------------------------------------------------------
     async def _on_estimate(self, message: Message) -> None:
-        """`self.estimate.request` -- what Sim believes about itself at this
-        kind of work (stage 6 item 1), from the outcomes it has recorded."""
+        """`self.estimate.request` -- what Sim believes about itself at
+        this kind of work (stage 6 item 1), from the two sources that
+        count (stage 8 item 2): verify-backed outcomes, and the eval
+        suite that speaks for this task type."""
         task_type = str(message.payload.get("task_type") or "")
         strategy = str(message.payload.get("strategy") or "") or None
         await self._ctx.bus.reply(message, type=topics.SELF_ESTIMATE_REPLY,
-                                  payload=self._competence.estimate(task_type, strategy=strategy))
+                                  payload=self._competence.estimate(
+                                      task_type, strategy=strategy,
+                                      eval_suite=self._suite_for(task_type),
+                                      eval_weight=self._config.eval_sample_weight))
+
+    def _suite_for(self, task_type: str) -> str | None:
+        """The eval suite that speaks for this task type, if one does.
+
+        Matched on the type's first segment: a task type is
+        `patch:src/memory`, and the suite is about patching, not about
+        that directory.
+        """
+        head = (task_type or "").split(":", 1)[0]
+        for kind, suite in self._config.eval_suites:
+            if kind == head:
+                return suite
+        return None
+
+    def load_evals(self, path) -> int:
+        """Fold an `evals.jsonl` into the table (stage 8 item 2).
+
+        Read from a file rather than the bus because the evals run
+        outside the Kernel -- `simloader bless` runs them before Sim is
+        even up, which is exactly when the numbers are worth having.
+        The newest report per suite wins; older ones are history, not
+        more evidence, and counting every historical run would let a
+        suite that has been run fifty times outvote the house.
+        """
+        import json
+        from pathlib import Path
+
+        path = Path(path)
+        if not path.exists():
+            return 0
+        newest: dict[str, dict] = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            suite = str(row.get("suite") or "")
+            if suite:
+                newest[suite] = row
+        for suite, row in newest.items():
+            self._competence.record_eval(suite, passed=int(row.get("passed") or 0),
+                                         total=int(row.get("total") or 0),
+                                         weight=self._config.eval_sample_weight)
+        return len(newest)
 
     async def _on_strategy_suggest(self, message: Message) -> None:
         from .strategy import build_reply

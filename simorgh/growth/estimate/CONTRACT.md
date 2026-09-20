@@ -55,19 +55,38 @@ The generated rows for `learn.self_patch.applied`, `learn.self_patch.reverted`, 
 
 ## Config
 
-`[learning]` in simorgh.toml; dataclass in `simorgh/growth/estimate/config.py`. Loaded from `ctx.config` in `start()` unless the caller passed one (`service.py:65-66`).
+`[growth.estimate]` in simorgh.toml (this was `[learning]` before the stage 8 merge); dataclass in `simorgh/growth/estimate/config.py`. Loaded from `ctx.config` in `start()` unless the caller passed one (`service.py:65-66`).
 
 | Key | Default | Read in the package |
 |---|---|---|
 | `explore_bonus` | `0.15` | yes (`strategy.py`) |
 | `min_samples_for_trust` | `5` | yes (`strategy.py`) |
 | `blocked_sample_weight` | `0.5` | yes (`outcomes.py::on_task_blocked`) |
+| `unverified_sample_weight` | `0.25` | yes (`outcomes.py::on_task_completed`) |
+| `eval_sample_weight` | `0.5` | yes (`service.py::_on_estimate`, `load_evals`) |
+| `eval_suites` | `patch->trials, research->research, chat->household` | yes (`service.py::_suite_for`) |
+| `evals_record` | `.simorgh_loader/evals.jsonl` | yes (`service.py::start`) |
 
 The six keys that belonged to the retired PatchPipeline (`max_draft_attempts`, `max_pipeline_wall_seconds`, `action_timeout_seconds`, `verify_timeout_seconds`, `hot_swap_slots`, `max_concurrent_pipelines`) were removed from the dataclass on 2026-09-19; `from_mapping` drops any key it does not know, so writing one changes nothing and the Kernel's config check reports the section (`tests/simorgh/growth/estimate/test_config.py`).
 
+## What an estimate rests on (stage 8 item 2)
+
+Two sources, weighted, and nothing else:
+
+| Source | Weight per sample | Why |
+|---|---|---|
+| a task outcome a verification passed | 1.0 | the strongest thing there is: something checked it |
+| a task outcome nobody verified | `unverified_sample_weight` (0.25) | "the task said it finished" is a self-report. It counts a little, because dropping it would leave whole task types with no estimate, and it is counted separately (`OutcomeRecorder.unverified`) so how much of an estimate is self-report can be read off |
+| a blocked task | `blocked_sample_weight` (0.5), as a failure | it did not work, but it did not go wrong the way a failure does |
+| an eval case | `eval_sample_weight` (0.5) | a fixture is the same question every time and the house is not in it |
+
+Eval cases are kept under their own key (`eval:<suite>`), never mixed into the task type's own counts, so "what a fixture says" and "what happened in this house" can be read apart. `posterior(task_type, eval_suite=...)` is what blends them, and `_suite_for` maps a task type's first segment to a suite (`patch:src/memory` is about patching, not about that directory). Reports are read from `evals_record` at start -- a file rather than the bus, because the evals run before the Kernel is up, on every `simloader bless` -- and only the newest report per suite counts: older runs are history, not more evidence, and counting all of them would let a suite that has been run fifty times outvote the house.
+
+A chat turn never reaches any of this: it has no task type, and untyped outcomes are skipped (`OutcomeRecorder.skipped_unknown`).
+
 ## Public Python surface
 
-- `simorgh.learning.Service` (`name = "learning"`, layer 4): `start(ctx)`, `stop()`, `health()`; `consumes` / `produces` as in the tables above (exact for subscriptions, pinned by `tests/simorgh/test_manifests_match_the_code.py`). `health()` is `ok` with the count of skipped untyped turns, or `degraded` if the competence rebuild failed at start.
+- `simorgh.growth.estimate.Service` (a part of the `growth` Subsystem since stage 8 item 1; it has no `name` of its own on the bus -- it publishes as `growth`): `start(ctx)`, `stop()`, `health()`; `consumes` / `produces` as in the tables above (exact for subscriptions, pinned by `tests/simorgh/test_manifests_match_the_code.py`). `health()` is `ok` with the count of skipped untyped turns, or `degraded` if the competence rebuild failed at start.
 - `CompetenceTable` (`competence.py`): duck-typed ledger projection (`apply`, `fold`, `state`, `load`, `applied_seq`) plus readers `success_rate`, `calibration`, `samples`, `suggest`. Imported by nothing outside the package; the World Model keeps its own copy of competence from `learn.competence.updated`.
 - `OutcomeRecorder`, `build_reply`, `Correlator`: package-internal.
 - No module-level mutable singletons. Per-instance state that is lost on restart: the verify-verdict cache (500 entries, `outcomes.py:25`), so a `task.completed` whose `verify.result` arrived before a restart records verdict `unknown`.
