@@ -37,7 +37,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
-| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py` |
+| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py` |
 
 ## Suites
 
@@ -70,6 +70,10 @@ The observer registers on the bus **backend**, not through a client. A client is
 It never touches `~/.simorgh`, never reaches a device, and defaults to a provider that costs nothing.
 
 **The people** (`house/people.py`) are five personas -- an owner, an adult, two children and a guest, so every gate has somebody to exercise it -- and deliberately not the creator's family: cloning a household member's voice needs that person to say so. Each has a Kokoro voice, and `enrol()` puts three synthesised sentences through the same sherpa CAM++ embedder the house uses into the sandbox's own book, so identification in a scenario is tested with the numbers a real voice gets.
+
+**The scene** (`house/scene.py`) is the room between a person and the microphone: distance as attenuation plus an early reflection, a seeded room bed at a named SNR, a television or music bed that is itself *speech*, Sim's own last utterance folded back at the gain a laptop's speaker really has, and overlapping talkers. Plain arithmetic on 16-bit PCM, because the point is a repeatable room rather than a convincing one.
+
+What it measured is in `docs/findings/2026-09-20-house-simulator.md`. The short version: identification degrades gracefully with distance and noise (0.90 near, 0.71-0.81 at 3 m / 10 dB, 0.57-0.68 at 6 m in a party), the hiss bed does not trouble whisper at all (WER 0.00 even at -6 dB), and a talking television at 0.6 gain makes the recogniser return a clean transcript of *the television* instead of the person. Speech-on-speech is the regime that matters; louder hiss is not.
 
 Which voices those are is a **measurement**, kept in `tools/house_voices.py`. The first hand-picked set had `af_heart` and `af_bella` at 0.77 against each other -- two personas the embedder could not tell apart, which would have read as Sim misidentifying people in every scenario. The measured set (`af_river`, `bm_lewis`, `bf_isabella`, `am_puck`, `af_nicole`) has a worst pair of 0.24, and each persona identifies itself at 0.89-0.95 with a profile coherence of 0.86-0.92.
 
