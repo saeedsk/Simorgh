@@ -54,7 +54,6 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     T.GROWTH_LESSON_FOUND: "what counting found, before anything is decided; the decision is the policy.* topics",
     T.GROWTH_POLICY_PROPOSED: "an announcement for the ledger: a proposal has not changed anything yet, and announcing every one would train the household to ignore the adoptions",
     T.PERCEPT_WEB_FETCHED: "an announcement; the stage-6 world model folds it",
-    T.WORLD_WELLBEING_CHANGED: "published by worldmodel; Initiative subscribes in stage 10 item 3 (the next commit)",
     T.LEARN_SELF_PATCH_REVERTED: "World Model and Reflection subscribe; nothing publishes it since the PatchPipeline was retired. The loader's rollback should (stage 8)",
     T.PLAN_APPROVED: "Planning both publishes and folds it from its own stream (stage 7 gives it a bus consumer)",
     # subscribed, published only by an operator command or a test today
