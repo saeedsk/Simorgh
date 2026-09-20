@@ -156,6 +156,10 @@ class Sandbox:
     def speaker(self):
         return self._voice_fakes.get("speaker")
 
+    @property
+    def recogniser(self):
+        return self._voice_fakes.get("recogniser")
+
 
 def _record_speech(synthesiser, record: Record) -> None:
     """Wrap the fake synthesiser so every piece is timed as it is asked
@@ -182,7 +186,8 @@ def _voice_fakes(into: dict):
     arguments; this is only how they reach it.
     """
     from simorgh.kernel import service as kernel_service
-    from simorgh.voice.fakes import FakeMicrophone, FakeRecogniser, FakeSpeaker, FakeSynthesiser
+    from simorgh.evals.house.hearing import ScriptedRecogniser
+    from simorgh.voice.fakes import FakeMicrophone, FakeSpeaker, FakeSynthesiser
 
     original = kernel_service.build_factories
 
@@ -194,7 +199,7 @@ def _voice_fakes(into: dict):
 
                 into["microphone"] = FakeMicrophone()
                 into["speaker"] = FakeSpeaker()
-                into["recogniser"] = FakeRecogniser()
+                into["recogniser"] = ScriptedRecogniser()
                 into["synthesiser"] = FakeSynthesiser()
                 return VoiceService(microphone=into["microphone"], speaker=into["speaker"],
                                     recogniser=into["recogniser"], synthesiser=into["synthesiser"])

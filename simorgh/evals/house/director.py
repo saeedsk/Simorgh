@@ -32,6 +32,10 @@ from .sandbox import Sandbox
 #: How long a turn may take before the director stops waiting for it.
 #: Generous: a real model behind a scenario is slower than the floor.
 TURN_TIMEOUT_S = 120.0
+#: How long to wait for the listening loop to finish with a beat it may
+#: decide to ignore. Short, because "Sim said nothing" is a legitimate
+#: and common outcome and every quiet beat pays this.
+LISTEN_TIMEOUT_S = 12.0
 
 
 class Director:
@@ -40,6 +44,14 @@ class Director:
     def __init__(self, sandbox: Sandbox) -> None:
         self.sandbox = sandbox
         self._session_ids: dict[str, str] = {}
+        #: The room these beats happen in (item 3). A scenario sets it
+        #: once and every later beat is in that room.
+        from .scene import Scene
+
+        self.scene = Scene()
+        self._voices: dict = {}
+        self._kokoro = None
+        self.listen_timeout_s = LISTEN_TIMEOUT_S
 
     @property
     def record(self) -> Record:
@@ -76,6 +88,70 @@ class Director:
             await self.settle(since=mark)
         return mark
 
+    async def into_the_room(self, person: str, text: str, *, distance: float | None = None,
+                            tv: str = "", overlap_with: str = "", wait: bool = True) -> float:
+        """`person` speaks, and Sim has to decide whether it was for it.
+
+        The other half of `say`. `say` asks Sim; this one makes a
+        sound in the room and leaves every decision to the listening
+        loop -- was that speech, whose voice is it, was it addressed
+        to me, was it my own echo coming back. Those decisions are
+        where the live failures were, and `ask` skips all of them.
+
+        The voice is real (Kokoro, through the scene, into the
+        microphone) because the speaker book needs real audio. The
+        words are scripted, because whether Sim stayed out of a
+        conversation should not depend on whether whisper heard every
+        syllable -- that is measured on its own (item 3's table).
+        """
+        from .people import by_name
+
+        persona = by_name(person)
+        if persona is None:
+            raise LookupError(f"nobody called {person!r} lives here")
+        mark = self.now()
+        audio = await self._voice_of(persona, text)
+        other = None
+        if overlap_with:
+            speaker = by_name(overlap_with)
+            other = await self._voice_of(speaker, "no I said the blue one, not that one") if speaker else None
+        if tv:
+            self.scene.playing = await self._voice_of(by_name("Devin"), tv)
+        heard = self.scene.hear(audio, distance=distance, also=other, also_after=0.4)
+        self.sandbox.recogniser.queue(text)
+        self.sandbox.microphone.feed(heard)
+        if wait:
+            # The end of a turn is a decision the session makes after
+            # the speech stops, so waiting for quiet on the bus is not
+            # enough: wait for the turn itself, and then for the room
+            # to settle. A beat Sim deliberately ignores never
+            # produces one, which is why this is a timeout and not a
+            # failure.
+            await self.wait_for("turn.completed", since=mark, timeout=self.listen_timeout_s)
+            await self.settle(since=mark, quiet_for=0.6)
+        # What Sim said now becomes what its microphone hears next.
+        said = self.record.said_since(mark)
+        if said:
+            self.scene.last_said = await self._voice_of(None, said[-1].text)
+        return mark
+
+    async def _voice_of(self, persona, text: str):
+        """`text` in a persona's voice, synthesised once and kept."""
+        key = (getattr(persona, "voice", "af_heart"), text)
+        if key in self._voices:
+            return self._voices[key]
+        audio = await self._tts().synthesise(text, voice=key[0])
+        self._voices[key] = audio
+        return audio
+
+    def _tts(self):
+        if self._kokoro is None:
+            from simorgh.voice.config import Config
+            from simorgh.voice.tts.kokoro import KokoroSynthesiser
+
+            self._kokoro = KokoroSynthesiser(Config())
+        return self._kokoro
+
     def _pipeline(self):
         """The voice pipeline of the running sandbox.
 
@@ -106,7 +182,8 @@ class Director:
 
         mark = self.now()
         topic = topics.CAMERA_EVENT if (kind or key).startswith("camera") else topics.TV_STATE
-        payload = ({"camera": key, "kinds": list(detail.get("kinds") or ["motion"])}
+        payload = ({"camera": key, "kinds": list(detail.get("kinds") or ["motion"]),
+                    "channel": int(detail.get("channel") or 1)}
                    if topic == topics.CAMERA_EVENT
                    else {"mode": state or "playing", "title": str(detail.get("title") or "")})
         await self.sandbox.kernel.bus.publish(Message.new(topic, source="execution", payload=payload))
@@ -184,4 +261,4 @@ class Director:
         return None
 
 
-__all__ = ["Director", "TURN_TIMEOUT_S"]
+__all__ = ["Director", "LISTEN_TIMEOUT_S", "TURN_TIMEOUT_S"]

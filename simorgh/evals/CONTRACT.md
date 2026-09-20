@@ -37,7 +37,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
-| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py` |
+| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `scenarios/` |
 
 ## Suites
 
@@ -74,6 +74,12 @@ It never touches `~/.simorgh`, never reaches a device, and defaults to a provide
 **The scene** (`house/scene.py`) is the room between a person and the microphone: distance as attenuation plus an early reflection, a seeded room bed at a named SNR, a television or music bed that is itself *speech*, Sim's own last utterance folded back at the gain a laptop's speaker really has, and overlapping talkers. Plain arithmetic on 16-bit PCM, because the point is a repeatable room rather than a convincing one.
 
 What it measured is in `docs/findings/2026-09-20-house-simulator.md`. The short version: identification degrades gracefully with distance and noise (0.90 near, 0.71-0.81 at 3 m / 10 dB, 0.57-0.68 at 6 m in a party), the hiss bed does not trouble whisper at all (WER 0.00 even at -6 dB), and a talking television at 0.6 gain makes the recogniser return a clean transcript of *the television* instead of the person. Speech-on-speech is the regime that matters; louder hiss is not.
+
+**A scenario** (`house/script.py`) is beats and expectations. A beat says who spoke, from where, over what; an expectation says what a person in the room would have accepted -- `answered()`, `quiet()`, `did_not_call("home_call")`, `asked_a_person()`, `first_audio_under(2.5)`, `remembered("March 6")` -- rather than naming the string the model must produce, because a test that pins the words fails when the model improves. Each expectation yields one `Outcome`, so a run reports per expectation with the beat that failed.
+
+A beat can reach Sim two ways, and the difference matters. `say()` drives `Pipeline.ask`, which asks Sim directly -- right for "what did it answer", useless for "what did it ignore". `into_the_room()` synthesises the persona's voice, puts it through the scene and hands it to the microphone, so the **listening loop** decides: is this speech, whose voice is it, was it addressed to me, was it my own echo. Every live failure the pack reproduces was decided there. The words are scripted (`hearing.ScriptedRecogniser`) while the audio is real, because whether Sim stayed out of a conversation should not depend on whether whisper heard every syllable -- word error is measured on its own.
+
+**The pack** (`house/scenarios/`) starts with `live.py`: the five evenings that actually went wrong on 2026-09-19 and 2026-09-20, each carrying the commit that broke it. A harness anchored in bugs that happened is worth more than one anchored in bugs somebody imagined.
 
 Which voices those are is a **measurement**, kept in `tools/house_voices.py`. The first hand-picked set had `af_heart` and `af_bella` at 0.77 against each other -- two personas the embedder could not tell apart, which would have read as Sim misidentifying people in every scenario. The measured set (`af_river`, `bm_lewis`, `bf_isabella`, `am_puck`, `af_nicole`) has a worst pair of 0.24, and each persona identifies itself at 0.89-0.95 with a profile coherence of 0.86-0.92.
 
