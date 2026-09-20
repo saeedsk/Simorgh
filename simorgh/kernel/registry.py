@@ -41,6 +41,9 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("cognition", "memory", "worldmodel"),
     ("guardian", "execution", "verification", "planning"),
     ("learning", "reflection", "curiosity"),
+    # Initiative sits above the things that give it something to say and
+    # below the channels that carry it (stage 6 item 6).
+    ("initiative",),
     ("persona", "benchmark", "voice", "interface"),
     ("orchestration",),
 )
@@ -128,6 +131,7 @@ def build_factories(
     from simorgh.bus.service import Service as BusService
     from simorgh.cognition.service import Service as CognitionService
     from simorgh.curiosity.service import Service as CuriosityService
+    from simorgh.initiative.service import Service as InitiativeService
     from simorgh.execution.service import Service as ExecutionService
     from simorgh.guardian.service import Service as GuardianService
     from simorgh.interface.service import Service as InterfaceService
@@ -155,6 +159,7 @@ def build_factories(
         "learning": lambda: LearningService(),
         "reflection": lambda: ReflectionService(),
         "curiosity": lambda: CuriosityService(),
+        "initiative": lambda: InitiativeService(),
         "persona": lambda: PersonaService(),
         "benchmark": lambda: BenchmarkService(),
         "voice": lambda: VoiceService(),

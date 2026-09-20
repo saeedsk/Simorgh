@@ -41,6 +41,12 @@ task = "stage 2 items 7-8 (worktree agents)"
 since = "2026-09-19T13:01:52+00:00"
 until = "2026-09-19T21:01:52+00:00"
 
+[locks.initiative]
+by = "opus-main"
+task = "stage 6 item 6: the initiative package"
+since = "2026-09-20T03:32:19+00:00"
+until = "2026-09-20T11:32:19+00:00"
+
 [locks.interface]
 by = "opus-main"
 task = "chat write tools, provider notice, search scope, TUI noise"

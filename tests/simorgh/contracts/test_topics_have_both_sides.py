@@ -47,6 +47,7 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     T.MEMORY_STORED: "an announcement for the ledger and the dashboard",
     T.MEMORY_CONSOLIDATED: "an announcement for the ledger and the dashboard",
     T.MEMORY_CONTRADICTION_FLAGGED: "superseded by the stage-5 fact store (2026-09-19, nothing publishes it now); kept for the ledger",
+    T.INITIATIVE_SUPPRESSED: "an announcement for the ledger and the dashboard: what Sim held back, and why",
     T.MEMORY_FACT_STORED: "an announcement for the ledger and the dashboard; readers ask memory.retrieve for facts",
     T.MEMORY_FACT_SUPERSEDED: "an announcement for the ledger and the dashboard; the fact store is read through memory.retrieve",
     T.MEMORY_FORGOTTEN: "an announcement for the ledger",

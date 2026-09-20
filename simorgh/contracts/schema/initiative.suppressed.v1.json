@@ -1,0 +1,32 @@
+{
+  "$id": "https://simorgh.local/schema/initiative.suppressed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Something Sim decided not to say, and why -- so a household can see what it held back, not only what it said.",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "why": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "why"
+  ],
+  "title": "initiative.suppressed",
+  "type": "object"
+}

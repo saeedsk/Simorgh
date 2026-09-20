@@ -10,6 +10,7 @@ from . import (  # noqa: F401 -- side effect: registration
     cognition,
     curiosity,
     guardian,
+    initiative,
     intent,
     learn,
     memory,

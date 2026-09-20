@@ -287,7 +287,7 @@ class TestHealthAndStatus(unittest.IsolatedAsyncioTestCase):
                 snap = kernel.status_snapshot()
                 by_name = {s["name"]: s for s in snap["subsystems"]}
                 self.assertEqual(by_name["bus"]["layer"], 0)
-                self.assertEqual(by_name["orchestration"]["layer"], 5)
+                self.assertEqual(by_name["orchestration"]["layer"], 6)  # initiative added a layer
                 for s in snap["subsystems"]:
                     self.assertIsInstance(s["detail"], str)
                     self.assertEqual(s["restarts"], 0)

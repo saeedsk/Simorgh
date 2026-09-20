@@ -39,8 +39,9 @@ class TestKernelBootsAllSixteenSubsystems(unittest.IsolatedAsyncioTestCase):
         # subsystem, but it is the composition root that boots the other
         # fifteen -- it does not appear as an entry in its own LAYERS.
         self.assertEqual(
-            len(ALL_SIXTEEN), 17,
-            "LAYERS should name every non-kernel subsystem: the original fifteen plus `benchmark` (2026-09-08)",
+            len(ALL_SIXTEEN), 18,
+            "LAYERS should name every non-kernel subsystem: the original fifteen, `benchmark` "
+            "(2026-09-08) and `initiative` (stage 6 item 6, 2026-09-19)",
         )
 
         with tempfile.TemporaryDirectory() as tmp:

@@ -17,13 +17,13 @@ from __future__ import annotations
 DOMAINS: tuple[str, ...] = (
     "system", "percept", "intent", "plan", "project", "task", "turn", "session", "action",
     "guardian", "tool", "verify", "memory", "world", "self", "learn", "reflect",
-    "curiosity", "persona", "ui", "cognition", "research", "benchmark", "voice",
+    "curiosity", "persona", "ui", "cognition", "research", "benchmark", "voice", "initiative",
 )
 
 SUBSYSTEMS: tuple[str, ...] = (
     "bus", "ledger", "kernel", "cognition", "memory", "worldmodel", "planning",
     "execution", "guardian", "verification", "learning", "reflection", "curiosity",
-    "persona", "interface", "orchestration", "benchmark", "voice",
+    "persona", "interface", "orchestration", "benchmark", "voice", "initiative",
 )
 
 # --- section 4.1 system ---------------------------------------------------
@@ -192,6 +192,12 @@ REFLECT_REVIEW_REPLY = "reflect.review.reply"
 CURIOSITY_CANDIDATE = "curiosity.candidate"
 CURIOSITY_INTEREST_UPDATED = "curiosity.interest.updated"
 CURIOSITY_SHARE_PROPOSED = "curiosity.share.proposed"
+
+# --- initiative (stage 6 item 6): when Sim speaks first -------------------
+#: A thing Sim decided NOT to say, and why. A decision to stay quiet is as
+#: much a decision as a decision to speak, and only one of the two is
+#: visible unless it is recorded.
+INITIATIVE_SUPPRESSED = "initiative.suppressed"
 CURIOSITY_DISCOVER_REQUEST = "curiosity.discover.request"
 CURIOSITY_DISCOVER_REPLY = "curiosity.discover.reply"
 CURIOSITY_SHARE_REQUEST = "curiosity.share.request"
