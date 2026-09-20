@@ -37,7 +37,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
-| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py` |
+| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py` |
 
 ## Suites
 
@@ -68,6 +68,10 @@ A whole Sim, booted where it can do no harm, driven by a scenario. `Sandbox` boo
 The observer registers on the bus **backend**, not through a client. A client is policed and `action.proposed` is Guardian's alone -- which is the policy working -- but a sandbox that cannot watch the approval path cannot test the approval path. It only ever reads.
 
 It never touches `~/.simorgh`, never reaches a device, and defaults to a provider that costs nothing.
+
+**The people** (`house/people.py`) are five personas -- an owner, an adult, two children and a guest, so every gate has somebody to exercise it -- and deliberately not the creator's family: cloning a household member's voice needs that person to say so. Each has a Kokoro voice, and `enrol()` puts three synthesised sentences through the same sherpa CAM++ embedder the house uses into the sandbox's own book, so identification in a scenario is tested with the numbers a real voice gets.
+
+Which voices those are is a **measurement**, kept in `tools/house_voices.py`. The first hand-picked set had `af_heart` and `af_bella` at 0.77 against each other -- two personas the embedder could not tell apart, which would have read as Sim misidentifying people in every scenario. The measured set (`af_river`, `bm_lewis`, `bf_isabella`, `am_puck`, `af_nicole`) has a worst pair of 0.24, and each persona identifies itself at 0.89-0.95 with a profile coherence of 0.86-0.92.
 
 ## Public Python surface
 
