@@ -3135,16 +3135,23 @@ class PeopleTool:
     """
 
     name = "people"
-    description = ("Link a chat handle or voice to a household person, unlink one, or set "
-                   "somebody's role. `action` is link | unlink | set_role; `identity` looks "
-                   "like telegram:<handle>, whatsapp:<number> or voice:<name>.")
+    description = ("Who somebody is to Sim: link a chat handle or voice to a household person, "
+                   "unlink one, set a role, record what they said yes to (grant | revoke a "
+                   "permission: wellbeing_checkins, interest_shares) or what they care about "
+                   "(add_interest | remove_interest). `identity` looks like telegram:<handle>, "
+                   "whatsapp:<number> or voice:<name>. Every action asks a person.")
     read_only = False
     reversibility = "reversible"     # a link can be unlinked; the tier is what gates it
     args_schema = {
         "type": "object", "required": ["action"],
-        "properties": {"action": {"type": "string", "enum": ["link", "unlink", "set_role"]},
+        "properties": {"action": {"type": "string", "enum": ["link", "unlink", "set_role", "grant", "revoke",
+                                                             "add_interest", "remove_interest"]},
                        "name": {"type": "string"}, "identity": {"type": "string"},
-                       "role": {"type": "string", "enum": ["owner", "adult", "child", "guest", "unknown"]}},
+                       "role": {"type": "string", "enum": ["owner", "adult", "child", "guest", "unknown"]},
+                       # Consent (stage 10) travels the same tier-3 path as a link:
+                       # a permission is never inferred from a turn.
+                       "permission": {"type": "string", "enum": ["wellbeing_checkins", "interest_shares"]},
+                       "interest": {"type": "string"}},
     }
 
     def __init__(self, config: Config) -> None:
@@ -3156,7 +3163,8 @@ class PeopleTool:
         args = args or {}
         payload = {"action": str(args.get("action") or ""),
                    "name": str(args.get("name") or ""), "identity": str(args.get("identity") or ""),
-                   "role": str(args.get("role") or "")}
+                   "role": str(args.get("role") or ""),
+                   "permission": str(args.get("permission") or ""), "interest": str(args.get("interest") or "")}
         try:
             reply = await ctx.bus.request(ctx.bus.new(topics.WORLD_PEOPLE_UPDATE, payload), timeout=5.0)
         except TimeoutError:

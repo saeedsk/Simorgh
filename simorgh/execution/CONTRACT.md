@@ -37,7 +37,7 @@ Core (the part that stays in Execution after stage 9):
 | `simorgh/execution/doctext.py` | DOCX, spreadsheet, CSV, image to text for `read_file` |
 | `simorgh/execution/render.py` | `render_page` / `browse_page` via Node + Puppeteer |
 | `simorgh/execution/notify.py` | `notify`: push a message to a person (irreversible) |
-| `simorgh/execution/tools.py::PeopleTool` | `people`: link a chat handle or voice to a household person, unlink one, set a role (stage 6 item 4). Reversible, and tier 3 all the same (`contracts/tiers.py::CHANGES_WHO_SIM_TRUSTS`) -- a handle linked to a name reads that person's memories. Goes to World Model as `world.people.update`; Execution keeps no people of its own |
+| `simorgh/execution/tools.py::PeopleTool` | `people`: link a chat handle or voice to a household person, unlink one, set a role (stage 6 item 4); grant or revoke a permission (`wellbeing_checkins`, `interest_shares`) and add or remove an interest (stage 10) -- consent travels the same tier-3 path as a link and is never inferred from a turn. Reversible, and tier 3 all the same (`contracts/tiers.py::CHANGES_WHO_SIM_TRUSTS`) -- a handle linked to a name reads that person's memories. Goes to World Model as `world.people.update`; Execution keeps no people of its own |
 | `simorgh/execution/geocode.py` | `geocode` via Nominatim |
 | `simorgh/execution/realestate.py` | `search_listings` |
 | `simorgh/execution/listingsources.py` | the listing data sources behind `search_listings` |

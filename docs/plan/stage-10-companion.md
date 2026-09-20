@@ -2,6 +2,8 @@
 
 Status: **in progress** (2026-09-20: items 1-3 first cut, on a branch; 4-10 open) · Depends on: stage 6 (People, `world:home`, Initiative) · Estimated: 4 weeks plus a two-week measurement · Modules touched: contracts, worldmodel, initiative, orchestration, execution, interface, memory, voice, persona, docs
 
+Done 2026-09-20 (item 1, the last wire): the tier-3 `people` tool offers `grant`/`revoke` (a permission of `contracts.people.PERMISSIONS`) and `add_interest`/`remove_interest`, so consent has a path a person confirms through and is reachable from a conversation only as an action Guardian escalates. Pinned from the tool's end in `tests/simorgh/execution/test_people_tool_carries_consent.py`.
+
 ## Outcome
 
 Sim behaves as a companion to the people it lives with, not only as their assistant. For a household member who has said yes, once, at onboarding, Sim keeps a per-person baseline of how they usually talk to it, notices when they are quieter than their usual, and -- when the evidence is strong and the moment is cheap -- asks gently how they are. It knows what each person cares about and, at a cheap moment, brings something up about it unprompted. Every one of those unprompted words goes through Initiative's utility decision and Guardian's gate like any other effect, and the state Sim holds about a person is a distribution with `unknown` in it, never a verdict.
