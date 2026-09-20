@@ -165,12 +165,14 @@ class Director:
         key = (getattr(persona, "voice", "af_heart"), text)
         if key in self._voices:
             return self._voices[key]
+        from .voicecache import cached_speech
         from .scene import resample
 
         # At the microphone's rate, not the synthesiser's. Kokoro
         # speaks at 24 kHz and the pipeline is 16 kHz; handing one to
         # the other makes every persona sound like somebody else.
-        audio = resample(await self._tts().synthesise(text, voice=key[0]))
+        audio = await cached_speech(key[0], text, lambda: self._tts().synthesise(text, voice=key[0]),
+                                    transform=resample)
         self._voices[key] = audio
         return audio
 

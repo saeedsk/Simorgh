@@ -38,6 +38,7 @@ def main(argv: list[str]) -> int:
     house = sub.add_parser("house", help="the household simulator's scenarios (stage 11)")
     house.add_argument("--one", default="", help="one scenario by id, in this process")
     house.add_argument("--only", default="", help="every scenario whose id starts with this")
+    house.add_argument("--fast", action="store_true", help="the bless subset: one per stage, free, a few minutes")
     house.add_argument("--json", action="store_true")
     scen = sub.add_parser("scenario", help="the household script, probe by probe")
     scen.add_argument("--json", action="store_true")
@@ -62,7 +63,9 @@ def main(argv: list[str]) -> int:
             with contextlib.redirect_stdout(io.StringIO()):
                 outcomes = asyncio.run(run_one(scenario))
         else:
-            chosen = [s for s in all_scenarios() if s.id.startswith(args.only)]
+            from .house.scenarios import fast
+
+            chosen = fast() if args.fast else [s for s in all_scenarios() if s.id.startswith(args.only)]
             outcomes = asyncio.run(run_pack(chosen))
         if args.json:
             print(as_json(outcomes))

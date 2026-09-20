@@ -90,13 +90,13 @@ The other reason is the ten stages. They describe an assistant that hears, remem
 
 | Number | Target |
 |---|---|
-| Stages with at least one green end-to-end scenario | 11 of 11 |
+| Stages with at least one green end-to-end scenario | 5 of 11 so far (0, 3, 5, 6, 9) |
 | Persona self-identification / worst cross-persona score | ≥ 0.7 / < 0.4 |
 | At 3 m and 10 dB: echo-as-turn, TV answered, named-persona unanswered | 0 / 0 / 0 |
 | Check-in recall on scripted low periods (consented adults) / check-ins to anyone else | ≥ 0.8 / 0 |
 | First audio p95 on the stage-3 pack | ≤ 2.5 s (the SLO) |
-| `house-fast` in the bless | under 3 minutes, free |
-| Live-log failures from 2026-09-19/20 reproduced as scenarios | 5 of 5 |
+| `house-fast` in the bless | **3:12, free** (five scenarios; a Kernel boot is ~35 s and dominates) |
+| Live-log failures from 2026-09-19/20 reproduced as scenarios | **5 of 5, all green** |
 | Nightly cost on the floor provider | $0 |
 
 ## Risks

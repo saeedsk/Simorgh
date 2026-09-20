@@ -67,7 +67,11 @@ A whole Sim, booted where it can do no harm, driven by a scenario. `Sandbox` boo
 
 The observer registers on the bus **backend**, not through a client. A client is policed and `action.proposed` is Guardian's alone -- which is the policy working -- but a sandbox that cannot watch the approval path cannot test the approval path. It only ever reads.
 
-It never touches `~/.simorgh`, never reaches a device, and defaults to a provider that costs nothing.
+It never touches `~/.simorgh`, never reaches a device, keeps its **speaker book inside its own data directory** (it read and wrote the live one until 2026-09-20), and defaults to a provider that costs nothing.
+
+**Running it**: `python -m simorgh.evals house` plays the whole pack, `--fast` the five the bless runs, `--one <id>` a single scenario in this process. Each scenario gets its own child process, because booting the whole system more than three times in one interpreter segfaults on the torch models. The pack is about five minutes, the bless subset about three; nearly all of it is Kernel boots, which is why the subset is five scenarios chosen for what they would CATCH rather than for coverage.
+
+A scenario marked `needs_model=True` is **skipped** unless `SIMORGH_HOUSE_PAID` is set, and says why. For a voice Sim has placed, "were these words for me?" is the model's judgement, not a rule -- so the floor provider, which answers everything, cannot judge those at all.
 
 **The people** (`house/people.py`) are five personas -- an owner, an adult, two children and a guest, so every gate has somebody to exercise it -- and deliberately not the creator's family: cloning a household member's voice needs that person to say so. Each has a Kokoro voice, and `enrol()` puts three synthesised sentences through the same sherpa CAM++ embedder the house uses into the sandbox's own book, so identification in a scenario is tested with the numbers a real voice gets.
 

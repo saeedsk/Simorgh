@@ -55,8 +55,18 @@ def _a_real_provider() -> bool:
 
 
 def _needs_voices(scenario) -> bool:
-    """Whether any beat speaks into the room rather than asking Sim."""
-    return True     # enrolling costs a few seconds and every scenario benefits from real identities
+    """Whether this scenario needs the household in the speaker book.
+
+    Enrolling is twenty sentences through Kokoro and the embedder --
+    most of a scenario's runtime -- and a scenario whose every beat
+    asks Sim directly never consults the book at all. Checked rather
+    than assumed, because the bless subset has to stay quick enough
+    that nobody is tempted to switch it off.
+    """
+    if any(not beat.ask_directly and beat.who for beat in scenario.beats):
+        return True
+    names = {e.name for beat in scenario.beats for e in beat.expect} | {e.name for e in scenario.expect}
+    return any(name.startswith("identified as") for name in names)
 
 
 async def _enrol_into(box, director) -> None:

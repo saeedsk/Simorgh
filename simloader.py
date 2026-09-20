@@ -607,6 +607,11 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
         evals_ok, evals_why = run_evals(repo, notes)
         if not evals_ok:
             return False, evals_why
+
+        house_ok, house_why = run_house(repo, notes)
+        if not house_ok:
+            return False, house_why
+        evals_why = f"{evals_why}; {house_why}"
         if not full:
             return True, f"unit suite green ({unit_why}); {evals_why}"
 
@@ -639,6 +644,48 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
     if trials.returncode != 0:
         return False, "trial suite had failures"
     return True, "unit suite and trial suite green"
+
+
+def run_house(repo: Path, notes: Path | None) -> tuple[bool, str]:
+    """A few minutes of Sim actually living, before a commit is blessed
+    (stage 11 item 11).
+
+    The unit suite certifies shape and the household evals certify that
+    what the family said reaches the prompt. Neither can show that a
+    tool Initiative proposes exists, that a child is refused the front
+    door, or that a memory survives a restart -- those need a booted
+    Sim, driven, for long enough to get it wrong. Four blesses on
+    2026-09-20 passed over a Guardian race and a delivery path that had
+    been dead since stage 6; this is the gate that would have caught
+    both.
+
+    Free: the floor provider, a fake house, a fake microphone. About
+    three minutes, which is the reason it is five scenarios and not
+    eleven.
+    """
+    rule("gate: the house")
+    say("five scenarios against a booted Sim -- a misheard name, a camera at night, a child at the "
+        "door, a memory across a restart, the terminal -- about three minutes, no model, no money")
+    try:
+        proc = subprocess.run([sys.executable, "-u", "-m", "simorgh.evals", "house", "--fast"],
+                              cwd=repo, capture_output=True, text=True, timeout=900)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        say(f"the house did not run ({exc}); the unit suite still decides", "warn")
+        return True, "the house did not run"
+    summary = next((line for line in proc.stdout.splitlines() if line.startswith("house:")), "")
+    for line in proc.stdout.splitlines():
+        if line.strip().startswith(("failed", "skipped")):
+            say(line.strip(), "fail" if line.strip().startswith("failed") else "note")
+    if notes is not None:
+        notes.mkdir(parents=True, exist_ok=True)
+        (notes / "last_house.txt").write_text(proc.stdout + "\n--- stderr ---\n" + proc.stderr)
+    if not summary:
+        say("the house produced no report; the unit suite still decides", "warn")
+        return True, "the house produced no report"
+    say(summary)
+    if proc.returncode != 0:
+        return False, f"the house refused this commit: {summary}"
+    return True, summary
 
 
 def last_household(notes: Path | None) -> dict | None:
