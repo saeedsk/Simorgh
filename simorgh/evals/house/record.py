@@ -46,6 +46,23 @@ class Seen:
     source: str = ""
 
 
+@dataclass(frozen=True)
+class Spoke:
+    """The moment a person in the room started speaking.
+
+    The director knows this and nothing else does: a percept appears
+    only AFTER the listening loop has found the speech, recognised it
+    and placed the voice, so without this mark the whole listening
+    path is invisible and a latency table measures only what happens
+    after Sim already understood.
+    """
+
+    who: str
+    text: str
+    at: float
+    in_the_room: bool
+
+
 @dataclass
 class Record:
     """Everything that happened, in order."""
@@ -53,6 +70,7 @@ class Record:
     messages: list[Seen] = field(default_factory=list)
     printed: list[Printed] = field(default_factory=list)
     said: list[Said] = field(default_factory=list)
+    spoke: list[Spoke] = field(default_factory=list)
     started_at: float = field(default_factory=time.monotonic)
 
     # -- writing (the sandbox's side) -------------------------------------------
@@ -63,8 +81,14 @@ class Record:
     def printed_line(self, text: str) -> None:
         self.printed.append(Printed(text=str(text), at=time.monotonic()))
 
-    def spoke(self, text: str, *, voice: str = "", speed: float = 1.0) -> None:
+    def sim_spoke(self, text: str, *, voice: str = "", speed: float = 1.0) -> None:
         self.said.append(Said(text=str(text), at=time.monotonic(), voice=voice, speed=speed))
+
+    def somebody_spoke(self, who: str, text: str, *, in_the_room: bool) -> float:
+        """A person started talking. Returns the mark."""
+        mark = time.monotonic()
+        self.spoke.append(Spoke(who=who, text=str(text), at=mark, in_the_room=in_the_room))
+        return mark
 
     # -- reading (an expectation's side) ----------------------------------------
     def of(self, type_: str, *, since: float = 0.0) -> list[Seen]:
@@ -114,4 +138,4 @@ class Record:
         return (pieces[0].at - since) if pieces else None
 
 
-__all__ = ["Printed", "Record", "Said", "Seen"]
+__all__ = ["Printed", "Record", "Said", "Seen", "Spoke"]

@@ -185,7 +185,7 @@ def _record_speech(synthesiser, record: Record) -> None:
     original = synthesiser.synthesise
 
     async def _timed(text: str, *, voice: str = "", speed: float = 1.0, tone: str = ""):
-        record.spoke(text, voice=voice, speed=speed)
+        record.sim_spoke(text, voice=voice, speed=speed)
         return await original(text, voice=voice, speed=speed, tone=tone)
 
     synthesiser.synthesise = _timed

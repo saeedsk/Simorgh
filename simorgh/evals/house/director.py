@@ -77,7 +77,7 @@ class Director:
         says in an evening are one conversation, which is what Sim's
         own conversation window assumes.
         """
-        mark = self.now()
+        mark = self.record.somebody_spoke(person, text, in_the_room=False)
         pipeline = self._pipeline()
         session_id = session or self._session_ids.setdefault(person, uuid.uuid4().hex)
         reply = await pipeline.ask(text, session_id=session_id, speaker_name=person,
@@ -116,7 +116,7 @@ class Director:
         # is worse than always (2026-09-20: beats 2 and 3 of four were
         # lost, the other two fine).
         await self._ready_to_listen()
-        mark = self.now()
+        mark = self.record.somebody_spoke(person, text, in_the_room=True)
         audio = await self._voice_of(persona, text)
         other = None
         if overlap_with:

@@ -143,6 +143,22 @@ async def _in_a_child(scenario) -> list[Outcome]:
                         status=SKIPPED, why=f"the house did not come up: {tail}")]
 
 
+async def run_with_timing(scenario):
+    """One scenario, plus where its seconds went."""
+    from .director import Director
+    from .sandbox import Sandbox
+    from .script import play
+    from .timing import from_record
+
+    async with Sandbox() as box:
+        director = Director(box)
+        director.scene.room = scenario.room
+        if _needs_voices(scenario):
+            await _enrol_into(box, director)
+        outcomes = await play(scenario, director)
+        return outcomes, from_record(director.record)
+
+
 def as_json(outcomes) -> str:
     return json.dumps([{"name": o.case.name, "kind": o.case.kind, "level": o.case.level,
                         "status": o.status, "seconds": o.seconds, "cost_usd": o.cost_usd,

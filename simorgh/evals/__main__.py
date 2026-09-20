@@ -39,6 +39,7 @@ def main(argv: list[str]) -> int:
     house.add_argument("--one", default="", help="one scenario by id, in this process")
     house.add_argument("--only", default="", help="every scenario whose id starts with this")
     house.add_argument("--fast", action="store_true", help="the bless subset: one per stage, free, a few minutes")
+    house.add_argument("--timing", action="store_true", help="with --one: where the turn's seconds went")
     house.add_argument("--json", action="store_true")
     scen = sub.add_parser("scenario", help="the household script, probe by probe")
     scen.add_argument("--json", action="store_true")
@@ -60,8 +61,17 @@ def main(argv: list[str]) -> int:
                 return 2
             # In THIS process, so the parent can capture it: the parent
             # is what gives each scenario its own interpreter.
+            table = None
             with contextlib.redirect_stdout(io.StringIO()):
-                outcomes = asyncio.run(run_one(scenario))
+                if args.timing:
+                    from .house.run import run_with_timing
+
+                    outcomes, table = asyncio.run(run_with_timing(scenario))
+                else:
+                    outcomes = asyncio.run(run_one(scenario))
+            if table is not None and not args.json:
+                print(table.render())
+                print()
         else:
             from .house.scenarios import fast
 

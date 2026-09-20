@@ -37,7 +37,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
-| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `scenarios/` |
+| `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `timing.py`, `voicecache.py`, `run.py`, `scenarios/` |
 
 ## Suites
 
@@ -82,6 +82,8 @@ What it measured is in `docs/findings/2026-09-20-house-simulator.md`. The short 
 **A scenario** (`house/script.py`) is beats and expectations. A beat says who spoke, from where, over what; an expectation says what a person in the room would have accepted -- `answered()`, `quiet()`, `did_not_call("home_call")`, `asked_a_person()`, `first_audio_under(2.5)`, `remembered("March 6")` -- rather than naming the string the model must produce, because a test that pins the words fails when the model improves. Each expectation yields one `Outcome`, so a run reports per expectation with the beat that failed.
 
 A beat can reach Sim two ways, and the difference matters. `say()` drives `Pipeline.ask`, which asks Sim directly -- right for "what did it answer", useless for "what did it ignore". `into_the_room()` synthesises the persona's voice, puts it through the scene and hands it to the microphone, so the **listening loop** decides: is this speech, whose voice is it, was it addressed to me, was it my own echo. Every live failure the pack reproduces was decided there. The words are scripted (`hearing.ScriptedRecogniser`) while the audio is real, because whether Sim stayed out of a conversation should not depend on whether whisper heard every syllable -- word error is measured on its own.
+
+**Where a turn's seconds go** (`house/timing.py`, `--timing`): `hear` (somebody started speaking → Sim understood them: VAD, the recogniser, the speaker book), `think`, `first_audio`, `reply`. Measured from the moment a **person** spoke, not from the percept -- a percept appears only once the listening path is done, so measuring from it hides the part with stage 3's two-second budget in it. Every number is a difference between two things already recorded, so no instrument is added to Sim and the table cannot drift from what happened. The budgets are stage 3's own. On the floor provider `think` is ~0.08 s and the real figure is `hear`: 2.84 s for a spoken beat, over its budget.
 
 **The pack** (`house/scenarios/`) starts with `live.py`: the five evenings that actually went wrong on 2026-09-19 and 2026-09-20, each carrying the commit that broke it. A harness anchored in bugs that happened is worth more than one anchored in bugs somebody imagined.
 

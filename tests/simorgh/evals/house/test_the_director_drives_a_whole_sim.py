@@ -39,7 +39,7 @@ class TheRecord(unittest.TestCase):
         record = self._record()
         record.saw(Message.new("percept.text.received", source="voice",
                                payload={"speaker": "Ira", "text": "is it raining"}))
-        record.spoke("A bit, yes.")
+        record.sim_spoke("A bit, yes.")
         self.assertEqual(record.transcript(), "Ira: is it raining\nsim: A bit, yes.")
 
     def test_nothing_said_is_no_first_audio_rather_than_zero(self):

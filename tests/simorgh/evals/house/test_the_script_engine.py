@@ -26,7 +26,7 @@ def _record(**parts) -> tuple[Record, float]:
     for topic, payload in parts.pop("messages", []):
         record.saw(Message.new(topic, source="test", payload=payload))
     for text in parts.pop("said", []):
-        record.spoke(text)
+        record.sim_spoke(text)
     for text in parts.pop("printed", []):
         record.printed_line(text)
     return record, since
