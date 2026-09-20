@@ -219,7 +219,14 @@ class Service:
         # External adapters (external.py) load last so a hand-built tool of
         # the same name is never shadowed by an optional package's.
         external = load_external_tools(self._config.external_tools, logger=ctx.logger)
-        for tool in builtin_tools(self._config, secrets=ctx.secrets) + system_tools + self._extra_tools + external:
+        # An `extra_tools` entry may be a factory `(config, secrets=) ->
+        # list` rather than a tool: the domains (stage 9 item 1) need the
+        # scoped secrets, which do not exist when the Kernel builds this
+        # Service, only here.
+        extra: list = []
+        for entry in self._extra_tools:
+            extra.extend(entry(self._config, secrets=ctx.secrets) if callable(entry) and not hasattr(entry, "run") else [entry])
+        for tool in builtin_tools(self._config, secrets=ctx.secrets) + system_tools + extra + external:
             if tool.name in self._registry:
                 ctx.logger.warning("tool_name_collision", name=tool.name, provider=getattr(tool, "provider", "builtin"))
                 continue

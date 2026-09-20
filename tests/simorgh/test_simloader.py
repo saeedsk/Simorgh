@@ -373,12 +373,12 @@ class LoaderTestCase(unittest.TestCase):
         minutes, cameras and TV included, and would fail a boot with the
         network down."""
         (self.repo.path / "tests" / "simorgh" / "kernel").mkdir(parents=True)
-        (self.repo.path / "tests" / "simorgh" / "execution" / "home").mkdir(parents=True)
+        (self.repo.path / "tests" / "simorgh" / "domains" / "home").mkdir(parents=True)
         argv = self._gate_argv()
         self.assertIn("tests/simorgh/kernel", argv)
         self.assertNotIn("tests", argv)
         self.assertEqual(argv[argv.index("not live") - 1], "-m", "the marker filter, not python's -m")
-        self.assertIn("--ignore=tests/simorgh/execution/home", argv)
+        self.assertIn("--ignore=tests/simorgh/domains/home", argv)
         self.assertNotIn("tests/simorgh/voice", argv, "a path the checkout lacks is not passed")
 
     def test_all_tests_runs_every_test(self):

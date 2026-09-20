@@ -60,3 +60,17 @@ class TheGrowthLoopCannotLoosenItsOwnGate(unittest.IsolatedAsyncioTestCase):
 
     async def test_ordinary_code_is_still_Sims_to_change(self):
         self.assertEqual(await self._kind("simorgh/memory/store.py"), "abstain")
+
+
+class TheDomainsAreSimsToChange(unittest.IsolatedAsyncioTestCase):
+    """Stage 9 item 1: the product domains left `simorgh/execution/`.
+    Only what has to be trusted is protected now; a media tool is not
+    part of the approval path, it is something the approval path gates."""
+
+    async def test_a_domain_file_is_not_protected(self):
+        self.assertEqual(await TheGrowthLoopCannotLoosenItsOwnGate._kind(
+            TheGrowthLoopCannotLoosenItsOwnGate(), "simorgh/domains/media/tools.py"), "abstain")
+
+    async def test_what_remains_in_execution_still_is(self):
+        self.assertEqual(await TheGrowthLoopCannotLoosenItsOwnGate._kind(
+            TheGrowthLoopCannotLoosenItsOwnGate(), "simorgh/execution/verifier.py"), "deny")

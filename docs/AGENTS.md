@@ -19,6 +19,7 @@ The unit of ownership is the module. An agent locks a module, changes only what 
 | planning | 3 | `simorgh/planning/` | `tests/simorgh/planning/` | `planning` |
 | guardian | 3 | `simorgh/guardian/` | `tests/simorgh/guardian/` | `guardian` |
 | execution | 3 | `simorgh/execution/` | `tests/simorgh/execution/` | `execution` |
+| domains | 3 (behind execution's `extra_tools`) | `simorgh/domains/` | `tests/simorgh/domains/` | `domains` |
 | verification | 3 | `simorgh/verification/` | `tests/simorgh/verification/` | `verification` |
 | growth | 4 | `simorgh/growth/` (parts: `estimate/`, `monitors/`, `explore/`) | `tests/simorgh/growth/` | `growth` |
 | persona | 5 | `simorgh/persona/` | `tests/simorgh/persona/` | `persona` |

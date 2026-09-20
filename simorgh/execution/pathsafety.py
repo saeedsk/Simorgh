@@ -8,11 +8,13 @@ refusal string instead.
 
 from __future__ import annotations
 
+from simorgh.contracts.pathnames import looks_like_credential_path  # noqa: F401 -- re-exported; moved for the domains (stage 9 item 1)
+
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from .doctext import document_to_text
-from .pdftext import looks_like_pdf, pdf_to_text
+from simorgh.contracts.text.doctext import document_to_text
+from simorgh.contracts.text.pdftext import looks_like_pdf, pdf_to_text
 
 # What a credential file actually looks like, as opposed to what a
 # credential file's name contains. The old rule was a substring test
@@ -33,17 +35,10 @@ from .pdftext import looks_like_pdf, pdf_to_text
 
 #: Extensions that hold data rather than source. A credential word in
 #: one of these is a credential file.
-_DATA_EXTENSIONS = frozenset({
-    "", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".txt", ".env",
-})
 #: Extensions that ARE a credential, whatever the file is called.
-_SECRET_EXTENSIONS = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keystore"})
 #: Words that name a credential store when they name a data file.
-_CREDENTIAL_WORDS = ("credential", "secret", "password", "passwd", "token")
 #: Files that are a private key by name alone.
-_KEY_FILENAMES = frozenset({"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".netrc", ".pgpass"})
 #: A directory called this holds credentials whatever is inside it.
-_CREDENTIAL_DIRECTORIES = frozenset({"secrets", "credentials", ".ssh", ".gnupg", ".aws"})
 
 _MAX_PATH_CHARS = 4096
 _MAX_READ_CHARS = 20_000
@@ -68,40 +63,6 @@ _MAX_FILE_BYTES = 8_000_000
 # out, and `pdf_to_text`'s page limit already bounds that.
 _MAX_PDF_BYTES = 60_000_000
 _MAX_LIST_ENTRIES = 300
-
-
-def _is_dotenv(name: str) -> bool:
-    """`.env`, `.env.local`, `prod.env` -- but not `world.env.query.v1.json`,
-    which is a schema with the word in the middle of its name."""
-    return name == ".env" or name.startswith(".env.") or name.endswith(".env")
-
-
-def looks_like_credential_path(parts: Iterable[str]) -> bool:
-    """True if any path segment looks like a credentials file/dir name.
-
-    Shared by `resolve_safe_path` (so `read_file`/`list_dir` refuse these
-    outright) and `search_code`'s own file walk (both the `rg` and
-    pure-Python backends) -- without this second use, `search_code`
-    could grep the contents of a `.env` or `credentials.json` sitting
-    anywhere under `readable_roots` even though `read_file` refuses the
-    very same path by name. Found live, 2026-09-08: a `tools/.env` and a
-    `tools/credentials.json` were both unreadable via `read_file` but
-    their secret contents came back verbatim from `search_code`, via
-    ripgrep AND the pure-Python fallback."""
-    segments = [str(part).strip().lower() for part in parts if str(part).strip()]
-    if not segments:
-        return False
-    if any(segment in _CREDENTIAL_DIRECTORIES for segment in segments[:-1]):
-        return True
-    name = segments[-1]
-    if name in _KEY_FILENAMES or _is_dotenv(name):
-        return True
-    suffix = PurePosixPath(name).suffix
-    if suffix in _SECRET_EXTENSIONS:
-        return True
-    if suffix in _DATA_EXTENSIONS and any(word in name for word in _CREDENTIAL_WORDS):
-        return True
-    return name in _CREDENTIAL_DIRECTORIES
 
 
 def hides_a_credential(repo_root: Path, path: Path, *, readable_roots: tuple[str, ...],

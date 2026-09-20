@@ -4,3 +4,33 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.docs]
+by = "opus-main"
+task = "stage 9 item 1: domains out of execution"
+since = "2026-09-20T14:08:14+00:00"
+until = "2026-09-20T22:08:14+00:00"
+
+[locks.domains]
+by = "opus-main"
+task = "stage 9 item 1: domains out of execution"
+since = "2026-09-20T14:25:25+00:00"
+until = "2026-09-20T22:25:25+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "stage 9 item 1: domains out of execution"
+since = "2026-09-20T14:08:14+00:00"
+until = "2026-09-20T22:08:14+00:00"
+
+[locks.guardian]
+by = "opus-main"
+task = "stage 9 item 1: domains out of execution"
+since = "2026-09-20T14:08:14+00:00"
+until = "2026-09-20T22:08:14+00:00"
+
+[locks.kernel]
+by = "opus-main"
+task = "stage 9 item 1: domains out of execution"
+since = "2026-09-20T14:08:14+00:00"
+until = "2026-09-20T22:08:14+00:00"

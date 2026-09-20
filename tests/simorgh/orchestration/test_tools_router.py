@@ -523,7 +523,7 @@ class TestKnowledgeMarkersReachTheTools(unittest.TestCase):
         a missing timeout is the stale-5-second bug; a missing note
         means the model is offered a tool it is never told about."""
         from simorgh.execution.config import Config
-        from simorgh.execution.knowledge.tools import knowledge_tools
+        from simorgh.domains.knowledge.tools import knowledge_tools
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.session import _ACTION_TIMEOUTS
         from simorgh.orchestration.tools import _TOOL_POLICY
@@ -536,7 +536,7 @@ class TestKnowledgeMarkersReachTheTools(unittest.TestCase):
 
     def test_the_declared_policy_matches_what_the_tool_says_about_itself(self):
         from simorgh.execution.config import Config
-        from simorgh.execution.knowledge.tools import knowledge_tools
+        from simorgh.domains.knowledge.tools import knowledge_tools
         from simorgh.orchestration.tools import _TOOL_POLICY
 
         for tool in knowledge_tools(Config()):
@@ -603,7 +603,7 @@ class TestPimMarkersReachTheTools(unittest.TestCase):
 
     def test_every_pim_tool_has_a_policy_row_a_timeout_and_a_note(self):
         from simorgh.execution.config import Config
-        from simorgh.execution.pim.tools import pim_tools
+        from simorgh.domains.pim.tools import pim_tools
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.session import _ACTION_TIMEOUTS
         from simorgh.orchestration.tools import _TOOL_POLICY
@@ -675,7 +675,7 @@ class TestSecurityMarkersReachTheTools(unittest.TestCase):
 
     def test_every_security_tool_has_a_policy_row_a_timeout_and_a_note(self):
         from simorgh.execution.config import Config
-        from simorgh.execution.security.tools import security_tools
+        from simorgh.domains.security.tools import security_tools
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.session import _ACTION_TIMEOUTS
         from simorgh.orchestration.tools import _TOOL_POLICY
@@ -702,11 +702,12 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
         session default, and only the ones that can genuinely take
         minutes are listed."""
         from simorgh.execution.config import Config
+        from simorgh.domains import domain_tools
         from simorgh.execution.tools import builtin_tools
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.tools import _TOOL_POLICY
 
-        for tool in builtin_tools(Config()):
+        for tool in builtin_tools(Config()) + domain_tools(Config(), secrets=None):
             with self.subTest(tool=tool.name):
                 self.assertIn(tool.name, _TOOL_POLICY, "no _TOOL_POLICY row -- Guardian would "
                                                         "treat it as irreversible")
@@ -719,10 +720,11 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
         calls it irreversible is gated wrongly in one direction or the
         other."""
         from simorgh.execution.config import Config
+        from simorgh.domains import domain_tools
         from simorgh.execution.tools import builtin_tools
         from simorgh.orchestration.tools import _TOOL_POLICY
 
-        for tool in builtin_tools(Config()):
+        for tool in builtin_tools(Config()) + domain_tools(Config(), secrets=None):
             if tool.name not in _TOOL_POLICY:
                 continue
             with self.subTest(tool=tool.name):
@@ -732,12 +734,14 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
         """A profile offering a tool that is not registered wastes a
         step: the model calls it and is refused."""
         from simorgh.execution.config import Config
+        from simorgh.domains import domain_tools
         from simorgh.execution.tools import builtin_tools
         from simorgh.orchestration.profiles import BY_KIND
 
         from simorgh.orchestration.session import SESSION_LOCAL
 
-        registered = {tool.name for tool in builtin_tools(Config(shell=True, remote=True))} | SESSION_LOCAL
+        config = Config(shell=True, remote=True)
+        registered = {tool.name for tool in builtin_tools(config) + domain_tools(config, secrets=None)} | SESSION_LOCAL
         for kind, profile in BY_KIND.items():
             for name in profile.tools:
                 with self.subTest(profile=kind, tool=name):
@@ -816,7 +820,7 @@ class TestHomeMarkersReachTheTools(unittest.TestCase):
 
     def test_every_home_tool_has_a_policy_row_and_a_note(self):
         from simorgh.execution.config import Config
-        from simorgh.execution.home.tools import home_tools
+        from simorgh.domains.home.tools import home_tools
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.session import _ACTION_TIMEOUTS
         from simorgh.orchestration.tools import _TOOL_POLICY

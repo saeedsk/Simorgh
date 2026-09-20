@@ -540,7 +540,7 @@ CORE_TESTS = (
     "tests/simorgh/integration/test_a_patch_lands_through_a_worktree.py",
     "tests/simorgh/test_module_boundaries.py", "tests/simorgh/test_simloader.py",
 )
-CORE_IGNORE = tuple(f"tests/simorgh/execution/{domain}"
+CORE_IGNORE = tuple(f"tests/simorgh/domains/{domain}"
                     for domain in ("home", "media", "energy", "pim", "knowledge", "security"))
 
 

@@ -4,7 +4,7 @@ One-line status: layer 3 · 21,657 lines · 60 test files · lock: `execution` i
 
 ## Purpose
 
-Execution is the only place a side effect happens: it owns the tool registry (about 100 tools: 43 core tools, six domain subpackages, worktree tools, on-demand `skill:<name>` tools, MCP proxies and external adapters) and runs a tool only in answer to an `action.approved` from Guardian, reporting `action.result` (`service.py:755-938`). It must never run a tool whose approval it has not verified itself: before any dispatch it recomputes the canonical args hash from the proposal Guardian recorded on `action:<id>` and re-checks Guardian's HMAC token, expiry and replay (`verifier.py`, `service.py:759-773`); a failure publishes `action.denied` with `layer="token"` and nothing runs. The shaping decision is "Guardian sees every call": every capability, including device control, video signalling and self-landing, is a Tool behind one approval path, which buys one audit trail at the cost of per-call ceremony (L4, T4). Code tasks edit a per-task git worktree and land on main only through `worktree_land`: rebase, a whole-suite gate re-judged by `simloader.unit_verdict`, then `git merge --ff-only` (`worktree.py:178-251`, `tools.py:1297-1323`). The package is Guardian-protected: Sim's own tasks cannot edit it.
+Execution is the only place a side effect happens: it owns the tool registry (about 100 tools: 43 core tools, the six product domains arriving through `extra_tools` from `simorgh/domains/` since stage 9 item 1, worktree tools, on-demand `skill:<name>` tools, MCP proxies and external adapters) and runs a tool only in answer to an `action.approved` from Guardian, reporting `action.result` (`service.py:755-938`). It must never run a tool whose approval it has not verified itself: before any dispatch it recomputes the canonical args hash from the proposal Guardian recorded on `action:<id>` and re-checks Guardian's HMAC token, expiry and replay (`verifier.py`, `service.py:759-773`); a failure publishes `action.denied` with `layer="token"` and nothing runs. The shaping decision is "Guardian sees every call": every capability, including device control, video signalling and self-landing, is a Tool behind one approval path, which buys one audit trail at the cost of per-call ceremony (L4, T4). Code tasks edit a per-task git worktree and land on main only through `worktree_land`: rebase, a whole-suite gate re-judged by `simloader.unit_verdict`, then `git merge --ff-only` (`worktree.py:178-251`, `tools.py:1297-1323`). The package is Guardian-protected: Sim's own tasks cannot edit it.
 
 ## Files
 
@@ -47,14 +47,14 @@ Domain subpackages (stage 9 moves each to `simorgh/domains/<name>/`):
 
 | Subpackage | For |
 |---|---|
-| `simorgh/execution/knowledge/` (api, chunk, embed, index, parse, retrieve, sources, tools) | the creator's documents: sqlite FTS5 + vector index; `kb_status`, `kb_sources`, `kb_search`, `kb_open`, `kb_ask` |
-| `simorgh/execution/pim/` (api, accounts, ics, nlp, tools, connectors/caldav, imap, fakes) | calendar and mail, read-only, credentials from the vault; `cal_list`, `mail_search`, `mail_read`, `remind` (publishes `system.schedule.add`) |
-| `simorgh/execution/security/` (api, findings, selfcheck, tools) | Sim's own security posture, local and advisory; `sec_self`, `sec_posture`, `sec_findings`, `sec_show`, `sec_accept` |
-| `simorgh/execution/home/` (registry, tools, cameras, ring) | Home Assistant `home_find/state/describe/call/undo`; Reolink NVR `cam_*` (11 tools); Ring `ring_*` (8 tools) |
-| `simorgh/execution/energy/` (api, meters, tools) | meters and tariffs through Home Assistant; `energy_status`, `energy_report`, `energy_tariff` |
-| `simorgh/execution/media/` (tools, cast, androidtv, musicapp, tvmedia) | HA `media_*`, Chromecast `cast_*`, dashboard `dash_view`/`dash_key`, Android TV `tv_*`, macOS Music `music_*` |
+| `simorgh/domains/knowledge/` (api, chunk, embed, index, parse, retrieve, sources, tools) | the creator's documents: sqlite FTS5 + vector index; `kb_status`, `kb_sources`, `kb_search`, `kb_open`, `kb_ask` |
+| `simorgh/domains/pim/` (api, accounts, ics, nlp, tools, connectors/caldav, imap, fakes) | calendar and mail, read-only, credentials from the vault; `cal_list`, `mail_search`, `mail_read`, `remind` (publishes `system.schedule.add`) |
+| `simorgh/domains/security/` (api, findings, selfcheck, tools) | Sim's own security posture, local and advisory; `sec_self`, `sec_posture`, `sec_findings`, `sec_show`, `sec_accept` |
+| `simorgh/domains/home/` (registry, tools, cameras, ring) | Home Assistant `home_find/state/describe/call/undo`; Reolink NVR `cam_*` (11 tools); Ring `ring_*` (8 tools) |
+| `simorgh/domains/energy/` (api, meters, tools) | meters and tariffs through Home Assistant; `energy_status`, `energy_report`, `energy_tariff` |
+| `simorgh/domains/media/` (tools, cast, androidtv, musicapp, tvmedia) | HA `media_*`, Chromecast `cast_*`, dashboard `dash_view`/`dash_key`, Android TV `tv_*`, macOS Music `music_*` |
 
-Each subpackage exports one `<name>_tools(config, secrets=...)` factory that `builtin_tools()` splices in (`tools.py:3105-3163`); device integrations take optional SDKs and refuse by name when absent.
+Each domain exports one `<name>_tools(config, secrets=...)` factory; `simorgh/domains/__init__.py::domain_tools` gathers them and the Kernel hands that factory to `Service(extra_tools=[domain_tools])`. An `extra_tools` entry that is callable is called with `(config, secrets=)` at `start()`, because the scoped secrets do not exist when the Service is built. Device integrations take optional SDKs and refuse by name when absent.
 
 ## Consumes
 
@@ -66,7 +66,7 @@ Each subpackage exports one `<name>_tools(config, secrets=...)` factory that `bu
 | `world.camera.event` | `messages/world.py::CameraEvent` | simorgh/execution/service.py (`vision.py`) | stills plus a vision model call; announces the description |
 | `ui.dash.state` | `messages/ui.py::DashState` | simorgh/execution/service.py | a `charts` view from anyone but Execution proposes `tv_charts` (in a background task, through `SelfActions`) |
 | `action.result` / `action.denied` | `messages/action.py` | simorgh/execution/selfaction.py | a short-lived subscription per own proposal, matched on `action_id`: the outcome of a call Execution proposed itself (it also publishes both) |
-| `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/execution/home/cameras.py | while `cam_watch` is on, turns the NVR's push into `world.camera.event` |
+| `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/domains/home/cameras.py | while `cam_watch` is on, turns the NVR's push into `world.camera.event` |
 | replies | `memory.retrieve`, `cognition.think`, `world.env.query`, `task.create`, `task.list.request`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request` | service.py, vision.py, tools.py | replies to Execution's own `bus.request`s (not subscriptions) |
 
 The generated rows for `action.denied`, `action.result`, `cognition.think`, `percept.web.fetched`, `system.metrics`, `tool.*`, `ui.notice` and `voice.speak.request` as consumed topics were wrong (Execution publishes them) and are deleted.
@@ -90,7 +90,7 @@ The generated rows for `action.denied`, `action.result`, `cognition.think`, `per
 | `memory.retrieve` | `messages/memory.py::MemoryRetrieve` | simorgh/execution/service.py | request for a skill's procedural description on load |
 | `world.camera.event` | `messages/world.py::CameraEvent` | home/cameras.py, home/ring.py | NVR push or Ring poll saw motion/person/ring |
 | `ui.tv.state` / `ui.dash.state` / `ui.dash.key` | `messages/ui.py` | media/cast.py, home/cameras.py | the TV page's mode, the dashboard view, a remote key |
-| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/execution/pim/tools.py | `remind` |
+| `system.schedule.add` | `messages/system.py::SystemScheduleAdd` | simorgh/domains/pim/tools.py | `remind` |
 | tool-driven requests | `task.create`, `task.list.request`, `task.cancel`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request`, `world.env.query` | simorgh/execution/tools.py | `start_task`, `list_tasks`, `cancel_task`, `sim_command`, `memory_forget`, `voice_setting`, `self_map` |
 
 The Service's `produces` tuple lists exactly these 26 topics (since 2026-09-19; it listed ten before). `tests/simorgh/execution/test_produces_manifest.py` pins it both ways against every `Message.new(topics.X` / `.caused(topics.X` / `_publish(ctx, topics.X` in the package, so a new publish without a manifest entry fails.

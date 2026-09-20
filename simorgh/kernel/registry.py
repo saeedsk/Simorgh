@@ -133,6 +133,7 @@ def build_factories(
     from simorgh.bus.service import Service as BusService
     from simorgh.cognition.service import Service as CognitionService
     from simorgh.initiative.service import Service as InitiativeService
+    from simorgh.domains import domain_tools
     from simorgh.execution.service import Service as ExecutionService
     from simorgh.growth.service import Service as GrowthService
     from simorgh.guardian.service import Service as GuardianService
@@ -153,7 +154,9 @@ def build_factories(
         "memory": lambda: MemoryService(),
         "worldmodel": lambda: WorldModelService(),
         "guardian": lambda: GuardianService(config=guardian_config),
-        "execution": lambda: ExecutionService(config=execution_config),
+        # The product domains ride in through the same seam an external
+        # adapter would (stage 9 item 1).
+        "execution": lambda: ExecutionService(config=execution_config, extra_tools=[domain_tools]),
         "verification": lambda: VerificationService(),
         "planning": lambda: PlanningService(),
         "growth": lambda: GrowthService(),

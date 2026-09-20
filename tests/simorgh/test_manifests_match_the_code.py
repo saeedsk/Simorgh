@@ -36,8 +36,16 @@ _SUBSCRIBE = re.compile(r"subscribe\(\s*topics\.([A-Z_][A-Z0-9_]*)")
 _REFERENCE = re.compile(r"\btopics\.([A-Z_][A-Z0-9_]*)\b")
 
 
+#: Code that runs under a subsystem's Context without being that
+#: package: the product domains are Execution's `extra_tools` (stage 9
+#: item 1) and publish as `execution`, so their topics are Execution's
+#: to declare and count as Execution's uses.
+_ALSO_RUNS_AS: dict[str, tuple[str, ...]] = {"execution": ("domains",)}
+
+
 def _sources(package: str) -> list[str]:
-    return [p.read_text(errors="replace") for p in (ROOT / "simorgh" / package).rglob("*.py")
+    roots = [ROOT / "simorgh" / package] + [ROOT / "simorgh" / extra for extra in _ALSO_RUNS_AS.get(package, ())]
+    return [p.read_text(errors="replace") for root in roots for p in root.rglob("*.py")
             if "__pycache__" not in p.parts]
 
 

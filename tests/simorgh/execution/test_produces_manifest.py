@@ -14,6 +14,10 @@ from simorgh.contracts import topics
 from simorgh.execution.service import Service
 
 _PACKAGE = Path(__file__).resolve().parents[3] / "simorgh" / "execution"
+# The product domains are Execution's `extra_tools` (stage 9 item 1): they
+# run under its Context and publish as `execution`, so what they build is
+# Execution's to declare.
+_ALSO = Path(__file__).resolve().parents[3] / "simorgh" / "domains"
 # Comment lines between the call and its topic are allowed: one publish
 # carries a fourteen-line comment there.
 _BUILDS = re.compile(r"(?:\.new|\.caused|_publish)\((?:\s*#[^\n]*)*\s*(?:ctx,\s*)?topics\.([A-Z_][A-Z0-9_]*)")
@@ -21,7 +25,7 @@ _BUILDS = re.compile(r"(?:\.new|\.caused|_publish)\((?:\s*#[^\n]*)*\s*(?:ctx,\s*
 
 def _built_topics() -> set[str]:
     names: set[str] = set()
-    for path in _PACKAGE.rglob("*.py"):
+    for path in [*_PACKAGE.rglob("*.py"), *_ALSO.rglob("*.py")]:
         names.update(_BUILDS.findall(path.read_text(errors="replace")))
     return {getattr(topics, name) for name in names}
 

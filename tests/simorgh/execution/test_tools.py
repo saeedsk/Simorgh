@@ -787,7 +787,14 @@ class TestProposeMcpServerTool(unittest.IsolatedAsyncioTestCase):
 
 class TestBuiltinTools(unittest.TestCase):
     def test_registers_exactly_the_scoped_set(self):
-        names = {tool.name for tool in builtin_tools(Config(repo_root=Path.cwd()))}
+        # The six product domains left this package for `simorgh/domains/`
+        # (stage 9 item 1) and arrive through `extra_tools`; the SET Sim
+        # can reach is unchanged, which is the acceptance case, so the
+        # two halves are checked together here.
+        from simorgh.domains import domain_tools
+
+        config = Config(repo_root=Path.cwd())
+        names = {tool.name for tool in builtin_tools(config) + domain_tools(config, secrets=None)}
         self.assertEqual(names, {
             "read_file", "list_dir", "search_code", "self_map", "run_python_sandboxed",
             "run_js_sandboxed", "run_tests",
@@ -1121,7 +1128,7 @@ class TestWebFetchOnAPdf(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_a_pdf_comes_back_as_readable_text(self):
-        from tests.simorgh.execution.test_pdftext import make_pdf
+        from tests.simorgh.contracts.test_pdftext import make_pdf
 
         tool = self._tool(make_pdf("the answer is in this document"))
         result = await tool.run({"url": "https://example.com/paper.pdf"}, ctx=self._ctx())
@@ -1131,7 +1138,7 @@ class TestWebFetchOnAPdf(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["kind"], "pdf")
 
     async def test_a_pdf_served_from_a_url_with_no_extension_is_still_read(self):
-        from tests.simorgh.execution.test_pdftext import make_pdf
+        from tests.simorgh.contracts.test_pdftext import make_pdf
 
         tool = self._tool(make_pdf("served from a bare path"))
         result = await tool.run({"url": "https://example.com/download?id=7"}, ctx=self._ctx())

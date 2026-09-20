@@ -1,6 +1,6 @@
 # Stage 9 -- Consolidation and breadth (ongoing)
 
-Status: **in progress** (2026-09-19: item 9 done) · Depends on: every earlier stage landed through the gate · Estimated: 4 weeks then ongoing · Modules touched: orchestration, cognition, interface, execution, ledger, voice; new packages `agent`, `llm`, `perception`, `channels`, `admin`, `domains`
+Status: **in progress** (2026-09-20: items 1 and 9 done; `simorgh/execution/` 22.3k -> 11.0k lines) · Depends on: every earlier stage landed through the gate · Estimated: 4 weeks then ongoing · Modules touched: orchestration, cognition, interface, execution, ledger, voice; new packages `agent`, `llm`, `perception`, `channels`, `admin`, `domains`
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation W10 (Execution is a 21.6k-line package holding six product domains ne
 Every move is a pure file move with shims, gated by the evals suite, old path deleted before the next move begins. Never combine a move with a behaviour change in one commit.
 
 ## Action items
+
+Done 2026-09-20 (item 1): `simorgh/execution/{knowledge,pim,security,home,energy,media}/` -> `simorgh/domains/`, registered through `extra_tools` (an entry may be a `(config, secrets=) -> list` factory, since the scoped secrets only exist at `start()`). Tool set unchanged (pinned together in `test_registers_exactly_the_scoped_set`); the boundary test holds because the two things the domains needed from Execution -- `looks_like_credential_path` and the pdf/doc/html converters -- moved to `contracts/pathnames.py` and `contracts/text/`; `simorgh/domains/` is not Guardian-protected and `simorgh/execution/` still is (pinned in `test_protected_subjects.py`). Execution: 22,265 -> 10,973 lines. Not done in this item: `execution/vision.py` and the camera watchers stay until item 4.
 
 Done 2026-09-19 (item 9): `docs/adding-capability.md` -- a new capability arrives as an MCP server with its own schemas, configured by a person and gated by Guardian; a tool class is for the machine itself, the safety mechanism, and things with no external service behind them. The next integration is the acceptance test.
 

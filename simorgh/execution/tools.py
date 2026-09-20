@@ -62,23 +62,15 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 
 from . import pathsafety
 from .config import Config
-from .htmltext import html_to_text, looks_like_bot_challenge, looks_like_html
+from simorgh.contracts.text.htmltext import html_to_text, looks_like_bot_challenge, looks_like_html
 from .netsafety import FetchRefused, validate_public_http_url, wait_note
-from .doctext import document_to_text
+from simorgh.contracts.text.doctext import document_to_text
 from .geocode import GeocodeTool
 from .packages import FindPackageTool, InstallPackageTool
-from .pdftext import looks_like_pdf, pdf_to_text
+from simorgh.contracts.text.pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
-from .knowledge.tools import knowledge_tools
-from .pim.tools import pim_tools
-from .energy.tools import energy_tools
-from .home.tools import home_tools
-from .home.cameras import cameras_tools
-from .home.ring import ring_tools
 from .vision import vision_tools
-from .media.tools import media_tools
-from .security.tools import security_tools
 from .notify import NotifyTool
 from .remote import RunRemoteTool
 from .container import RunContainerTool
@@ -3196,36 +3188,10 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
         BrowsePageTool(config), RunContainerTool(config), NotifyTool(config),
-        # The creator's own documents (execution/knowledge/,
-        # domains/01-knowledge.md). Registered whether or not a source is
-        # configured: an unconfigured knowledge base answers with what to
-        # add, which beats the tool not existing on the day somebody
-        # points it at ~/Documents.
-        *knowledge_tools(config),
-        # Calendar and mail (execution/pim/,
-        # domains/02-calendar-mail-tasks.md). Read-only: sending is
-        # irreversible and gets a human gate, and a connector that
-        # cannot write at all is a stronger guarantee than a policy
-        # saying it should not.
-        *pim_tools(config, secrets=secrets),
-        # Sim's own security posture (execution/security/,
-        # domains/04-security-posture.md). Guardian audits the code Sim
-        # writes; nothing audited what Sim *is*.
-        *security_tools(config, secrets=secrets),
-        # The house, through Home Assistant (execution/home/,
-        # home-automation-design.md). The acting half only: finding,
-        # reading, calling, undoing. The percept bridge and the rules
-        # engine are the `home` subsystem, still to be built.
-        *home_tools(config, secrets=secrets),
-        # What the house costs (execution/energy/) and what it is
-        # playing (execution/media/). Both read through the same Home
-        # Assistant client the home_* tools use.
-        *energy_tools(config, secrets=secrets),
-        *media_tools(config, secrets=secrets),
-        # The cameras: a Reolink NVR and everything on it (execution/home/cameras.py).
-        *cameras_tools(config, secrets=secrets),
-        # The Ring cameras, through Ring's cloud (execution/home/ring.py).
-        *ring_tools(config, secrets=secrets),
+        # The six product domains (knowledge, pim, security, home, energy,
+        # media) used to be spliced in here. Since stage 9 item 1 they
+        # are `simorgh/domains/` and arrive through `extra_tools`, so the
+        # most trusted package holds only what has to be trusted.
         # Asking a camera what it can see (execution/vision.py). The
         # watcher describes events by itself; this is the same thing on
         # request, and the reason the model knows the capability exists.
