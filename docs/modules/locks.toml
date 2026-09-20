@@ -17,12 +17,6 @@ task = "stage 11 item 8: the latency table"
 since = "2026-09-20T20:09:27+00:00"
 until = "2026-09-21T04:09:27+00:00"
 
-[locks.initiative]
-by = "opus-main"
-task = "stage 11 item 6: an offered notice is as visible as a suppressed one"
-since = "2026-09-20T21:20:04+00:00"
-until = "2026-09-21T05:20:04+00:00"
-
 [locks.interface]
 by = "opus-main"
 task = "a telegram turn renders as ? · ? · (no description)"
@@ -40,15 +34,3 @@ by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
 since = "2026-09-20T19:42:55+00:00"
 until = "2026-09-21T03:42:55+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "a quiet room makes the echo bar infinite, and the person is not heard"
-since = "2026-09-20T22:02:44+00:00"
-until = "2026-09-21T06:02:44+00:00"
-
-[locks.worldmodel]
-by = "opus-main"
-task = "stage 11 item 6: companion arcs over simulated weeks"
-since = "2026-09-20T21:20:04+00:00"
-until = "2026-09-21T05:20:04+00:00"
