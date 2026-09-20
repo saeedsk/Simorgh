@@ -30,7 +30,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "simorgh"
 SUBSTRATE_CLIENTS = ("bus.client", "ledger.client")  # relative to the package
-COMPOSITION_ROOTS = {"kernel", "__init__", "__main__"}
+# `evals` is here for the same reason `kernel` is: it composes the whole
+# system rather than living inside it. A suite boots every subsystem and
+# types at the Interface, which is the only way to measure the things
+# unit tests keep passing on (stage 4 item 9). Nothing imports it back.
+COMPOSITION_ROOTS = {"kernel", "evals", "__init__", "__main__"}
 # Layer-0 packages the Kernel owns: contracts, stdlib and themselves only.
 SUBSTRATE = {"bus", "ledger", "telemetry"}
 STDLIB = set(sys.stdlib_module_names) | set(sys.builtin_module_names)

@@ -603,8 +603,12 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
                 say(f"... and {len(failed) - 12} more (full output: {notes / 'last_unit.txt' if notes else 'not kept'})", "fail")
             return False, f"unit suite failed: {unit_why} ({tail})"
         write_baseline(notes, ran, scope, seconds=time.monotonic() - started)
+
+        evals_ok, evals_why = run_evals(repo, notes)
+        if not evals_ok:
+            return False, evals_why
         if not full:
-            return True, f"unit suite green ({unit_why})"
+            return True, f"unit suite green ({unit_why}); {evals_why}"
 
         rule("gate: scored trial suite")
         total = trial_count(repo)
@@ -635,6 +639,72 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
     if trials.returncode != 0:
         return False, "trial suite had failures"
     return True, "unit suite and trial suite green"
+
+
+def last_household(notes: Path | None) -> dict | None:
+    """The most recent recorded `household` report, or None.
+
+    Stdlib only, by hand: `simorgh.evals.runner.last` does exactly this,
+    and importing it here would break the one rule this file has.
+    """
+    if notes is None:
+        return None
+    path = notes / "evals.jsonl"
+    if not path.exists():
+        return None
+    found = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("suite") == "household":
+            found = row
+    return found
+
+
+def run_evals(repo: Path, notes: Path | None) -> tuple[bool, str]:
+    """The free eval suite, and whether it got worse (stage 4 item 9).
+
+    The unit suite certifies shape: it passes on a Sim that has stopped
+    remembering what the family told it, which is exactly the failure
+    that kept reaching the creator. `household` measures that, in about
+    eight seconds, with no model and no money, so every bless can afford
+    it.
+
+    A drop against the last recorded run refuses the bless. A failure
+    with nothing to compare against only warns: the first run of a new
+    suite establishes the baseline, and refusing every bless until
+    somebody hand-edits a file is how a gate gets switched off.
+    """
+    rule("gate: household evals")
+    # The loader never imports `simorgh` -- that is the whole point of it
+    # (see the module docstring) -- so it reads the eval record itself
+    # rather than through the package it is judging.
+    before = last_household(notes)
+    cmd = [sys.executable, "-u", "-m", "simorgh.evals", "run", "household", "--repeats", "1", "--json"]
+    if notes is not None:
+        cmd += ["--record", str(notes)]
+    try:
+        proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=300)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        say(f"the evals did not run ({exc}); the unit suite still decides", "warn")
+        return True, "evals did not run"
+    try:
+        report = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        say("the evals produced no report; the unit suite still decides", "warn")
+        return True, "evals produced no report"
+    passed, total = int(report.get("passed", 0)), int(report.get("total", 0))
+    say(f"household: {passed}/{total} probes ({report.get('seconds')} s)")
+    for failure in report.get("failures") or []:
+        say(f"{failure.get('case')}: {failure.get('why')}", "fail")
+    was = int((before or {}).get("passed", -1))
+    if before is not None and passed < was:
+        return False, f"household evals fell from {was} to {passed} of {total}"
+    if passed < total and before is None:
+        say("no earlier household run to compare against; recorded as the baseline", "warn")
+    return True, f"household evals {passed}/{total}"
 
 
 _COUNT = re.compile(r"(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b")
