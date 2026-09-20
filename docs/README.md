@@ -3,6 +3,8 @@
 Everything an agent or a person needs to work on Sim, and nothing that describes a system other than the one that runs. The old blueprint, evolution log, plans and knowledge base were removed on 2026-09-19 because they described intent and history and had started to mislead reviewers; they remain in git history at tag `pre-cleanup-2026-09-18`.
 
 ## Read in this order
+- [adding-capability.md](adding-capability.md) — how a new capability arrives: an MCP server, not a tool class.
+
 
 1. **[ARCHITECTURE.md](ARCHITECTURE.md)**: what runs today, from the code. Layers, the three enforced invariants, a turn end to end, one paragraph per module, how to run it, what is deliberately not built.
 2. **[AGENTS.md](AGENTS.md)**: how several agents change Sim at once. Module locks, the edit loop, changing a contract, what not to do.
