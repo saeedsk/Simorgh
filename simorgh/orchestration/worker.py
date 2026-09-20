@@ -301,6 +301,9 @@ class Worker:
         session = Session(
             task_id=task_id, kind=kind, mode=mode, profile=profile,
             worker_id=self.worker_id, user_text=description, subject=task.get("subject"),
+            # What "done" means for this task, from its plan node (stage 7
+            # items 3 and 6): the checkpoint critic scores against it.
+            acceptance=[str(a) for a in (task.get("acceptance") or [])],
         )
         session.budget.max_steps = step_cap(task.get("max_steps"), profile.max_steps)
         session.budget.max_revisions = profile.max_revisions

@@ -4,6 +4,15 @@
   "additionalProperties": true,
   "description": "Payload of `task.created` (catalog v1).",
   "properties": {
+    "acceptance": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "depends_on": {
       "items": {
         "type": "string"

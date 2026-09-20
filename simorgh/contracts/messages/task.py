@@ -33,6 +33,9 @@ TaskCreateReply = define(t.TASK_CREATE_REPLY, [
     O("deduplicated_against", Str),
 ])
 TaskCreated = define(t.TASK_CREATED, [
+    # What "done" means for this task, from its plan node (stage 7 items
+    # 3 and 6): the checkpoint critic scores the trajectory against it.
+    O("acceptance", List(Str)),
     F("task_id", Str),
     F("kind", TASK_KIND),
     F("description", Str),

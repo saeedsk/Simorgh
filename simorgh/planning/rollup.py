@@ -11,7 +11,7 @@ from typing import Sequence
 
 from .model import (
     BLOCKED, COMPLETED, DEPENDENCY_FAILED_NOTE, FAILED, IN_PROGRESS, PENDING,
-    TERMINAL_STATUSES, Task,
+    TERMINAL_STATUSES, WAITING, Task,
 )
 
 
@@ -77,7 +77,9 @@ def project_status(children: Sequence[Task]) -> str:
         # check above already caught that) -- at least one failed, or
         # was parked forever behind one that did.
         return FAILED
-    if any(s == IN_PROGRESS for s in statuses):
+    if any(s in (IN_PROGRESS, WAITING) for s in statuses):
+        # A waiting child (stage 7 item 5) is going fine and is simply not
+        # due yet: the project is in progress, not stalled and not pending.
         return IN_PROGRESS
     if any(s == COMPLETED for s in statuses):
         # some children finished, others haven't started -- still

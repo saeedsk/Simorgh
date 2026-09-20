@@ -47,6 +47,20 @@ _SECOND_TICK_COUNTER_KEY = "n"
 #: Every change to a plan-mode plan, as its whole state (see `_persist_changed_plans`).
 PLANS_STREAM = "planning:plans"
 
+def _acceptance_of(why: str) -> list[str]:
+    """The acceptance criteria a step carries in its `why`.
+
+    `decomposer.parse_plan` writes them as "done when: a; b" so they
+    survive as ordinary text through a store that knows nothing about
+    plan nodes -- and so a person reading the task can see what finishing
+    means.
+    """
+    text = (why or "").strip()
+    if not text.lower().startswith("done when:"):
+        return []
+    return [part.strip() for part in text[len("done when:"):].split(";") if part.strip()]
+
+
 class Service:
     name = NAME
     version = VERSION
@@ -302,6 +316,12 @@ class Service:
         }
         if task.max_steps:
             payload["max_steps"] = task.max_steps
+        # What "done" means for this child (stage 7 items 3 and 6), from
+        # its plan node, so the checkpoint critic has something to score
+        # the trajectory against.
+        acceptance = _acceptance_of(self._why_for_child(task.parent_id or "", task) if task.parent_id else task.note)
+        if acceptance:
+            payload["acceptance"] = acceptance
         await self._ctx.bus.publish(Message.new(
             topics.TASK_CREATED, source=self._ctx.source,
             partition_key=f"task:{task.id}", payload=payload,
@@ -826,6 +846,10 @@ class Service:
                 if step.description == task.description:
                     return step.why
         return task.note
+
+    @staticmethod
+    def _acceptance_of(why: str) -> list[str]:
+        return _acceptance_of(why)
 
     def _changes_since(self, project_id: str, task: Task) -> list[str]:
         """Spec 5.5's `changes_since`: sibling outcomes plus
@@ -1466,6 +1490,10 @@ def _task_payload(task: Task) -> dict:
         "status": task.status, "mode": task.mode, "risk": task.risk, "origin": task.origin,
         "parent_id": task.parent_id, "depends_on": list(task.depends_on), "attempts": task.attempts,
         "note": task.note, "max_steps": task.max_steps,
+        # What "done" means, carried from the plan node through the note
+        # (stage 7 items 3 and 6), so the worker's checkpoint critic has
+        # something to score the trajectory against.
+        "acceptance": _acceptance_of(task.note),
     }
 
 

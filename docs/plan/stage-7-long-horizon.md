@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-19: items 2, 3, 5, 7, 9 done; 1, 6, 8 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-19: items 2, 3, 5, 7, 9 done; 1, 4, 6, 8 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 8.1 rows planning and verification; section 9.2 (projects tha
 Stage 4's long-task suite (60 scripted turns, kill-and-resume) is the gate; record its numbers. Read `planning/decomposer.py` (`parse_steps`, the numbered-list regex), `planning/model.py`, `planning/service.py` (rollups, the DAG), `orchestration/session.py::_delegate`, `orchestration/api.py::Session`, `verification/` (plan review, trajectory), `kernel/scheduler.py`.
 
 ## Action items
+
+Done 2026-09-19 (item 4, in part): a plan node's acceptance criteria reach the child session (note -> `task.created`/claim reply -> `Session.acceptance`), and the rollup treats a `WAITING` child as in progress. The rollup was already a pure function of children's statuses, so "complete when children exist" was not the behaviour; what was missing was the acceptance half and the new waiting state. Still open: a project session spawning children through `Task` rather than through Planning's queue, and marking a node done only once its acceptance is verified.
 
 Done 2026-09-19 (item 6, in part): the checkpoint critic. `verify.checkpoint.request/reply` scores a trajectory against its acceptance criteria on the cheap tier at every progress note; two `drifting` verdicts in a row (or one `blocked`) end the attempt for re-planning, and an unreadable reply is `insufficient_evidence` rather than approval. Still open: the majority vote of three cheap samples, and Planning turning `needs re-planning` into a structured subtree revision.
 
