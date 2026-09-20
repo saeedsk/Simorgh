@@ -183,7 +183,14 @@ class Service:
         await ctx.bus.publish(Message.new(topics.ACTION_PROPOSED, source=ctx.bus.source, payload={
             "action_id": uuid.uuid4().hex,
             "tool": delivery.tool,
-            "args": ({"text": text} if delivery.tool == "speak" else {"text": text, "to": delivery.to}),
+            # `notify` takes `body`, not `text`, and has no recipient
+            # field: it reaches the person who runs Sim. Every
+            # unprompted notification since stage 6 item 6 was denied
+            # with "$.body: required property missing" -- visible in
+            # the creator's log twice in one evening, 2026-09-20 -- so
+            # nothing Initiative decided to send ever arrived.
+            "args": ({"text": text} if delivery.tool == "speak"
+                     else {"body": text, **({"subject": f"for {delivery.to}"} if delivery.to else {})}),
             "scope": {"paths": [], "network": delivery.tool == "notify"},
             "reversibility": "irreversible",
             "rationale": delivery.why,

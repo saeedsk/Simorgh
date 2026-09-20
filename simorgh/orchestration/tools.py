@@ -77,6 +77,8 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # Reversible (a link can be unlinked) and still tier 3: between the
     # two, the handle reads somebody's memories (stage 6 item 4).
     "people": ("reversible", False),
+    # There is no unsaying it, and it does not leave the house.
+    "speak": ("irreversible", False),
     "apply_skill": ("irreversible", False),
     "git_commit": ("reversible", False),
     # Reads three git commands and cannot write: no checkout, no fetch,

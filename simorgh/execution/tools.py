@@ -3119,6 +3119,55 @@ class OverheardNoteTool:
         return ToolResult(ok=False, error="say `memo <what to keep>` or `wipe`")
 
 
+class SpeakTool:
+    """Say something out loud in the room.
+
+    Initiative has proposed `speak` since stage 6 item 6 and no such
+    tool existed, so every unprompted word Sim decided to say was
+    denied as an unknown tool and nobody ever heard one (found live,
+    2026-09-20, in the creator's own log -- beside `notify` being
+    denied for a schema mismatch, which was the other half of the same
+    silence).
+
+    It is a tool rather than a bus request because speaking aloud in
+    somebody's house is an effect, and Guardian gates effects: Sim
+    talking to an empty room at 3am is exactly what the approval path
+    is for. Irreversible for the obvious reason -- there is no unsaying
+    it.
+    """
+
+    name = "speak"
+    description = "Say something out loud, through the speaker in the room."
+    read_only = False
+    reversibility = "irreversible"
+    args_schema = {"type": "object", "required": ["text"],
+                   "properties": {"text": {"type": "string"}, "voice": {"type": "string"}}}
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        if ctx.bus is None:
+            return ToolResult(ok=False, error="no bus available to reach the voice")
+        text = str((args or {}).get("text") or "").strip()
+        if not text:
+            return ToolResult.refused("nothing to say", output="nothing to say")
+        payload = {"text": text}
+        voice = str((args or {}).get("voice") or "")
+        if voice:
+            payload["voice"] = voice
+        try:
+            reply = await ctx.bus.request(ctx.bus.new(topics.VOICE_SPEAK_REQUEST, payload), timeout=60.0)
+        except TimeoutError:
+            return ToolResult(ok=False, error="the voice did not answer in time")
+        body = reply.payload or {}
+        if body.get("ok") is False:
+            detail = (body.get("error") or {}).get("detail") or "the voice refused"
+            return ToolResult.refused(detail, output=detail)
+        said = f"said it aloud: {text[:120]}"
+        return ToolResult(ok=True, output=said, side_effects=(said,), metadata={"kind": "speak"})
+
+
 class PeopleTool:
     """Who a person is, as far as Sim is concerned (stage 6 item 4).
 
@@ -3191,6 +3240,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
         VoiceSettingTool(config), MemoryForgetTool(config), SimCommandTool(config),
+        SpeakTool(config),
         PeopleTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),

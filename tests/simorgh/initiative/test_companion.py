@@ -284,7 +284,12 @@ class TheService(unittest.IsolatedAsyncioTestCase):
         proposals = self.bus.of(topics.ACTION_PROPOSED)
         self.assertEqual(len(proposals), 1)
         self.assertEqual(proposals[0]["tool"], "notify")
-        self.assertEqual(proposals[0]["args"]["to"], "Soodeh")
+        # `notify` takes `body` and has no recipient field -- it reaches
+        # the person who runs Sim. Asserting `args["to"]` passed while
+        # every real notification was denied for a missing `body`
+        # (2026-09-20); who it is for rides in the subject.
+        self.assertEqual(proposals[0]["args"]["body"], LINE)
+        self.assertIn("Soodeh", proposals[0]["args"]["subject"])
 
     async def test_with_saeed_in_the_kitchen_it_is_not_said_aloud(self):
         self.situation = EVENING_TOGETHER
@@ -365,3 +370,46 @@ class TheService(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheDeliveryPathsExist(unittest.IsolatedAsyncioTestCase):
+    """2026-09-20, from the creator's own log: `notify` denied with
+    "$.body: required property missing", twice in one evening, and
+    `speak` was never a registered tool at all.
+
+    So Initiative decided, proposed, and nothing ever arrived -- both
+    of its channels had been dead since stage 6 item 6. A decision
+    machinery whose delivery does not exist is worse than none: it
+    looks like restraint.
+    """
+
+    def _tools(self):
+        from simorgh.domains import domain_tools
+        from simorgh.execution.config import Config
+        from simorgh.execution.tools import builtin_tools
+
+        config = Config()
+        return {t.name: t for t in builtin_tools(config) + domain_tools(config, secrets=None)}
+
+    def test_every_tool_initiative_can_propose_is_registered(self):
+        """`Delivery.tool` is the mapping; every value it can take has
+        to be a tool that exists."""
+        from simorgh.initiative.api import CHANNELS, Delivery, Notice
+
+        registered = self._tools()
+        notice = Notice(kind="check_in", text="a word", person="Soodeh")
+        for channel in CHANNELS:
+            tool = Delivery(notice=notice, channel=channel, to="Soodeh", utility=1.0, why="").tool
+            with self.subTest(channel=channel, tool=tool):
+                self.assertIn(tool, registered, f"Initiative proposes {tool!r} and nothing answers to it")
+
+    def test_what_initiative_sends_satisfies_the_tools_own_schema(self):
+        from simorgh.contracts import schema as schema_mod  # noqa: F401 -- presence, not use
+
+        tools = self._tools()
+        for tool_name, args in (("speak", {"text": "a word"}),
+                                ("notify", {"body": "a word", "subject": "for Soodeh"})):
+            with self.subTest(tool=tool_name):
+                required = set(tools[tool_name].args_schema.get("required") or ())
+                self.assertTrue(required <= set(args),
+                                f"{tool_name} requires {sorted(required - set(args))} and Initiative sends none")

@@ -134,6 +134,9 @@ _TOOL_NOTES: dict[str, str] = {
     "voice_setting": "change Sim's own voice live when asked: key=tts_voice value=af_heart (or bf_emma, am_adam, "
                      "af_bella...), key=tts_speed value=1.2, key=volume value=1.3; `voices` alone lists the voices "
                      "-- never say you cannot change your voice",
+    "speak": "say something out loud in the room, when the person is not at the screen -- "
+             "you are usually already speaking your reply, so this is for the rare case where "
+             "you are not",
     "people": "say who somebody is when THEY tell you to link it: `action=link name=Ira "
               "identity=telegram:irak`, or unlink one, or set_role; record consent when THEY give it "
               "(`action=grant name=Saeed permission=wellbeing_checkins`, or revoke) and what they care "
