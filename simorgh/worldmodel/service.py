@@ -20,6 +20,7 @@ from .config import Config
 from .facets.capability_map import CapabilityMapFacet
 from .facets.file_index import FileIndexFacet
 from .facets.git_state import GitStateFacet
+from .facets.home import HomeFacet
 from .facets.registry_facets import ToolsFacet, UserProfileFacet
 from .selfmodel import (
     add_change,
@@ -92,9 +93,13 @@ class Service:
         self._tools = ToolsFacet()
         self._booted = False
         self._user_profile = UserProfileFacet()
+        # What the house is doing and who is in it (stage 6 item 3), folded
+        # from the evidence Sim already sees.
+        self._home = HomeFacet(clock=ctx.clock.now)
         self._facets = {
             "capability_map": self._capability_map, "file_index": self._file_index,
             "git_state": self._git_state, "tools": self._tools, "user_profile": self._user_profile,
+            "home": self._home,
         }
         self._model = build_static_model(
             soul_path=self.config.resolved_soul_path(), clock_now=self._started_at,
@@ -126,6 +131,9 @@ class Service:
             await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_finished),
             await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_finished),
             await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_blocked),
+            await ctx.bus.subscribe(topics.CAMERA_EVENT, self._on_camera_event),
+            await ctx.bus.subscribe(topics.TV_STATE, self._on_tv_state),
+            await ctx.bus.subscribe(topics.VOICE_TRANSCRIPT, self._on_voice_transcript),
         ]
         await self._ingest_loader_rollback(ctx)
         ctx.logger.info("worldmodel.started", areas=len(self._capability_map.areas()))
@@ -184,6 +192,34 @@ class Service:
         if not self.config.repo_root.is_dir():
             return Health.degraded(f"repo_root {self.config.repo_root} does not exist")
         return Health.ok()
+
+    # -- the house (stage 6 item 3) --------------------------------------------------
+    async def _on_camera_event(self, message: Message) -> None:
+        p = message.payload
+        camera = str(p.get("camera") or "")
+        kinds = [str(k) for k in (p.get("kinds") or [])]
+        if not camera:
+            return
+        self._home.observe(f"camera.{camera.lower().replace(' ', '_')}", kind="camera",
+                           state=", ".join(kinds) or "event", area=camera, detail={"kinds": kinds})
+
+    async def _on_tv_state(self, message: Message) -> None:
+        mode = str(message.payload.get("mode") or "none")
+        self._home.observe("tv.family_room", kind="tv", state="playing" if mode != "none" else "idle",
+                           area="family room", detail={"title": str(message.payload.get("title") or "")})
+
+    async def _on_voice_transcript(self, message: Message) -> None:
+        """A placed voice is evidence of where that person is. A partial,
+        an echo of Sim's own voice, or a voice nobody could place is not."""
+        p = message.payload
+        speaker = str(p.get("speaker") or "")
+        if not speaker or p.get("partial") or p.get("echo"):
+            return
+        area = str(p.get("room") or p.get("device") or "") or "here"
+        # A confident identification is worth more than a lean; the belief
+        # is evidence, not a vote.
+        strength = 0.9 if float(p.get("confidence") or 0.0) >= 0.6 else 0.5
+        self._home.saw_person(speaker, area=area, strength=strength)
 
     # -- handlers ------------------------------------------------------------------
     async def _on_env_query(self, message: Message) -> None:

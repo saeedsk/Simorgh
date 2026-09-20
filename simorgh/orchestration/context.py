@@ -91,6 +91,13 @@ WORKING_BLOCK_HEADER = (
 #: stated more confidently -- which is reliably the original, since a
 #: correction is short and the thing it corrects came with a full answer
 #: restating it.
+#: What the house is doing right now (stage 6 item 3). Only the fresh
+#: entities; anything unobserved lately is named as unknown by the facet
+#: itself, because "the TV is off" and "I have not looked" are different
+#: answers and only one of them is honest.
+WORLD_NOW_HEADER = "The house right now, as far as you can tell:\n"
+
+
 #: What HOLDS now, ahead of what was said (stage 5 items 3-4). A fact and
 #: an episode disagree only when a correction has not been folded into the
 #: episodes, and the fact is the one that was superseded deliberately.
@@ -195,12 +202,17 @@ class Assembler:
         blocks: list[dict] = []
 
         task = session.user_text or user_text
-        (mem, unavailable, facts), working = await asyncio.gather(
+        (mem, unavailable, facts), working, house = await asyncio.gather(
             self._memory_block(task or session.task_id, session),
             self._working_block(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
+            # The house, for a turn a person is having in it. A task
+            # session is not in the room and does not pay for this.
+            self._world_now(session) if getattr(session.profile, "scaffold", "") == "chat" else _nothing(),
         )
         if working:
             blocks.append({"role": "system", "content": working})
+        if house:
+            blocks.append({"role": "system", "content": WORLD_NOW_HEADER + house})
         if facts:
             blocks.append({"role": "system", "content": FACTS_BLOCK_HEADER + facts})
         if mem:
@@ -481,6 +493,30 @@ class Assembler:
         lines = [str(i.get("content", "")).strip() for i in items[-_WORKING_K:]]
         lines = [line for line in lines if line]
         return WORKING_BLOCK_HEADER + "\n".join(lines) if lines else ""
+
+    async def _world_now(self, session: Session) -> str:
+        """The house as a few lines, or "" when World Model does not
+        answer in time -- a missing block costs nothing, a slow one costs
+        the turn."""
+        reply = await self.world_facet("home", trace_id=session.trace)
+        if not reply or reply.get("ok") is False:
+            return ""
+        entities = [e for e in reply.get("entities") or [] if not e.get("stale")]
+        presence = reply.get("presence") or {}
+        situation = reply.get("situation") or {}
+        lines = [f"- {e['key']}: {e['state']}" + (f" ({int(e['age_s'] // 60)} min ago)" if e.get("age_s") else "")
+                 for e in entities[:6]]
+        for person, areas in list(presence.items())[:5]:
+            if "unknown" in areas:
+                lines.append(f"- {person}: not seen anywhere lately")
+            else:
+                area = max(areas, key=areas.get)
+                lines.append(f"- {person}: probably in the {area} ({areas[area]:.0%})")
+        flags = [name.replace("_", " ") for name in ("quiet_hours", "tv_playing", "child_alone")
+                 if situation.get(name)]
+        if flags:
+            lines.append("- " + ", ".join(flags))
+        return "\n".join(lines)
 
     async def world_facet(self, what: str, args: dict | None = None, *, trace_id: str | None = None) -> dict | None:
         reply = await self._request(topics.WORLD_ENV_QUERY, {"what": what, "args": args or {}}, trace_id=trace_id)

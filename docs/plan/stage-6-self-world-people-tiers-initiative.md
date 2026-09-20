@@ -1,6 +1,6 @@
 # Stage 6 -- Self and world projections, People, safety tiers, Initiative
 
-Status: **in progress** (2026-09-19: items 1-2 in part, 5 in part) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+Status: **in progress** (2026-09-19: items 1-2 in part, 3 in part, 5 in part) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation C6 (Self Model volatile), V3 (four session models, no identity contra
 Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/competence.py`, `contracts/household.py`, `contracts/places.py`, `contracts/home/policy.py`, `voice/speakers.py` (the speaker book), `voice/session.py` (`_room`, bystander), `curiosity/sharing.py`, `persona/sharing.py`, `execution/vision.py` (the announce step), `kernel/scheduler.py` (reminders). Decide with the creator whether a phone channel (Telegram) is the owner's "ask" path for tier 3; default yes.
 
 ## Action items
+
+Done 2026-09-19 (item 3, in part): `worldmodel/facets/home.py` -- an entity table folded from camera events, TV state and placed voices; presence as a belief per (person, area) halving every 20 minutes and reported with `unknown`; situation facts (quiet hours, tv playing, someone asleep, child alone, nobody home) as pure rules; a world-now block in every chat prompt that names stale entities as unknown instead of reporting them. The scripted evening is a test. Still open in item 3: folding `action.result` of home tools and calendar reads, `percept.home.state_changed` when HA is bridged, learned change rates for staleness, the per-area room transcript ring, and the `world.entity.observed` / `world.home.situation_changed` topics.
 
 Done 2026-09-19 (items 1-2, in part): a Beta posterior per task type and per strategy over `learn:outcomes` (`CompetenceTable.posterior`/`estimate`), asked for over `self.estimate.request/reply`; Orchestration reads it once per task session and starts on the strong tier when the mean is below 0.45 over 8+ outcomes. Still open in item 1: rebuilding the whole self model as a fold at boot, exponential forgetting, per-tool p(ok) and latency quantiles, per-provider quality, snapshots, and the summary rendering posteriors with sample counts.
 
