@@ -1,0 +1,35 @@
+{
+  "$id": "https://simorgh.local/schema/world.home.situation_changed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "One situation fact of world:home changed value: quiet_hours, tv_playing, someone_asleep, child_alone, nobody_home. An open session is told, so it can act on the house it is in.",
+  "properties": {
+    "fact": {
+      "type": "string"
+    },
+    "people": {
+      "additionalProperties": true,
+      "properties": {},
+      "required": [],
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "since": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "value": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "fact",
+    "value"
+  ],
+  "title": "world.home.situation_changed",
+  "type": "object"
+}

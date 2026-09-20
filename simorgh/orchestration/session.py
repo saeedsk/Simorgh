@@ -567,6 +567,10 @@ class SessionRunner:
         from simorgh.contracts.protocols import NULL_TELEMETRY
 
         self._telemetry = telemetry or NULL_TELEMETRY
+        #: The sessions running right now, by task id, so something that
+        #: happens in the house can reach the agent working in it
+        #: (stage 6 item 7).
+        self._open: dict[str, Session] = {}
         # Agent Skills: the catalog rides in `task_rules` and `use_skill` returns
         # one skill's instructions. Off by default -- every THINK pays for the
         # catalog (docs/plans/agent-skills-design.md section 5.2).
@@ -645,6 +649,7 @@ class SessionRunner:
             # caused from one that was already red without a tree to
             # compare against, and this commit is that tree.
             session.base_ref = _git_head()
+        self._open[session.task_id] = session
         if not session.estimate and session.profile.scaffold != "chat":
             # Asked once, before the first step (stage 6 item 2): what Sim's
             # own record says about this kind of work decides whether it
@@ -653,6 +658,7 @@ class SessionRunner:
         try:
             outcome = await self._run(session, user_text=user_text)
         finally:
+            self._open.pop(session.task_id, None)
             await self._persist_transcript(session)
         if outcome.kind == "completed":
             # `_transcript_echo` catches a fabrication written in our own
@@ -1549,6 +1555,29 @@ class SessionRunner:
         ok = outcome.kind == "completed" and bool((outcome.result_summary or "").strip())
         text = f"Helper {child_id} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
         return ok, text, text[:self._DETAIL_CHARS]
+
+    def note_environment(self, fact: str, value: bool, *, people: dict | None = None) -> int:
+        """Tell every open task session that the house changed (stage 6
+        item 7); how many were told.
+
+        A task runs for minutes and the house does not hold still for it.
+        The turn is appended as an ordinary user message, so the model may
+        act on it at its next step -- under the same gate as everything
+        else it does. A chat turn is one exchange long and is left alone:
+        an environment line arriving mid-answer is noise, not news.
+        """
+        where = ", ".join(f"{who} in the {area}" for who, area in (people or {}).items())
+        told = 0
+        for session in list(self._open.values()):
+            if session.profile.scaffold == "chat" or not session.messages:
+                continue
+            session.messages.append({"role": "user", "content": (
+                f"While you work, something changed in the house: {fact.replace('_', ' ')} is now "
+                f"{'true' if value else 'false'}" + (f" ({where})" if where else "") +
+                ". Act on it only if it affects the task you are doing; otherwise carry on."
+            )})
+            told += 1
+        return told
 
     async def _estimate(self, task_type: str) -> dict:
         """What Sim believes about its own competence here (stage 6 item

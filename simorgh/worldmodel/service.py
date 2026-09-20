@@ -202,11 +202,13 @@ class Service:
             return
         self._home.observe(f"camera.{camera.lower().replace(' ', '_')}", kind="camera",
                            state=", ".join(kinds) or "event", area=camera, detail={"kinds": kinds})
+        await self._announce_situation()
 
     async def _on_tv_state(self, message: Message) -> None:
         mode = str(message.payload.get("mode") or "none")
         self._home.observe("tv.family_room", kind="tv", state="playing" if mode != "none" else "idle",
                            area="family room", detail={"title": str(message.payload.get("title") or "")})
+        await self._announce_situation()
 
     async def _on_voice_transcript(self, message: Message) -> None:
         """A placed voice is evidence of where that person is. A partial,
@@ -220,6 +222,15 @@ class Service:
         # is evidence, not a vote.
         strength = 0.9 if float(p.get("confidence") or 0.0) >= 0.6 else 0.5
         self._home.saw_person(speaker, area=area, strength=strength)
+        await self._announce_situation()
+
+    async def _announce_situation(self) -> None:
+        """Publish the situation facts that have flipped (stage 6 item 7)."""
+        for fact, value in self._home.changes():
+            await self._ctx.bus.publish(Message.new(
+                topics.WORLD_HOME_SITUATION_CHANGED, source=self._ctx.bus.source,
+                payload={"fact": fact, "value": value, "people": self._home.situation().get("people") or {},
+                         "since": self._ctx.clock.now()}))
 
     # -- handlers ------------------------------------------------------------------
     async def _on_env_query(self, message: Message) -> None:

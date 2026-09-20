@@ -78,6 +78,8 @@ class HomeFacet:
         self.entities: dict[str, Entity] = {}
         # (person, area) -> (belief, when it was last updated)
         self._presence: dict[tuple[str, str], tuple[float, float]] = {}
+        #: The situation as it was when `changes()` last looked.
+        self._last_situation: dict[str, bool] = {}
 
     def _now(self) -> float:
         return float(self._clock() if callable(self._clock) else self._clock.now())
@@ -148,6 +150,15 @@ class HomeFacet:
             "child_alone": bool(children) and not adults,
             "people": {p: max(a, key=a.get) for p, a in placed.items()},
         }
+
+    def changes(self, *, now: float | None = None) -> list[tuple[str, bool]]:
+        """The situation facts that have flipped since this was last
+        asked: `(fact, value)`. Only changes -- a fact that has not moved
+        is not news, and a tick that repeats itself is noise."""
+        current = {k: v for k, v in self.situation(now=now).items() if isinstance(v, bool)}
+        moved = [(k, v) for k, v in current.items() if self._last_situation.get(k) != v]
+        self._last_situation = current
+        return moved
 
     def now_block(self, *, now: float | None = None, limit: int = 8) -> str:
         """The house as a few lines for a prompt (~200 tokens at most).

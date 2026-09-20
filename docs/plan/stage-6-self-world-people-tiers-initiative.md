@@ -1,6 +1,6 @@
 # Stage 6 -- Self and world projections, People, safety tiers, Initiative
 
-Status: **in progress** (2026-09-19: items 1-3, 5, 6 in part) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+Status: **in progress** (2026-09-19: items 1-3, 5, 6 in part; item 7 done) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation C6 (Self Model volatile), V3 (four session models, no identity contra
 Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/competence.py`, `contracts/household.py`, `contracts/places.py`, `contracts/home/policy.py`, `voice/speakers.py` (the speaker book), `voice/session.py` (`_room`, bystander), `curiosity/sharing.py`, `persona/sharing.py`, `execution/vision.py` (the announce step), `kernel/scheduler.py` (reminders). Decide with the creator whether a phone channel (Telegram) is the owner's "ask" path for tier 3; default yes.
 
 ## Action items
+
+Done 2026-09-19 (item 7): `world.home.situation_changed` is published when a situation fact flips (only on a change), and Orchestration appends it to every open task session as a user turn. A chat turn is left alone.
 
 Done 2026-09-19 (item 6, in part): the `initiative` package and subsystem. `decide` weighs urgency by class against relevance to the people present and the cost of interrupting them through each channel; a camera event at 02:00 with a child asleep goes to the owner's phone and not the speaker (the plan's acceptance, as a test). Cooldowns per class, a daily cap of 12, do-not-disturb, and a safety alert that is never dropped. Every delivery is an `action.proposed{speak|notify}`; what is held back is `initiative.suppressed`. Still open in item 6: folding in `curiosity/sharing.py`, `persona/sharing.py` and `execution/vision.py`'s announce step (all still running), the HOLD state in the voice turn manager, and the digest.
 

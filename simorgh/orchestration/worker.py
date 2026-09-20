@@ -389,6 +389,10 @@ class Worker:
         finally:
             self.current_task_id, self.current_kind = None, None
 
+    def note_environment(self, fact: str, value: bool, *, people: dict | None = None) -> int:
+        """Pass a change in the house to whatever this worker is running."""
+        return self._runner.note_environment(fact, value, people=people)
+
     def prefetch_recall(self, session_id: str, text: str, *, channel: str = "", trace_id: str = "") -> None:
         """Start this turn's recall before its session exists (stage 5 item
         5). Best effort: the session falls back to an ordinary recall."""

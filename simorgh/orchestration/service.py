@@ -33,7 +33,7 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.TASK_AVAILABLE, topics.SYSTEM_STATE_CHANGED,
         topics.ACTION_RESULT, topics.ACTION_DENIED, topics.ACTION_NEEDS_HUMAN, topics.VERIFY_RESULT,
-        topics.PERCEPT_TEXT_RECEIVED, topics.TOOL_REGISTERED,
+        topics.PERCEPT_TEXT_RECEIVED, topics.TOOL_REGISTERED, topics.WORLD_HOME_SITUATION_CHANGED,
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
         topics.TASK_CANCEL,
         topics.TOOL_PROBED,
@@ -51,6 +51,7 @@ class Service:
         self._workers: list[Worker] = []
         self._ctx: Context | None = None
         self._percept_sub = None
+        self._situation_sub = None
         self._tool_sub = None
         self._capability_sub = None
         self._next_worker = 0
@@ -104,6 +105,8 @@ class Service:
             await worker.start()
             self._workers.append(worker)
         self._percept_sub = await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept)
+        # The house, reaching the agent working in it (stage 6 item 7).
+        self._situation_sub = await ctx.bus.subscribe(topics.WORLD_HOME_SITUATION_CHANGED, self._on_situation)
         # Execution announces every tool it registers -- builtin, skill,
         # MCP, external adapters -- and the router's policy table (which
         # used to be hand-edited per tool, see tools.py's own MCP note)
@@ -249,6 +252,9 @@ class Service:
         if self._percept_sub is not None:
             await self._percept_sub.unsubscribe()
             self._percept_sub = None
+        if self._situation_sub is not None:
+            await self._situation_sub.unsubscribe()
+            self._situation_sub = None
         if self._metrics_task is not None:
             self._metrics_task.cancel()
             try:
@@ -296,6 +302,12 @@ class Service:
         )
         self._chat_tasks.add(task)
         task.add_done_callback(self._chat_tasks.discard)
+
+    async def _on_situation(self, message: Message) -> None:
+        payload = message.payload
+        for worker in self._workers:
+            worker.note_environment(str(payload.get("fact") or ""), bool(payload.get("value")),
+                                    people=dict(payload.get("people") or {}))
 
     def _workers_snapshot(self) -> list[dict]:
         return [

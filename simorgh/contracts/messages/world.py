@@ -4,7 +4,7 @@ as observation; it never writes."""
 
 from __future__ import annotations
 
-from ..fields import List, Int, Enum, F, Float, O, Obj, Str
+from ..fields import Bool, Enum, F, Float, Int, List, O, Obj, Str
 from ..registry import define
 from .. import topics as t
 
@@ -22,5 +22,9 @@ WorldEnvObserved = define(t.WORLD_ENV_OBSERVED, [
     F("summary", Str),
     F("ref", Str),
 ])
+WorldHomeSituationChanged = define(t.WORLD_HOME_SITUATION_CHANGED, [
+    F("fact", Str), F("value", Bool), O("people", Obj()), O("since", Float),
+], doc="One situation fact of world:home changed value: quiet_hours, tv_playing, someone_asleep, "
+       "child_alone, nobody_home. An open session is told, so it can act on the house it is in.")
 CameraEvent = define(t.CAMERA_EVENT, [F("channel", Int), F("camera", Str), F("kinds", List(Str)), O("host", Str)],
                      doc="kinds: motion, person, vehicle, pet, face, package -- whatever the NVR reported.")

@@ -153,6 +153,10 @@ WORLD_ENV_QUERY = "world.env.query"
 # A camera saw something: motion, a person, a vehicle, an animal
 # (execution/home/cameras.py, from the NVR's event push).
 CAMERA_EVENT = "world.camera.event"
+#: A situation fact of `world:home` flipped (stage 6 items 3 and 7): the
+#: house went quiet, the TV started, a child was left alone. Only the
+#: changes, never a tick: a fact that has not moved is not news.
+WORLD_HOME_SITUATION_CHANGED = "world.home.situation_changed"
 WORLD_ENV_QUERY_REPLY = "world.env.query.reply"
 WORLD_ENV_OBSERVED = "world.env.observed"
 SELF_SUMMARY = "self.summary"
