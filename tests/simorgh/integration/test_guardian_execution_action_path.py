@@ -151,7 +151,18 @@ class TestGuardianExecutionActionPath(unittest.IsolatedAsyncioTestCase):
 
         await kernel.bus.publish(Message.new(topics.SYSTEM_PAUSE, source="kernel",
                                               payload={"reason": "test", "requested_by": "test"}, priority=9))
-        await asyncio.sleep(0.05)
+        # Wait for GUARDIAN to have seen the pause, not for a fixed 50 ms:
+        # under a 3,900-test parallel run that window was missed once
+        # (bless of e338981, 2026-09-20) and the proposal was judged by a
+        # Guardian that still believed the system was running. The
+        # Kernel's own state is not the thing either -- subscribers of
+        # one publish are not ordered -- so ask the rule's own input.
+        guardian = kernel._supervisor.services["guardian"].service  # noqa: SLF001
+        for _ in range(500):
+            if getattr(guardian, "_system_state", "") == "paused":
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(getattr(guardian, "_system_state", ""), "paused", "the pause never reached Guardian")
 
         await kernel.bus.publish(_proposal(
             "paused-1", tool="read_file", args={"path": "docs/ARCHITECTURE.md"},
