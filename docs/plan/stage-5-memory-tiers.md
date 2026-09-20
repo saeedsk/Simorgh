@@ -60,5 +60,5 @@ Item 8 in part, 2026-09-19: pruning never forgets a record a live fact was read 
 
 ## Definition of done
 
-- [ ] Items 1-8 with tests; memory's CONTRACT.md rewritten for the four tiers.
-- [ ] Findings entry with the table.
+- [ ] Items 1-8 with tests; memory's CONTRACT.md rewritten for the four tiers. **Items 1-7 done with tests; item 8 only in part (pruning spares what a fact cites; a score with access counts waits for something to record them). The CONTRACT has the new streams and rules appended but has not been rewritten around the four tiers.**
+- [x] Findings entry with the table. **Paraphrase recall 0/10 -> 10/10, p50 13 ms, the correction case by construction.**

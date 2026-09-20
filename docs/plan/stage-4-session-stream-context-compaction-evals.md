@@ -56,6 +56,6 @@ Item 7 done 2026-09-19: `agents/{chat,voice_chat,patch,research,plan,skill}.md`,
 
 ## Definition of done
 
-- [ ] Items 1-10 with tests; CONTRACT.md for every touched module updated; `agents/` protected.
-- [ ] `simloader.py bless` runs the evals suite.
-- [ ] Findings entry with the table.
+- [ ] Items 1-10 with tests; CONTRACT.md for every touched module updated; `agents/` protected. **Items 1-3, 5-7, 10 done and `agents/` is protected. Open: item 4's ContextBuilder move (the stable prefix landed), item 8's Verification trajectory check (the Stop hook landed), item 9's evals package -- untouched.**
+- [ ] `simloader.py bless` runs the evals suite. **Waits on item 9: there is no `simorgh/evals/` yet.**
+- [x] Findings entry with the table. **`2026-09-19-stage-4-live-fixes-and-stage-5-recall.md`.**

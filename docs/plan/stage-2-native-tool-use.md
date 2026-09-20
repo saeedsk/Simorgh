@@ -64,6 +64,6 @@ Next: (typed turns and N calls per turn in `session.py`, native path only), then
 
 ## Definition of done
 
-- [ ] Items 1-10 with tests; `--tier core` green; CONTRACT.md of cognition, orchestration, execution, guardian, contracts updated.
-- [ ] At least VOICE_CHAT and CHAT on native for the live model with a recorded win.
-- [ ] Findings entry.
+- [x] Items 1-10 with tests; `--tier core` green; CONTRACT.md of cognition, orchestration, execution, guardian, contracts updated.
+- [ ] At least VOICE_CHAT and CHAT on native for the live model with a recorded win. **Blocked on the measurement, not the code: Together native scored 6/7 against markers' 6/7 -- a tie is not a win, so nothing is flipped. Needs a native-aware BFCL harness or more trial rounds.**
+- [x] Findings entry. **`2026-09-19-stage-0-gate.md`: BFCL-parallel 17/18/18, the prompt-token change, the native round.**

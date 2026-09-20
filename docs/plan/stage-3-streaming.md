@@ -45,6 +45,6 @@ Open: item 5 (a spoken filler on a slow tool; Voice already says "Okay." at once
 
 ## Definition of done
 
-- [ ] Items 1-8 with tests; module tiers green for cognition, orchestration, interface, voice.
-- [ ] Findings entry with the table.
-- [ ] CONTRACT.md updated for the new topic and config keys.
+- [ ] Items 1-8 with tests; module tiers green for cognition, orchestration, interface, voice. **Items 1-4 and 8 done, tiers green. Open: item 5, item 6 (streaming STT -- needs recordings), item 7, item 9.**
+- [x] Findings entry with the table. **`2026-09-19-stage-4-live-fixes-and-stage-5-recall.md`: first text at 0.78 s of 1.2 s, streamed speech on by default, and what the live session found.**
+- [x] CONTRACT.md updated for the new topic and config keys. **`session.delta`, `[voice] stream_replies`, `tts_speed`, the voice stage budgets.**

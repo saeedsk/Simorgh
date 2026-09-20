@@ -70,6 +70,6 @@ Deferred, with reasons:
 
 ## Definition of done
 
-- [ ] Items 1-10 committed with their tests; `--tier core` green.
-- [ ] No `trace:` streams written on a booted Kernel.
-- [ ] `docs/findings/` entry with the table above; CONTRACT.md of every touched module updated (new topics, streams, config).
+- [ ] Items 1-10 committed with their tests; `--tier core` green. **Items 1-5, 7-9 done; core green. Item 6 (Ring keepalives) and item 10 are deferred with reasons above, so this box stays open.**
+- [x] No `trace:` streams written on a booted Kernel. **Checked 2026-09-19 on the live data dir: 0 `trace:` streams (178 stream files before, 17 after).**
+- [x] `docs/findings/` entry with the table above; CONTRACT.md of every touched module updated (new topics, streams, config). **`2026-09-19-stage-0-gate.md`; bus, ledger, kernel, cognition, orchestration, execution contracts updated.**
