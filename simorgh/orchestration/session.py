@@ -589,6 +589,7 @@ class SessionRunner:
         delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"), telemetry=None,
+        bridge_on_slow_turns: bool = False, bridge_timeout_s: float = 2.0,
     ) -> None:
         # Counts each Stop-hook rule that fires (`stophook.py`); a no-op
         # stand-in when the runner is built without one (tests, harnesses).
@@ -600,6 +601,12 @@ class SessionRunner:
         #: Telemetry because it is read on the way OUT of a turn, where
         #: a query is exactly the latency it is trying to cover.
         self._tool_ms: dict[str, list[float]] = {}
+        # A one-line bridge before a slow turn (stage 3 item 7).
+        self._bridge_on = bool(bridge_on_slow_turns)
+        self._bridge_timeout_s = float(bridge_timeout_s)
+        #: Sessions that have already had one, so a ten-step patch task
+        #: says "I'll look at that" once rather than at every step.
+        self._bridged: set[str] = set()
         #: The sessions running right now, by task id, so something that
         #: happens in the house can reach the agent working in it
         #: (stage 6 item 7).
@@ -717,6 +724,14 @@ class SessionRunner:
             # own record says about this kind of work decides whether it
             # starts on the strong tier.
             session.estimate = await self._estimate(session.kind)
+        # One line before a slow turn, so the person is not watching
+        # nothing happen (stage 3 item 7). Off by default; never the
+        # answer, and never recorded as the turn's text -- it is not
+        # put on `session.messages` and does not reach `Outcome`.
+        try:
+            await self._bridge(session, user_text)
+        except Exception:  # noqa: BLE001 -- a courtesy is never worth failing a turn for
+            pass
         try:
             outcome = await self._run(session, user_text=user_text)
         finally:
@@ -1282,6 +1297,45 @@ class SessionRunner:
 
         logging.getLogger("simorgh.orchestration").warning(
             "session transcript not written for %s: %r", session.task_id, exc)
+
+    #: Scaffolds whose turns are slow enough to be worth bridging.
+    SLOW_SCAFFOLDS = ("patch", "research")
+
+    async def _bridge(self, session: Session, user_text: str) -> str:
+        """One line, before a slow turn, so the person knows Sim started.
+
+        Streamed as `session.delta` and returned for the caller to
+        record as *said*, never as the turn's text: the answer is what
+        the real reply says, and a bridge that could end up in the
+        transcript would be a turn Sim answered without thinking.
+
+        Cheap by construction -- 24 tokens, no tools, two seconds --
+        and skipped entirely on anything that is not slow.
+        """
+        if not self._bridge_on or session.profile.scaffold not in self.SLOW_SCAFFOLDS:
+            return ""
+        if session.task_id in self._bridged:
+            return ""
+        self._bridged.add(session.task_id)
+        ask = ("In one short sentence, say what you are about to go and do. "
+               "No preamble, no promises about the result, under 12 words.\n\n"
+               f"The request: {user_text[:400]}")
+        req = Message.new(
+            topics.COGNITION_THINK, source=self._bus.source, trace_id=session.trace,
+            payload={"purpose": "chat", "messages": [{"role": "user", "content": ask}],
+                     "tools": [], "budget": {"max_tokens": 24, "max_cost_usd": 0.01},
+                     # A bridge is a courtesy. If only the floor is left,
+                     # the turn says nothing rather than saying something
+                     # canned in Sim's voice.
+                     "require_real_provider": True,
+                     "stream": True, "stream_to": session.task_id},
+        )
+        try:
+            reply = await self._bus.request(req, timeout=self._bridge_timeout_s)
+        except Exception:  # noqa: BLE001 -- a bridge is never worth failing a turn for
+            return ""
+        text = str((reply.payload or {}).get("text") or "").strip()
+        return text[:200]
 
     async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message | None:
         # Everything up to this call is durable before the model is asked.

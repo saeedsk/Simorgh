@@ -1,6 +1,6 @@
 # Stage 3 -- Streaming end to end
 
-Status: **in progress** (2026-09-19: items 1-4 and 8 done; 5-7 and 9 open) · Depends on: stage 2 items 3-5 · Estimated: 2 weeks · Modules touched: cognition, orchestration, interface, voice, contracts
+Status: **in progress** (2026-09-20: items 1-5, 7 and 8 done; item 6 waits on 50 recorded turns, item 9 on item 6) · Depends on: stage 2 items 3-5 · Estimated: 2 weeks · Modules touched: cognition, orchestration, interface, voice, contracts
 
 ## Outcome
 
@@ -45,6 +45,6 @@ Open: item 5 (a spoken filler on a slow tool; Voice already says "Okay." at once
 
 ## Definition of done
 
-- [ ] Items 1-8 with tests; module tiers green for cognition, orchestration, interface, voice. **Items 1-4 and 8 done, tiers green. Open: item 5, item 6 (streaming STT -- needs recordings), item 7, item 9.**
+- [ ] Items 1-8 with tests; module tiers green for cognition, orchestration, interface, voice. **Items 1-5, 7 and 8 done, tiers green. Open: item 6 (streaming STT) -- it needs the 50 recorded turns to measure WER against, which do not exist yet; that recording session is the creator's to run. Item 7 landed off by default (`[orchestration] bridge_on_slow_turns`): it is a second model call on every slow turn, and the thing it buys -- knowing Sim started -- the TUI already shows as the task tree. Item 9's findings need item 6's numbers.**
 - [x] Findings entry with the table. **`2026-09-19-stage-4-live-fixes-and-stage-5-recall.md`: first text at 0.78 s of 1.2 s, streamed speech on by default, and what the live session found.**
 - [x] CONTRACT.md updated for the new topic and config keys. **`session.delta`, `[voice] stream_replies`, `tts_speed`, the voice stage budgets.**

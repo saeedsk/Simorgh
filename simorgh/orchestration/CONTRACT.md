@@ -86,6 +86,8 @@ Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905
 | `review_benchmark` | `True` | yes |
 | `reground_every_steps` | `0` | yes |
 | `keep_recent_steps` | `2` | yes |
+| `bridge_on_slow_turns` | `false` | yes |
+| `bridge_timeout_s` | `2.0` | yes |
 | `clean_revisions` | `False` | yes |
 | `delegation` | `False` | yes |
 | `delegate_max_steps` | `12` | yes |

@@ -88,6 +88,8 @@ class Service:
                             heartbeat_s=self.config.heartbeat_s, review_benchmark=self.config.review_benchmark,
                             reground_every_steps=self.config.reground_every_steps,
                             keep_recent_steps=self.config.keep_recent_steps,
+                            bridge_on_slow_turns=self.config.bridge_on_slow_turns,
+                            bridge_timeout_s=self.config.bridge_timeout_s,
                             clean_revisions=self.config.clean_revisions,
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
                             max_children=self.config.max_children_concurrent,

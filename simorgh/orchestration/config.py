@@ -58,6 +58,19 @@ class Config:
     # benchmark arm wins (docs/plans/long-run-context-design.md).
     reground_every_steps: int = 0
     keep_recent_steps: int = 2
+    # A one-line bridge before a turn that is going to be slow (stage 3
+    # item 5's sibling, item 7): a `patch` or `research` session streams
+    # "I'll look at X" as `session.delta` while the real reply is still
+    # being written. It is never the answer and is never recorded as the
+    # turn's text.
+    #
+    # Off by default, unlike streamed replies: this is a SECOND model
+    # call on every slow turn, and the thing it buys -- knowing Sim
+    # started -- the TUI already shows as the task tree the moment the
+    # turn opens. Turn it on where there is no screen.
+    bridge_on_slow_turns: bool = False
+    #: Longest the bridge may take before the turn goes on without it.
+    bridge_timeout_s: float = 2.0
     # A patch revision after a rejected answer starts from the progress note
     # and the last `keep_recent_steps` steps instead of the whole transcript.
     clean_revisions: bool = False
