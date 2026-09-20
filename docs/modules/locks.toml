@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.ledger]
-by = "opus-main"
-task = "revert the sqlite default: first live boot spun"
-since = "2026-09-20T15:44:47+00:00"
-until = "2026-09-20T23:44:47+00:00"
