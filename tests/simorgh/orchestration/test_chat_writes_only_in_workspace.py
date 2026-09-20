@@ -1,5 +1,5 @@
 """A chat turn writes only under workspace/ (live 2026-09-19: a typo became
-a chat turn that edited simorgh/learning/ in the live checkout)."""
+a chat turn that edited simorgh/growth/estimate/ in the live checkout)."""
 
 import unittest
 
@@ -18,7 +18,7 @@ def _chat():
 class ChatWritesOnlyInWorkspace(unittest.TestCase):
     def test_the_rule(self):
         self.assertIn("start_task", chat_outside_workspace_refusal(_chat(), "replace_in_file",
-                                                                   {"path": "simorgh/learning/models.py"}))
+                                                                   {"path": "simorgh/growth/estimate/models.py"}))
         self.assertTrue(chat_outside_workspace_refusal(_chat(), "apply_source_patch", {"subject": "README.md"}))
         self.assertEqual(chat_outside_workspace_refusal(_chat(), "apply_source_patch", {"subject": "workspace/deck/make.py"}), "")
         self.assertEqual(chat_outside_workspace_refusal(_chat(), "read_file", {"path": "simorgh/x.py"}), "")
@@ -30,7 +30,7 @@ class ChatWritesOnlyInWorkspace(unittest.TestCase):
         async with Harness() as h:
             cognition = FakeCognition(h.client("cognition"), script=[
                 {"tool_calls": [{"tool": "replace_in_file",
-                                 "args": {"path": "simorgh/learning/models.py", "code": "<<<<<<< SEARCH\\na\\n=======\\nb\\n>>>>>>> REPLACE"}}]},
+                                 "args": {"path": "simorgh/growth/estimate/models.py", "code": "<<<<<<< SEARCH\\na\\n=======\\nb\\n>>>>>>> REPLACE"}}]},
                 {"text": "ok"},
             ])
             gx = FakeGuardianExecution(h.client("guardian"))

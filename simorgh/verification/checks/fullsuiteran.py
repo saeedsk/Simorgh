@@ -7,7 +7,7 @@ real orchestration-driven patch task: `applies()` requires
 `orchestration/session.py::_put_verify_subject` never populates either
 -- only Learning's `PatchPipeline` does, and that pipeline has never
 been reachable from a real task (its drafting tools were never built;
-see `simorgh/learning/CONTRACT.md`'s known issues). So the one check
+see `simorgh/growth/estimate/CONTRACT.md`'s known issues). So the one check
 built to answer "does the patched suite still pass" has been silently
 absent from every real patch verification since it was written.
 

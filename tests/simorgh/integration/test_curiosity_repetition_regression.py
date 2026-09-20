@@ -1,4 +1,4 @@
-"""The single most important test in `simorgh/curiosity/` (v1 milestones
+"""The single most important test in `simorgh/growth/explore/` (v1 milestones
 95-96, docs/blueprint/subsystems/13-curiosity.md section 9): asking a
 model one open-ended "propose an improvement" question, repeatedly,
 clusters on the same neighborhood of ideas -- even reworded each time.
@@ -74,7 +74,7 @@ class RepetitionRegressionTest(unittest.IsolatedAsyncioTestCase):
         # These tests drive back-to-back ticks to exercise the sampler's
         # spread; the exploration pacing (`min_explore_interval_seconds`,
         # which keeps the idle heartbeat from draining the LLM budget) is
-        # a separate property, covered in tests/simorgh/curiosity.
+        # a separate property, covered in tests/simorgh/growth/explore.
         self.config = CuriosityConfig(
             candidates_per_tick=1, project_chance=0.0, recent_subjects=30,
             min_explore_interval_seconds=0.0,

@@ -9,7 +9,7 @@ Its default `under` stayed at v1's own `src/` -- retired but not
 deleted -- rather than `simorgh/`, the live v2 tree, which the sibling
 `capability_map.py` facet had the identical bug in for the same reason
 (2026-09-08). It matters here too: Curiosity's own real call
-(`simorgh/curiosity/service.py`) passes `args={}`, taking this default
+(`simorgh/growth/explore/service.py`) passes `args={}`, taking this default
 every time, so its self-directed exploration was reading the wrong
 tree's file list. No model-callable tool exposes this facet directly
 (an observer confirmed Sim answers "where do you live" questions by

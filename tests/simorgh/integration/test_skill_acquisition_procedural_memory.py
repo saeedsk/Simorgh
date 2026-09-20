@@ -8,7 +8,7 @@ same `mock.patch("simorgh.kernel.service.build_factories", ...)` seam
 kernel_boot.py` use.
 
 Learning's own `PatchPipeline` (kind="skill") is unit-tested against a
-scripted harness in `tests/simorgh/learning/test_pipeline.py` -- it
+scripted harness in `tests/simorgh/growth/estimate/test_pipeline.py` -- it
 can't usefully run against a REAL Guardian+Execution here, because the
 `skill.draft` LLM-drafting tool it proposes first is a Cognition-backed
 composite tool that is a pre-existing, out-of-scope gap (08-execution.md

@@ -517,7 +517,7 @@ def chat_outside_workspace_refusal(session: Session, tool: str, args: dict) -> s
     game, a document -- in `workspace/`). It could also write anywhere
     else: on 2026-09-19 a typo ("?/tas") became a chat turn that saw a
     queued patch task in `list_tasks` and did that task itself, editing
-    `simorgh/learning/` in the live checkout Sim runs from, with no
+    `simorgh/growth/estimate/` in the live checkout Sim runs from, with no
     worktree, no tests before landing and no verification; three tests
     broke. A change to anything outside `workspace/` is a task's job.
     """

@@ -120,7 +120,7 @@ class Config:
             # nothing at all -- `max_distillations_per_day = 99` still
             # capped at 3, `distillation_enabled = false` still
             # distilled (observer bulk5-02, 2026-09-10). The
-            # completeness test in `tests/simorgh/reflection/
+            # completeness test in `tests/simorgh/growth/monitors/
             # test_config.py` now fails if a field is added to this
             # dataclass without a key here, so this cannot recur
             # silently a third time.

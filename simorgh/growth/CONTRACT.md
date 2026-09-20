@@ -13,9 +13,9 @@ Since stage 8 item 1 (2026-09-20) Growth is also the **merge** of learning, refl
 | File | For |
 |---|---|
 | `simorgh/growth/service.py` | the Subsystem: unions the parts' manifests, starts each with its own `[growth.<part>]` section, fans out `stop`/`health` |
-| `simorgh/growth/estimate/` | what Sim is good at, from outcomes (was `simorgh/learning/`): outcome recording, the competence table, strategy suggestion |
-| `simorgh/growth/monitors/` | what is going wrong, watched (was `simorgh/reflection/`): drift, calibration, health findings, critique, denial analysis, pattern mining, distillation, digests |
-| `simorgh/growth/explore/` | what is worth finding out (was `simorgh/curiosity/`): drives, the diversity sampler, ideas, project proposals, interests, sharing pace |
+| `simorgh/growth/estimate/` | what Sim is good at, from outcomes (was `simorgh/growth/estimate/`): outcome recording, the competence table, strategy suggestion |
+| `simorgh/growth/monitors/` | what is going wrong, watched (was `simorgh/growth/monitors/`): drift, calibration, health findings, critique, denial analysis, pattern mining, distillation, digests |
+| `simorgh/growth/explore/` | what is worth finding out (was `simorgh/growth/explore/`): drives, the diversity sampler, ideas, project proposals, interests, sharing pace |
 | `simorgh/growth/diagnose.py` | `Failure`, `Cluster`, `cluster()`: terminal failures grouped by what they share; `phrasing_prompt` is the only thing a model is asked |
 | `simorgh/growth/policies.py` | `Policy`, `PolicyStore`: propose → adopt-with-a-measurement → retire, over `growth:policies` |
 

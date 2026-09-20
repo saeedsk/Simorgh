@@ -27,7 +27,7 @@ fakes-based tests could not see, both fixed alongside this test:
    it would keep "failing" the same cached verdict until
    `max_revisions`, then wrongly `task.blocked`. Fixed: a fresh
    `verification_id` per attempt (matching the sibling implementation in
-   `simorgh/learning/pipeline.py`'s `PatchPipeline._verify_once`, which
+   `simorgh/growth/estimate/pipeline.py`'s `PatchPipeline._verify_once`, which
    already did this correctly).
 2. `subject_ref` was sent as raw, truncated session text. The real
    service's `_resolve_subject` treats `subject_ref` as a Ledger blob id

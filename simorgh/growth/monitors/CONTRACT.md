@@ -10,18 +10,18 @@ Reflection watches what the system does and turns it into signals other subsyste
 
 | File | For |
 |---|---|
-| `simorgh/reflection/__init__.py` | empty package marker |
-| `simorgh/reflection/api.py` | Protocols describing the four pure cores the service composes (documentation only) |
-| `simorgh/reflection/calibration.py` | `CalibrationTable`: stated confidence vs outcome per task type, Brier score, min-sample gate |
-| `simorgh/reflection/config.py` | frozen `Config` dataclass and `from_mapping` for `[reflection]` |
-| `simorgh/reflection/critique.py` | lenient JSON parse of a model critique, with a floor critique when it fails |
-| `simorgh/reflection/denials.py` | `DenialMiner`: same tool+reason denied N times in a window becomes one proposal |
-| `simorgh/reflection/digest.py` | pure monitors, alert routing (rate limit, quiet hours, reopen), daily digest rendering |
-| `simorgh/reflection/distillation.py` | decides whether a solved task is worth a new skill, and its slug |
-| `simorgh/reflection/drift.py` | `DriftTracker` heuristic score plus a model verdict that can only raise it |
-| `simorgh/reflection/health.py` | `HealthMonitor`: pinned/oscillating mood and load -> warn/critical finding |
-| `simorgh/reflection/patterns.py` | `PatternMiner`: failure rate per `(task_type, strategy)` over a window |
-| `simorgh/reflection/service.py` | the `Service`: subscriptions, the reflection pass loop, publishing and ledger appends |
+| `simorgh/growth/monitors/__init__.py` | empty package marker |
+| `simorgh/growth/monitors/api.py` | Protocols describing the four pure cores the service composes (documentation only) |
+| `simorgh/growth/monitors/calibration.py` | `CalibrationTable`: stated confidence vs outcome per task type, Brier score, min-sample gate |
+| `simorgh/growth/monitors/config.py` | frozen `Config` dataclass and `from_mapping` for `[reflection]` |
+| `simorgh/growth/monitors/critique.py` | lenient JSON parse of a model critique, with a floor critique when it fails |
+| `simorgh/growth/monitors/denials.py` | `DenialMiner`: same tool+reason denied N times in a window becomes one proposal |
+| `simorgh/growth/monitors/digest.py` | pure monitors, alert routing (rate limit, quiet hours, reopen), daily digest rendering |
+| `simorgh/growth/monitors/distillation.py` | decides whether a solved task is worth a new skill, and its slug |
+| `simorgh/growth/monitors/drift.py` | `DriftTracker` heuristic score plus a model verdict that can only raise it |
+| `simorgh/growth/monitors/health.py` | `HealthMonitor`: pinned/oscillating mood and load -> warn/critical finding |
+| `simorgh/growth/monitors/patterns.py` | `PatternMiner`: failure rate per `(task_type, strategy)` over a window |
+| `simorgh/growth/monitors/service.py` | the `Service`: subscriptions, the reflection pass loop, publishing and ledger appends |
 
 ## Consumes
 
@@ -29,41 +29,41 @@ Exact subscription list: `Service.consumes` (`service.py:106-117`).
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/reflection/service.py | feeds `HealthMonitor`; publishes a finding only when severity changes |
-| `task.created` | `messages/task.py::TaskCreated` | simorgh/reflection/service.py | registers the task's goal and scope with a new `DriftTracker` |
-| `task.step` | `messages/task.py::TaskStep` | simorgh/reflection/service.py | records the tool used, resets the stall clock, feeds the drift heuristic |
-| `task.completed` | `messages/task.py::TaskCompleted` | simorgh/reflection/service.py | terminal: pattern sample, calibration, drift close, `self.observation`, critique for work kinds |
-| `task.failed` | `messages/task.py::TaskFailed` | simorgh/reflection/service.py | same terminal path as completed, as a failure |
-| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/reflection/service.py | same terminal path, counted as a failure |
-| `verify.result` | `messages/verify.py::VerifyResult` | simorgh/reflection/service.py | calibration sample for task type `verify` when a confidence is present |
-| `plan.revised` | `messages/plan.py::PlanRevised` | simorgh/reflection/service.py | counts a plan revision on a tracker keyed by `plan_id` (rarely matches; `service.py:427-440`) |
-| `learn.outcome.recorded` | `messages/learn.py::LearnOutcomeRecorded` | simorgh/reflection/service.py | pattern sample and calibration sample |
-| `learn.self_patch.applied` | `messages/learn.py::LearnSelfPatchApplied` | simorgh/reflection/service.py | publishes `self.observation{kind: change}` |
-| `learn.self_patch.reverted` | `messages/learn.py::LearnSelfPatchReverted` | simorgh/reflection/service.py | publishes `self.observation{kind: change}` (no publisher today) |
-| `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/reflection/service.py | publishes `self.observation{kind: change}` |
-| `system.started` | `messages/system.py::SystemStarted` | simorgh/reflection/service.py | publishes `self.observation{kind: restart}` |
-| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/reflection/service.py | sets the paused flag (paused/stopping/stopped): no model calls, no monitors, no pass |
-| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/reflection/service.py | runs the reflection pass (patterns + calibration) |
-| `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/reflection/service.py | stall check, then due monitors, ad-hoc alerts and the digest |
-| `reflect.review.request` | `messages/reflect.py::ReflectReviewRequest` | simorgh/reflection/service.py | replies with patterns mined over the requested window (no publisher today) |
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/reflection/service.py | scope denials feed drift; repeated denials become a `repeated_denial` pattern |
+| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/growth/monitors/service.py | feeds `HealthMonitor`; publishes a finding only when severity changes |
+| `task.created` | `messages/task.py::TaskCreated` | simorgh/growth/monitors/service.py | registers the task's goal and scope with a new `DriftTracker` |
+| `task.step` | `messages/task.py::TaskStep` | simorgh/growth/monitors/service.py | records the tool used, resets the stall clock, feeds the drift heuristic |
+| `task.completed` | `messages/task.py::TaskCompleted` | simorgh/growth/monitors/service.py | terminal: pattern sample, calibration, drift close, `self.observation`, critique for work kinds |
+| `task.failed` | `messages/task.py::TaskFailed` | simorgh/growth/monitors/service.py | same terminal path as completed, as a failure |
+| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/growth/monitors/service.py | same terminal path, counted as a failure |
+| `verify.result` | `messages/verify.py::VerifyResult` | simorgh/growth/monitors/service.py | calibration sample for task type `verify` when a confidence is present |
+| `plan.revised` | `messages/plan.py::PlanRevised` | simorgh/growth/monitors/service.py | counts a plan revision on a tracker keyed by `plan_id` (rarely matches; `service.py:427-440`) |
+| `learn.outcome.recorded` | `messages/learn.py::LearnOutcomeRecorded` | simorgh/growth/monitors/service.py | pattern sample and calibration sample |
+| `learn.self_patch.applied` | `messages/learn.py::LearnSelfPatchApplied` | simorgh/growth/monitors/service.py | publishes `self.observation{kind: change}` |
+| `learn.self_patch.reverted` | `messages/learn.py::LearnSelfPatchReverted` | simorgh/growth/monitors/service.py | publishes `self.observation{kind: change}` (no publisher today) |
+| `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/growth/monitors/service.py | publishes `self.observation{kind: change}` |
+| `system.started` | `messages/system.py::SystemStarted` | simorgh/growth/monitors/service.py | publishes `self.observation{kind: restart}` |
+| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/growth/monitors/service.py | sets the paused flag (paused/stopping/stopped): no model calls, no monitors, no pass |
+| `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/growth/monitors/service.py | runs the reflection pass (patterns + calibration) |
+| `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/growth/monitors/service.py | stall check, then due monitors, ad-hoc alerts and the digest |
+| `reflect.review.request` | `messages/reflect.py::ReflectReviewRequest` | simorgh/growth/monitors/service.py | replies with patterns mined over the requested window (no publisher today) |
+| `action.denied` | `messages/action.py::ActionDenied` | simorgh/growth/monitors/service.py | scope denials feed drift; repeated denials become a `repeated_denial` pattern |
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `reflect.health.finding` | `messages/reflect.py::ReflectHealthFinding` | simorgh/reflection/service.py | health severity changes to warn/critical (consumed by Guardian, Persona) |
-| `reflect.drift.detected` | `messages/reflect.py::ReflectDriftDetected` | simorgh/reflection/service.py | combined drift score crosses `drift_emit_threshold` at task end, or a task stalls |
-| `reflect.patterns.found` | `messages/reflect.py::ReflectPatternsFound` | simorgh/reflection/service.py | the pass mines patterns, or a denial group crosses its threshold (Planning turns it into tasks) |
-| `reflect.calibration.updated` | `messages/reflect.py::ReflectCalibrationUpdated` | simorgh/reflection/service.py | each pass, per task type with at least `calibration_min_samples` |
-| `reflect.review.reply` | `messages/reflect.py::ReflectReviewReply` | simorgh/reflection/service.py | reply to `reflect.review.request` (via `bus.reply`) |
-| `reflect.alert.raised` | `messages/reflect.py::ReflectAlertRaised` | simorgh/reflection/service.py | a monitor or ad-hoc alert is delivered (allow-listed one-sided) |
-| `reflect.alert.cleared` | `messages/reflect.py::ReflectAlertCleared` | simorgh/reflection/service.py | an open alert is resolved (allow-listed one-sided) |
-| `self.observation` | `messages/self_.py::SelfObservation` | simorgh/reflection/service.py | every terminal task, self-patch, skill, restart, and each mined pattern (`kind: limitation`) |
-| `memory.store` | `messages/memory.py::MemoryStore` | simorgh/reflection/service.py | one `procedural` critique per terminal patch/skill/research/project task |
-| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/reflection/service.py | request/reply for the drift review and the critique (`purpose: review`) |
-| `task.create` | `messages/task.py::TaskCreate` | simorgh/reflection/service.py | a distillation candidate passes the daily cap (`kind: skill`, `origin: reflection`) |
-| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/reflection/service.py | an alert or the daily digest goes out as an irreversible `notify` |
+| `reflect.health.finding` | `messages/reflect.py::ReflectHealthFinding` | simorgh/growth/monitors/service.py | health severity changes to warn/critical (consumed by Guardian, Persona) |
+| `reflect.drift.detected` | `messages/reflect.py::ReflectDriftDetected` | simorgh/growth/monitors/service.py | combined drift score crosses `drift_emit_threshold` at task end, or a task stalls |
+| `reflect.patterns.found` | `messages/reflect.py::ReflectPatternsFound` | simorgh/growth/monitors/service.py | the pass mines patterns, or a denial group crosses its threshold (Planning turns it into tasks) |
+| `reflect.calibration.updated` | `messages/reflect.py::ReflectCalibrationUpdated` | simorgh/growth/monitors/service.py | each pass, per task type with at least `calibration_min_samples` |
+| `reflect.review.reply` | `messages/reflect.py::ReflectReviewReply` | simorgh/growth/monitors/service.py | reply to `reflect.review.request` (via `bus.reply`) |
+| `reflect.alert.raised` | `messages/reflect.py::ReflectAlertRaised` | simorgh/growth/monitors/service.py | a monitor or ad-hoc alert is delivered (allow-listed one-sided) |
+| `reflect.alert.cleared` | `messages/reflect.py::ReflectAlertCleared` | simorgh/growth/monitors/service.py | an open alert is resolved (allow-listed one-sided) |
+| `self.observation` | `messages/self_.py::SelfObservation` | simorgh/growth/monitors/service.py | every terminal task, self-patch, skill, restart, and each mined pattern (`kind: limitation`) |
+| `memory.store` | `messages/memory.py::MemoryStore` | simorgh/growth/monitors/service.py | one `procedural` critique per terminal patch/skill/research/project task |
+| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/growth/monitors/service.py | request/reply for the drift review and the critique (`purpose: review`) |
+| `task.create` | `messages/task.py::TaskCreate` | simorgh/growth/monitors/service.py | a distillation candidate passes the daily cap (`kind: skill`, `origin: reflection`) |
+| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/growth/monitors/service.py | an alert or the daily digest goes out as an irreversible `notify` |
 
 `system.tick.sleep` is built in `_reflect_periodically` (`service.py:555`) but handed to `_run_pass` directly, never published.
 
@@ -71,19 +71,19 @@ Exact subscription list: `Service.consumes` (`service.py:106-117`).
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `reflect:health` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
-| `reflect:drift:{task_id}` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
-| `reflect:critique:{task_id}` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
-| `reflect:distillation` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
-| `reflect:patterns` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
-| `reflect:calibration` | simorgh/reflection/service.py | - | 90d (`reflect:` prefix) |
-| `reflection:alerts` | simorgh/reflection/service.py | simorgh/interface/dispatch.py | forever (no `DEFAULT_RETENTION` entry; `reflection:` does not match `reflect:`) |
+| `reflect:health` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
+| `reflect:drift:{task_id}` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
+| `reflect:critique:{task_id}` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
+| `reflect:distillation` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
+| `reflect:patterns` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
+| `reflect:calibration` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
+| `reflection:alerts` | simorgh/growth/monitors/service.py | simorgh/interface/dispatch.py | forever (no `DEFAULT_RETENTION` entry; `reflection:` does not match `reflect:`) |
 
 There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never written and was removed 2026-09-19); `self.observation` is a bus message only. Reflection reads no stream: all its state (task metas, miners, calibration, alert router) is in memory and starts empty on every boot.
 
 ## Config
 
-`[reflection]` in simorgh.toml; dataclass in `simorgh/reflection/config.py`. Some keys are nested in the TOML: `health_*` under `[reflection.health]` (e.g. `window`, `oscillation_flips_warn`), `pattern_*` under `[reflection.pattern]`, `calibration_*` under `[reflection.calibration]` (`config.py:120-151`). An explicitly constructed `Config` wins over `ctx.config`.
+`[reflection]` in simorgh.toml; dataclass in `simorgh/growth/monitors/config.py`. Some keys are nested in the TOML: `health_*` under `[reflection.health]` (e.g. `window`, `oscillation_flips_warn`), `pattern_*` under `[reflection.pattern]`, `calibration_*` under `[reflection.calibration]` (`config.py:120-151`). An explicitly constructed `Config` wins over `ctx.config`.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -121,7 +121,7 @@ There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never
 
 ## Public Python surface
 
-- `simorgh.reflection.service.Service` (`name = "reflection"`): the Subsystem (`start`, `stop`, `health` always `ok`). Two extra public methods, `register_monitor(monitor)` and `raise_alert(alert: digest.Alert)`, are the designed entry points for domains to add checks. Nothing outside the package calls either, and the service registers no monitor of its own: in a running Sim the registry is empty, no `reflect.alert.*` is ever published, no alert `notify` is proposed, and the daily digest renders empty and is skipped. The alert and digest path runs only in `tests/simorgh/reflection/test_service_alerts.py`. There is no obvious caller to wire: a domain cannot import `simorgh.reflection` (`tests/simorgh/test_module_boundaries.py`), so a live caller needs a bus-level entry point (a topic) first, which is a contracts change.
+- `simorgh.reflection.service.Service` (`name = "reflection"`): the Subsystem (`start`, `stop`, `health` always `ok`). Two extra public methods, `register_monitor(monitor)` and `raise_alert(alert: digest.Alert)`, are the designed entry points for domains to add checks. Nothing outside the package calls either, and the service registers no monitor of its own: in a running Sim the registry is empty, no `reflect.alert.*` is ever published, no alert `notify` is proposed, and the daily digest renders empty and is skipped. The alert and digest path runs only in `tests/simorgh/growth/monitors/test_service_alerts.py`. There is no obvious caller to wire: a domain cannot import `simorgh.reflection` (`tests/simorgh/test_module_boundaries.py`), so a live caller needs a bus-level entry point (a topic) first, which is a contracts change.
 - `Config` (`config.py`), read by the Kernel's config check.
 - Nothing is exported through `simorgh.contracts`; other packages see Reflection only through the topics above.
 - No module-level mutable singletons. Module constants: stream names, `_CRITIQUE_KINDS`. `_repo_root()` duplicates `execution/config.py::find_repo_root` (`service.py:44-69`) to resolve `skill_dir`.
@@ -147,11 +147,11 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 - `tests/simorgh/integration/test_reflection_health_patterns_calibration.py` -- the real Service over a real bus: health finding, patterns found, calibration, critique floor with no Cognition
 - `tests/simorgh/integration/test_reflection_pass_without_a_sleep_tick.py` -- the pass publishes patterns, calibration and limitations without a sleep tick
-- `tests/simorgh/reflection/test_service_alerts.py` -- idle tick -> monitors -> `reflect.alert.*`, ledger rows and a `notify` `action.proposed`
-- `tests/simorgh/reflection/test_service_stall.py` -- `stall_idle_seconds` produces one `behavior`/`note` drift per stall episode
-- `tests/simorgh/reflection/test_config.py` -- every dataclass field is read by `from_mapping` (the completeness check)
-- `tests/simorgh/reflection/test_distillation.py` -- when a solved task becomes a skill proposal, and the refusals
-- `tests/simorgh/reflection/test_drift.py` -- heuristic score and the rule that a model verdict never lowers it
+- `tests/simorgh/growth/monitors/test_service_alerts.py` -- idle tick -> monitors -> `reflect.alert.*`, ledger rows and a `notify` `action.proposed`
+- `tests/simorgh/growth/monitors/test_service_stall.py` -- `stall_idle_seconds` produces one `behavior`/`note` drift per stall episode
+- `tests/simorgh/growth/monitors/test_config.py` -- every dataclass field is read by `from_mapping` (the completeness check)
+- `tests/simorgh/growth/monitors/test_distillation.py` -- when a solved task becomes a skill proposal, and the refusals
+- `tests/simorgh/growth/monitors/test_drift.py` -- heuristic score and the rule that a model verdict never lowers it
 - `tests/simorgh/orchestration/test_critiques_stay_out_of_chat.py` -- critiques are procedural memory, recalled by task sessions and not by chat (C7)
 
 ## Known issues (2026-09-18 evaluation)
@@ -172,4 +172,4 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 ## Working on this module
 
-Lock it first (`python tools/modlock.py claim reflection --by <you> --task "..."`), commit the lock, edit only `simorgh/reflection/`, `tests/simorgh/reflection/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py reflection` before committing; commit subject `reflection: <what changed>`.
+Lock it first (`python tools/modlock.py claim reflection --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/monitors/`, `tests/simorgh/growth/monitors/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py reflection` before committing; commit subject `reflection: <what changed>`.

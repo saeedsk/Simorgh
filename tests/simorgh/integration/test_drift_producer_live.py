@@ -1,6 +1,6 @@
 """Live-Kernel test of Reflection's real `reflect.drift.detected`
 producer path (drift.py's `DriftTracker` + `service.py::_run_drift_close`),
-not just `tests/simorgh/reflection/test_drift.py`'s synthetic
+not just `tests/simorgh/growth/monitors/test_drift.py`'s synthetic
 `DriftTracker` unit tests, and not just
 `tests/simorgh/integration/test_reground_drift_flow.py`'s hand-published
 `reflect.drift.detected` (which only exercises Planning's consumer side).

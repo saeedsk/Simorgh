@@ -7,7 +7,7 @@ Before this fork, `simorgh/worldmodel/selfmodel.py`'s own docstring
 said it plainly: every section but identity was "an honest, clearly-
 marked-empty placeholder, because their real producers (Learning,
 Reflection, Planning) don't exist yet." Those producers exist now
-(`simorgh/learning/competence.py`, `simorgh/reflection/calibration.py`
+(`simorgh/growth/estimate/competence.py`, `simorgh/growth/monitors/calibration.py`
 `.patterns.py`, `.critique.py`) but `Service.consumes` never listened to
 any of `learn.competence.updated`, `reflect.calibration.updated`,
 `self.observation`, `learn.self_patch.applied/reverted`, or

@@ -1,5 +1,5 @@
 """Monitors, alert routing, and the daily digest
-(simorgh/reflection/digest.py; platform-connectors-design.md section 6).
+(simorgh/growth/monitors/digest.py; platform-connectors-design.md section 6).
 
 Five designs had each specified their own copy of this. The interesting
 half is not "notice a problem" -- it is deciding what is worth waking a

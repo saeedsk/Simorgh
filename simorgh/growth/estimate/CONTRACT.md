@@ -10,38 +10,38 @@ Learning owns the outcome record and the competence estimate: it turns `task.com
 
 | File | For |
 |---|---|
-| `simorgh/learning/__init__.py` | re-exports `Service`, `VERSION` |
-| `simorgh/learning/competence.py` | `CompetenceTable`: the projection over `learn:outcomes` (rate, calibration, UCB1 strategy ranking) |
-| `simorgh/learning/config.py` | `[learning]` dataclass |
-| `simorgh/learning/correlator.py` | id-keyed futures for `action.result` / `verify.result`; a leftover of the retired pipeline, nothing awaits them |
-| `simorgh/learning/models.py` | plain dataclasses (`TaskTypeStats`, `StrategyStats`, `StrategyScore`; `Strategy`, `Outcome`, `PatchTaskSpec` unused) |
-| `simorgh/learning/outcomes.py` | `OutcomeRecorder`: terminal task messages to `learn:outcomes` events and the two announcements |
-| `simorgh/learning/service.py` | `Service`: subscriptions, competence rebuild at start, health |
-| `simorgh/learning/strategy.py` | `build_reply`: answers `learn.strategy.suggest` from the table |
+| `simorgh/growth/estimate/__init__.py` | re-exports `Service`, `VERSION` |
+| `simorgh/growth/estimate/competence.py` | `CompetenceTable`: the projection over `learn:outcomes` (rate, calibration, UCB1 strategy ranking) |
+| `simorgh/growth/estimate/config.py` | `[learning]` dataclass |
+| `simorgh/growth/estimate/correlator.py` | id-keyed futures for `action.result` / `verify.result`; a leftover of the retired pipeline, nothing awaits them |
+| `simorgh/growth/estimate/models.py` | plain dataclasses (`TaskTypeStats`, `StrategyStats`, `StrategyScore`; `Strategy`, `Outcome`, `PatchTaskSpec` unused) |
+| `simorgh/growth/estimate/outcomes.py` | `OutcomeRecorder`: terminal task messages to `learn:outcomes` events and the two announcements |
+| `simorgh/growth/estimate/service.py` | `Service`: subscriptions, competence rebuild at start, health |
+| `simorgh/growth/estimate/strategy.py` | `build_reply`: answers `learn.strategy.suggest` from the table |
 
-`simorgh/learning/README.md` still describes the retired `pipeline.py` and `learn.pipeline.run`; it is stale.
+`simorgh/growth/estimate/README.md` still describes the retired `pipeline.py` and `learn.pipeline.run`; it is stale.
 
 ## Consumes
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `task.completed` | `messages/task.py::TaskCompleted` | simorgh/learning/service.py | records a success (weight 1.0) with the cached verify verdict; skips untyped turns |
-| `task.failed` | `messages/task.py::TaskFailed` | simorgh/learning/service.py | records a failure (weight 1.0); skips untyped turns |
-| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/learning/service.py | records a failure at `blocked_sample_weight` (0.5); does NOT skip untyped turns |
-| `verify.result` | `messages/verify.py::VerifyResult` | simorgh/learning/service.py | caches the verdict by `verification_id` (last 500) for the completion join |
-| `action.result` | `messages/action.py::ActionResult` | simorgh/learning/service.py | resolves a `Correlator` future; nothing waits on one since the pipeline retired |
-| `action.denied` | `messages/action.py::ActionDenied` | simorgh/learning/service.py | same, with `denied: True`; dead for the same reason |
-| `learn.strategy.suggest` | `messages/learn.py::LearnStrategySuggest` | simorgh/learning/service.py | replies with the best strategy or overall rate for a task type; no requester today |
+| `task.completed` | `messages/task.py::TaskCompleted` | simorgh/growth/estimate/service.py | records a success (weight 1.0) with the cached verify verdict; skips untyped turns |
+| `task.failed` | `messages/task.py::TaskFailed` | simorgh/growth/estimate/service.py | records a failure (weight 1.0); skips untyped turns |
+| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/growth/estimate/service.py | records a failure at `blocked_sample_weight` (0.5); does NOT skip untyped turns |
+| `verify.result` | `messages/verify.py::VerifyResult` | simorgh/growth/estimate/service.py | caches the verdict by `verification_id` (last 500) for the completion join |
+| `action.result` | `messages/action.py::ActionResult` | simorgh/growth/estimate/service.py | resolves a `Correlator` future; nothing waits on one since the pipeline retired |
+| `action.denied` | `messages/action.py::ActionDenied` | simorgh/growth/estimate/service.py | same, with `denied: True`; dead for the same reason |
+| `learn.strategy.suggest` | `messages/learn.py::LearnStrategySuggest` | simorgh/growth/estimate/service.py | replies with the best strategy or overall rate for a task type; no requester today |
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `learn.outcome.recorded` | `messages/learn.py::LearnOutcomeRecorded` | simorgh/learning/outcomes.py | after each outcome append (also on a deduplicated redelivery); Reflection consumes it |
-| `learn.competence.updated` | `messages/learn.py::LearnCompetenceUpdated` | simorgh/learning/outcomes.py | right after `learn.outcome.recorded`, with that type's rate, calibration, samples; World Model consumes it |
-| `learn.strategy.suggest.reply` | `messages/learn.py::LearnStrategySuggestReply` | simorgh/learning/service.py | as the bus reply to `learn.strategy.suggest` |
-| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/learning/service.py | declared; `_propose_action` has no caller, so never in practice |
-| `verify.requested` | `messages/verify.py::VerifyRequested` | simorgh/learning/service.py | declared; `_request_verify` has no caller, so never in practice |
+| `learn.outcome.recorded` | `messages/learn.py::LearnOutcomeRecorded` | simorgh/growth/estimate/outcomes.py | after each outcome append (also on a deduplicated redelivery); Reflection consumes it |
+| `learn.competence.updated` | `messages/learn.py::LearnCompetenceUpdated` | simorgh/growth/estimate/outcomes.py | right after `learn.outcome.recorded`, with that type's rate, calibration, samples; World Model consumes it |
+| `learn.strategy.suggest.reply` | `messages/learn.py::LearnStrategySuggestReply` | simorgh/growth/estimate/service.py | as the bus reply to `learn.strategy.suggest` |
+| `action.proposed` | `messages/action.py::ActionProposed` | simorgh/growth/estimate/service.py | declared; `_propose_action` has no caller, so never in practice |
+| `verify.requested` | `messages/verify.py::VerifyRequested` | simorgh/growth/estimate/service.py | declared; `_request_verify` has no caller, so never in practice |
 
 The generated rows for `learn.self_patch.applied`, `learn.self_patch.reverted`, `learn.skill.acquired` and `memory.store` were deleted: Learning publishes none of them (the first is published by `orchestration/session.py::_land`; the second by nobody since the pipeline retired).
 
@@ -49,13 +49,13 @@ The generated rows for `learn.self_patch.applied`, `learn.self_patch.reverted`, 
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `learn:outcomes` | simorgh/learning/outcomes.py (write), simorgh/learning/service.py (rebuild) | - | forever (deliberately no entry in `DEFAULT_RETENTION`; the competence fold is rebuilt from it) |
-| `learn:patch:{task_id}` | simorgh/learning/outcomes.py (read only) | - | no writer since the pipeline retired; the read always finds nothing, so `strategy` is never set |
-| `task:{task_id}` | simorgh/learning/outcomes.py (read only) | written by Planning/Orchestration | forever |
+| `learn:outcomes` | simorgh/growth/estimate/outcomes.py (write), simorgh/growth/estimate/service.py (rebuild) | - | forever (deliberately no entry in `DEFAULT_RETENTION`; the competence fold is rebuilt from it) |
+| `learn:patch:{task_id}` | simorgh/growth/estimate/outcomes.py (read only) | - | no writer since the pipeline retired; the read always finds nothing, so `strategy` is never set |
+| `task:{task_id}` | simorgh/growth/estimate/outcomes.py (read only) | written by Planning/Orchestration | forever |
 
 ## Config
 
-`[learning]` in simorgh.toml; dataclass in `simorgh/learning/config.py`. Loaded from `ctx.config` in `start()` unless the caller passed one (`service.py:65-66`).
+`[learning]` in simorgh.toml; dataclass in `simorgh/growth/estimate/config.py`. Loaded from `ctx.config` in `start()` unless the caller passed one (`service.py:65-66`).
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -63,7 +63,7 @@ The generated rows for `learn.self_patch.applied`, `learn.self_patch.reverted`, 
 | `min_samples_for_trust` | `5` | yes (`strategy.py`) |
 | `blocked_sample_weight` | `0.5` | yes (`outcomes.py::on_task_blocked`) |
 
-The six keys that belonged to the retired PatchPipeline (`max_draft_attempts`, `max_pipeline_wall_seconds`, `action_timeout_seconds`, `verify_timeout_seconds`, `hot_swap_slots`, `max_concurrent_pipelines`) were removed from the dataclass on 2026-09-19; `from_mapping` drops any key it does not know, so writing one changes nothing and the Kernel's config check reports the section (`tests/simorgh/learning/test_config.py`).
+The six keys that belonged to the retired PatchPipeline (`max_draft_attempts`, `max_pipeline_wall_seconds`, `action_timeout_seconds`, `verify_timeout_seconds`, `hot_swap_slots`, `max_concurrent_pipelines`) were removed from the dataclass on 2026-09-19; `from_mapping` drops any key it does not know, so writing one changes nothing and the Kernel's config check reports the section (`tests/simorgh/growth/estimate/test_config.py`).
 
 ## Public Python surface
 
@@ -89,11 +89,11 @@ The six keys that belonged to the retired PatchPipeline (`max_draft_attempts`, `
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract learning`.
 
-- `tests/simorgh/learning/test_outcomes.py` -- terminal message to outcome: success/failure/blocked weights, task type from the task stream, verify join, per-run cost and dedup keys.
-- `tests/simorgh/learning/test_competence.py` -- the projection math (Laplace, shrinkage, UCB1, calibration) and apply == rebuild, state/load round trip.
-- `tests/simorgh/learning/test_strategy.py` -- the `learn.strategy.suggest.reply` shape against the real schema, floor and overall-rate fallbacks.
-- `tests/simorgh/learning/test_service.py` -- health is `ok` and counts untyped turns; `draft_candidate` is not a registered tool.
-- `tests/simorgh/learning/test_config.py` -- `[learning]` has exactly the three live keys; a retired pipeline key changes nothing.
+- `tests/simorgh/growth/estimate/test_outcomes.py` -- terminal message to outcome: success/failure/blocked weights, task type from the task stream, verify join, per-run cost and dedup keys.
+- `tests/simorgh/growth/estimate/test_competence.py` -- the projection math (Laplace, shrinkage, UCB1, calibration) and apply == rebuild, state/load round trip.
+- `tests/simorgh/growth/estimate/test_strategy.py` -- the `learn.strategy.suggest.reply` shape against the real schema, floor and overall-rate fallbacks.
+- `tests/simorgh/growth/estimate/test_service.py` -- health is `ok` and counts untyped turns; `draft_candidate` is not a registered tool.
+- `tests/simorgh/growth/estimate/test_config.py` -- `[learning]` has exactly the three live keys; a retired pipeline key changes nothing.
 
 ## Known issues (2026-09-18 evaluation)
 
@@ -110,4 +110,4 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 ## Working on this module
 
-Lock it first (`python tools/modlock.py claim learning --by <you> --task "..."`), commit the lock, edit only `simorgh/learning/`, `tests/simorgh/learning/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py learning` before committing; commit subject `learning: <what changed>`.
+Lock it first (`python tools/modlock.py claim learning --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/estimate/`, `tests/simorgh/growth/estimate/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py learning` before committing; commit subject `learning: <what changed>`.

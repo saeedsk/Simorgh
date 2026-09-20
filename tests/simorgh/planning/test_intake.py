@@ -145,7 +145,7 @@ class TestCandidateDedupeUsesSubject(unittest.TestCase):
         first = await intake.on_candidate(
             kind="patch",
             description="Add type hints to the public functions in this file for a clearer interface.",
-            subject="simorgh/curiosity/idea.py", area="curiosity",
+            subject="simorgh/growth/explore/idea.py", area="curiosity",
         )
         second = await intake.on_candidate(
             kind="patch",
@@ -165,12 +165,12 @@ class TestCandidateDedupeUsesSubject(unittest.TestCase):
         first = await intake.on_candidate(
             kind="patch",
             description="Add type hints to the public functions in this file for a clearer interface.",
-            subject="simorgh/curiosity/idea.py", area="curiosity",
+            subject="simorgh/growth/explore/idea.py", area="curiosity",
         )
         second = await intake.on_candidate(
             kind="patch",
             description="Add type hints to the public functions in this file for a clearer interface, please.",
-            subject="simorgh/curiosity/idea.py", area="curiosity",
+            subject="simorgh/growth/explore/idea.py", area="curiosity",
         )
         self.assertIsNotNone(first.task)
         self.assertIsNone(second.task)
