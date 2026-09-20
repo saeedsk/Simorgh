@@ -156,7 +156,7 @@ class Service:
         topics.SYSTEM_METRICS, topics.PERCEPT_WEB_FETCHED, topics.LEARN_SKILL_ACQUIRED,
         topics.UI_NOTICE, topics.VOICE_SPEAK_REQUEST, topics.COGNITION_THINK, topics.MEMORY_RETRIEVE,
         topics.CAMERA_EVENT, topics.TV_STATE, topics.DASH_STATE, topics.UI_DASH_KEY,
-        topics.SYSTEM_SCHEDULE_ADD, topics.WORLD_ENV_QUERY,
+        topics.SYSTEM_SCHEDULE_ADD, topics.WORLD_ENV_QUERY, topics.WORLD_PEOPLE_UPDATE,
         topics.TASK_CREATE, topics.TASK_LIST_REQUEST, topics.TASK_CANCEL, topics.UI_COMMAND_REQUEST,
         topics.MEMORY_FORGET, topics.VOICE_VOICES_REQUEST, topics.VOICE_CONTROL_REQUEST,
     )

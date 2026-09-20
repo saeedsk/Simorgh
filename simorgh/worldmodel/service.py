@@ -54,10 +54,12 @@ class Service:
         topics.TASK_CREATED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
         # The house (stage 6 item 3): the evidence the `home` facet folds.
         topics.CAMERA_EVENT, topics.TV_STATE, topics.VOICE_TRANSCRIPT,
+        # Who a person is, changed by a person (stage 6 item 4).
+        topics.WORLD_PEOPLE_UPDATE,
     )
     produces: tuple[str, ...] = (
         topics.WORLD_ENV_QUERY_REPLY, topics.SELF_SUMMARY_REPLY, topics.SELF_GAPS_REPLY, topics.SELF_MODEL_UPDATED,
-        topics.WORLD_HOME_SITUATION_CHANGED,
+        topics.WORLD_HOME_SITUATION_CHANGED, topics.WORLD_PEOPLE_UPDATE_REPLY,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -120,6 +122,7 @@ class Service:
 
         self._subs = [
             await ctx.bus.subscribe(topics.WORLD_ENV_QUERY, self._on_env_query),
+            await ctx.bus.subscribe(topics.WORLD_PEOPLE_UPDATE, self._on_people_update),
             await ctx.bus.subscribe(topics.SELF_SUMMARY, self._on_self_summary),
             await ctx.bus.subscribe(topics.SELF_GAPS, self._on_self_gaps),
             await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered),
@@ -262,6 +265,46 @@ class Service:
             return
         payload = {"ok": True, "facet": what, "as_of": self._ctx.clock.now(), **data}
         await self._ctx.bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload=payload)
+
+    async def _on_people_update(self, message: Message) -> None:
+        """Link a handle to a person, unlink one, or set a role.
+
+        The only write in this subsystem. It is a write because the
+        alternative -- Sim inferring from "call me X" that a handle
+        belongs to somebody -- is how an identity gets claimed by
+        whoever says the right sentence. Guardian puts it at tier 3, so
+        a person confirms each one, and what lands here has already
+        been confirmed.
+        """
+        payload = message.payload or {}
+        action = str(payload.get("action") or "")
+        name = str(payload.get("name") or "").strip()
+        identity = str(payload.get("identity") or "").strip()
+        role = str(payload.get("role") or "").strip()
+        try:
+            if action == "link":
+                if not name or not identity:
+                    raise ValueError("a link needs both a name and an identity")
+                person = self._people.link(name, identity, role=role)
+                detail = f"{identity} is {person.name}"
+            elif action == "unlink":
+                person = self._people.unlink(identity)
+                if person is None:
+                    raise ValueError(f"nothing is linked to {identity!r}")
+                detail = f"{identity} is nobody now"
+            elif action == "set_role":
+                person = self._people.set_role(name, role)
+                if person is None:
+                    raise ValueError(f"I do not know anybody called {name!r}")
+                detail = f"{person.name} is {person.role}"
+            else:
+                raise ValueError(f"{action!r} is not link, unlink or set_role")
+        except Exception as exc:  # noqa: BLE001 -- a bad ask is a reply, never a crash
+            await self._ctx.bus.reply(message, type=topics.WORLD_PEOPLE_UPDATE_REPLY,
+                                      payload=error_reply_payload("refused", str(exc)))
+            return
+        await self._ctx.bus.reply(message, type=topics.WORLD_PEOPLE_UPDATE_REPLY,
+                                  payload={"ok": True, "person": person.to_dict(), "detail": detail})
 
     async def _on_provider_status(self, message: Message) -> None:
         """Record what is actually doing the thinking.

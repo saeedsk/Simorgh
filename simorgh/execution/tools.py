@@ -3127,6 +3127,56 @@ class OverheardNoteTool:
         return ToolResult(ok=False, error="say `memo <what to keep>` or `wipe`")
 
 
+class PeopleTool:
+    """Who a person is, as far as Sim is concerned (stage 6 item 4).
+
+    One tool rather than three, because `people_link`, `people_unlink`
+    and `people_set_role` differ only in one word and a model offered
+    three near-identical tools picks between them badly.
+
+    The reason this is a tool at all -- rather than something Sim
+    infers from "call me X" -- is that an inferred identity is an
+    identity claimed by whoever says the right sentence. It is tier 3
+    (`contracts/tiers.py::CHANGES_WHO_SIM_TRUSTS`), so a person
+    confirms every one: linking a handle to a name decides whose
+    memories that handle reads and what its role may ask for.
+    """
+
+    name = "people"
+    description = ("Link a chat handle or voice to a household person, unlink one, or set "
+                   "somebody's role. `action` is link | unlink | set_role; `identity` looks "
+                   "like telegram:<handle>, whatsapp:<number> or voice:<name>.")
+    read_only = False
+    reversibility = "reversible"     # a link can be unlinked; the tier is what gates it
+    args_schema = {
+        "type": "object", "required": ["action"],
+        "properties": {"action": {"type": "string", "enum": ["link", "unlink", "set_role"]},
+                       "name": {"type": "string"}, "identity": {"type": "string"},
+                       "role": {"type": "string", "enum": ["owner", "adult", "child", "guest", "unknown"]}},
+    }
+
+    def __init__(self, config: Config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        if ctx.bus is None:
+            return ToolResult(ok=False, error="no bus available to reach the people store")
+        args = args or {}
+        payload = {"action": str(args.get("action") or ""),
+                   "name": str(args.get("name") or ""), "identity": str(args.get("identity") or ""),
+                   "role": str(args.get("role") or "")}
+        try:
+            reply = await ctx.bus.request(ctx.bus.new(topics.WORLD_PEOPLE_UPDATE, payload), timeout=5.0)
+        except TimeoutError:
+            return ToolResult(ok=False, error="the people store did not respond in time")
+        body = reply.payload or {}
+        if not body.get("ok", False):
+            detail = (body.get("error") or {}).get("detail") or "the people store refused that"
+            return ToolResult.refused(detail, output=detail)
+        said = str(body.get("detail") or "done")
+        return ToolResult(ok=True, output=said, side_effects=(said,), metadata={"kind": "people"})
+
+
 def builtin_tools(config: Config, *, secrets=None) -> list:
     """`secrets` is the subsystem's scoped secret store. Only the
     account-backed tools use it, and they take the value at call time so
@@ -3141,6 +3191,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
         VoiceSettingTool(config), MemoryForgetTool(config), SimCommandTool(config),
+        PeopleTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),

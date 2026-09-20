@@ -38,6 +38,13 @@ LOCAL_IRREVERSIBLE: frozenset[str] = frozenset({
     "install_package", "run_shell", "run_script", "run_container", "git_revert", "git_discard",
 })
 
+#: Tier 3 by name for a different reason than reach: these change who
+#: Sim trusts (stage 6 item 4). Linking a handle to a name decides whose
+#: memories that handle reads and what its role may ask for, and an
+#: identity nobody confirmed is an identity claimed by whoever says the
+#: right sentence. Reversible, and still a person's call.
+CHANGES_WHO_SIM_TRUSTS: frozenset[str] = frozenset({"people"})
+
 TIER_NAMES = {0: "read", 1: "reversible", 2: "local irreversible", 3: "reaches outside"}
 
 
@@ -46,6 +53,8 @@ def tier_of(proposal: Proposal, info=None, *, network: bool | None = None) -> tu
     tool = proposal.tool or ""
     if tool in REACHES_OUTSIDE:
         return 3, f"{tool} reaches outside the house"
+    if tool in CHANGES_WHO_SIM_TRUSTS:
+        return 3, f"{tool} changes who I trust"
     reversibility = getattr(info, "reversibility", None) or proposal.reversibility or "irreversible"
     if reversibility == "read_only":
         return 0, f"{tool} only reads"
@@ -59,4 +68,4 @@ def tier_of(proposal: Proposal, info=None, *, network: bool | None = None) -> tu
 
 
 
-__all__ = ["LOCAL_IRREVERSIBLE", "REACHES_OUTSIDE", "TIER_NAMES", "tier_of"]
+__all__ = ["CHANGES_WHO_SIM_TRUSTS", "LOCAL_IRREVERSIBLE", "REACHES_OUTSIDE", "TIER_NAMES", "tier_of"]

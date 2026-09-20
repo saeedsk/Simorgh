@@ -177,6 +177,12 @@ CAMERA_EVENT = "world.camera.event"
 #: changes, never a tick: a fact that has not moved is not news.
 WORLD_HOME_SITUATION_CHANGED = "world.home.situation_changed"
 WORLD_ENV_QUERY_REPLY = "world.env.query.reply"
+#: Change who a person IS, as far as Sim is concerned (stage 6 item 4):
+#: link a handle to them, unlink one, set their role. A write, unlike
+#: `world.env.query`, and tier 3 on the way in -- it decides what
+#: somebody may ask for, so a person confirms it.
+WORLD_PEOPLE_UPDATE = "world.people.update"
+WORLD_PEOPLE_UPDATE_REPLY = "world.people.update.reply"
 WORLD_ENV_OBSERVED = "world.env.observed"
 SELF_SUMMARY = "self.summary"
 SELF_SUMMARY_REPLY = "self.summary.reply"

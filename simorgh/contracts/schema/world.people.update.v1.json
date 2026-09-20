@@ -1,0 +1,39 @@
+{
+  "$id": "https://simorgh.local/schema/world.people.update.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Change who a person is as far as Sim is concerned (stage 6 item 4). A write: tier 3 on the way in, so a person confirms it.",
+  "properties": {
+    "action": {
+      "enum": [
+        "link",
+        "unlink",
+        "set_role"
+      ],
+      "type": "string"
+    },
+    "identity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "title": "world.people.update",
+  "type": "object"
+}

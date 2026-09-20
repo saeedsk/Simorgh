@@ -48,12 +48,14 @@ Authority: `Service.consumes` in `service.py:45-53`.
 | `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/worldmodel/service.py | marks the goal blocked (still outstanding) |
 
 Also read at boot: `SIMORGH_LOADER_NOTES/last_rollback.json`, turned into a limitation once per rollback (`service.py:133-172`).
+| `world.people.update` | `messages/world.py::WorldPeopleUpdate` | simorgh/worldmodel/service.py | link a handle to a person, unlink one, or set a role (stage 6 item 4). The only write in this subsystem; tier 3 on the way in, so a person has already confirmed it |
 
 ## Produces
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
 | `world.env.query.reply` | `messages/world.py::WorldEnvQueryReply` | simorgh/worldmodel/service.py | reply to every query: `ok`, `facet`, `as_of` plus the facet's data, or an `unknown_facet`/`unavailable` error |
+| `world.people.update.reply` | `messages/world.py::WorldPeopleUpdateReply` | simorgh/worldmodel/service.py | reply to every `world.people.update`: the person as written, or a `refused` error naming what was wrong |
 | `self.summary.reply` | `messages/self_.py::SelfSummaryReply` | simorgh/worldmodel/service.py | reply to every `self.summary`: `text`, `version`, `tokens` |
 | `self.gaps.reply` | `messages/self_.py::SelfGapsReply` | simorgh/worldmodel/service.py | reply to every `self.gaps`: `gaps`, `unexplored_areas`, `version` |
 | `self.model.updated` | `messages/self_.py::SelfModelUpdated` | simorgh/worldmodel/service.py | once per version bump, with the changed section and reason (no subscriber; allow-listed as an announcement) |

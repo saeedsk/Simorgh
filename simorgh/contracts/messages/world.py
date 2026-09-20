@@ -17,6 +17,18 @@ WorldEnvQueryReply = define(t.WORLD_ENV_QUERY_REPLY, [
     F("facet", Str),
     F("as_of", Float),
 ], doc="Open: the facet's own fields follow (additionalProperties true).")
+WorldPeopleUpdate = define(t.WORLD_PEOPLE_UPDATE, [
+    F("action", Enum("link", "unlink", "set_role")),
+    O("name", Str),        # the household name; required for link and set_role
+    O("identity", Str),    # "telegram:irak", "whatsapp:1555...", "voice:ira"
+    O("role", Str),        # owner | adult | child | guest | unknown
+], doc="Change who a person is as far as Sim is concerned (stage 6 item 4). A write: "
+       "tier 3 on the way in, so a person confirms it.")
+WorldPeopleUpdateReply = define(t.WORLD_PEOPLE_UPDATE_REPLY, [
+    # `ok`/`error` are admitted on every reply by the registry.
+    O("person", Obj()),
+    O("detail", Str),
+])
 WorldEnvObserved = define(t.WORLD_ENV_OBSERVED, [
     F("facet", Str),
     F("summary", Str),

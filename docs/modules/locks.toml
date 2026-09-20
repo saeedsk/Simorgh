@@ -37,9 +37,9 @@ until = "2026-09-20T14:33:07+00:00"
 
 [locks.execution]
 by = "opus-main"
-task = "chat write tools, provider notice, search scope, TUI noise"
-since = "2026-09-19T12:29:46+00:00"
-until = "2026-09-19T20:29:46+00:00"
+task = "stage 6 item 4: people_* tools"
+since = "2026-09-20T07:08:31+00:00"
+until = "2026-09-20T15:08:31+00:00"
 
 [locks.growth]
 by = "opus-main"
