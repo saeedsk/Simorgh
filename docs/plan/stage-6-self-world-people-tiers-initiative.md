@@ -1,6 +1,6 @@
 # Stage 6 -- Self and world projections, People, safety tiers, Initiative
 
-Status: **in progress** (2026-09-19: items 1-3, 5, 6 in part; item 7 done) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+Status: **in progress** (2026-09-19: items 1-6 in part; item 7 done) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation C6 (Self Model volatile), V3 (four session models, no identity contra
 Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/competence.py`, `contracts/household.py`, `contracts/places.py`, `contracts/home/policy.py`, `voice/speakers.py` (the speaker book), `voice/session.py` (`_room`, bystander), `curiosity/sharing.py`, `persona/sharing.py`, `execution/vision.py` (the announce step), `kernel/scheduler.py` (reminders). Decide with the creator whether a phone channel (Telegram) is the owner's "ask" path for tier 3; default yes.
 
 ## Action items
+
+Done 2026-09-19 (item 4, in part): `contracts/people.py` and the `people` facet -- one `Person` per household member with their identities across channels, a role, and one memory namespace; seeded from the household, stored as `people.json`, resolved by identity with `unknown` as the default. Still open in item 4: resolution at every channel edge (the channels still use `channels.person_for`), the `people_*` tools through Guardian, and folding in the speaker book, the allow-lists and `persona/user_model.py`.
 
 Done 2026-09-19 (item 7): `world.home.situation_changed` is published when a situation fact flips (only on a change), and Orchestration appends it to every open task session as a user turn. A chat turn is left alone.
 
