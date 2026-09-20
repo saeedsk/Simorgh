@@ -107,21 +107,41 @@ been connected to each other.
 
 ## Where a turn's seconds go
 
-Measured from the moment a **person** started speaking, not from the
-percept -- a percept exists only once the listening path is done, so
-measuring from it hides the part with stage 3's two-second budget in
-it, and reported 0.07 s for everything.
+Corrected twice, and the corrections are the interesting part.
 
-| segment | budget | floor provider |
-|---|---|---|
-| hear | 2.0 s | **2.84 s** (over) |
-| think | 1.5 s | ~0.08 s |
-| first_audio | 2.5 s | within |
-| reply | 8.0 s | within |
+Measuring from the percept reported 0.07 s for everything, because a
+percept exists only once the listening path is already done. So I
+measured from the moment the person started speaking instead -- and
+that charged every segment with however long the sentence took to
+say. A three-second question broke a two-second budget before Sim
+had done anything at all, every turn of every scenario read "over",
+and "hear: 2.84 s, the bottleneck" went into the previous version of
+this document. A number that cannot be improved is not a
+measurement.
 
-`hear` is the real figure and the bottleneck, and the floor provider
-flatters `think` beyond any use. The improvement stage 11 item 8 asks
-for is owed against this table.
+Every segment is now measured from the moment the person **stopped**
+speaking, which is what a household actually waits, with the
+sentence on its own row. Six spoken beats, floor provider:
+
+| segment | budget | p50 | p95 | over |
+|---|---|---|---|---|
+| hear | 2.0 s | 0.26 s | 0.38 s | 0 |
+| think | 1.5 s | 0.33 s | 0.45 s | 0 |
+| first_audio | 2.5 s | 0.34 s | 0.46 s | 0 |
+| reply | 8.0 s | 0.34 s | 0.46 s | 0 |
+| (the sentence itself) | - | 2.54 s | 3.39 s | - |
+
+Nothing is over budget here, and the floor provider flatters `think`
+beyond any use -- a real bottleneck measurement needs a paid run,
+which is what item 8's improvement is owed against.
+
+**A dead field found while doing it.** Every final `voice.transcript`
+published `"seconds": 0.0`, hard-coded, while the partial before it
+carried the real 1.51 s. The World Model reads that field to learn
+how fast somebody usually talks -- one of the three signals behind a
+companion check-in -- and keeps a reading only when it is above
+zero. So the pace signal has never once fired in the live system. It
+is computed from the VAD's own marks now.
 
 ## The bugs the simulator found in its own harness
 

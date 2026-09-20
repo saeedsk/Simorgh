@@ -51,6 +51,23 @@ _END = object()
 _PREROLL_FRAMES = 40
 
 
+def _spoken_seconds(clock) -> float:
+    """How long the person spoke for, from the VAD's own two marks.
+
+    Every final transcript published a hard-coded `0.0` here. The
+    field is not decoration: the World Model reads it to learn how
+    fast somebody usually talks, which is one of the three signals
+    behind a companion check-in (stage 10 item 2), and it only keeps
+    a reading when `seconds > 0`. So the pace signal has never once
+    fired in the live system -- found while timing the household
+    simulator, where a partial carried 1.51 s and the final that
+    followed it carried nothing (2026-09-20).
+    """
+    if clock.speech_end and clock.speech_start and clock.speech_end > clock.speech_start:
+        return round(clock.speech_end - clock.speech_start, 3)
+    return 0.0
+
+
 @dataclass
 class TurnClock:
     turn_id: int
@@ -1108,7 +1125,7 @@ class VoiceSession:
             scores = self._speakers.scores(vector) if vector is not None else []
             line = ", ".join(f"{n} {sc:.2f}" for n, sc in scores[:4]) or "nobody is enrolled"
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
-                "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
+                "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
                 "device": self._config.device, "turn": turn_id, **who, "speaker_note": f"scores: {line}"})
             said = f"That sounded like {speaker}." if speaker else "I do not know that voice."
             await self._say_aside(f"say-{turn_id}", f"{said} Scores: {line}.")
@@ -1116,7 +1133,7 @@ class VoiceSession:
             await self._announce(self.turns.state)
             return
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
-            "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
+            "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
             "device": self._config.device, "session_id": session_id, "turn": turn_id, **who})
         # Two people talking to each other: Sim listens and keeps the
         # thread, but does not ask the model and does not speak, unless
@@ -1131,7 +1148,7 @@ class VoiceSession:
         if recents and (echoes_recent(text, recents) if in_exchange_now
                         else (self._pipeline.last_said and is_echo(text, self._pipeline.last_said))):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
-                "text": text, "confidence": clock.confidence, "seconds": 0.0, "engine": clock.engine_stt,
+                "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
                 "device": self._config.device, "session_id": session_id, "echo": True, "turn": turn_id})
             self.turns.state = LISTENING
             await self._announce(self.turns.state)

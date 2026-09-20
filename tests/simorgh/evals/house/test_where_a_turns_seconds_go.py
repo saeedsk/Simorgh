@@ -106,3 +106,50 @@ class MeasuredFromWhenSomebodySpoke(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpeakingIsNotWaiting(unittest.TestCase):
+    """Every segment is measured from the moment the person STOPPED.
+
+    Measured from the start, each one carried however long the
+    sentence took to say: a three-second question broke a two-second
+    budget before Sim had done anything, and the table read "over" on
+    every turn of every scenario -- which is a number nobody can
+    improve and therefore not a measurement (2026-09-20). It is also
+    how "hear: 2.84 s, the bottleneck" got written into a findings
+    document; the real figure was a third of a second.
+    """
+
+    def _record(self, *, spoke_for: float, think_at: float) -> tuple:
+        from simorgh.contracts.envelope import Message
+
+        record = Record()
+        at = record.somebody_spoke("Mara", "Sim, what is on this evening?", in_the_room=True)
+        # The transcript the listening path publishes, carrying how
+        # long the person spoke for.
+        record.saw(Message.new("voice.transcript", source="voice",
+                               payload={"text": "Sim, what is on this evening?", "seconds": spoke_for,
+                                        "device": "fake", "confidence": 0.9, "engine": "scripted"}))
+        record.saw(Message.new("percept.text.received", source="voice",
+                               payload={"text": "hello", "channel": "voice"}))
+        record.saw(Message.new("cognition.think", source="orchestration", payload={"messages": []}))
+        return record, at, think_at
+
+    def test_the_sentence_itself_is_not_charged_to_any_segment(self):
+        record, _at, _ = self._record(spoke_for=2.5, think_at=0.0)
+        table = from_record(record)
+        turn = table.turns[0]
+        self.assertAlmostEqual(turn.spoke_for, 2.5)
+        # Everything happened in the same instant here, so once the
+        # speaking is taken out, every segment is zero rather than 2.5.
+        for name in ("hear", "think", "first_audio", "reply"):
+            value = getattr(turn, name)
+            if value is not None:
+                self.assertLess(value, 0.5, f"{name} is still carrying the sentence")
+        self.assertEqual(turn.over(), [])
+
+    def test_a_transcript_without_a_duration_charges_nothing_extra(self):
+        record, _at, _ = self._record(spoke_for=0.0, think_at=0.0)
+        turn = from_record(record).turns[0]
+        self.assertIsNone(turn.spoke_for)
+        self.assertIsNotNone(turn.hear)

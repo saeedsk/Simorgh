@@ -31,14 +31,29 @@ class Turn:
     """One turn, decomposed."""
 
     said: str
-    #: Somebody started speaking -> Sim understood them. VAD, the
-    #: recogniser and the speaker book, which is stage 3's 2 s STT
-    #: budget and is invisible from the bus alone: a percept appears
-    #: only once all three are done.
+    #: Somebody STOPPED speaking -> Sim understood them. VAD's
+    #: end-of-speech wait, the recogniser and the speaker book, which
+    #: is stage 3's 2 s budget and is invisible from the bus alone: a
+    #: percept appears only once all three are done.
+    #:
+    #: Measured from the end, not the start. From the start it
+    #: included however long the person talked for, so a three-second
+    #: sentence was over a two-second budget before Sim had done
+    #: anything at all, and every turn of every scenario read "over"
+    #: -- a number that cannot be improved is not a measurement
+    #: (2026-09-20). `spoke_for` keeps the duration beside it, since
+    #: what a person actually waits is the two added together.
     hear: float | None = None
-    think: float | None = None          # spoke -> Sim asked the model
-    first_audio: float | None = None    # spoke -> first piece to synthesise
-    reply: float | None = None          # spoke -> turn.completed
+    #: How long the utterance itself lasted.
+    spoke_for: float | None = None
+    #: All three are measured from the moment the person STOPPED
+    #: speaking, for the same reason `hear` is: what a household
+    #: waits for is the pause after they finish, and a budget that
+    #: includes the length of the sentence can be broken by speaking
+    #: slowly.
+    think: float | None = None          # stopped -> Sim asked the model
+    first_audio: float | None = None    # stopped -> first piece to synthesise
+    reply: float | None = None          # stopped -> turn.completed
     in_the_room: bool = True
 
     def over(self) -> list[str]:
@@ -87,12 +102,20 @@ class Table:
                          f"{('-' if p50 is None else f'{p50:.2f}s'):>8} "
                          f"{('-' if p95 is None else f'{p95:.2f}s'):>8} "
                          f"{counts.get(name, 0):>6}")
+        spoke = self.percentile("spoke_for", 0.5)
+        if spoke is not None:
+            # Not a segment and not budgeted: the person's own speech.
+            # It belongs on the table because what somebody in the
+            # room actually waits is this plus everything above it.
+            lines.append(f"{'(spoke for)':12} {'-':>8} {spoke:>7.2f}s "
+                         f"{(self.percentile('spoke_for', 0.95) or 0.0):>7.2f}s {'-':>6}")
         if self.worst_segment:
             lines.append(f"\nthe segment that most often breaks its budget: {self.worst_segment}")
         return "\n".join(lines)
 
     def as_dict(self) -> dict:
         return {"turns": len(self.turns), "breaches": self.breaches(),
+                "spoke_for_p50": self.percentile("spoke_for", 0.5),
                 "worst_segment": self.worst_segment,
                 "p50": {k: self.percentile(k, 0.5) for k in BUDGETS_S},
                 "p95": {k: self.percentile(k, 0.95) for k in BUDGETS_S}}
@@ -112,16 +135,41 @@ def from_record(record) -> Table:
     for index, beat in enumerate(beats):
         until = beats[index + 1].at if index + 1 < len(beats) else None
         percept = record.first("percept.text.received", since=beat.at)
-        heard = (percept.at - beat.at) if percept is not None and (until is None or percept.at <= until) else None
+        spoke_for = _spoke_for(record, beat.at, until)
+        heard = None
+        if percept is not None and (until is None or percept.at <= until):
+            heard = max(0.0, percept.at - beat.at - (spoke_for or 0.0))
         table.add(Turn(
             said=beat.text[:60],
             hear=heard,
-            think=_gap(record, "cognition.think", beat.at, until),
-            first_audio=_first_said(record, beat.at, until),
-            reply=_gap(record, "turn.completed", beat.at, until),
+            spoke_for=spoke_for,
+            think=_less(_gap(record, "cognition.think", beat.at, until), spoke_for),
+            first_audio=_less(_first_said(record, beat.at, until), spoke_for),
+            reply=_less(_gap(record, "turn.completed", beat.at, until), spoke_for),
             in_the_room=beat.in_the_room,
         ))
     return table
+
+
+def _less(value: float | None, spoke_for: float | None) -> float | None:
+    """`value`, without the time the person spent speaking."""
+    if value is None:
+        return None
+    return max(0.0, value - (spoke_for or 0.0))
+
+
+def _spoke_for(record, since: float, until: float | None) -> float | None:
+    """How long the utterance lasted, from the transcript that carries
+    it. The listening path cannot start before the person stops."""
+    for message in record.of("voice.transcript", since=since):
+        payload = message.payload or {}
+        if payload.get("partial") or payload.get("echo"):
+            continue
+        if until is not None and message.at > until:
+            break
+        seconds = float(payload.get("seconds") or 0.0)
+        return seconds or None
+    return None
 
 
 def _gap(record, type_: str, since: float, until: float | None) -> float | None:
