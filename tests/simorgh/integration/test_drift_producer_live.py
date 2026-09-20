@@ -47,6 +47,7 @@ from simorgh.planning.config import Config as PlanningConfig
 from simorgh.planning.service import Service as PlanningService
 from simorgh.growth.monitors.config import Config as ReflectionConfig
 from simorgh.growth.monitors.service import Service as ReflectionService
+from simorgh.growth.service import Service as GrowthService
 
 STEPS_TEXT = (
     "1. RESEARCH :: is the current retry backoff strategy adequate\n"
@@ -61,7 +62,12 @@ def _patched_build_factories(planning_config: PlanningConfig, reflection_config:
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl, guardian_config=guardian_config)
         factories = {name: factories[name] for name in ("bus", "ledger")}
         factories["planning"] = lambda: PlanningService(planning_config)
-        factories["reflection"] = lambda: ReflectionService(reflection_config)
+        # `reflection` is a PART of `growth` since stage 8 item 1, not a
+        # subsystem: registering it by its old name started nothing at
+        # all and the boot assertion below looked for a service that
+        # could not exist. The composite takes its parts as arguments,
+        # so the other two are left at their defaults.
+        factories["growth"] = lambda: GrowthService(monitors=ReflectionService(reflection_config))
         return factories
 
     return _build

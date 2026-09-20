@@ -36,8 +36,13 @@ class DenialsBecomeTasksTestCase(unittest.IsolatedAsyncioTestCase):
         self.kernel = Kernel(
             LoadedConfig({
                 "runtime": {"data_dir": self._tmp.name},
-                # Three is enough to mean "again", and keeps the test short.
-                "reflection": {"denial_min_repeats": 3},
+                # Three is enough to mean "again", and keeps the test
+                # short. `[growth.monitors]` since the merge (stage 8
+                # item 1): under the old `[reflection]` the threshold
+                # silently stayed at five and three denials never
+                # tripped it, which is the shape of every config a
+                # rename leaves behind.
+                "growth": {"monitors": {"denial_min_repeats": 3}},
             }, None),
             secrets=EnvSecretStore({}),
         )

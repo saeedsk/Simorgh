@@ -296,6 +296,28 @@ def unread_keys(cls, section: dict, baseline: dict | None = None) -> list[str]:
     return unread
 
 
+#: Sections that moved when three subsystems became one (stage 8 item
+#: 1). A config written before the merge still parses, and its settings
+#: are now read from nowhere -- which is the silent half of a rename and
+#: exactly the bug this module exists to shout about. Reported by name,
+#: with where the keys went.
+RENAMED_SECTIONS: dict[str, str] = {
+    "learning": "growth.estimate",
+    "reflection": "growth.monitors",
+    "curiosity": "growth.explore",
+}
+
+
+def renamed_sections(config) -> list[str]:
+    """`"[curiosity] -> [growth.explore]"` for every pre-merge section
+    the config still carries. Nothing reads these any more."""
+    found = []
+    for old, new in sorted(RENAMED_SECTIONS.items()):
+        if config.section(old):
+            found.append(f"[{old}] -> [{new}]")
+    return found
+
+
 def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
     """Section names holding at least one key nothing reads.
 
@@ -391,6 +413,15 @@ def report(config, logger) -> list[str]:
             detail=f"[{name}] {', '.join(keys)} in simorgh.toml: nothing reads "
                    f"{'it' if len(keys) == 1 else 'them'} -- check the names against simorgh/{name}/config.py",
         )
+    for moved in renamed_sections(config):
+        # A rename that says nothing is the silent half of a move: the
+        # file still parses, the settings apply to nothing, and the
+        # person who wrote them has no way to find out (stage 8 item 1
+        # merged three subsystems into `growth` on 2026-09-20).
+        logger.warning(
+            "config.section_moved", detail=f"{moved} in simorgh.toml: the section moved when "
+                                           f"learning, reflection and curiosity became one "
+                                           f"subsystem; nothing reads the old name")
     for name, field in dead_fields(config):
         logger.warning(
             "config.field_had_no_effect", section=name, field=field,

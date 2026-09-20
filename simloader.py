@@ -533,11 +533,14 @@ CORE_TESTS = (
     "tests/simorgh/interface/test_parser.py", "tests/simorgh/interface/test_dispatch.py",
     "tests/simorgh/interface/test_command_table.py", "tests/simorgh/interface/test_service.py",
     "tests/simorgh/interface/test_tui.py",
-    "tests/simorgh/integration/test_kernel_boots_all_sixteen_subsystems.py",
-    "tests/simorgh/integration/test_guardian_execution_action_path.py",
-    "tests/simorgh/integration/test_cli_end_to_end.py",
-    "tests/simorgh/integration/test_flow_5_pause_resume_stop.py",
-    "tests/simorgh/integration/test_a_patch_lands_through_a_worktree.py",
+    # The WHOLE directory since 2026-09-20, not the five it used to be.
+    # Those five passed while twenty-seven others failed, and four
+    # blesses went out over a Guardian race that reported a successful
+    # action as denied and over an Initiative whose delivery paths had
+    # both been dead since stage 6. The argument for five was eight
+    # minutes; the directory is 41 seconds because it carries no `live`
+    # test, so the argument no longer holds.
+    "tests/simorgh/integration",
     "tests/simorgh/test_module_boundaries.py", "tests/simorgh/test_simloader.py",
 )
 CORE_IGNORE = tuple(f"tests/simorgh/domains/{domain}"

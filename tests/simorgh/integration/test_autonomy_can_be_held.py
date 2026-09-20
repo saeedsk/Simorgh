@@ -32,7 +32,11 @@ class AutonomyHoldTestCase(unittest.IsolatedAsyncioTestCase):
         kernel = Kernel(
             LoadedConfig({
                 "runtime": {"data_dir": self._tmp.name},
-                "curiosity": {"min_explore_interval_seconds": 0.0, **curiosity},
+                # `[growth.explore]` since the merge (stage 8 item 1);
+                # `[curiosity]` still parses and is read by nothing,
+                # which is what `configcheck.renamed_sections` now says
+                # out loud at boot.
+                "growth": {"explore": {"min_explore_interval_seconds": 0.0, **curiosity}},
             }, None),
             secrets=EnvSecretStore({}),
         )

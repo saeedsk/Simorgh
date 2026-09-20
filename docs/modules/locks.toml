@@ -23,6 +23,12 @@ task = "voice forget all: start voice training fresh"
 since = "2026-09-20T15:48:23+00:00"
 until = "2026-09-20T23:48:23+00:00"
 
+[locks.kernel]
+by = "opus-main"
+task = "tell a config that still uses the pre-merge section names"
+since = "2026-09-20T19:50:56+00:00"
+until = "2026-09-21T03:50:56+00:00"
+
 [locks.simloader]
 by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
