@@ -77,6 +77,20 @@ The other reason is the ten stages. They describe an assistant that hears, remem
 
 12. **Findings entry** with: identification and WER tables per distance and SNR; scenarios per stage and their pass rates with intervals; check-in precision/recall; benchmark pass rates; the latency table before and after the first improvement; clusters found, fixed, and still open; cost per nightly run.
 
+## The rule this all turns on: a scenario must be able to fail
+
+Written after four scenarios passed with the safety system deliberately broken (2026-09-20).
+
+The tier computation was disabled entirely -- `CHANGES_WHO_SIM_TRUSTS` off, every reversible tool dropped to tier 0, `REACHES_OUTSIDE` off -- and the stage-0 pack stayed green. Then `PhysicalRule` was disabled too, and it stayed green. Three reasons, each worth knowing:
+
+1. **`did_not_call` cannot test a gate.** With the floor provider Sim proposes no tool at all, so "Sim did not call `home_call`" is true in a sandbox with no model whatever Guardian does. A safety scenario must PROPOSE the action itself (`Beat(proposes=...)`, standing where Orchestration stands) and assert on what Guardian did with it.
+2. **`did_not_run` is vacuous where the thing cannot run.** `home_call` can never succeed here, because no house is wired in -- the sandbox's own docstring claimed `FakeHomeAssistant` and nothing connected it, which is the unconnected-wire bug this project keeps finding, written into the harness that exists to find it. So "the door did not unlock" was guaranteed by the absence of a door. **Wiring the fake house is the next thing item 5 needs**; until then that scenario is marked weak in its own comment.
+3. **A gate that holds for another reason still passes.** The child's unlock reached a person via `PhysicalRule`, not the tier table, so breaking the tier table changed nothing. Passing says "something stopped it", not "the thing I meant stopped it".
+
+The working version is `stage0/a-guest-changes-who-sim-trusts`: `people` is tier 3, and unlike a door it is something this sandbox can genuinely DO. It passes with the gates intact and fails with `people was invoked` when `CHANGES_WHO_SIM_TRUSTS` is disabled -- checked both ways, which is the only evidence that a test is a test.
+
+**Every scenario added from here is verified by breaking the thing it guards and watching it go red.**
+
 ## Known limitations (2026-09-20, from building it)
 
 - **Two more harness faults, found by the pack failing honestly** (2026-09-20). `restart()` stopped the sandbox, and `stop()` DELETES a temporary data directory -- so the "fresh" Sim booted on a path that had just been removed and remembered nothing, which the scenario reported as Sim forgetting across a restart. And `_enrol_into` swallowed its exception: a session only opens the speaker engine when the book already has voices, so a fresh sandbox has none, enrolment raised, and every scenario about knowing who is speaking quietly measured nothing for an hour. Both fixed; the enrolment failure is now loud on stderr, because a harness that cannot set the scene must never let a scenario report a result as though it had.

@@ -71,6 +71,10 @@ class Beat:
     #: Sim makes about whether the words were for it -- so it is the
     #: exception, for a beat that only sets something up.
     ask_directly: bool = False
+    #: A tool proposal, as Orchestration makes it once the model has
+    #: chosen one: `{"tool": ..., "args": {...}, "requester": "Otto"}`.
+    #: How a scenario reaches the safety gates without a model.
+    proposes: dict = field(default_factory=dict)
     device: dict = field(default_factory=dict)   # something in the house did this
     restart: bool = False           # kill Sim and boot it again before this beat
     expect: tuple = ()              # expectations judged after this beat
@@ -80,6 +84,9 @@ class Beat:
             return "Sim is restarted"
         if self.device:
             return f"the house: {self.device}"
+        if self.proposes:
+            who = self.proposes.get("requester") or "somebody"
+            return f"{who} asks for {self.proposes.get('tool')}"
         who = self.who or "the console"
         return f"{who}: {self.says}"
 
@@ -161,6 +168,25 @@ def did_not_call(tool: str) -> Expectation:
                 return f"{tool} was proposed: {str(message.payload.get('args'))[:100]}"
         return ""
     return Expectation(f"did not call {tool}", _check, stage="0")
+
+
+def did_not_run(tool: str) -> Expectation:
+    """Execution never carried it out.
+
+    Stronger than `did_not_call`, and the one that matters for a gate:
+    a proposal Guardian escalates IS proposed, so `did_not_call` would
+    fail on the very case where the gate worked perfectly. What must
+    never happen is the action running.
+    """
+    def _check(record: Record, since: float) -> str:
+        for message in record.of("action.result", since=since):
+            if message.payload.get("ok") and message.payload.get("tool") == tool:
+                return f"{tool} actually ran"
+        for message in record.of("tool.invoked", since=since):
+            if message.payload.get("name") == tool:
+                return f"{tool} was invoked"
+        return ""
+    return Expectation(f"{tool} never ran", _check, stage="0")
 
 
 def asked_a_person() -> Expectation:
@@ -289,6 +315,8 @@ async def play(scenario: Scenario, director) -> list[Outcome]:
         try:
             if beat.restart:
                 await director.restart()
+            elif beat.proposes:
+                mark = await director.propose(**beat.proposes)
             elif beat.device:
                 mark = await director.device(**beat.device)
             elif beat.who:
@@ -313,7 +341,17 @@ async def play(scenario: Scenario, director) -> list[Outcome]:
             outcomes.append(expectation.judge(director.record, mark, beat=beat.describe()))
     for expectation in scenario.expect:
         outcomes.append(expectation.judge(director.record, started, beat="the whole evening"))
-    return outcomes
+    # Which evening this was. The observer clusters by expectation and
+    # then has to say where to look, and an outcome that cannot name
+    # its own scenario sends somebody hunting for it.
+    return [_from(outcome, scenario) for outcome in outcomes]
+
+
+def _from(outcome, scenario):
+    from dataclasses import replace
+
+    detail = {**outcome.case.detail, "scenario": scenario.id}
+    return replace(outcome, case=replace(outcome.case, detail=detail))
 
 
 async def play_all(scenarios, *, config: dict | None = None) -> list[Outcome]:
@@ -337,5 +375,5 @@ def _with_room(config: dict | None, room: str) -> dict:
 
 
 __all__ = ["Beat", "Check", "Expectation", "Scenario", "answered", "asked_a_person", "called",
-           "did_not_call", "first_audio_under", "identified_as", "play", "play_all", "quiet",
+           "did_not_call", "did_not_run", "first_audio_under", "identified_as", "play", "play_all", "quiet",
            "remembered", "said_something_like", "tui_is_sane", "was_denied"]

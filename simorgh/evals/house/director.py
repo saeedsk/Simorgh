@@ -205,6 +205,35 @@ class Director:
             await self.settle(since=mark)
         return mark
 
+    async def propose(self, tool: str, args: dict | None = None, *, requester: str = "",
+                      channel: str = "voice", reversibility: str = "irreversible",
+                      wait: bool = True) -> float:
+        """Somebody asks Sim to do something, and Guardian decides.
+
+        Stands where Orchestration stands once the model has chosen a
+        tool. A scenario about the safety gates needs this: with the
+        floor provider Sim never proposes anything at all, so
+        `did_not_call("home_call")` passed even with the whole tier
+        computation deliberately broken (2026-09-20). An expectation
+        that cannot fail is a line of documentation pretending to be a
+        test.
+        """
+        import uuid
+
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        mark = self.now()
+        await self.sandbox.kernel.bus.publish(Message.new(
+            topics.ACTION_PROPOSED, source="orchestration",
+            payload={"action_id": uuid.uuid4().hex, "tool": tool, "args": dict(args or {}),
+                     "scope": {"paths": [], "network": False}, "reversibility": reversibility,
+                     "rationale": f"{requester or 'somebody'} asked", "proposed_by": "orchestration",
+                     "requester": requester, "requester_channel": channel}))
+        if wait:
+            await self.settle(since=mark, quiet_for=0.4)
+        return mark
+
     async def device(self, key: str, *, kind: str = "", state: str = "", area: str = "",
                      **detail) -> float:
         """Something in the house changed by itself: the TV started, a

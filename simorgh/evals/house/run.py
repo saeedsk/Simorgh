@@ -162,7 +162,7 @@ async def run_with_timing(scenario):
 def as_json(outcomes) -> str:
     return json.dumps([{"name": o.case.name, "kind": o.case.kind, "level": o.case.level,
                         "status": o.status, "seconds": o.seconds, "cost_usd": o.cost_usd,
-                        "why": o.why} for o in outcomes])
+                        "why": o.why, "detail": o.case.detail} for o in outcomes])
 
 
 __all__ = ["SCENARIO_TIMEOUT_S", "as_json", "run_one", "run_pack"]

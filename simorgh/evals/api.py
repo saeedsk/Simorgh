@@ -133,7 +133,7 @@ class Report:
             "failures": [{"case": o.case.name, "why": o.why} for o in self.failures()],
             "cases": [{"name": o.case.name, "kind": o.case.kind, "level": o.case.level,
                        "status": o.status, "seconds": o.seconds, "cost_usd": o.cost_usd,
-                       "why": o.why} for o in self.outcomes],
+                       "why": o.why, "detail": o.case.detail} for o in self.outcomes],
         }
 
 
@@ -145,7 +145,8 @@ def outcomes_from(rows: list[dict]) -> list[Outcome]:
     report has to survive a trip through JSON to be pooled.
     """
     return [Outcome(case=Case(name=str(row.get("name") or ""), kind=str(row.get("kind") or ""),
-                              level=str(row.get("level") or "")),
+                              level=str(row.get("level") or ""),
+                              detail=dict(row.get("detail") or {})),
                     status=str(row.get("status") or FAILED), seconds=float(row.get("seconds") or 0.0),
                     cost_usd=float(row.get("cost_usd") or 0.0), why=str(row.get("why") or ""))
             for row in rows]

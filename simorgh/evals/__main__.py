@@ -40,6 +40,7 @@ def main(argv: list[str]) -> int:
     house.add_argument("--only", default="", help="every scenario whose id starts with this")
     house.add_argument("--fast", action="store_true", help="the bless subset: one per stage, free, a few minutes")
     house.add_argument("--timing", action="store_true", help="with --one: where the turn's seconds went")
+    house.add_argument("--findings", default="", metavar="PATH", help="write clustered findings there (default docs/findings/<date>-house.md)")
     house.add_argument("--json", action="store_true")
     scen = sub.add_parser("scenario", help="the household script, probe by probe")
     scen.add_argument("--json", action="store_true")
@@ -81,6 +82,14 @@ def main(argv: list[str]) -> int:
             print(as_json(outcomes))
         else:
             print(_house_table(outcomes))
+        if args.findings or (not args.one and not args.json):
+            from datetime import date
+
+            from .house.observer import Findings, cluster, write
+
+            findings = Findings(outcomes=outcomes, clusters=cluster(outcomes))
+            where = args.findings or f"docs/findings/{date.today().isoformat()}-house.md"
+            print(f"\nfindings: {write(findings, where)}")
         return 0 if all(o.status != "failed" for o in outcomes) else 1
 
     if args.command == "scenario":
