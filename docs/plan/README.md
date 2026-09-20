@@ -18,6 +18,7 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 | 7 | [stage-7-long-horizon.md](stage-7-long-horizon.md) | Long horizon: sub-agents, plans, waits, checkpoint critic | 4, 6 | in progress (2026-09-19: items 2, 3, 5, 7, 9 done; 1, 4, 6, 8 in part) |
 | 8 | [stage-8-growth-merge-policy-loop.md](stage-8-growth-merge-policy-loop.md) | Growth merge and the policy loop | 4, 6, 7 | in progress (2026-09-19: items 3-4 in part) |
 | 9 | [stage-9-consolidation-and-breadth.md](stage-9-consolidation-and-breadth.md) | Consolidation and breadth (package moves, HA, Frigate, MCP-first) | all | not started |
+| 10 | [stage-10-companion.md](stage-10-companion.md) | Companion: consent, a per-person wellbeing estimate, check-ins and interest shares, the creator's psychology corpus | 6 | in progress (2026-09-20: items 1-3 first cut on a branch; 4-10 open) |
 
 **The first month, if nothing else** (evaluation section 12): stage 0 in full, then stage 2 (native tools) and stage 3 (streaming), which are the two changes the family will feel.
 
