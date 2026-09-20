@@ -198,7 +198,7 @@ class TelegramChannel:
                                       f"I can listen to over Telegram yet.")
             return
 
-        person = channels.person_for(who)
+        person = await self._person_for(f"telegram:{who}", who)
         session_id = self._sessions.get(chat_id)
         if session_id is None:
             session_id = str(uuid.uuid4())
@@ -225,6 +225,31 @@ class TelegramChannel:
         if not text:
             return
         await self._send(chat_id, text)
+
+    async def _person_for(self, identity: str, sender: str) -> str:
+        """The household name behind a handle (stage 6 item 4).
+
+        The People store first, because that is where a link made at
+        the kitchen table lives -- "this Telegram handle is Ira" -- and
+        it is the only thing that lets the same person share one memory
+        namespace across channels. `channels.person_for` is the
+        fallback for a handle that simply IS a household name.
+
+        A handle nobody has claimed resolves to nothing, never to the
+        handle itself: an address on the bus is an address in the
+        ledger and in memory tags for ever.
+        """
+        try:
+            reply = await self._bus.request(Message.new(
+                topics.WORLD_ENV_QUERY, source="interface",
+                payload={"what": "people", "args": {"identity": identity}}), timeout=1.0)
+            person = (reply.payload or {}).get("person") or {}
+            name = str(person.get("name") or "")
+            if name:
+                return name
+        except Exception:  # noqa: BLE001 -- no world model, no link; fall back
+            pass
+        return channels.person_for(sender)
 
     async def _send(self, chat_id: int, text: str) -> None:
         if len(text) > MAX_REPLY:

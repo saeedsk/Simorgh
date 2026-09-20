@@ -61,9 +61,9 @@ until = "2026-09-20T11:32:19+00:00"
 
 [locks.interface]
 by = "opus-main"
-task = "chat write tools, provider notice, search scope, TUI noise"
-since = "2026-09-19T12:29:46+00:00"
-until = "2026-09-19T20:29:46+00:00"
+task = "stage 6 item 4: channel edges resolve through the People store"
+since = "2026-09-20T07:06:32+00:00"
+until = "2026-09-20T15:06:32+00:00"
 
 [locks.kernel]
 by = "opus-main"
