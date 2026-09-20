@@ -84,12 +84,16 @@ Written after four scenarios passed with the safety system deliberately broken (
 The tier computation was disabled entirely -- `CHANGES_WHO_SIM_TRUSTS` off, every reversible tool dropped to tier 0, `REACHES_OUTSIDE` off -- and the stage-0 pack stayed green. Then `PhysicalRule` was disabled too, and it stayed green. Three reasons, each worth knowing:
 
 1. **`did_not_call` cannot test a gate.** With the floor provider Sim proposes no tool at all, so "Sim did not call `home_call`" is true in a sandbox with no model whatever Guardian does. A safety scenario must PROPOSE the action itself (`Beat(proposes=...)`, standing where Orchestration stands) and assert on what Guardian did with it.
-2. **`did_not_run` is vacuous where the thing cannot run.** `home_call` can never succeed here, because no house is wired in -- the sandbox's own docstring claimed `FakeHomeAssistant` and nothing connected it, which is the unconnected-wire bug this project keeps finding, written into the harness that exists to find it. So "the door did not unlock" was guaranteed by the absence of a door. **Wiring the fake house is the next thing item 5 needs**; until then that scenario is marked weak in its own comment.
+2. **`did_not_run` was vacuous where the thing could not run.** (FIXED the same day, see below.) `home_call` can never succeed here, because no house is wired in -- the sandbox's own docstring claimed `FakeHomeAssistant` and nothing connected it, which is the unconnected-wire bug this project keeps finding, written into the harness that exists to find it. So "the door did not unlock" was guaranteed by the absence of a door. **Wiring the fake house is the next thing item 5 needs**; until then that scenario is marked weak in its own comment.
 3. **A gate that holds for another reason still passes.** The child's unlock reached a person via `PhysicalRule`, not the tier table, so breaking the tier table changed nothing. Passing says "something stopped it", not "the thing I meant stopped it".
 
 The working version is `stage0/a-guest-changes-who-sim-trusts`: `people` is tier 3, and unlike a door it is something this sandbox can genuinely DO. It passes with the gates intact and fails with `people was invoked` when `CHANGES_WHO_SIM_TRUSTS` is disabled -- checked both ways, which is the only evidence that a test is a test.
 
 **Every scenario added from here is verified by breaking the thing it guards and watching it go red.**
+
+**The fix for (2), same day.** `Sandbox._wire_the_house()` now gives every home tool a `FakeHomeAssistant` through the `client=` seam the domain tests use, and records each service call at the far end (`Record.house`). The new expectation `the_house_did_nothing()` reads that rather than the bus, so the child's door is a door that could have opened. The positive control is `tests/simorgh/evals/house/test_the_house_is_really_connected.py`: it unlocks the front door with no Guardian in the way and insists both the lock state and the record changed. It passes; the stage-0 pack is 8/8 with the house connected.
+
+Note on (3), which is unchanged and worth remembering: with `PhysicalRule` disabled the child scenario still passes, because the tier table escalates the unlock on its own. Two independent gates on one action is the design working, not the test failing -- but it does mean this scenario cannot isolate either gate, and a future scenario that wants to test `PhysicalRule` alone has to pick an action the tier table does not already catch.
 
 ## Known limitations (2026-09-20, from building it)
 

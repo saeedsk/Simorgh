@@ -37,6 +37,16 @@ class Printed:
 
 
 @dataclass(frozen=True)
+class Acted:
+    """Something the house really did."""
+
+    service: str
+    targets: tuple[str, ...]
+    args: dict
+    at: float
+
+
+@dataclass(frozen=True)
 class Seen:
     """One message off the bus."""
 
@@ -71,9 +81,18 @@ class Record:
     printed: list[Printed] = field(default_factory=list)
     said: list[Said] = field(default_factory=list)
     spoke: list[Spoke] = field(default_factory=list)
+    house: list[Acted] = field(default_factory=list)
     started_at: float = field(default_factory=time.monotonic)
 
     # -- writing (the sandbox's side) -------------------------------------------
+    def house_did(self, service: str, targets, args: dict) -> None:
+        """The fake house actually carried something out. Not a bus
+        message: this is the far end of the wire, where a door really
+        opens, and an expectation about a gate wants to read THAT
+        rather than an approval it might have slipped past."""
+        self.house.append(Acted(service=service, targets=tuple(targets or ()),
+                                args=dict(args or {}), at=time.monotonic()))
+
     def saw(self, message) -> None:
         self.messages.append(Seen(type=message.type, payload=dict(message.payload or {}),
                                   at=time.monotonic(), source=str(getattr(message, "source", "") or "")))
@@ -138,4 +157,4 @@ class Record:
         return (pieces[0].at - since) if pieces else None
 
 
-__all__ = ["Printed", "Record", "Said", "Seen", "Spoke"]
+__all__ = ["Acted", "Printed", "Record", "Said", "Seen", "Spoke"]

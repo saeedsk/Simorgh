@@ -77,6 +77,8 @@ class Sandbox:
         self.record = Record()
         self._subs: list = []
         self._voice_fakes: dict = {}
+        #: The house the home tools reach, once booted: `FakeHomeAssistant`.
+        self.house = None
 
     # -- lifecycle ----------------------------------------------------------------
     async def start(self) -> "Sandbox":
@@ -98,6 +100,7 @@ class Sandbox:
             self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore({}))
             await self.kernel.boot()
         await self._watch()
+        self._wire_the_house()
         return self
 
     async def stop(self) -> None:
@@ -155,6 +158,43 @@ class Sandbox:
         if synthesiser is not None:
             _record_speech(synthesiser, self.record)
         assert topics  # the import documents that "#" is a bus pattern, not a topic
+
+    def _wire_the_house(self) -> None:
+        """Give the home tools a house they can really change.
+
+        Until 2026-09-20 this docstring claimed `FakeHomeAssistant` and
+        nothing connected it, so `home_call` could only ever fail --
+        which meant every safety scenario asserting "the door did not
+        unlock" passed with the whole tier system disabled. The
+        absence of a door is not a locked door. This is the
+        unconnected-wire bug written into the harness built to find it.
+
+        Injection is by the seam the tool already has: `_HomeTool`
+        takes `client=` and keeps it in `_given`, which the domain
+        tests use. Every call is recorded at the far end, so an
+        expectation can ask what the house DID rather than what
+        Guardian said.
+        """
+        from simorgh.contracts.home.fakes import FakeHomeAssistant
+
+        execution = self.service("execution")
+        if execution is None:
+            return
+        self.house = FakeHomeAssistant()
+        original = self.house.call
+
+        async def _watched(service: str, *, entity_ids=(), data=None, **rest):
+            # `**rest` on purpose: `home_call` passes `settle_s` too,
+            # and a wrapper that pins today's signature turns a new
+            # argument into a TypeError from inside the fake house.
+            result = await original(service, entity_ids=entity_ids, data=data, **rest)
+            self.record.house_did(service, entity_ids, data or {})
+            return result
+
+        self.house.call = _watched
+        for tool in execution._registry.values():  # noqa: SLF001 -- the domain tools' own seam
+            if getattr(tool, "name", "").startswith("home_"):
+                tool._given = self.house  # noqa: SLF001
 
     def _bus_backend(self):
         return self.kernel._bus_backend  # noqa: SLF001 -- the observer seam; see `_watch`
