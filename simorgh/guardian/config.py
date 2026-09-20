@@ -38,6 +38,22 @@ DEFAULT_PROTECTED_SUBJECTS: tuple[str, ...] = (
     # ask for and what it is told to do. A session that could edit its own
     # agent file could grant itself any tool.
     "agents/",
+    # What the growth loop would write when it adopts a policy
+    # (stage 8 item 5): the rules rendered into an agent body, and the
+    # suite that judges whether a policy helped. Sim may PROPOSE
+    # either -- that is the whole point of the loop -- but adoption
+    # goes through a person, so the loop can never quietly loosen the
+    # gate that measures it. `agents/` above is the third of these.
+    #
+    # NOT here, deliberately: `simorgh_skills/`. `apply_skill` writes
+    # there and is on `human_only_tools`, so every skill already
+    # reaches a person; protecting the directory would turn that ask
+    # into a flat denial and take away a capability Sim has today.
+    # Protection and human-only are different tools: one says "never",
+    # the other says "not without somebody". A skill is the second.
+    "rules/",
+    "simorgh/evals/",
+    ".claude/hooks",
     # The machine, not only the repository (2026-09-18 evaluation, S2).
     # Substrings, matched case-folded like everything above, so the
     # absolute (`/Users/x/.simorgh/secrets.toml`), home-relative

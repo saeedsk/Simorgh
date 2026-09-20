@@ -130,6 +130,7 @@ Protected subjects (`config.py:21-51`), matched case-folded as substrings of the
 - A token is minted only for an approval, over the exact `(action_id, tool, canonical args hash, expires_at)`, with `approval_ttl_s` lifetime.
 - A physical tool's class never comes from the proposer's label; a mislabelled `lock.unlock` reaches a person in every posture, and `SIMORGH_GUARDIAN_AUTO_APPROVE` does not reach the house.
 - `apply_skill` (default `human_only_tools`) always asks a person, trusted posture and the Kernel's auto-approve included.
+- The growth loop cannot loosen its own gate (stage 8 item 5): `rules/`, `agents/` and `simorgh/evals/` are protected subjects, so a policy adoption that would rewrite the rules an agent body is rendered from, the agent definitions, or the suite that judges whether the policy helped is denied at `protected`. `simorgh_skills/` is deliberately NOT protected -- `apply_skill` is human-only, so a skill already reaches a person, and protecting the directory would turn that ask into a flat denial and remove a capability Sim has today.
 - Posture only tightens on messages; it loosens only on `system.resume` or when a `locked` posture's `lock_ttl_s` expires. Every tighten is recorded on `guardian:trust`, even when the level does not change.
 - A denial at layer `protected`, `denylist` or `immunity` is remembered on `guardian:rejected` (the joined `code` and `command` payload, first 4,096 chars) and reloaded at boot.
 - A human's `yes` is refused while the system is paused or stopping; a second answer to the same prompt is ignored.
