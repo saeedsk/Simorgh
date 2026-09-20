@@ -29,6 +29,12 @@ from . import pressure as pressure_mod
 #: Agentic recall (stage 5 item 6): session-local, effect-free, so it never
 #: reaches Guardian. Offered by the agents that list it.
 MEMORY_SEARCH = "memory_search"
+
+#: Tools the session answers itself: no Execution tool exists for them and
+#: Guardian never sees them, because none of them has an effect. An agent
+#: file may list `memory_search`; `delegate`, `use_skill` and
+#: `recall_result` are added when the session has something to use them on.
+SESSION_LOCAL = frozenset({MEMORY_SEARCH, "delegate", "use_skill", pressure_mod.RECALL_TOOL})
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here

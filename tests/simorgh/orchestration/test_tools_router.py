@@ -735,7 +735,9 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
         from simorgh.execution.tools import builtin_tools
         from simorgh.orchestration.profiles import BY_KIND
 
-        registered = {tool.name for tool in builtin_tools(Config(shell=True, remote=True))}
+        from simorgh.orchestration.session import SESSION_LOCAL
+
+        registered = {tool.name for tool in builtin_tools(Config(shell=True, remote=True))} | SESSION_LOCAL
         for kind, profile in BY_KIND.items():
             for name in profile.tools:
                 with self.subTest(profile=kind, tool=name):
