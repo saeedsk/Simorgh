@@ -166,5 +166,5 @@ Three things this turned up, none of them about the models:
 - [x] Item 6: the companion arcs, five of them, with recall per stretch and two counts that are not rates. Item 7: the three benchmark suites score through the sandbox, and the short-term memory probe is a stage-5 scenario. Item 5: a scenario pack per stage, the companion arcs with precision/recall, the benchmarks scoring through the sandbox.
 - [ ] Items 8-9: the latency table and the TUI grammar as expectations.
 - [ ] Items 10-11: findings written and clustered from a run; `house-fast` in the bless.
-- [ ] Item 12: findings entry with the tables above.
+- [x] Item 12: `docs/findings/2026-09-20-house-pack.md` -- the falsifiability finding, the arc table, the benchmark scores, the latency table, the harness bugs, and what is still open.
 - [ ] `simorgh/evals/CONTRACT.md` describes the `house` suite, the director's surface, the scenario format and what the simulator never does.
