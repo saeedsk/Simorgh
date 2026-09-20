@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 import os
 import re
 import subprocess
@@ -25,6 +26,29 @@ import uuid
 from simorgh.contracts import topics
 
 from . import pressure as pressure_mod
+
+@dataclass(frozen=True)
+class _CheckpointProposal:
+    """The two fields `guardian.tiers.tier_of` reads, so the session can
+    ask how far an action reached without building a real Proposal."""
+
+    tool: str
+    args: dict
+    reversibility: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.reversibility:
+            from .tools import _TOOL_POLICY
+
+            object.__setattr__(self, "reversibility", _TOOL_POLICY.get(self.tool, ("irreversible", False))[0])
+
+
+def _args_hash(args: dict) -> str:
+    import hashlib
+    import json as _json
+
+    return hashlib.sha256(_json.dumps(args, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
 
 #: Agentic recall (stage 5 item 6): session-local, effect-free, so it never
 #: reaches Guardian. Offered by the agents that list it.
@@ -1556,6 +1580,40 @@ class SessionRunner:
         text = f"Helper {child_id} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
         return ok, text, text[:self._DETAIL_CHARS]
 
+    async def _checkpoint(self, session: Session, call: dict, summary: str) -> None:
+        """Record an irreversible action that succeeded (stage 7 item 7).
+
+        A crash between the commit and the step record used to leave a
+        resumed session no way to tell that the commit had happened, so it
+        could make it twice. The checkpoint is on the session's own stream,
+        keyed by the tool and a hash of its arguments, and
+        `resume.done_actions` reads it back.
+        """
+        from simorgh.contracts.session import CHECKPOINT, stream_name
+        from simorgh.contracts.tiers import tier_of
+
+        tool = str(call.get("tool") or "")
+        if not tool or self._ledger is None:
+            return
+        # Not the Guardian tier: that asks how far an action reaches, and
+        # `git_commit` is "reversible" there because a revert exists. The
+        # question here is different -- would doing it twice be visible? --
+        # so every tool that changes something is checkpointed, and only a
+        # read may be repeated freely.
+        proposal = _CheckpointProposal(tool, call.get("args") or {})
+        tier, _why = tier_of(proposal)
+        if proposal.reversibility == "read_only":
+            return
+        stream = stream_name(session.task_id)
+        try:
+            await self._ledger.append(stream, Event(
+                stream=stream, type=CHECKPOINT, ts=_epoch(self._clock), trace_id=session.trace or "",
+                causation_id=None,
+                payload={"tool": tool, "args_sha256": _args_hash(call.get("args") or {}),
+                         "summary": summary[:500], "tier": tier}))
+        except Exception as exc:  # noqa: BLE001 -- a missing checkpoint is a repeat, not a crash
+            self._log_transcript_failure(session, exc)
+
     def note_environment(self, fact: str, value: bool, *, people: dict | None = None) -> int:
         """Tell every open task session that the house changed (stage 6
         item 7); how many were told.
@@ -1797,6 +1855,13 @@ class SessionRunner:
             requester=str(getattr(session, "speaker", "") or ""),
             requester_channel=str(getattr(session, "channel", "") or ""),
         )
+        already = session.done_actions.get((str(call.get("tool") or ""), _args_hash(payload.get("args") or {})))
+        if already is not None:
+            # This exact call already succeeded before the crash that
+            # ended the last attempt (stage 7 item 7). Doing it again is
+            # a second commit, a second message, a second purchase.
+            text = f"{call.get('tool')} was already done before this attempt was interrupted: {already}"
+            return True, text, Detail(text, "")
         refused = chat_outside_workspace_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
         if refused:
             return False, refused, Detail(refused, "refused")
@@ -1901,6 +1966,8 @@ class SessionRunner:
             # The kind as Execution sent it; a result with none (an older
             # producer) is "failed" -- never guessed from its words.
             kind = "" if ok else str(result.payload.get("error_kind") or "failed")
+            if ok:
+                await self._checkpoint(session, call, full)
             return ok, self._bound_for_model(full), Detail(full[: self._DETAIL_CHARS], kind)
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")

@@ -21,7 +21,11 @@ STREAM_PREFIX = "session:"
 TURN_APPENDED = "session.turn.appended"
 COMPACTED = "session.compacted"
 SNAPSHOT = "session.snapshot"
-STREAM_EVENTS = (TURN_APPENDED, COMPACTED, SNAPSHOT)
+#: An irreversible action that succeeded (stage 7 item 7): the tool, a
+#: hash of its arguments and what it returned, so a session resumed after
+#: a crash knows it already happened and does not do it twice.
+CHECKPOINT = "session.checkpoint"
+STREAM_EVENTS = (TURN_APPENDED, COMPACTED, SNAPSHOT, CHECKPOINT)
 
 ROLES = ("system", "user", "assistant", "tool")
 STATES = ("open", "waiting", "closed")
@@ -171,7 +175,7 @@ def validate_pairs(turns: list[Turn]) -> list[str]:
 
 
 __all__ = [
-    "Block", "Budget", "COMPACTED", "Image", "ROLES", "SNAPSHOT", "STATES", "STREAM_EVENTS", "STREAM_PREFIX",
+    "Block", "Budget", "CHECKPOINT", "COMPACTED", "Image", "ROLES", "SNAPSHOT", "STATES", "STREAM_EVENTS", "STREAM_PREFIX",
     "Session", "TURN_APPENDED", "Text", "ToolResult", "ToolUse", "Turn", "block_from_dict", "session_from_dict",
     "session_to_dict", "stream_name", "turn_from_dict", "turn_to_dict", "validate_pairs", "validate_session",
     "validate_turn",

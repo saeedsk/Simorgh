@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: not started · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-19: item 7 done) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 8.1 rows planning and verification; section 9.2 (projects tha
 Stage 4's long-task suite (60 scripted turns, kill-and-resume) is the gate; record its numbers. Read `planning/decomposer.py` (`parse_steps`, the numbered-list regex), `planning/model.py`, `planning/service.py` (rollups, the DAG), `orchestration/session.py::_delegate`, `orchestration/api.py::Session`, `verification/` (plan review, trajectory), `kernel/scheduler.py`.
 
 ## Action items
+
+Done 2026-09-19 (item 7): `session.checkpoint` after every successful action that changes something, and `resume.done_actions` reading them back, so a resumed session answers an already-completed call with what it returned rather than repeating it. A read is never checkpointed.
 
 1. **The `Task` built-in.** *Lock `orchestration`.* `Task{agent, brief, isolation: fresh|fork, budget}` spawns a child `Session` on its own `session:<id>` stream, in-process (never via the task queue: the documented single-worker deadlock), depth ≤ `max_depth`, concurrency ≤ `max_children`; summary-only return bounded as a ToolResult; tier escalation on helper failure kept from `_delegate`; `delegate` becomes an alias. Acceptance: a research agent spawning two verify children concurrently, each on its own stream, parent context unchanged.
 2. **Agent definitions for the roles.** *Lock `orchestration`, `docs`.* `agents/planner.md`, `agents/verify.md`, `agents/skill-writer.md`, `agents/browser.md` (over `browse_page`'s snapshot-act loop, item 8). Acceptance: each loads and its tool allowlist is enforced.

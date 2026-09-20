@@ -115,6 +115,30 @@ def carried_note(attempts: list[dict]) -> str:
     return text[-_CARRY_CHARS:] if len(text) > _CARRY_CHARS else text
 
 
+async def done_actions(session_id: str, ledger) -> dict[tuple[str, str], str]:
+    """`(tool, args hash) -> what it returned` for the irreversible actions
+    this session already completed (stage 7 item 7).
+
+    The drill this exists for: SIGKILL between a successful `git_commit`
+    and the step record. The resumed session sees no commit in its steps,
+    makes the same one again, and the ledger then holds two commits for
+    one intention.
+    """
+    from simorgh.contracts.session import CHECKPOINT, stream_name
+
+    try:
+        events = await ledger.read(stream_name(session_id))
+    except Exception:  # noqa: BLE001 -- no stream, nothing done
+        return {}
+    out: dict[tuple[str, str], str] = {}
+    for event in events:
+        if event.type == CHECKPOINT:
+            payload = event.payload or {}
+            out[(str(payload.get("tool") or ""), str(payload.get("args_sha256") or ""))] = \
+                str(payload.get("summary") or "")
+    return out
+
+
 async def restore_session(session: Session, ledger) -> int:
     """Prepare `session` from its stream. Returns the number of steps
     this attempt already spent (non-zero only after a crash)."""
@@ -138,6 +162,7 @@ async def restore_session(session: Session, ledger) -> int:
 
         from .transcript import fold, hydrate
 
+        session.done_actions = await done_actions(session.task_id, ledger)
         try:
             messages = await hydrate(ledger, fold(await ledger.read(stream_name(session.task_id))))
         except Exception:  # noqa: BLE001 -- a missing or unreadable transcript: resume as before

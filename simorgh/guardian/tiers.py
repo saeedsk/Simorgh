@@ -27,45 +27,9 @@ is the failure a household actually has.
 
 from __future__ import annotations
 
+from simorgh.contracts.tiers import LOCAL_IRREVERSIBLE, REACHES_OUTSIDE, TIER_NAMES, tier_of  # noqa: F401
+
 from .api import Decision, Proposal
-
-#: Tools whose reach is not visible in their reversibility class.
-#: Everything here is tier 3: it leaves the house, tells somebody, spends
-#: money, or is loud in the night.
-REACHES_OUTSIDE: frozenset[str] = frozenset({
-    "notify",           # tells a person somewhere else, through a third party
-    "run_remote",       # a command on another machine
-    "mail_send",        # writes to somebody else, as the household
-    "cam_siren", "ring_siren",          # loud, outside, at any hour
-    "publish_page", "post_message",     # anything that puts words in public
-})
-
-#: Tier 2 by name: irreversible, but local and bounded -- the class the
-#: ordinary irreversible path already handles well.
-LOCAL_IRREVERSIBLE: frozenset[str] = frozenset({
-    "git_commit", "worktree_land", "apply_source_patch", "apply_skill", "replace_in_file",
-    "install_package", "run_shell", "run_script", "run_container", "git_revert", "git_discard",
-})
-
-TIER_NAMES = {0: "read", 1: "reversible", 2: "local irreversible", 3: "reaches outside"}
-
-
-def tier_of(proposal: Proposal, info=None, *, network: bool | None = None) -> tuple[int, str]:
-    """`(tier, why)` for one proposal."""
-    tool = proposal.tool or ""
-    if tool in REACHES_OUTSIDE:
-        return 3, f"{tool} reaches outside the house"
-    reversibility = getattr(info, "reversibility", None) or proposal.reversibility or "irreversible"
-    if reversibility == "read_only":
-        return 0, f"{tool} only reads"
-    if reversibility == "reversible":
-        return 1, f"{tool} can be undone"
-    if network is True and tool not in LOCAL_IRREVERSIBLE:
-        # An irreversible tool that talks to the network may be doing
-        # either; say so rather than guessing it is local.
-        return 3, f"{tool} is irreversible and uses the network"
-    return 2, f"{tool} is irreversible, locally"
-
 
 #: What each role may reach, at most. A role absent here is `unknown`.
 CEILING: dict[str, int] = {"owner": 3, "adult": 3, "child": 1, "guest": 1, "unknown": 0}
