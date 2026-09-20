@@ -1842,7 +1842,13 @@ class VoiceSession:
         objected to, and a tool nobody has timed yet says nothing,
         because an unknown duration is not evidence of a slow one.
         """
-        over = int(getattr(self._config, "filler_over_ms", 0) or 0)
+        # The typed field, not a `getattr` with its own fallback: the
+        # fallback here said 0 -- never fill -- while the default has
+        # said 2000 since the twenty-second silences of 2026-09-20, so
+        # a config object without the attribute would have silently
+        # switched the fillers back off. `test_config_is_read_typed`
+        # exists for exactly this and caught it in the full suite.
+        over = int(self._config.filler_over_ms or 0)
         if over <= 0 or recent_p95_ms < over or not self._config.backchannel:
             return
         turn_id = self.turns.turn_id
@@ -1881,7 +1887,7 @@ class VoiceSession:
         seconds behind the text is noise (the creator's screen,
         2026-09-13). The expressive lane when asked for it (`voice
         test`), for a long spoken answer, or always/off by setting."""
-        mode = str(getattr(self._config, "expressive_lane", "auto") or "auto")
+        mode = str(self._config.expressive_lane or "auto")
         if mode == "off":
             return "fast"
         if mode == "always" or explicit:
@@ -1892,7 +1898,7 @@ class VoiceSession:
         # spoken reply that took the slow lane held the speech lock for
         # 78 s and every reply behind it waited or was dropped (the
         # creator, 2026-09-13: "I didn't hear anything from you").
-        threshold = int(getattr(self._config, "expressive_min_chars", 0) or 0)
+        threshold = int(self._config.expressive_min_chars or 0)
         return "expressive" if threshold and len(text) >= threshold else "fast"
 
     def _maybe_hum(self, spoken_ms: int) -> None:
