@@ -691,7 +691,9 @@ def run_evals(repo: Path, notes: Path | None) -> tuple[bool, str]:
         say(f"the evals did not run ({exc}); the unit suite still decides", "warn")
         return True, "evals did not run"
     try:
-        report = json.loads(proc.stdout.strip().splitlines()[-1])
+        # The report is indented JSON, so the last LINE of it is "}".
+        text = proc.stdout
+        report = json.loads(text[text.index("{"):text.rindex("}") + 1])
     except (ValueError, IndexError):
         say("the evals produced no report; the unit suite still decides", "warn")
         return True, "evals produced no report"
