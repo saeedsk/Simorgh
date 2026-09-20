@@ -52,9 +52,12 @@ class Service:
         topics.LEARN_SELF_PATCH_APPLIED, topics.LEARN_SELF_PATCH_REVERTED, topics.LEARN_SKILL_ACQUIRED,
         topics.SYSTEM_STARTED, topics.COGNITION_PROVIDER_STATUS,
         topics.TASK_CREATED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
+        # The house (stage 6 item 3): the evidence the `home` facet folds.
+        topics.CAMERA_EVENT, topics.TV_STATE, topics.VOICE_TRANSCRIPT,
     )
     produces: tuple[str, ...] = (
         topics.WORLD_ENV_QUERY_REPLY, topics.SELF_SUMMARY_REPLY, topics.SELF_GAPS_REPLY, topics.SELF_MODEL_UPDATED,
+        topics.WORLD_HOME_SITUATION_CHANGED,
     )
 
     def __init__(self, config: Config | None = None) -> None:

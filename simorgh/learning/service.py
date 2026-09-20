@@ -32,6 +32,8 @@ class Service:
         topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
         topics.VERIFY_RESULT,
         topics.LEARN_STRATEGY_SUGGEST,
+        # What Sim believes about its own competence, asked for (stage 6 item 1).
+        topics.SELF_ESTIMATE_REQUEST,
     )
     produces = (
         topics.LEARN_OUTCOME_RECORDED, topics.LEARN_COMPETENCE_UPDATED,
