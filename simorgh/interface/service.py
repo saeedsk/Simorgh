@@ -249,6 +249,14 @@ class Service:
             self._live = LiveStatus(enabled=live_status_enabled(self.config.live_status))
         self._subs = [
             await ctx.bus.subscribe(topics.UI_NOTICE, self._on_notice),
+            # Every channel's words pass through here, which is why the
+            # naming belongs here. The console names its own turn and
+            # `voice.transcript` names a spoken one, so a Telegram,
+            # WhatsApp or HTTP turn had nobody to name it and rendered
+            # as `⏺ • ? · ? · (no description)` on the creator's screen
+            # -- for every message he has ever sent Sim from his phone
+            # (found by the simulator's TUI grammar, 2026-09-20).
+            await ctx.bus.subscribe(topics.PERCEPT_TEXT_RECEIVED, self._on_percept),
             # A reply as it is written (stage 3 items 2-3).
             await ctx.bus.subscribe(topics.SESSION_DELTA, self._on_session_delta),
             # `benchmark run` prints "progress is narrated as it goes",
@@ -1203,6 +1211,27 @@ class Service:
             # Otherwise the activity feed narrates the turn as
             # `? · ? · (no description)` (the creator's screen, 2026-09-10).
             self._book.on_created({"task_id": session_id, "kind": "chat", "origin": "voice", "description": text})
+
+    async def _on_percept(self, message: Message) -> None:
+        """Name a chat turn from the words themselves.
+
+        Last resort, not first: the console and the voice transcript
+        both know more (who is speaking, how it was heard) and get
+        there first. This only fills a gap, so a turn from a channel
+        nobody else narrates still reads as something a person can
+        recognise.
+        """
+        payload = message.payload or {}
+        session_id = str(payload.get("session_id") or "")
+        text = str(payload.get("text") or "").strip()
+        if not session_id or not text:
+            return
+        known = self._book.tasks.get(session_id)
+        if known is not None and known.description:
+            return      # somebody who knew more already named it
+        self._book.on_created({"task_id": session_id, "kind": "chat",
+                               "origin": str(payload.get("channel") or "human"),
+                               "description": text})
 
     async def _on_voice_spoken(self, message: Message) -> None:
         text = str(message.payload.get("text") or "").strip()

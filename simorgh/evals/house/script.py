@@ -221,20 +221,53 @@ def remembered(*words: str) -> Expectation:
     return Expectation(f"remembered {', '.join(words)}", _check, stage="5")
 
 
-def tui_is_sane() -> Expectation:
-    """Nothing on the terminal that should never be there (item 9 makes
-    this the full grammar; this is the half that is always true)."""
+#: What must never appear on the terminal, and why it is worse than
+#: ugly. Each of these has happened.
+_FORBIDDEN: tuple[tuple[str, str], ...] = (
+    ("Traceback (most recent call last)", "a stack trace: Sim failing in public"),
+    ("Loading weights", "a library's progress bar: Sim's screen is not pip's"),
+    ("it/s]", "a library's progress bar"),
+    ("? · ? ·", "a task nobody named -- every Telegram turn read like this until 2026-09-20"),
+    ("(no description)", "a task nobody named"),
+    ("{'", "a raw payload where a sentence should be"),
+    ('{"', "a raw payload where a sentence should be"),
+)
+
+#: A line that is only ever a placeholder.
+_EMPTY = ("🔊 sim:", "● ", "⏺", "⎿")
+
+
+def tui_is_sane(*, width: int = 200) -> Expectation:
+    """The terminal grammar (item 9).
+
+    Not a style check. Every rule here is something that reached the
+    creator's screen and told him nothing, or told him something that
+    was not true: a stack trace, a library's progress bar, a task
+    rendered as `? · ? · (no description)`, a raw payload, an empty
+    answer line, the same line twice, a line wider than any terminal.
+    """
     def _check(record: Record, since: float) -> str:
-        for line in record.printed_since(since):
-            text = line.text
-            if "Traceback (most recent call last)" in text:
-                return f"a stack trace reached the terminal: {text[:80]!r}"
-            if "Loading weights" in text or "it/s]" in text:
-                return f"a library's progress bar reached the terminal: {text[:60]!r}"
-            if text.strip() in ("🔊 sim:", "● "):
-                return "an empty line where an answer should be"
+        lines = [line.text for line in record.printed_since(since)]
+        plain = [_uncoloured(text) for text in lines]
+        for text in plain:
+            for needle, why in _FORBIDDEN:
+                if needle in text:
+                    return f"{why}: {text[:90]!r}"
+            if text.strip() in _EMPTY:
+                return f"an empty line where something should be: {text.strip()!r}"
+            if len(text) > width:
+                return f"a line {len(text)} characters wide (terminals are not): {text[:60]!r}"
+        for index in range(1, len(plain)):
+            if plain[index].strip() and plain[index] == plain[index - 1]:
+                return f"the same line twice in a row: {plain[index][:70]!r}"
         return ""
     return Expectation("the terminal is sane", _check, stage="9")
+
+
+def _uncoloured(text: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 
