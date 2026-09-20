@@ -15,7 +15,14 @@ BACKENDS = ("memory", "jsonl", "sqlite", "dynamodb")
 
 @dataclass(frozen=True)
 class Config:
-    backend: str = "jsonl"
+    # SQLite since stage 9 item 5 (2026-09-20), after its eval passed on a
+    # copy of the live ledger: 1,717 streams and 411 blobs round-tripped
+    # with nothing lost, boot 0.39 s against JSONL's 0.37 s, append p95
+    # 0.08 ms, a SIGKILL mid-append lost nothing acked. A JSONL ledger
+    # found where no database exists is imported first, once
+    # (`factory.make_backend` -> `migrate.ensure_migrated`); JSONL stays
+    # available as `backend = "jsonl"`.
+    backend: str = "sqlite"
     data_dir: str = "~/.simorgh/ledger"
     fsync: bool = True
     snapshot_every: int = 200

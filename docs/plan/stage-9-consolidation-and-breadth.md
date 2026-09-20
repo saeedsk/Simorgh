@@ -1,6 +1,6 @@
 # Stage 9 -- Consolidation and breadth (ongoing)
 
-Status: **in progress** (2026-09-20: items 1 and 9 done; `simorgh/execution/` 22.3k -> 11.0k lines) · Depends on: every earlier stage landed through the gate · Estimated: 4 weeks then ongoing · Modules touched: orchestration, cognition, interface, execution, ledger, voice; new packages `agent`, `llm`, `perception`, `channels`, `admin`, `domains`
+Status: **in progress** (2026-09-20: items 1, 5 and 9 done; `simorgh/execution/` 22.3k -> 11.0k lines; the ledger default is SQLite) · Depends on: every earlier stage landed through the gate · Estimated: 4 weeks then ongoing · Modules touched: orchestration, cognition, interface, execution, ledger, voice; new packages `agent`, `llm`, `perception`, `channels`, `admin`, `domains`
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation W10 (Execution is a 21.6k-line package holding six product domains ne
 Every move is a pure file move with shims, gated by the evals suite, old path deleted before the next move begins. Never combine a move with a behaviour change in one commit.
 
 ## Action items
+
+Done 2026-09-20 (item 5): `[ledger] backend = "sqlite"` is the default. Its eval is `python -m simorgh.evals run ledger` (free): migration round trip on a copy of the live ledger, boot time both backends, append latency, resume after SIGKILL. On the live copy: 1,717 streams / 12,460 events / 411 blobs with nothing lost, boot 0.39 s vs 0.37 s, append p95 0.08 ms, 50 acked before the kill and all 50 present after. `simorgh/ledger/migrate.py` + `tools/ledger_migrate.py` go both ways with seqs preserved (a corrupt line stays a gap; `append` would have renumbered). The flip carries its own safety net: the live `simorgh.toml` names no backend, so `make_backend` imports a JSONL ledger once when it opens SQLite where only JSONL exists -- without that the new default would have booted Sim against an empty database. Not migrated: snapshots (caches, rebuilt). Known gap: the SQLite blob table has no sweep yet.
 
 Done 2026-09-20 (item 1): `simorgh/execution/{knowledge,pim,security,home,energy,media}/` -> `simorgh/domains/`, registered through `extra_tools` (an entry may be a `(config, secrets=) -> list` factory, since the scoped secrets only exist at `start()`). Tool set unchanged (pinned together in `test_registers_exactly_the_scoped_set`); the boundary test holds because the two things the domains needed from Execution -- `looks_like_credential_path` and the pdf/doc/html converters -- moved to `contracts/pathnames.py` and `contracts/text/`; `simorgh/domains/` is not Guardian-protected and `simorgh/execution/` still is (pinned in `test_protected_subjects.py`). Execution: 22,265 -> 10,973 lines. Not done in this item: `execution/vision.py` and the camera watchers stay until item 4.
 

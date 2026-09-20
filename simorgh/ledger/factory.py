@@ -28,8 +28,13 @@ def make_backend(config: Config) -> LedgerBackend:
         return JsonlBackend(config.data_path, fsync=config.fsync)
     if config.backend == "sqlite":
         from .backends.sqlite import SqliteBackend
+        from .migrate import SQLITE_NAME, ensure_migrated
 
-        return SqliteBackend(config.data_path / "ledger.sqlite3")
+        # A JSONL ledger with no SQLite beside it is imported first, once
+        # (stage 9 item 5). Without this the default flipping to SQLite
+        # would have booted Sim against an empty database.
+        ensure_migrated(config.data_path)
+        return SqliteBackend(config.data_path / SQLITE_NAME)
     if config.backend == "dynamodb":
         from .backends.dynamodb import DynamoBackend, _boto3_adapters
 

@@ -34,3 +34,9 @@ by = "opus-main"
 task = "stage 9 item 1: domains out of execution"
 since = "2026-09-20T14:08:14+00:00"
 until = "2026-09-20T22:08:14+00:00"
+
+[locks.ledger]
+by = "opus-main"
+task = "stage 9 item 5: sqlite default, migration, eval"
+since = "2026-09-20T14:27:22+00:00"
+until = "2026-09-20T22:27:22+00:00"

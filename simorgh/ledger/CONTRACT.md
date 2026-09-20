@@ -4,7 +4,7 @@ One-line status: layer 0 · 2,798 lines · 14 test files · lock: `ledger` in do
 
 ## Purpose
 
-The ledger is the append-only record of everything that happened: named streams of immutable `Event`s with a per-stream monotonic `seq`, compare-and-swap appends (`expected_seq`), idempotency keys, snapshots for projections, content-addressed blobs for anything over the inline threshold, and retention. It owns storage semantics only; it does not decide who may write which stream (`streams.KNOWN_PREFIXES` is informational, `streams.py:16-18`) and does not interpret payloads. It must never renumber, reorder or silently drop an event (a corrupt line is a gap, not the end of the stream), never let a stream's head go backwards, and never accept a payload string over `blob_inline_threshold` that is not a `blob:` ref. The shaping decision: one `LedgerClient` layers validation, idempotency, tail delivery and counters over small mechanical backends (`memory`, `jsonl`, `sqlite`, `dynamodb`) behind `api.LedgerBackend`, and the Kernel hands the same client to every subsystem as `Context.ledger`. The live backend is `jsonl`: one file per stream plus sidecars.
+The ledger is the append-only record of everything that happened: named streams of immutable `Event`s with a per-stream monotonic `seq`, compare-and-swap appends (`expected_seq`), idempotency keys, snapshots for projections, content-addressed blobs for anything over the inline threshold, and retention. It owns storage semantics only; it does not decide who may write which stream (`streams.KNOWN_PREFIXES` is informational, `streams.py:16-18`) and does not interpret payloads. It must never renumber, reorder or silently drop an event (a corrupt line is a gap, not the end of the stream), never let a stream's head go backwards, and never accept a payload string over `blob_inline_threshold` that is not a `blob:` ref. The shaping decision: one `LedgerClient` layers validation, idempotency, tail delivery and counters over small mechanical backends (`memory`, `jsonl`, `sqlite`, `dynamodb`) behind `api.LedgerBackend`, and the Kernel hands the same client to every subsystem as `Context.ledger`. The live backend is `sqlite` since stage 9 item 5 (2026-09-20): one WAL database, `ledger.sqlite3`, under the ledger data dir. A JSONL ledger found beside it with no database yet is imported once at open (`migrate.ensure_migrated`), seqs preserved gaps included, and left in place; `backend = "jsonl"` still works, and `tools/ledger_migrate.py` moves a ledger either way.
 
 ## Files
 
@@ -14,9 +14,10 @@ The ledger is the append-only record of everything that happened: named streams 
 | `simorgh/ledger/api.py` | `LedgerBackend` protocol, `Projection` base, error types |
 | `simorgh/ledger/backends/__init__.py` | package docstring naming the four engines |
 | `simorgh/ledger/backends/dynamodb.py` | DynamoDB + S3 engine behind adapter protocols; unused live |
-| `simorgh/ledger/backends/jsonl.py` | live default: one JSONL file per stream, head marks, idempotency sidecars, blob dir, blob sweep |
+| `simorgh/ledger/backends/jsonl.py` | the previous default (until 2026-09-20): one JSONL file per stream, head marks, idempotency sidecars, blob dir, blob sweep |
 | `simorgh/ledger/backends/memory.py` | reference semantics for tests |
-| `simorgh/ledger/backends/sqlite.py` | WAL SQLite engine, CAS on `(stream, seq)`; unused live |
+| `simorgh/ledger/backends/sqlite.py` | the live default: WAL SQLite engine, CAS on `(stream, seq)`, heads table so a compacted stream never reissues a seq, blobs in-table |
+| `simorgh/ledger/migrate.py` | JSONL <-> SQLite at the file level, seqs preserved; `ensure_migrated` runs once when SQLite opens where only JSONL exists; `compare` says whether two agree |
 | `simorgh/ledger/blobs.py` | `blob:<sha256>` refs and the on-disk blob store |
 | `simorgh/ledger/client.py` | `LedgerClient`: validation, idempotency, CAS, `tail`, snapshots, blobs, counters |
 | `simorgh/ledger/compaction.py` | `DEFAULT_RETENTION`, `RetentionPolicy`, `run_compaction` |

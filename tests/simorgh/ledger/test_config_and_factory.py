@@ -11,7 +11,9 @@ from simorgh.ledger.factory import make_backend, make_ledger
 class TestConfig(unittest.TestCase):
     def test_defaults(self) -> None:
         cfg = Config.from_mapping(None, env={})
-        self.assertEqual(cfg.backend, "jsonl")
+        # SQLite since stage 9 item 5 (2026-09-20); its eval on a copy of
+        # the live ledger is `python -m simorgh.evals run ledger`.
+        self.assertEqual(cfg.backend, "sqlite")
         self.assertEqual(cfg.keep_tail, 50)
         self.assertTrue(cfg.fsync)
         self.assertFalse(cfg.allow_fallback)
