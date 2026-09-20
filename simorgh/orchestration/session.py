@@ -595,6 +595,11 @@ class SessionRunner:
         from simorgh.contracts.protocols import NULL_TELEMETRY
 
         self._telemetry = telemetry or NULL_TELEMETRY
+        #: What each tool has recently cost, in milliseconds, newest
+        #: last (stage 3 item 5). Kept here rather than asked of
+        #: Telemetry because it is read on the way OUT of a turn, where
+        #: a query is exactly the latency it is trying to cover.
+        self._tool_ms: dict[str, list[float]] = {}
         #: The sessions running right now, by task id, so something that
         #: happens in the house can reach the agent working in it
         #: (stage 6 item 7).
@@ -654,6 +659,31 @@ class SessionRunner:
         self._think_timeout_s = think_timeout_s
         self._action_timeout_s = action_timeout_s
         self._verify_timeout_s = verify_timeout_s
+
+    #: How many recent durations per tool are kept for the p95.
+    TOOL_MS_KEEP = 20
+
+    def recent_p95_ms(self, tool: str) -> int:
+        """This tool's recent 95th-percentile duration, or -1 (stage 3 item 5).
+
+        -1 means "nothing is known about it yet", which a consumer must
+        not read as fast: the first `web_fetch` after a boot is as slow
+        as every other one, and guessing zero would be the one time a
+        filler is most needed and least likely to fire.
+        """
+        samples = sorted(self._tool_ms.get(tool) or ())
+        if not samples:
+            return -1
+        index = min(len(samples) - 1, int(round(0.95 * (len(samples) - 1))))
+        return int(samples[index])
+
+    def _note_tool_ms(self, tool: str, ms: float) -> None:
+        """Remember what a call cost, keeping only the recent ones: a
+        tool that was slow a thousand calls ago is not slow now."""
+        kept = self._tool_ms.setdefault(tool, [])
+        kept.append(max(0.0, ms))
+        del kept[:-self.TOOL_MS_KEEP]
+
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
         """Run the session, and never leave a change behind that nobody
@@ -1997,6 +2027,17 @@ class SessionRunner:
         )
         await self._bus.publish(msg)
         tool_name = call.get("tool")
+        # Say a tool has STARTED, so anything covering the wait can
+        # start covering it now (stage 3 item 5). `tool.invoked` fires
+        # when the call finishes, which is too late to be useful to
+        # somebody standing in the kitchen.
+        await self._bus.publish(Message.new(
+            topics.TOOL_STARTED, source=self._bus.source, trace_id=session.trace,
+            payload={"name": str(tool_name or ""), "action_id": action_id,
+                     "recent_p95_ms": self.recent_p95_ms(str(tool_name or "")),
+                     "session_id": session.task_id, "channel": session.channel},
+        ))
+        started_at = time.monotonic()
         # A read-only tool (`web_fetch`, `run_python_sandboxed`, ...)
         # never reports a `file_write`/`file_create` side effect, so
         # `session.uncommitted` has nothing at stake in giving up on it
@@ -2025,6 +2066,7 @@ class SessionRunner:
             through=(topics.ACTION_NEEDS_HUMAN,) if waits_for_person else (),
             through_timeout=_HUMAN_ANSWER_WAIT_S + _ACTION_TIMEOUTS.get(tool_name, self._action_timeout_s),
         )
+        self._note_tool_ms(str(tool_name or ""), (time.monotonic() - started_at) * 1000.0)
         if result is None:
             if cancel_check is not None and cancel_check():
                 text = f"{tool_name}: cancelled while waiting for a response"

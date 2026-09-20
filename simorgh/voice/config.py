@@ -199,6 +199,13 @@ class Config:
     # this is not for me".
     conversation_window_s: float = 180.0
     still_after_s: float = 20.0
+    # A tool whose recent p95 is over this says so out loud while it runs
+    # (stage 3 item 5): "let me look", once per turn. The wait a person
+    # actually sits through is the tool, not the model, and a six-second
+    # `web_fetch` with nothing said over it is a dead line. 0 turns it
+    # off. A tool nobody has timed yet never triggers it -- an unknown
+    # duration is not evidence of a slow one.
+    filler_over_ms: int = 2000
     # A listener's "uh-huh" under the person, at half volume, when
     # they pause mid-story (voice/delivery.py "hum"): only once they have
     # been talking `hum_after_ms`, at a pause that is not the end of a

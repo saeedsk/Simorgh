@@ -1,0 +1,36 @@
+{
+  "$id": "https://simorgh.local/schema/tool.started.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `tool.started` (catalog v1).",
+  "properties": {
+    "action_id": {
+      "type": "string"
+    },
+    "channel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "recent_p95_ms": {
+      "type": "integer"
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "action_id",
+    "recent_p95_ms"
+  ],
+  "title": "tool.started",
+  "type": "object"
+}

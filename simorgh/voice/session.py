@@ -349,6 +349,9 @@ class VoiceSession:
         self._talking_with: dict[str, float] = {}   # speaker -> when Sim last answered them
         self._ack_task: asyncio.Task | None = None
         self._still_task: asyncio.Task | None = None
+        #: Turns that have already had a "let me look" (stage 3 item 5):
+        #: one per turn, however many slow tools the turn runs.
+        self._filled: set[int] = set()
         self._last_user_text = ""
         self._stop: asyncio.Event | None = None
         # Set whenever a candidate turn settles (discarded, or asked), so
@@ -439,6 +442,11 @@ class VoiceSession:
         """`voice on`: listen, answer, listen again, until told to stop."""
         self._stop = stop
         self._vad = self._build_vad()
+        # Cover a slow tool out loud while it runs (stage 3 item 5). Set
+        # here and cleared in `_teardown`: the pipeline outlives one
+        # session, and a stale handler would speak for a session that
+        # has stopped listening.
+        self._pipeline.on_tool_started = self._on_tool_started
         self.turns.start()
         try:
             self.stats.warmup_seconds = await self._tts.warmup()
@@ -463,6 +471,7 @@ class VoiceSession:
             await self._teardown()
 
     async def _teardown(self) -> None:
+        self._pipeline.on_tool_started = None
         # A chat still running for a turn nobody will hear is stopped too.
         with contextlib.suppress(Exception):
             await self._cancel_outstanding(before=10**9)
@@ -1805,6 +1814,27 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
             "quiet": True, "turn": turn_id, **({"reason": reason} if reason else {})})
+
+    async def _on_tool_started(self, tool: str, recent_p95_ms: int) -> None:
+        """A tool that is known to be slow has started (stage 3 item 5).
+
+        The wait a person in the kitchen sits through is usually the
+        tool, not the model: a `web_fetch` or a `run_tests` is seconds
+        of silence after Sim has already said "okay". So it says what it
+        is doing, once per turn -- twice would be the tic the creator
+        objected to, and a tool nobody has timed yet says nothing,
+        because an unknown duration is not evidence of a slow one.
+        """
+        over = int(getattr(self._config, "filler_over_ms", 0) or 0)
+        if over <= 0 or recent_p95_ms < over or not self._config.backchannel:
+            return
+        turn_id = self.turns.turn_id
+        if self.turns.state != THINKING or turn_id in self._answered or turn_id in self._filled:
+            return
+        self._filled.add(turn_id)
+        language = language_of(self._last_user_text or "")
+        if await self._say_aside(f"tool-{turn_id}-{tool}", self._backchannel.looking(language)):
+            self._last_aside_at = self._now()
 
     async def _still_thinking(self, turn_id: int, language: str) -> None:
         """`still_after_s` into a wait with no answer yet: one more short

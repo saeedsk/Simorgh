@@ -224,11 +224,26 @@ class Pipeline:
         self._subs.append(await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed))
         # A reply as it is written, for the turn that asked (stage 3 item 4).
         self._subs.append(await self._bus.subscribe(topics.SESSION_DELTA, self._on_session_delta))
+        # A tool that is known to be slow has started (stage 3 item 5):
+        # the live session covers the wait out loud if it wants to.
+        self._subs.append(await self._bus.subscribe(topics.TOOL_STARTED, self._on_tool_started))
         for topic in (topics.TASK_FAILED, topics.TASK_BLOCKED):
             self._subs.append(await self._bus.subscribe(topic, self._on_task_event))
         # What is on the TV, so the model knows what "next" and "pause"
         # are about (live 2026-09-13: a bare "next" got QUIET).
         self._subs.append(await self._bus.subscribe(topics.TV_STATE, self._on_tv_state))
+
+    #: Called with (tool name, recent p95 ms) when a tool starts. The
+    #: live voice session sets it; nothing is said without one, because
+    #: the pipeline has no idea whether a person is waiting.
+    on_tool_started = None
+
+    async def _on_tool_started(self, message) -> None:
+        handler = self.on_tool_started
+        if handler is None:
+            return
+        payload = message.payload or {}
+        await handler(str(payload.get("name") or ""), int(payload.get("recent_p95_ms") or -1))
 
     #: the last `ui.tv.state`: mode, url, title, native (execution/media/cast.py)
     tv_state: dict = {}

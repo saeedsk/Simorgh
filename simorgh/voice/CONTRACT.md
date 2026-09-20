@@ -58,6 +58,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:38-45`, pinned by `tes
 | `task.failed`, `task.blocked` | `messages/task.py` | pipeline.py:260 | Resolves a pending ask whose task id is its session id; a cancelled one is dropped silently |
 | `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | service.py:689 | Mood (valence, arousal) colours delivery |
 | `ui.tv.state` | `messages/ui.py::TvState` | pipeline.py:217 | Keeps what the TV is playing for the prompt's room line |
+| `tool.started` | `messages/tool.py::ToolStarted` | pipeline.py:229 | A slow tool (recent p95 over `[voice] filler_over_ms`) gets one short spoken line while it runs (stage 3 item 5) |
 
 ## Produces
 
@@ -144,6 +145,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the s
 | `unplaced_follows_conversation` | `True` | yes |
 | `conversation_window_s` | `180.0` | yes |
 | `still_after_s` | `20.0` | yes |
+| `filler_over_ms` | `2000` | yes | A tool whose recent p95 exceeds this is covered by one spoken line while it runs (stage 3 item 5); 0 turns it off |
 | `hum` | `True` | yes |
 | `hum_after_ms` | `6000` | yes |
 | `hum_gap_s` | `10.0` | yes |

@@ -25,9 +25,9 @@ until = "2026-09-19T20:29:46+00:00"
 
 [locks.contracts]
 by = "opus-main"
-task = "stage 2 items 7-8 (worktree agents)"
-since = "2026-09-19T13:01:52+00:00"
-until = "2026-09-19T21:01:52+00:00"
+task = "stage 3 item 5: tool.started"
+since = "2026-09-20T06:48:55+00:00"
+until = "2026-09-20T14:48:55+00:00"
 
 [locks.evals]
 by = "opus-main"
@@ -85,9 +85,9 @@ until = "2026-09-19T21:05:46+00:00"
 
 [locks.orchestration]
 by = "opus-main"
-task = "chat write tools, provider notice, search scope, TUI noise"
-since = "2026-09-19T12:29:45+00:00"
-until = "2026-09-19T20:29:45+00:00"
+task = "stage 3 items 5 and 7"
+since = "2026-09-20T06:48:19+00:00"
+until = "2026-09-20T14:48:19+00:00"
 
 [locks.planning]
 by = "opus-main"
@@ -115,6 +115,6 @@ until = "2026-09-20T14:25:39+00:00"
 
 [locks.voice]
 by = "opus-main"
-task = "panel styling for voice views"
-since = "2026-09-19T12:55:24+00:00"
-until = "2026-09-19T20:55:24+00:00"
+task = "stage 3 item 5: spoken filler on a slow tool"
+since = "2026-09-20T06:48:19+00:00"
+until = "2026-09-20T14:48:19+00:00"

@@ -136,6 +136,14 @@ TOOL_REGISTERED = "tool.registered"
 TOOL_PROBED = "tool.probed"
 TOOL_UNAVAILABLE = "tool.unavailable"
 TOOL_INVOKED = "tool.invoked"
+#: A tool call is about to go out (stage 3 item 5). `tool.invoked` fires
+#: when one FINISHES, which is exactly too late for anything that wants
+#: to cover the wait: Voice needs to know a slow tool has started so it
+#: can say "let me look" instead of leaving the room silent for six
+#: seconds. Published by Orchestration when it proposes the call, not by
+#: Execution when it runs it, because the Guardian round trip is part of
+#: the wait a person is sitting through.
+TOOL_STARTED = "tool.started"
 # --- 4.8 verify -----------------------------------------------------------
 VERIFY_REQUESTED = "verify.requested"
 VERIFY_RESULT = "verify.result"

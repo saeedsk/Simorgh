@@ -50,6 +50,7 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | Topic | Schema | Where | When |
 |---|---|---|---|
 | `action.proposed` | `messages/action.py::ActionProposed` | session.py:1637 | Every tool call, worktree open/land/close and `git_discard` |
+| `tool.started` | `messages/tool.py::ToolStarted` | session.py (beside each `action.proposed`) | That a call has gone out, with the tool's recent p95 in ms (`SessionRunner.recent_p95_ms`, -1 when untimed), so Voice can cover a slow one out loud (stage 3 item 5). `tool.invoked` fires when a call finishes, which is too late for that |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | session.py:1246 | Each think (request, `think_timeout_s`), plus progress notes and wrap-up |
 | `memory.retrieve` | `messages/memory.py::MemoryRetrieve` | context.py:272-288, 357 | Each think: matched, recent, per-person and working-window recalls (0.25 s) |
 | `world.env.query` | `messages/world.py::WorldEnvQuery` | context.py:369 | `Assembler.world_facet` (request) |

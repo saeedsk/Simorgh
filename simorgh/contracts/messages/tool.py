@@ -30,6 +30,16 @@ ToolProbed = define(t.TOOL_PROBED, [
     F("cost", Str),
     O("tools", List(Str)),
 ])
+ToolStarted = define(t.TOOL_STARTED, [
+    F("name", Str),
+    F("action_id", Str),
+    # What this tool has recently cost, in milliseconds, so a consumer
+    # does not have to keep its own timing table: -1 when nothing is
+    # known about it yet, which is not the same as "fast".
+    F("recent_p95_ms", Int),
+    O("session_id", Str),
+    O("channel", Str),
+])
 ToolInvoked = define(t.TOOL_INVOKED, [
     F("name", Str),
     F("action_id", Str),

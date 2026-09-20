@@ -76,6 +76,15 @@ STILL: dict[str, tuple[str, ...]] = {
     FARSI: ("هنوز دارم می‌بینم.", "یه لحظه دیگه.", "تقریباً تمومه.", "دارم چک می‌کنم."),
 }
 
+# Said when a tool that is known to be slow has just started (stage 3
+# item 5). Different from STILL on purpose: this one says what is
+# happening, because the person has already heard an acknowledgement and
+# a second "still on it" tells them nothing new.
+LOOKING: dict[str, tuple[str, ...]] = {
+    ENGLISH: ("Let me look.", "Looking that up.", "Checking now.", "Give me a moment for this one."),
+    FARSI: ("بذار ببینم.", "دارم نگاه می‌کنم.", "الان چک می‌کنم."),
+}
+
 # Sim's names, as a person says them and as whisper writes them.
 # "Shin" is how whisper wrote the creator's "Sim" on 2026-09-11.
 _NAMED = re.compile(r"\b(?:sim|simorgh|simurgh|seemorgh|cyim|sym|shin|seem|sims|asim)\b|سیم|سیمرغ", re.I)
@@ -193,6 +202,14 @@ class Backchannel:
         self._remember(choice)
         return choice
 
+    def looking(self, language: str = ENGLISH) -> str:
+        """A short line that says a slow tool is running (stage 3 item 5)."""
+        options = LOOKING.get(language) or LOOKING[ENGLISH]
+        fresh = [o for o in options if o not in self._recent] or list(options)
+        choice = self._random.choice(fresh)
+        self._remember(choice)
+        return choice
+
     def still(self, language: str = ENGLISH) -> str:
         options = STILL.get(language) or STILL[ENGLISH]
         fresh = [o for o in options if o not in self._recent] or list(options)
@@ -206,5 +223,5 @@ class Backchannel:
         del self._recent[: -self.RECENT]
 
 
-__all__ = ["Backchannel", "EMPATHY", "GREETING", "HEARD", "HUM", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
+__all__ = ["Backchannel", "EMPATHY", "GREETING", "HEARD", "HUM", "LOOKING", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
            "classify", "is_quiet", "strip_lead"]
