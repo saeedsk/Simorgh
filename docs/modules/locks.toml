@@ -5,32 +5,8 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.execution]
+[locks.ledger]
 by = "opus-main"
-task = "the speak tool Initiative has always proposed"
-since = "2026-09-20T15:37:52+00:00"
-until = "2026-09-20T23:37:52+00:00"
-
-[locks.guardian]
-by = "opus-main"
-task = "the claim dedupe cannot tell in-flight from abandoned"
-since = "2026-09-20T15:11:02+00:00"
-until = "2026-09-20T23:11:02+00:00"
-
-[locks.initiative]
-by = "opus-main"
-task = "notify args never matched its schema"
-since = "2026-09-20T15:37:25+00:00"
-until = "2026-09-20T23:37:25+00:00"
-
-[locks.shared]
-by = "opus-main"
-task = "integration fixtures after the growth merge"
-since = "2026-09-20T15:15:06+00:00"
-until = "2026-09-20T23:15:06+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "live: Sim deaf to Sam/Sima/Seam"
-since = "2026-09-20T15:25:16+00:00"
-until = "2026-09-20T23:25:16+00:00"
+task = "revert the sqlite default: first live boot spun"
+since = "2026-09-20T15:44:47+00:00"
+until = "2026-09-20T23:44:47+00:00"

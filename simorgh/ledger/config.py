@@ -15,14 +15,25 @@ BACKENDS = ("memory", "jsonl", "sqlite", "dynamodb")
 
 @dataclass(frozen=True)
 class Config:
-    # SQLite since stage 9 item 5 (2026-09-20), after its eval passed on a
-    # copy of the live ledger: 1,717 streams and 411 blobs round-tripped
-    # with nothing lost, boot 0.39 s against JSONL's 0.37 s, append p95
-    # 0.08 ms, a SIGKILL mid-append lost nothing acked. A JSONL ledger
-    # found where no database exists is imported first, once
-    # (`factory.make_backend` -> `migrate.ensure_migrated`); JSONL stays
-    # available as `backend = "jsonl"`.
-    backend: str = "sqlite"
+    # Back to JSONL on 2026-09-20, hours after the flip. The eval that
+    # justified SQLite (`python -m simorgh.evals run ledger`) measured a
+    # migration round trip, a boot, append latency and a SIGKILL -- and
+    # every one of those on a copy, with the boot running against an
+    # already-migrated directory and exiting 0.39 s later. It never ran
+    # a live session, which is the only thing that would have caught
+    # what happened on the first real boot: the migration finished
+    # (9.1 MB, 12,460 events), the process wrote for four minutes, and
+    # then the main thread spun at 100% CPU with no I/O and ignored
+    # SIGTERM until it was killed.
+    #
+    # The spin is not proven to be SQLite's doing -- it may be a busy
+    # loop that a slower backend merely exposed. But a default is a
+    # claim that something is ready, and this one was made on evidence
+    # that did not cover the live path. `backend = "sqlite"` still
+    # works, `ensure_migrated` still imports a JSONL ledger once, and
+    # `tools/ledger_migrate.py` still goes both ways; what is withdrawn
+    # is the claim.
+    backend: str = "jsonl"
     data_dir: str = "~/.simorgh/ledger"
     fsync: bool = True
     snapshot_every: int = 200

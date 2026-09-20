@@ -1,6 +1,6 @@
 # Stage 9 -- Consolidation and breadth (ongoing)
 
-Status: **in progress** (2026-09-20: items 1, 5 and 9 done; `simorgh/execution/` 22.3k -> 11.0k lines; the ledger default is SQLite) · Depends on: every earlier stage landed through the gate · Estimated: 4 weeks then ongoing · Modules touched: orchestration, cognition, interface, execution, ledger, voice; new packages `agent`, `llm`, `perception`, `channels`, `admin`, `domains`
+Status: **in progress** (2026-09-20: items 1 and 9 done; item 5's tooling done but the default REVERTED after the first live boot spun -- see below; `simorgh/execution/` 22.3k -> 11.0k lines; the ledger default is SQLite) · Depends on: every earlier stage landed through the gate · Estimated: 4 weeks then ongoing · Modules touched: orchestration, cognition, interface, execution, ledger, voice; new packages `agent`, `llm`, `perception`, `channels`, `admin`, `domains`
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation W10 (Execution is a 21.6k-line package holding six product domains ne
 Every move is a pure file move with shims, gated by the evals suite, old path deleted before the next move begins. Never combine a move with a behaviour change in one commit.
 
 ## Action items
+
+Item 5, 2026-09-20, **default reverted**: the migration, the CLI and the eval stand; the default does not. The first live boot on SQLite migrated cleanly (9.1 MB, 12,460 events), wrote for four minutes and then spun its main thread at 100% CPU with no I/O, ignoring SIGTERM. Whether SQLite caused the spin or merely exposed one is not established. Before trying again the eval needs a case that RUNS a session rather than booting and exiting. The original note follows.
 
 Done 2026-09-20 (item 5): `[ledger] backend = "sqlite"` is the default. Its eval is `python -m simorgh.evals run ledger` (free): migration round trip on a copy of the live ledger, boot time both backends, append latency, resume after SIGKILL. On the live copy: 1,717 streams / 12,460 events / 411 blobs with nothing lost, boot 0.39 s vs 0.37 s, append p95 0.08 ms, 50 acked before the kill and all 50 present after. `simorgh/ledger/migrate.py` + `tools/ledger_migrate.py` go both ways with seqs preserved (a corrupt line stays a gap; `append` would have renumbered). The flip carries its own safety net: the live `simorgh.toml` names no backend, so `make_backend` imports a JSONL ledger once when it opens SQLite where only JSONL exists -- without that the new default would have booted Sim against an empty database. Not migrated: snapshots (caches, rebuilt). Known gap: the SQLite blob table has no sweep yet.
 

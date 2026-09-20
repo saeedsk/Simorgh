@@ -11,9 +11,10 @@ from simorgh.ledger.factory import make_backend, make_ledger
 class TestConfig(unittest.TestCase):
     def test_defaults(self) -> None:
         cfg = Config.from_mapping(None, env={})
-        # SQLite since stage 9 item 5 (2026-09-20); its eval on a copy of
-        # the live ledger is `python -m simorgh.evals run ledger`.
-        self.assertEqual(cfg.backend, "sqlite")
+        # Back to jsonl the same day: the first live boot on sqlite spun
+        # the main thread at 100% CPU and had to be killed, and the eval
+        # that justified the flip never ran a live session.
+        self.assertEqual(cfg.backend, "jsonl")
         self.assertEqual(cfg.keep_tail, 50)
         self.assertTrue(cfg.fsync)
         self.assertFalse(cfg.allow_fallback)
