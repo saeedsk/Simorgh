@@ -147,3 +147,42 @@ between a commit and its step record).
 Two guards earned their keep again: the manifest test caught three subscriptions nobody had
 declared, and the module-boundary test caught Orchestration importing Guardian (the tier
 vocabulary moved to `contracts/tiers.py`, which both may read).
+
+## Stages 7, 8 and 9
+
+Stage 7 (long horizon), what landed and what it is for:
+
+| Item | State | The failure it addresses |
+|---|---|---|
+| 1 — helpers as agents | in part | a helper was always a research session; now it is any agent by name, and `max_children_concurrent` is read at last, so the cap is real rather than a number in a doc |
+| 2 — the helper roles | done | `planner`, `verify`, `skill-writer`, `browser` as agent files. The verifier is read-only (a checker that can change what it checks is not a checker), answers VERDICT/WHY, may say "not enough evidence", and is not itself verified |
+| 3 — the typed plan | done | the regex decomposer read two line shapes and ignored the rest, so a planner answering in prose produced nothing and nobody could tell that from "no steps" — 21 projects at 0/0. A plan is now JSON with six node kinds, acceptance criteria and edges, refused by name when wrong |
+| 4 — projects and children | in part | acceptance criteria now travel to the child session; a `WAITING` child keeps its project in progress |
+| 5 — WAITING | done | waiting by sleeping held a worker and a context for the length of the wait. A task now parks, its lease goes, and it returns on a time, an event or `task.wake` |
+| 6 — the checkpoint critic | in part | a long task wanders and nothing notices until the budget is gone. Every progress note is scored against the acceptance criteria on the cheap tier; two `drifting` verdicts, or one `blocked`, end the attempt for re-planning. An unreadable reply is `insufficient_evidence`, never approval |
+| 7 — checkpoints | done | SIGKILL between a successful `git_commit` and its step record made one intention into two commits. Every action that changes something writes `session.checkpoint`, and a resumed session answers that call with what it returned |
+| 8 — killing heavy steps | in part | a cancelled task left pytest compiling against a tree it was discarding: a thread cannot be cancelled and neither can the child inside it. Children now run in their own process group and the group is killed, with partial output kept |
+| 9 — standing intents | done | "tell me when the TV goes off" is a wait on the event, not a loop that costs a model call per lap and misses what happens between two of them |
+
+Stage 8: items 3-4 in part. `growth/diagnose.py` finds what keeps going wrong by
+counting facts already recorded (task type, failed check, denied tool, the critic's
+unmet item) instead of asking a model what patterns it sees; a cluster needs three
+members **and** a share above other task types' baseline, and a cluster whose cause
+nobody recorded is not a pattern. The model is asked only to phrase what the counting
+found. `growth/policies.py` keeps what was decided, with three refusals that matter:
+never measured, below the stored baseline, and fixed none of the failures it came from.
+Item 1's merge of learning, reflection and curiosity is **not** started; those
+subsystems still run.
+
+Stage 9: item 9 done — `docs/adding-capability.md`. A new capability arrives as an MCP
+server with its own schemas, configured by a person; a tool class inside the
+Guardian-protected `execution/` is for the machine itself, the safety mechanism, and
+things with no external service behind them.
+
+### What the guards caught, again
+
+Three real mistakes this stretch, all caught by tests that exist because of earlier
+ones: a subscription nobody declared (the manifest test), Orchestration importing
+Guardian (the module-boundary test — the tier vocabulary moved to `contracts/tiers.py`),
+and two new topics with no consumer (`plan.artifact`, which was deleted: a shape that
+nothing publishes should not pretend to be a topic).
