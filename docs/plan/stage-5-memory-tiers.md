@@ -1,6 +1,6 @@
 # Stage 5 -- Memory tiers
 
-Status: **in progress** (2026-09-19: items 1-3, 5 and 6 done, 4 and 8 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
+Status: **in progress** (2026-09-19: items 1-3, 5, 6 and 7 done, 4 and 8 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
 
 ## Outcome
 
@@ -27,6 +27,8 @@ Item 4 in part, 2026-09-19: the facts block. What holds is rendered before the c
 Done 2026-09-19: item 6. `memory_search` is a session-local built-in (no Guardian, it only reads), offered by chat, voice_chat and research; a spoken turn searches under the speaker's tag and gets facts before episodes.
 
 Done 2026-09-19: item 5. The turn's recall starts at `percept.text.received`, beside session setup, with a 1 s budget; the session takes the prefetched reply. A recall slower than the old 0.25 s blocking budget now arrives in time (`tests/simorgh/orchestration/test_speculative_recall.py`). Voice's own STT-partial prefetch is not done.
+
+Done 2026-09-19: item 7. Telegram and WhatsApp put the sender's household name on the percept (`channels.person_for`), so their turns are remembered under that person. A sender who matches no household member is unnamed rather than identified by handle or number, which must never reach the bus.
 
 Item 8 in part, 2026-09-19: pruning never forgets a record a live fact was read from. Not done: a score with access counts (nothing records them yet).
 

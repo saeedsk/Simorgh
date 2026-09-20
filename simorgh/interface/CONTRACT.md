@@ -156,6 +156,8 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 
 ## Invariants
 
+
+- A Telegram or WhatsApp turn carries `speaker` when the sender is a household member (`contracts.channels.person_for`, stage 5 item 7), so what is said there is remembered under that person. An address that matches nobody yields no `speaker`: a handle or phone number must never reach the bus.
 1. HTTP token boundary: with `SIM_API_TOKEN` set, every route except the reviewed open list (`_OPEN_ROUTES`: `/`, `/api/status`, `/tv`, `/dash`, `/remote`, `/api/wallpapers`, `/api/dash/data`, `/api/dash/state` GET, `/api/dash/keys`, `/api/dash/banner`, logo, favicon; prefix `/wallpapers/`) needs `Authorization: Bearer <token>` or `?token=`, compared in constant time (`httpapi.py:84-87, 604-620`).
 2. Camera routes are never open: `/api/dash/streams`, `/cameras/snap/` and `/tv/hls/` (and `/tv/media/`) require the token like any gated route (`httpapi.py:482, 548-589`).
 3. With no token configured, a gated route is served only on a loopback bind; a non-loopback bind serves only the open routes, and the Service logs `http_api_unauthenticated` at start (`httpapi.py:610-616`; `service.py:305-316`).

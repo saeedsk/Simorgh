@@ -157,7 +157,19 @@ class WhatItWillNotDoTestCase(unittest.IsolatedAsyncioTestCase):
         await ch._on_update(_update("hello", chat=424242, uid=7))
         payload = bus.published[0].payload
         self.assertNotIn("424242", str(payload))
-        self.assertEqual(set(payload) - {"channel", "text", "session_id"}, set())
+        # `speaker` is the household NAME (stage 5 item 7), so the turn is
+        # remembered under the person who wrote it; the handle stays here.
+        self.assertEqual(set(payload) - {"channel", "text", "session_id"}, {"speaker"})
+        self.assertEqual(payload["speaker"], "Saeed")
+        self.assertNotIn("7", str(payload.get("speaker")))
+
+    async def test_a_sender_who_is_not_in_the_household_is_unnamed(self):
+        """An allow-listed stranger is still allowed; their address is not
+        a name and must not become one on the bus."""
+        bus = _Bus()
+        ch = _Channel(bus, token="t", allowed=("neighbour",))
+        await ch._on_update(_update("hello", who="neighbour", chat=99, uid=7))
+        self.assertNotIn("speaker", bus.published[0].payload)
 
     async def test_a_voice_note_is_answered_not_swallowed(self):
         """Interface may not import Voice, so there is no transcriber to

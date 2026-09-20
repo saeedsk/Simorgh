@@ -103,6 +103,29 @@ def normalise_sender(sender: str) -> str:
     return text
 
 
+def person_for(sender: str) -> str:
+    """The household name behind an address, or "".
+
+    Every channel namespaces what it remembers by person (stage 5 item 7),
+    and the typed channels know who is writing: an allow-list is a list of
+    people. A handle that matches a household name IS that person.
+
+    An address that matches nobody yields nothing, not the address: a phone
+    number or a chat handle must never reach the bus (`test_no_phone_number
+    _ever_reaches_the_bus`), where it would be written to the ledger and
+    into memory tags for ever. An unclaimed sender is simply unnamed.
+    """
+    from .household import HOUSEHOLD
+
+    handle = normalise_sender(sender)
+    if not handle:
+        return ""
+    for member in HOUSEHOLD:
+        if normalise_sender(member.name) == handle:
+            return member.name
+    return ""
+
+
 def allowed(sender: str, allow: Iterable[str]) -> bool:
     """Whether `sender` may drive Sim over an external channel.
 
@@ -122,7 +145,7 @@ def allowed(sender: str, allow: Iterable[str]) -> bool:
     return who in {normalise_sender(a) for a in allow if str(a or "").strip()}
 
 
-__all__ = [
+__all__ = ["person_for", 
     "ALL", "API", "CHAT", "CLI", "COMMAND", "DISPLAY", "EXTERNAL", "LOCAL",
     "TELEGRAM", "VOICE", "WHATSAPP",
     "allowed", "display", "is_external", "is_known", "normalise_sender",

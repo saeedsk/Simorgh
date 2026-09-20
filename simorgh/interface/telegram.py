@@ -198,6 +198,7 @@ class TelegramChannel:
                                       f"I can listen to over Telegram yet.")
             return
 
+        person = channels.person_for(who)
         session_id = self._sessions.get(chat_id)
         if session_id is None:
             session_id = str(uuid.uuid4())
@@ -205,7 +206,10 @@ class TelegramChannel:
             self._chats[session_id] = chat_id
         await self._bus.publish(Message.new(
             topics.PERCEPT_TEXT_RECEIVED, source="interface",
-            payload={"channel": channels.TELEGRAM, "text": text, "session_id": session_id},
+            payload={"channel": channels.TELEGRAM, "text": text, "session_id": session_id,
+                     # Who wrote it (stage 5 item 7): this channel knows, and
+                     # without it the turn is remembered under nobody's name.
+                     **({"speaker": person} if person else {})},
             clock=self._clock,
         ))
         self._log("info", "telegram.received", chars=len(text))

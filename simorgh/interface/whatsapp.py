@@ -194,6 +194,7 @@ class WhatsAppChannel:
         if not text:
             return
 
+        person = channels.person_for(wa_id)
         session_id = self._sessions.get(wa_id)
         if session_id is None:
             session_id = str(uuid.uuid4())
@@ -201,7 +202,10 @@ class WhatsAppChannel:
             self._numbers[session_id] = wa_id
         await self._bus.publish(Message.new(
             topics.PERCEPT_TEXT_RECEIVED, source="interface",
-            payload={"channel": channels.WHATSAPP, "text": text, "session_id": session_id},
+            payload={"channel": channels.WHATSAPP, "text": text, "session_id": session_id,
+                     # Who wrote it (stage 5 item 7): this channel knows, and
+                     # without it the turn is remembered under nobody's name.
+                     **({"speaker": person} if person else {})},
             clock=self._clock,
         ))
         self._log("info", "whatsapp.received", chars=len(text))
