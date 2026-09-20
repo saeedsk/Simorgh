@@ -86,3 +86,42 @@ class Decay(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PresenceSaysWhetherItCouldTellWhoItWas(unittest.TestCase):
+    """Stage 6 item 5: Guardian will not let a voice approve anything
+    that reaches outside the house unless the speaker was actually
+    recognised. So presence has to carry that, not just a belief."""
+
+    def test_a_recognised_voice_is_verified(self):
+        home = HomeFacet(clock=lambda: 1000.0)
+        home.saw_person("Saeed", area="kitchen", strength=0.9, verified=True)
+        self.assertEqual(home.where("Saeed")[0], "kitchen")
+        self.assertTrue(home.verified("Saeed"))
+
+    def test_a_lean_is_not_verified(self):
+        home = HomeFacet(clock=lambda: 1000.0)
+        home.saw_person("Saeed", area="kitchen", strength=0.5)
+        self.assertTrue(home.where("Saeed")[1] > 0.0, "still evidence of presence")
+        self.assertFalse(home.verified("Saeed"), "but not of who it was")
+
+    def test_the_latest_evidence_wins_rather_than_the_best_ever(self):
+        """A person last heard as a guess is a guess, however sure the
+        identification was an hour ago."""
+        home = HomeFacet(clock=lambda: 1000.0)
+        home.saw_person("Saeed", area="kitchen", strength=0.9, verified=True)
+        home.saw_person("Saeed", area="kitchen", strength=0.5, verified=False)
+        self.assertFalse(home.verified("Saeed"))
+
+    def test_nowhere_in_particular_is_not_verified(self):
+        home = HomeFacet(clock=lambda: 1000.0)
+        self.assertFalse(home.verified("nobody"))
+
+    def test_the_query_reply_carries_it(self):
+        import asyncio
+
+        home = HomeFacet(clock=lambda: 1000.0)
+        home.saw_person("Ira", area="office", strength=0.9, verified=True)
+        reply = asyncio.run(home.get({"person": "Ira"}))
+        self.assertEqual(reply["area"], "office")
+        self.assertTrue(reply["verified"])

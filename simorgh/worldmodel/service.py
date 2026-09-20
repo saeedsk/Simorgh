@@ -227,8 +227,13 @@ class Service:
         area = str(p.get("room") or p.get("device") or "") or "here"
         # A confident identification is worth more than a lean; the belief
         # is evidence, not a vote.
-        strength = 0.9 if float(p.get("confidence") or 0.0) >= 0.6 else 0.5
-        self._home.saw_person(speaker, area=area, strength=strength)
+        confidence = float(p.get("confidence") or 0.0)
+        strength = 0.9 if confidence >= 0.6 else 0.5
+        # A lean is not an identification (stage 6 item 5): Guardian will
+        # not let a voice approve anything that reaches outside the house
+        # unless the speaker was actually recognised, and a 0.5 guess is
+        # exactly the case where a television can be mistaken for Saeed.
+        self._home.saw_person(speaker, area=area, strength=strength, verified=confidence >= 0.6)
         await self._announce_situation()
 
     async def _announce_situation(self) -> None:

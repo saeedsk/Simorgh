@@ -76,8 +76,14 @@ class HomeFacet:
     def __init__(self, *, clock=None) -> None:
         self._clock = clock or time.time
         self.entities: dict[str, Entity] = {}
-        # (person, area) -> (belief, when it was last updated)
-        self._presence: dict[tuple[str, str], tuple[float, float]] = {}
+        # (person, area) -> (belief, when it was last updated, was the
+        # evidence a *verified* identification). Verification is kept
+        # separately from belief because they answer different
+        # questions: how sure Sim is that somebody is here, and whether
+        # the thing that said so could tell one voice from another.
+        # Guardian needs both before a voice may unlock a door
+        # (stage 6 item 5).
+        self._presence: dict[tuple[str, str], tuple[float, float, bool]] = {}
         #: The situation as it was when `changes()` last looked.
         self._last_situation: dict[str, bool] = {}
 
@@ -92,16 +98,25 @@ class HomeFacet:
         self.entities[key] = entity
         return entity
 
-    def saw_person(self, person: str, *, area: str, strength: float = 1.0, at: float | None = None) -> None:
+    def saw_person(self, person: str, *, area: str, strength: float = 1.0, at: float | None = None,
+                   verified: bool = False) -> None:
         """Evidence that `person` is in `area`: a placed voice, a camera
         that recognised them, a phone on the network. `strength` is how
-        much the evidence is worth (a named voice more than a guess)."""
+        much the evidence is worth (a named voice more than a guess).
+
+        `verified` is a different claim: that whatever saw them could
+        actually tell them from somebody else -- a speaker match above
+        the bar, a face, a phone that is theirs -- rather than a lean.
+        It is the latest evidence's answer, not a high-water mark: a
+        person last heard as a guess is a guess, however sure the
+        identification was an hour ago.
+        """
         if not person:
             return
         now = at if at is not None else self._now()
-        current, since = self._presence.get((person, area), (0.0, now))
+        current, since, _was = self._presence.get((person, area), (0.0, now, False))
         belief = min(1.0, decayed(current, now - since) + max(0.0, min(1.0, strength)))
-        self._presence[(person, area)] = (belief, now)
+        self._presence[(person, area)] = (belief, now, bool(verified))
 
     # -- questions out --------------------------------------------------------------
     def presence(self, *, now: float | None = None) -> dict:
@@ -109,7 +124,7 @@ class HomeFacet:
         no evidence places anywhere right now."""
         now = self._now() if now is None else now
         out: dict[str, dict[str, float]] = {}
-        for (person, area), (belief, since) in self._presence.items():
+        for (person, area), (belief, since, _verified) in self._presence.items():
             value = decayed(belief, now - since)
             if value >= PRESENT_AT:
                 out.setdefault(person, {})[area] = round(value, 3)
@@ -125,6 +140,15 @@ class HomeFacet:
             return "unknown", 0.0
         area = max(areas, key=areas.get)
         return area, areas[area]
+
+    def verified(self, person: str, *, now: float | None = None) -> bool:
+        """Whether the evidence placing `person` where they most likely
+        are came from something that could tell them apart (stage 6
+        item 5). False when they are nowhere in particular."""
+        area, _belief = self.where(person, now=now)
+        if area == "unknown":
+            return False
+        return bool(self._presence.get((person, area), (0.0, 0.0, False))[2])
 
     def situation(self, *, now: float | None = None) -> dict:
         """The facts a decision actually turns on. Each is derived, and
@@ -194,7 +218,8 @@ class HomeFacet:
         person = str(args.get("person") or "")
         if person:
             area, belief = self.where(person, now=now)
-            return {"person": person, "area": area, "belief": belief}
+            return {"person": person, "area": area, "belief": belief,
+                    "verified": self.verified(person, now=now)}
         return {
             "entities": [e.as_dict(now) for e in sorted(self.entities.values(), key=lambda e: e.key)],
             "presence": self.presence(now=now),

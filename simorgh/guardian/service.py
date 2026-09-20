@@ -737,7 +737,9 @@ class Service:
         area = str(payload.get("area") or "unknown")
         if area == "unknown":
             return (0.0, False)   # somewhere unknown is not somewhere in the house
-        return (float(payload.get("belief") or 0.0), bool(payload.get("verified", True)))
+        # Absent means NOT verified. A world model that does not say
+        # whether it could tell one voice from another has not said yes.
+        return (float(payload.get("belief") or 0.0), bool(payload.get("verified", False)))
 
     def _rejected_similarity(self, code: str):
         return rule_defs.similarity(code, self._rejected_excerpts, self._config.immunity_similarity_threshold)
