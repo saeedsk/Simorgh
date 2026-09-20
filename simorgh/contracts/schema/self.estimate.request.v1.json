@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/self.estimate.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `self.estimate.request` (catalog v1).",
+  "properties": {
+    "strategy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_type"
+  ],
+  "title": "self.estimate.request",
+  "type": "object"
+}

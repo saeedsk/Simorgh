@@ -74,6 +74,8 @@ The six keys that belonged to the retired PatchPipeline (`max_draft_attempts`, `
 
 ## Invariants
 
+- `self.estimate.request` is answered from the same `learn:outcomes` projection as the strategy suggestion: a Beta posterior per task type (and per strategy), `Beta(1,1)` when nothing is recorded -- mean 0.5 with a wide spread, which means "no idea", not "half the time". A consumer that acts on the mean must read `samples` too (stage 6 items 1-2).
+
 - One `learn:outcomes` event per (task_id, terminal type, run index): the idempotency key is `{task_id}:{event_type}:{run}` (`outcomes.py:181`); a redelivered terminal message appends nothing and does not re-fold the table.
 - `CompetenceTable` after live `apply` equals a fresh `rebuild` over `learn:outcomes` (the property in `test_competence.py`).
 - A `task.completed` or `task.failed` whose task stream has no `created` event (task type `unknown`) records nothing and increments `skipped_unknown`.

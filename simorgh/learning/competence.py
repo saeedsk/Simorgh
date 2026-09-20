@@ -130,6 +130,44 @@ class CompetenceTable(_Projection):
         stats = self._by_type.get(task_type)
         return stats.n if stats is not None else 0
 
+    def posterior(self, task_type: str, *, strategy: str | None = None) -> tuple[float, float, int]:
+        """`(alpha, beta, samples)` for a task type, or one of its
+        strategies (stage 6 item 1).
+
+        Beta(1, 1) with nothing recorded -- a flat prior, which reads as
+        "no idea", not as "half the time". The counts are the weighted
+        successes and failures the outcomes already carry, so a posterior
+        is a view of the same projection rather than a second record of
+        the same facts.
+        """
+        stats = self._by_type.get(task_type)
+        if stats is None:
+            return 1.0, 1.0, 0
+        if strategy is not None:
+            per = stats.strategies.get(strategy)
+            if per is None:
+                return 1.0, 1.0, 0
+            return 1.0 + per.successes_w, 1.0 + max(0.0, per.n - per.successes_w), per.n
+        return 1.0 + stats.successes_w, 1.0 + max(0.0, stats.n - stats.successes_w), stats.n
+
+    def estimate(self, task_type: str, *, strategy: str | None = None) -> dict:
+        """What Sim believes about its own competence at something, in the
+        shape `self.estimate.reply` carries: the posterior mean, how much
+        it rests on, and the calibration when there is one."""
+        alpha, beta, samples = self.posterior(task_type, strategy=strategy)
+        mean = alpha / (alpha + beta)
+        # The variance of a Beta says how much the mean is worth: with two
+        # samples it is wide, and a consumer should not escalate on it.
+        variance = (alpha * beta) / (((alpha + beta) ** 2) * (alpha + beta + 1.0))
+        out = {"task_type": task_type, "mean": round(mean, 4), "samples": samples,
+               "alpha": round(alpha, 3), "beta": round(beta, 3), "spread": round(variance ** 0.5, 4)}
+        if strategy is not None:
+            out["strategy"] = strategy
+        calibration = self.calibration(task_type)
+        if calibration is not None:
+            out["calibration"] = calibration
+        return out
+
     def suggest(self, task_type: str, *, explore_bonus: float, min_samples_for_trust: int) -> list[StrategyScore]:
         """Ranked strategies for `task_type`, highest score first. Empty
         when nothing has ever been recorded for this type -- the caller

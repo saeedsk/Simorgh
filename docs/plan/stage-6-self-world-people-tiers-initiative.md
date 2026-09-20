@@ -1,6 +1,6 @@
 # Stage 6 -- Self and world projections, People, safety tiers, Initiative
 
-Status: **in progress** (2026-09-19: item 5 in part) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+Status: **in progress** (2026-09-19: items 1-2 in part, 5 in part) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation C6 (Self Model volatile), V3 (four session models, no identity contra
 Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/competence.py`, `contracts/household.py`, `contracts/places.py`, `contracts/home/policy.py`, `voice/speakers.py` (the speaker book), `voice/session.py` (`_room`, bystander), `curiosity/sharing.py`, `persona/sharing.py`, `execution/vision.py` (the announce step), `kernel/scheduler.py` (reminders). Decide with the creator whether a phone channel (Telegram) is the owner's "ask" path for tier 3; default yes.
 
 ## Action items
+
+Done 2026-09-19 (items 1-2, in part): a Beta posterior per task type and per strategy over `learn:outcomes` (`CompetenceTable.posterior`/`estimate`), asked for over `self.estimate.request/reply`; Orchestration reads it once per task session and starts on the strong tier when the mean is below 0.45 over 8+ outcomes. Still open in item 1: rebuilding the whole self model as a fold at boot, exponential forgetting, per-tool p(ok) and latency quantiles, per-provider quality, snapshots, and the summary rendering posteriors with sample counts.
 
 Done 2026-09-19 (item 5, in part): `guardian/tiers.py` gives every proposal a tier 0-3 computed from the registry's class, a network flag and a small reach table; `TierRule` sends tier 3 to a person in every posture and denies it when locked; `PersonRule` weighs the requester's role (owner/adult/child/guest/unknown) against a ceiling -- a child asking to unlock escalates to an adult, an unplaced voice is denied. `action.proposed` carries `requester`/`requester_channel`. Still open in item 5: the per-person permission matrix (needs item 4's People store), `PresenceRule` (needs item 3's presence belief), and tier as a span attribute on every decision.
 

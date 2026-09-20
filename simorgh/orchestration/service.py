@@ -91,6 +91,8 @@ class Service:
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
                             delegate_max_steps=self.config.delegate_max_steps,
                             escalate_from_attempt=self.config.escalate_from_attempt, worktrees=self.config.worktrees,
+                            escalate_below_posterior=self.config.escalate_below_posterior,
+                            escalate_min_samples=self.config.escalate_min_samples,
                             parallel_read_tools=self.config.parallel_read_tools,
                             attempt_limits=(self.config.attempt_max_tokens, self.config.attempt_max_usd,
                                             self.config.attempt_max_wall_s),

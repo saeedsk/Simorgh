@@ -556,6 +556,7 @@ class SessionRunner:
         think_timeout_s: float = 5.0, action_timeout_s: float = ACTION_TIMEOUT_S,
         verify_timeout_s: float = VERIFY_TIMEOUT_S, assemble_timeout_s: float = DEFAULT_TIMEOUT_S,
         worktrees: bool = False, reground_every_steps: int = 0, keep_recent_steps: int = 2,
+        escalate_below_posterior: float = 0.0, escalate_min_samples: int = 8,
         clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3,
         delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
@@ -583,6 +584,8 @@ class SessionRunner:
         # helper came back without an answer, a THINK asks Cognition for the
         # strong tier. 0 is off.
         self._escalate_from_attempt = max(0, int(escalate_from_attempt))
+        self._escalate_below = max(0.0, float(escalate_below_posterior))
+        self._escalate_min_samples = max(1, int(escalate_min_samples))
         # Helper tasks (design section 5): `delegate` runs a read-only research
         # session in-process with a fresh context and returns only its report.
         self._delegation = bool(delegation)
@@ -642,6 +645,11 @@ class SessionRunner:
             # caused from one that was already red without a tree to
             # compare against, and this commit is that tree.
             session.base_ref = _git_head()
+        if not session.estimate and session.profile.scaffold != "chat":
+            # Asked once, before the first step (stage 6 item 2): what Sim's
+            # own record says about this kind of work decides whether it
+            # starts on the strong tier.
+            session.estimate = await self._estimate(session.kind)
         try:
             outcome = await self._run(session, user_text=user_text)
         finally:
@@ -1542,6 +1550,19 @@ class SessionRunner:
         text = f"Helper {child_id} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
         return ok, text, text[:self._DETAIL_CHARS]
 
+    async def _estimate(self, task_type: str) -> dict:
+        """What Sim believes about its own competence here (stage 6 item
+        2), or {} when Learning does not answer in time."""
+        if not task_type or self._escalate_below <= 0.0:
+            return {}
+        req = Message.new(topics.SELF_ESTIMATE_REQUEST, source=self._bus.source,
+                          payload={"task_type": task_type}, clock=self._clock)
+        try:
+            reply = await asyncio.wait_for(self._bus.request(req, timeout=0.25), timeout=0.3)
+        except Exception:  # noqa: BLE001 -- no estimate is not an escalation
+            return {}
+        return dict(reply.payload or {})
+
     def _tier(self, session: Session) -> dict:
         """`{"tier": "strong", "tier_reason": ...}` when this THINK should use
         the strong tier, else {}. Cognition falls back to the default order
@@ -1550,6 +1571,13 @@ class SessionRunner:
             return {}
         if session.attempt >= self._escalate_from_attempt:
             return {"tier": "strong", "tier_reason": f"attempt {session.attempt}"}
+        estimate = getattr(session, "estimate", None) or {}
+        mean, samples = float(estimate.get("mean") or 0.0), int(estimate.get("samples") or 0)
+        if samples >= self._escalate_min_samples and mean < self._escalate_below:
+            # Sim's own record at this kind of work, not a guess about the
+            # model: below the bar and resting on enough outcomes to mean
+            # something, this asks for the stronger tier from the start.
+            return {"tier": "strong", "tier_reason": f"{session.kind} succeeds {mean:.0%} over {samples}"}
         last = session.steps[-1] if session.steps else None
         if last is not None and last.tool == "delegate" and last.ok is False:
             return {"tier": "strong", "tier_reason": "a helper came back without an answer"}

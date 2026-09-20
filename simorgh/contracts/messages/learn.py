@@ -6,6 +6,13 @@ from ..fields import Bool, Enum, F, Float, Int, List, O, Obj, Str
 from ..registry import define
 from .. import topics as t
 
+SelfEstimateRequest = define(t.SELF_ESTIMATE_REQUEST, [F("task_type", Str), O("strategy", Str)])
+SelfEstimateReply = define(t.SELF_ESTIMATE_REPLY, [
+    F("task_type", Str), F("mean", Float), F("samples", Int), F("alpha", Float), F("beta", Float),
+    F("spread", Float), O("strategy", Str), O("calibration", Float),
+], doc="A Beta posterior over whether this task type succeeds: mean with the spread that says "
+       "how much it rests on. Beta(1,1) -- mean 0.5, spread 0.29 -- means nothing is recorded yet, "
+       "not that it succeeds half the time.")
 LearnStrategySuggest = define(t.LEARN_STRATEGY_SUGGEST, [F("task_type", Str), O("context", Obj())])
 LearnStrategySuggestReply = define(t.LEARN_STRATEGY_SUGGEST_REPLY, [
     F("success_rate", Float),

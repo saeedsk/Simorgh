@@ -203,6 +203,9 @@ class Session:
     # Why the speaker's name is not certain (voice/speakers.py::doubt_of);
     # "" when it is. The prompt then asks for no name.
     speaker_doubt: str = ""
+    #: What Sim believes about its own competence at this kind of task
+    #: (`self.estimate.reply`), read once when the session starts.
+    estimate: dict = field(default_factory=dict)
     # The trace this session's messages carry. A task's trace is its task
     # id; a chat turn's is the percept's own trace, so one spoken or typed
     # turn is one trace from percept to turn.completed (stage 1 item 2).

@@ -75,6 +75,7 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_blocked))
         self._subs.append(await ctx.bus.subscribe(topics.VERIFY_RESULT, self._on_verify_result))
         self._subs.append(await ctx.bus.subscribe(topics.LEARN_STRATEGY_SUGGEST, self._on_strategy_suggest))
+        self._subs.append(await ctx.bus.subscribe(topics.SELF_ESTIMATE_REQUEST, self._on_estimate))
 
     async def stop(self) -> None:
         for sub in self._subs:
@@ -107,6 +108,14 @@ class Service:
         self._outcomes.cache_verify_result(message.payload)
 
     # -- strategy ---------------------------------------------------------------
+    async def _on_estimate(self, message: Message) -> None:
+        """`self.estimate.request` -- what Sim believes about itself at this
+        kind of work (stage 6 item 1), from the outcomes it has recorded."""
+        task_type = str(message.payload.get("task_type") or "")
+        strategy = str(message.payload.get("strategy") or "") or None
+        await self._ctx.bus.reply(message, type=topics.SELF_ESTIMATE_REPLY,
+                                  payload=self._competence.estimate(task_type, strategy=strategy))
+
     async def _on_strategy_suggest(self, message: Message) -> None:
         from .strategy import build_reply
         reply = build_reply(message.payload["task_type"], competence=self._competence, config=self._config)

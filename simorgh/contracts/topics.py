@@ -164,6 +164,11 @@ SELF_OBSERVATION = "self.observation"
 # --- 4.11 learn -----------------------------------------------------------
 LEARN_STRATEGY_SUGGEST = "learn.strategy.suggest"
 LEARN_STRATEGY_SUGGEST_REPLY = "learn.strategy.suggest.reply"
+#: What Sim believes about its own competence at a task type, asked for
+#: rather than announced (stage 6 item 1). Learning answers it from the
+#: same `learn:outcomes` projection the strategy suggestion uses.
+SELF_ESTIMATE_REQUEST = "self.estimate.request"
+SELF_ESTIMATE_REPLY = "self.estimate.reply"
 LEARN_OUTCOME_RECORDED = "learn.outcome.recorded"
 LEARN_COMPETENCE_UPDATED = "learn.competence.updated"
 LEARN_SKILL_ACQUIRED = "learn.skill.acquired"

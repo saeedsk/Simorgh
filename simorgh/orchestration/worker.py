@@ -138,6 +138,7 @@ class Worker:
         reground_every_steps: int = 0, keep_recent_steps: int = 2, clean_revisions: bool = False,
         delegation: bool = False, max_depth: int = 3, delegate_max_steps: int = 12, escalate_from_attempt: int = 0,
         parallel_read_tools: int = 1, skills_enabled: bool = False,
+        escalate_below_posterior: float = 0.0, escalate_min_samples: int = 8,
         skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"),
         attempt_limits: tuple[int, float, float] = (0, 0.0, 0.0), telemetry=None,
@@ -180,6 +181,7 @@ class Worker:
             clean_revisions=clean_revisions, delegation=delegation, max_depth=max_depth,
             delegate_max_steps=delegate_max_steps, escalate_from_attempt=escalate_from_attempt,
             parallel_read_tools=parallel_read_tools, skills_enabled=skills_enabled,
+            escalate_below_posterior=escalate_below_posterior, escalate_min_samples=escalate_min_samples,
             skills_catalog_max_chars=skills_catalog_max_chars, skills_roots=skills_roots,
             skills_channels=skills_channels, telemetry=telemetry, **runner_kwargs,
         )
