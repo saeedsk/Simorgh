@@ -216,7 +216,8 @@ The four `aec*` keys affect only the legacy `Pipeline` capture path; the live `V
 7. Spoken commands (stop, quiet, voice off, restart) are handled locally and never sent to the model (`commands.py`).
 8. Boot never fails for want of audio; a missing engine is reported by name with what to install, and presence probes are appended to `capabilities` at boot.
 9. Kept audio is bounded: after each kept turn, files older than `keep_audio_days` or beyond `keep_audio_max_mb` are deleted with their transcripts (`session.py` `prune_kept_audio`).
-10. With the defaults, an unknown voice is never asked for its name unprompted (`introduce_after_turns = 0`), and a voice Sim cannot place is not answered unless it says Sim's name or answers what Sim just asked (`unplaced_needs_name`, `config.py:172-178`).
+10. The echo bar is infinite only while a gain has never been MEASURED (`EchoTracker.learnt`), and a reply ending settles whatever it measured (`EchoTracker.settle`, called from `session._play`). A room where the microphone hears nothing of Sim measures zero, which is correct -- Sim is inaudible to itself, so the person is always louder -- and reading that as "not learnt yet" put the bar at infinity for the start of every reply, where nothing anybody says can count as a person. That is the "Sim, can you hear me?" of a quiet kitchen 30 cm from the speaker; the household simulator reproduced it as every other spoken beat going unheard (`live/a-whole-conversation`, 4/6 before the fix, 6/6 after). A zero gain is provisional: `observe` keeps sampling and `expected` takes `max(gain, this reply's middle)`, so a room that does echo raises the bar without waiting for a restart.
+11. With the defaults, an unknown voice is never asked for its name unprompted (`introduce_after_turns = 0`), and a voice Sim cannot place is not answered unless it says Sim's name or answers what Sim just asked (`unplaced_needs_name`, `config.py:172-178`).
 
 ## Contract tests
 

@@ -2183,7 +2183,14 @@ class VoiceSession:
             if to_tv:
                 await self._ship_to_tv(audio, request_id)
 
-        return await self._player.play_stream(chunks, request_id=request_id, on_play=_reference, **kw)
+        try:
+            return await self._player.play_stream(chunks, request_id=request_id, on_play=_reference, **kw)
+        finally:
+            # Keep whatever gain this reply managed to measure, even a
+            # short one's few frames: an unlearnt gain means an
+            # infinite bar at the start of the NEXT reply, and Sim is
+            # asked to answer briefly.
+            self._echo.settle()
 
     async def _ship_to_tv(self, audio: Audio, request_id: str) -> None:
         """One run of the voice as a WAV blob in the ledger, announced on

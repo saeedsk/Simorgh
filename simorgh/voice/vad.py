@@ -401,14 +401,56 @@ class EchoTracker:
         self.lag_s = max(0.0, float(lag_s))
         self._runs: list[tuple[float, float, list[float]]] = []  # (started_at, frame_s, levels)
         self._ends_at = 0.0
-        self.gain = float(gain)      # mic RMS per reference RMS; 0 = not yet learnt
+        self.gain = float(gain)      # mic RMS per reference RMS
+        #: Has a gain ever been MEASURED? Not the same as `gain > 0`,
+        #: and conflating the two is the bug below: in a room where
+        #: Sim's own voice never comes back -- a quiet kitchen, a good
+        #: speaker, headphones, working echo cancellation -- the
+        #: honest measurement IS zero, and reading that as "not yet
+        #: learnt" left the bar at infinity for the start of every
+        #: reply, where nothing anybody says can count as a person.
+        self.learnt = float(gain) > 0.0
         self._ratios: list[float] = []   # this reply's mic/reference samples
         self._seen = 0               # calibration frames used this reply
         self.replies = 0
 
     # -- what is playing --------------------------------------------------------------------------
+    def settle(self) -> None:
+        """The reply is over: calibration ends, whatever it managed.
+
+        Two ways a reply can end without a gain, and both used to
+        leave the bar at infinity for every reply afterwards.
+
+        A reply shorter than the calibration window gives a handful of
+        frames instead of forty. A rough gain from six frames is a
+        bar; no gain is a wall, and Sim is asked to answer briefly.
+
+        And a room where the microphone hears *nothing* of Sim gives
+        no frames at all -- headphones, a good speaker, working echo
+        cancellation, a quiet kitchen. There the honest answer is
+        that Sim is inaudible to its own microphone, so the person is
+        always louder, and the bar belongs at zero. Infinity says the
+        opposite: nothing anybody says can count as a person while
+        Sim may be audible. That is the "Sim, can you hear me?" the
+        creator hit in a quiet room 30 cm from the speaker, and the
+        household simulator reproduced it as every second beat going
+        unheard (2026-09-20).
+
+        A zero gain is not final: `observe` keeps sampling on later
+        replies until it has its forty frames, and `expected` takes
+        `max(gain, this reply's middle)` until then, so a room that
+        does turn out to echo raises the bar as soon as it does.
+        """
+        if not self._runs:
+            return   # nothing was played, so nothing was there to hear
+        if not self.learnt:
+            if self._ratios:
+                self.gain = self._middle()
+            self.learnt = True
+
     def start(self) -> None:
         """A new playback: forget the old reference, learn the gain afresh."""
+        self.settle()
         self._runs.clear()
         self._ends_at = 0.0
         self._ratios = []
@@ -434,9 +476,19 @@ class EchoTracker:
 
     @property
     def calibrating(self) -> bool:
-        """Still learning this reply's gain with no earlier one to go
-        on: the only time a person cannot interrupt."""
-        return bool(self._runs) and self._seen < self._calibrate and self.gain <= 0.0
+        """Still learning this reply's gain with no earlier measurement
+        to go on: the only time a person cannot interrupt.
+
+        `learnt`, not `gain > 0`. The two came apart in the quietest
+        rooms: with the mic hearing nothing of Sim the measured gain
+        is zero, which is correct and means "the person is always
+        louder than Sim" -- but read as "not learnt yet" it made the
+        bar infinite at the start of every reply instead. The
+        household simulator found it as one beat in two going
+        unheard, and it is the likeliest cause of "Sim, can you hear
+        me?" in a quiet kitchen 30 cm from the speaker (2026-09-20).
+        """
+        return bool(self._runs) and self._seen < self._calibrate and not self.learnt
 
     def reference(self, now: float) -> float:
         """The loudest reference frame that could be reaching the mic now."""
@@ -464,6 +516,7 @@ class EchoTracker:
             # This reply's measurement replaces the last one's: the
             # volume may have changed between them.
             self.gain = self._middle()
+            self.learnt = True
 
     def _middle(self) -> float:
         """The middle of this reply's mic/reference samples.

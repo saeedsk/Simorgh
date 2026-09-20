@@ -149,12 +149,44 @@ was mine, not Sim's, and each would have read as Sim misbehaving.
   window, so nothing was dropped and "it remembered" meant "it could
   still see it".
 
+## The simulator's first real catch: a quiet room made Sim deaf every other turn
+
+The pack dropped about one spoken beat in three and I had written it
+down as a harness flaw. It was not.
+
+`EchoTracker.expected()` returns infinity while the reply's gain is
+"still being learnt", which is correct and deliberate -- during
+calibration nothing may count as a person cutting in. But "learnt"
+was `gain > 0`, and in a room where the microphone never hears Sim
+the honest measured gain **is zero**: headphones, a good speaker,
+working echo cancellation, a quiet kitchen. So the gain never counted
+as learnt, and every reply began with an infinite bar for its first
+1.2 seconds plus the half-second tail -- during which anything said
+was not speech, not a turn, not anything.
+
+Nine spoken beats in a row: **five heard, four silently dropped**,
+alternating. From the room that is Sim ignoring you every other time
+you talk to it, which is what the creator reported on 2026-09-19 and
+20 ("Hello, Sam. Can you hear me?", "Sima, I'm talking to you") and
+what four attempts had failed to explain.
+
+The fix separates "measured zero" from "never measured"
+(`EchoTracker.learnt`), and settles the calibration when a reply ends
+so a short reply keeps its handful of frames instead of leaving the
+next reply at infinity. A zero gain stays provisional: sampling
+continues and the bar rises the moment the room turns out to echo.
+Nine beats in a row: **9/9**.
+
+`live/a-whole-conversation` is the scenario, and it was checked both
+ways: 4/6 with the old rule restored, 6/6 with the fix.
+
+This is the household simulator paying for itself. The bug was four
+weeks old, survived a unit-test suite that passes 545 voice tests,
+and was invisible to every test that did not put real audio into a
+real session twice in a row.
+
 ## Still open
 
-- **The room path drops about one beat in three** over a long
-  conversation. Cause unknown; the scenarios that need dependable
-  hearing use `say()` and the ones about the listening loop use one
-  utterance. This is the next thing worth a morning.
 - **`PhysicalRule` cannot be tested alone** while the tier table
   catches the same actions. A scenario that isolates it needs an
   action the tier table does not already stop.

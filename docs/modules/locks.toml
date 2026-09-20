@@ -43,9 +43,9 @@ until = "2026-09-21T03:42:55+00:00"
 
 [locks.voice]
 by = "opus-main"
-task = "voice forget all: start voice training fresh"
-since = "2026-09-20T15:48:23+00:00"
-until = "2026-09-20T23:48:23+00:00"
+task = "a quiet room makes the echo bar infinite, and the person is not heard"
+since = "2026-09-20T22:02:44+00:00"
+until = "2026-09-21T06:02:44+00:00"
 
 [locks.worldmodel]
 by = "opus-main"

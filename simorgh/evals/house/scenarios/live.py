@@ -91,6 +91,30 @@ A_CAMERA_AT_NIGHT = Scenario(
     ),
 )
 
-SCENARIOS = (MISHEARD_NAME, NOT_FOR_SIM, A_LONG_WAIT, A_CORRECTION, A_CAMERA_AT_NIGHT)
+#: Six things said to Sim in a row, out loud, and every one must be
+#: heard. This is the scenario that found the echo bar sitting at
+#: infinity in a quiet room: before the fix it answered every other
+#: beat, and an alternating deafness is exactly what "Sim doesn't
+#: answer" looks like from a kitchen. Every beat goes through the
+#: room, because the listening loop is the whole question.
+A_WHOLE_CONVERSATION = Scenario(
+    id="live/a-whole-conversation",
+    stage="3",
+    because="2026-09-20: in a quiet room Sim heard every other thing said to it, and nobody could see why",
+    beats=tuple(
+        Beat(who="Mara", says=says, expect=(answered(),))
+        for says in (
+            "Sim, what is on this evening?",
+            "Sim, is the kitchen light on?",
+            "Sim, what time is it?",
+            "Sim, how long does rice take?",
+            "Sim, is there anything I asked you to remember?",
+            "Sim, are you still there?",
+        )
+    ),
+)
+
+SCENARIOS = (MISHEARD_NAME, NOT_FOR_SIM, A_LONG_WAIT, A_CORRECTION, A_CAMERA_AT_NIGHT,
+             A_WHOLE_CONVERSATION)
 
 __all__ = ["A_CAMERA_AT_NIGHT", "A_CORRECTION", "A_LONG_WAIT", "MISHEARD_NAME", "NOT_FOR_SIM", "SCENARIOS"]

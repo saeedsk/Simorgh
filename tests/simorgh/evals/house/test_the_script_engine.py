@@ -124,7 +124,7 @@ class AScenarioReadsLikeAnEvening(unittest.TestCase):
 
 
 class TheLivePack(unittest.TestCase):
-    """The five evenings that actually went wrong."""
+    """The evenings that actually went wrong."""
 
     def test_every_one_says_why_it_exists(self):
         from simorgh.evals.house.scenarios import all_scenarios
@@ -134,10 +134,19 @@ class TheLivePack(unittest.TestCase):
             self.assertTrue(scenario.stage, f"{scenario.id} belongs to no stage")
             self.assertGreater(scenario.cases(), 0, f"{scenario.id} expects nothing")
 
-    def test_the_five_live_failures_are_all_there(self):
+    def test_every_live_failure_is_still_in_the_pack(self):
+        """One per evening that went wrong, and the list only grows.
+
+        A count rather than a list because the point is that nobody
+        quietly drops one: a scenario written from a real failure is
+        the only kind that is certainly worth keeping. Six since
+        2026-09-20, when the simulator found the echo bar going to
+        infinity in a quiet room (`live/a-whole-conversation`).
+        """
         from simorgh.evals.house.scenarios import all_scenarios
 
-        self.assertEqual(len([s for s in all_scenarios() if s.id.startswith("live/")]), 5)
+        live = [s for s in all_scenarios() if s.id.startswith("live/")]
+        self.assertGreaterEqual(len(live), 6, f"a live scenario went missing: {[s.id for s in live]}")
 
 
 @pytest.mark.integration

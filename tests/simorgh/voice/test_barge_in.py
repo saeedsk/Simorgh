@@ -285,6 +285,61 @@ class GainLearningTestCase(unittest.TestCase):
         self.assertAlmostEqual(tracker.gain, 0.8, places=2)
 
 
+class AQuietRoomIsNotAWallTestCase(unittest.TestCase):
+    """A room where the microphone never hears Sim.
+
+    Headphones, a good speaker, working echo cancellation, a quiet
+    kitchen: the honest gain is zero -- Sim is inaudible to its own
+    microphone, so the person is always louder. Read instead as "no
+    gain learnt yet", it made the bar INFINITE for the start of every
+    reply, where nothing anybody says can count as a person. The
+    household simulator found it as every second beat going unheard,
+    and it is the likeliest cause of "Sim, can you hear me?" in a
+    quiet room 30 cm from the speaker (2026-09-20).
+    """
+
+    def _speaking(self, tracker):
+        tracker.start()
+        tracker.play(_tone(0.3, 8000), at=100.0)
+
+    def test_a_reply_nobody_heard_back_does_not_leave_an_infinite_bar(self):
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=40)
+        self._speaking(tracker)                  # a reply with no mic frames at all
+        self.assertEqual(tracker.expected(100.1), float("inf"), "during the first reply, nothing may cut in")
+        tracker.settle()
+        self._speaking(tracker)                  # the next one
+        self.assertEqual(tracker.expected(100.1), 0.0,
+                         "a mic that never hears Sim means the person is always louder")
+
+    def test_a_reply_too_short_to_calibrate_keeps_what_it_measured(self):
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=40)
+        self._speaking(tracker)
+        reference = tracker.reference(100.1)
+        for _ in range(6):                       # a brief reply: six frames, not forty
+            tracker.observe(reference * 0.4, 100.1)
+        tracker.settle()
+        self.assertTrue(tracker.learnt)
+        self.assertAlmostEqual(tracker.gain, 0.4, places=2)
+
+    def test_a_room_that_does_echo_raises_the_bar_again(self):
+        """The zero is not final: it is what we know so far."""
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=40)
+        self._speaking(tracker)
+        tracker.settle()                         # learnt nothing: gain 0
+        self._speaking(tracker)
+        reference = tracker.reference(100.1)
+        for _ in range(10):                      # this reply IS audible to the mic
+            tracker.observe(reference * 0.7, 100.1)
+        self.assertGreater(tracker.expected(100.1), reference * 0.5,
+                           "a room that turns out to echo must raise the bar without waiting")
+
+
 class CompositeDetectorTestCase(unittest.TestCase):
     """Typing, clapping, a chair: loud but not a voice. Sim's own voice
     through the speakers: a voice but not louder than the echo floor.
