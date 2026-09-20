@@ -8,8 +8,8 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 
 | Stage | File | Title | Depends on | Status |
 |---|---|---|---|---|
-| 0 | [stage-0-safety-gaps-wires-gate.md](stage-0-safety-gaps-wires-gate.md) | Close the safety gaps, wire what exists, promote the gate | — | in progress (2026-09-19: v1 deleted, test tiers and locks in place) |
-| 1 | [stage-1-telemetry-out-of-the-decision-log.md](stage-1-telemetry-out-of-the-decision-log.md) | Telemetry out of the decision log | 0 | done (2026-09-19) |
+| 0 | [stage-0-safety-gaps-wires-gate.md](stage-0-safety-gaps-wires-gate.md) | Close the safety gaps, wire what exists, promote the gate | — | in progress (items 1-28, 31 done except V7; 30 partly; 29 open) |
+| 1 | [stage-1-telemetry-out-of-the-decision-log.md](stage-1-telemetry-out-of-the-decision-log.md) | Telemetry out of the decision log | 0 | in progress (items 1-5, 7-9 done; 6 and 10 deferred; 11 open) |
 | 2 | [stage-2-native-tool-use.md](stage-2-native-tool-use.md) | Schemas to the model, then native tool use behind a capability flag | 0 | in progress (items 1-9 done; no provider flipped) |
 | 3 | [stage-3-streaming.md](stage-3-streaming.md) | Streaming end to end | 2 | in progress (items 1-4, 8 done; streamed speech on by default 2026-09-19) |
 | 4 | [stage-4-session-stream-context-compaction-evals.md](stage-4-session-stream-context-compaction-evals.md) | Session stream, ContextBuilder, compaction, evals package | 1, 2 | in progress (2026-09-19: items 1-3, 5, 6, 7, 10, 11 done; 4 and 8 in part; 9 open) |
