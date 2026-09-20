@@ -45,8 +45,8 @@ from simorgh.kernel.service import Kernel
 from simorgh.kernel.state import RUNNING
 from simorgh.planning.config import Config as PlanningConfig
 from simorgh.planning.service import Service as PlanningService
-from simorgh.reflection.config import Config as ReflectionConfig
-from simorgh.reflection.service import Service as ReflectionService
+from simorgh.growth.monitors.config import Config as ReflectionConfig
+from simorgh.growth.monitors.service import Service as ReflectionService
 
 STEPS_TEXT = (
     "1. RESEARCH :: is the current retry backoff strategy adequate\n"

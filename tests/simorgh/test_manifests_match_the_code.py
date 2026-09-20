@@ -29,7 +29,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.integration]
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("bus", "ledger", "cognition", "memory", "worldmodel", "planning", "guardian", "execution",
-            "verification", "learning", "reflection", "curiosity", "persona", "benchmark", "voice", "interface",
+            "verification", "growth", "persona", "benchmark", "voice", "interface",
             "orchestration")
 _CONSTS = {n: v for n, v in vars(T).items() if n.isupper() and isinstance(v, str) and "." in v}
 _SUBSCRIBE = re.compile(r"subscribe\(\s*topics\.([A-Z_][A-Z0-9_]*)")

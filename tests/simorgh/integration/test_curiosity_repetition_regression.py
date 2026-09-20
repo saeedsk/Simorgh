@@ -37,8 +37,8 @@ from simorgh.bus.config import Config as BusConfig
 from simorgh.bus.factory import make_backend, make_client
 from simorgh.contracts import topics
 from simorgh.contracts.protocols import Context
-from simorgh.curiosity.config import Config as CuriosityConfig
-from simorgh.curiosity.service import Service
+from simorgh.growth.explore.config import Config as CuriosityConfig
+from simorgh.growth.explore.service import Service
 from simorgh.ledger.factory import make_ledger
 
 from tests.simorgh.helpers import FakeClock

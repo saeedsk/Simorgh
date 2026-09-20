@@ -41,8 +41,8 @@ from simorgh.bus.factory import make_backend, make_client
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 from simorgh.ledger.factory import make_ledger
-from simorgh.reflection.config import Config as ReflectionConfig
-from simorgh.reflection.service import Service
+from simorgh.growth.monitors.config import Config as ReflectionConfig
+from simorgh.growth.monitors.service import Service
 
 from tests.simorgh.helpers import FakeClock
 

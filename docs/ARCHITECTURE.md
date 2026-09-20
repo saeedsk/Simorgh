@@ -43,7 +43,7 @@ People ── Interface (CLI · TUI · HTTP/dash · Telegram · WhatsApp) ──
 | 0 substrate | `bus`, `ledger` | fabric and truth |
 | 2 cognitive core | `cognition`, `memory`, `worldmodel` | thinking, remembering, the Self Model |
 | 3 agency | `guardian`, `execution`, `verification`, `planning` | approving, doing, checking, decomposing |
-| 4 growth | `learning`, `reflection`, `curiosity` | outcomes, drift, exploration |
+| 4 growth | `growth` (parts `estimate`, `monitors`, `explore`) | outcomes, drift, exploration |
 | 5 surfaces | `persona`, `benchmark`, `voice`, `interface` | mood, evals, speech, every human channel |
 | X | `orchestration` | the worker that runs a session, booted last so nothing claims work before the gate is up |
 | shared | `contracts`, `kernel` | the only shared import; the composition root |
@@ -98,11 +98,11 @@ One paragraph each: what it owns and the one fact to know before touching it. Th
 
 **Verification** (`simorgh/verification/`, 3.1k lines). Eleven mechanical checks run cheapest-first (syntax, JS syntax, docstring, invariants, denylist immunity, did-anything, full-suite-ran, isolated suite, sandbox smoke, render, trailing narration), a model checklist at higher rigor, trajectory scoring, plan review. Five of the eleven never run on the real path because the subject they need is not sent. It publishes only `verify.result`.
 
-**Learning** (`simorgh/learning/`, 1.0k lines). Outcome recording, a competence table per task type with calibration, strategy suggestion, and a self-patch pipeline. The pipeline's trigger topic is never published and its tool is not registered; the path that actually lands code (`orchestration/session.py::_land`) publishes nothing to Learning. 91% of outcomes are `unknown` because chat turns have no task type.
+**Growth: estimate** (`simorgh/growth/estimate/`, 1.0k lines; was `learning` until the stage 8 merge). Outcome recording, a competence table per task type with calibration, strategy suggestion, and a self-patch pipeline. The pipeline's trigger topic is never published and its tool is not registered; the path that actually lands code (`orchestration/session.py::_land`) publishes nothing to Learning. 91% of outcomes are `unknown` because chat turns have no task type.
 
-**Reflection** (`simorgh/reflection/`, 2.1k lines). Drift, calibration, health findings, critique, denial analysis, pattern mining, distillation into draft skills, digests. Observer only; its critiques are stored as episodic memory without a person tag and so reach family chat prompts.
+**Growth: monitors** (`simorgh/growth/monitors/`, 2.1k lines; was `reflection`). Drift, calibration, health findings, critique, denial analysis, pattern mining, distillation into draft skills, digests. Observer only; its critiques are stored as episodic memory without a person tag and so reach family chat prompts.
 
-**Curiosity** (`simorgh/curiosity/`, 1.4k lines). Drives, a diversity sampler over inventories, idea and project proposals, interests, sharing pace. One exploration per idle tick; when paused it still writes a ledger event every 3 s. Its budget throttle reads fields Cognition does not send.
+**Growth: explore** (`simorgh/growth/explore/`, 1.4k lines; was `curiosity`). Drives, a diversity sampler over inventories, idea and project proposals, interests, sharing pace. One exploration per idle tick; when paused it still writes a ledger event every 3 s. Its budget throttle reads fields Cognition does not send.
 
 **Persona** (`simorgh/persona/`, 0.8k lines). Continuous mood with decay, a rule-based emotion floor, the voice line injected into every prompt via a bus request, a user model, proactive-share pacing. It publishes and ledgers a state change on 93% of its 5 s decay ticks.
 

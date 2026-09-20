@@ -42,6 +42,8 @@ _CONSUMES = (
     topics.TURN_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
     topics.PERSONA_STATE_CHANGED, topics.TV_STATE, topics.SESSION_DELTA,
+    # A slow tool has started, so the wait can be covered (stage 3 item 5).
+    topics.TOOL_STARTED,
 )
 _PRODUCES = (
     topics.PERCEPT_TEXT_RECEIVED, topics.VOICE_LISTENING, topics.VOICE_TRANSCRIPT, topics.VOICE_SPOKEN,

@@ -22,7 +22,12 @@ DOMAINS: tuple[str, ...] = (
 
 SUBSYSTEMS: tuple[str, ...] = (
     "bus", "ledger", "kernel", "cognition", "memory", "worldmodel", "planning",
-    "execution", "guardian", "verification", "learning", "reflection", "curiosity",
+    "execution", "guardian", "verification",
+    # One subsystem since stage 8 item 1; its parts are estimate,
+    # monitors and explore. The `learn.*`, `reflect.*` and `curiosity.*`
+    # DOMAINS above are unchanged -- the merge changed the owner, not
+    # the wire.
+    "growth",
     "persona", "interface", "orchestration", "benchmark", "voice", "initiative",
 )
 

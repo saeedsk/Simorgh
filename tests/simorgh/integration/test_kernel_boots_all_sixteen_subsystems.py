@@ -29,7 +29,7 @@ from simorgh.kernel.service import Kernel
 from simorgh.kernel.state import RUNNING
 from tests.simorgh.helpers import FakeClock
 
-# Seventeen since `voice` (2026-09-10); the name stays, the count moves.
+# Sixteen since the growth merge (stage 8 item 1); the name stays, the count moves.
 ALL_SIXTEEN = frozenset(name for layer in LAYERS for name in layer)
 
 
@@ -39,9 +39,11 @@ class TestKernelBootsAllSixteenSubsystems(unittest.IsolatedAsyncioTestCase):
         # subsystem, but it is the composition root that boots the other
         # fifteen -- it does not appear as an entry in its own LAYERS.
         self.assertEqual(
-            len(ALL_SIXTEEN), 18,
+            len(ALL_SIXTEEN), 16,
             "LAYERS should name every non-kernel subsystem: the original fifteen, `benchmark` "
-            "(2026-09-08) and `initiative` (stage 6 item 6, 2026-09-19)",
+            "(2026-09-08) and `initiative` (stage 6 item 6, 2026-09-19), less the two that "
+            "learning, reflection and curiosity gave up when they merged into `growth` "
+            "(stage 8 item 1, 2026-09-20)",
         )
 
         with tempfile.TemporaryDirectory() as tmp:

@@ -182,16 +182,16 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     should not add sixteen imports to every process that touches the
     Kernel package."""
     from simorgh.cognition.config import Config as CognitionConfig
-    from simorgh.curiosity.config import Config as CuriosityConfig
+    from simorgh.growth.explore.config import Config as CuriosityConfig
     from simorgh.execution.config import Config as ExecutionConfig
     from simorgh.guardian.config import Config as GuardianConfig
     from simorgh.interface.config import Config as InterfaceConfig
-    from simorgh.learning.config import Config as LearningConfig
+    from simorgh.growth.estimate.config import Config as LearningConfig
     from simorgh.memory.config import Config as MemoryConfig
     from simorgh.orchestration.config import Config as OrchestrationConfig
     from simorgh.persona.config import Config as PersonaConfig
     from simorgh.planning.config import Config as PlanningConfig
-    from simorgh.reflection.config import Config as ReflectionConfig
+    from simorgh.growth.monitors.config import Config as ReflectionConfig
     from simorgh.verification.config import VerificationConfig
     from simorgh.worldmodel.config import Config as WorldModelConfig
 

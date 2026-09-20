@@ -40,7 +40,9 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("bus", "ledger"),
     ("cognition", "memory", "worldmodel"),
     ("guardian", "execution", "verification", "planning"),
-    ("learning", "reflection", "curiosity"),
+    # One subsystem since stage 8 item 1; estimate, monitors and
+    # explore are its parts (was learning, reflection, curiosity).
+    ("growth",),
     # Initiative sits above the things that give it something to say and
     # below the channels that carry it (stage 6 item 6).
     ("initiative",),
@@ -130,18 +132,16 @@ def build_factories(
     from simorgh.benchmark.service import Service as BenchmarkService
     from simorgh.bus.service import Service as BusService
     from simorgh.cognition.service import Service as CognitionService
-    from simorgh.curiosity.service import Service as CuriosityService
     from simorgh.initiative.service import Service as InitiativeService
     from simorgh.execution.service import Service as ExecutionService
+    from simorgh.growth.service import Service as GrowthService
     from simorgh.guardian.service import Service as GuardianService
     from simorgh.interface.service import Service as InterfaceService
-    from simorgh.learning.service import Service as LearningService
     from simorgh.ledger.service import Service as LedgerService
     from simorgh.memory.service import Service as MemoryService
     from simorgh.orchestration.service import Service as OrchestrationService
     from simorgh.persona.service import Service as PersonaService
     from simorgh.planning.service import Service as PlanningService
-    from simorgh.reflection.service import Service as ReflectionService
     from simorgh.verification.service import VerificationService
     from simorgh.voice.service import Service as VoiceService
     from simorgh.worldmodel.service import Service as WorldModelService
@@ -156,9 +156,7 @@ def build_factories(
         "execution": lambda: ExecutionService(config=execution_config),
         "verification": lambda: VerificationService(),
         "planning": lambda: PlanningService(),
-        "learning": lambda: LearningService(),
-        "reflection": lambda: ReflectionService(),
-        "curiosity": lambda: CuriosityService(),
+        "growth": lambda: GrowthService(),
         "initiative": lambda: InitiativeService(),
         "persona": lambda: PersonaService(),
         "benchmark": lambda: BenchmarkService(),

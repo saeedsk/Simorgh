@@ -9,7 +9,9 @@ class TestLayers(unittest.TestCase):
             ("bus", "ledger"),
             ("cognition", "memory", "worldmodel"),
             ("guardian", "execution", "verification", "planning"),
-            ("learning", "reflection", "curiosity"),
+            # One subsystem since stage 8 item 1: estimate, monitors
+            # and explore are its parts.
+            ("growth",),
             # Initiative (stage 6 item 6) sits above what gives it
             # something to say and below the channels that carry it.
             ("initiative",),
