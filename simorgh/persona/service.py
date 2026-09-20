@@ -18,7 +18,6 @@ from simorgh.contracts.protocols import Context, Health
 from .config import Config
 from .emotion import react
 from .mood import EmotionalState, MoodEngine
-from .sharing import SharePolicy
 from .user_model import UserModel
 from .voice import VoiceComposer, mood_phrase
 
@@ -73,7 +72,7 @@ class Service:
     consumes: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
         topics.REFLECT_HEALTH_FINDING, topics.SYSTEM_TICK_SECOND, topics.SYSTEM_STATE_CHANGED,
-        topics.PERSONA_VOICE, topics.UI_PROMPT_ANSWERED, topics.CURIOSITY_SHARE_PROPOSED,
+        topics.PERSONA_VOICE, topics.UI_PROMPT_ANSWERED,
     )
     produces: tuple[str, ...] = (
         topics.PERSONA_STATE_CHANGED, topics.PERSONA_VOICE_REPLY, topics.PERSONA_USER_MODEL_UPDATED,
@@ -105,10 +104,6 @@ class Service:
         baseline = EmotionalState(valence=self.config.baseline_valence, arousal=self.config.baseline_arousal)
         self._mood = MoodEngine(clock=ctx.clock, history_limit=self.config.history_limit, baseline=baseline)
         self._user_model = UserModel()
-        self._share_policy = SharePolicy(
-            growth_cooldown_s=self.config.growth_cooldown_s, news_cooldown_s=self.config.news_cooldown_s,
-            quiet_when_active_s=self.config.quiet_when_active_s, max_per_hour=self.config.max_shares_per_hour,
-        )
         identity_summary = _load_identity_summary(self.config.resolved_soul_path())
         self._voice = VoiceComposer(identity_summary)
         self._last_decay_ts = ctx.clock.now()
@@ -124,7 +119,6 @@ class Service:
             await ctx.bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed),
             await ctx.bus.subscribe(topics.PERSONA_VOICE, self._on_voice_request),
             await ctx.bus.subscribe(topics.UI_PROMPT_ANSWERED, self._on_prompt_answered),
-            await ctx.bus.subscribe(topics.CURIOSITY_SHARE_PROPOSED, self._on_share_proposed),
         ]
         ctx.logger.info("persona.started", identity_chars=len(identity_summary))
 
@@ -220,7 +214,6 @@ class Service:
     async def _on_percept_text(self, message: Message) -> None:
         text = message.payload.get("text", "")
         now = self._ctx.clock.now()
-        self._share_policy.note_user_activity(now)
         delta = react(text, lexicon_weight=self.config.lexicon_weight, exclamation_arousal=self.config.exclamation_arousal)
         await self._apply_and_announce(valence=delta.valence, arousal=delta.arousal, source="percept.text")
 
@@ -282,7 +275,7 @@ class Service:
             await self._publish_state_changed(announced, new, "decay")
 
     async def _on_state_changed(self, message: Message) -> None:
-        self._share_policy.suspend(message.payload.get("state") != "running")
+        return None
 
     async def _on_voice_request(self, message: Message) -> None:
         context = message.payload.get("context", "chat")
@@ -291,25 +284,26 @@ class Service:
                                    payload={"style_block": voice.style_block, "mood_phrase": voice.mood_phrase})
 
     async def _on_prompt_answered(self, message: Message) -> None:
-        self._share_policy.note_user_activity(self._ctx.clock.now())
+        """Somebody is at the keyboard. Kept as a subscription because
+        the mood reads activity; the share pacing that used to live
+        here went with `_on_share_proposed`."""
+        return None
 
-    async def _on_share_proposed(self, message: Message) -> None:
-        """Proactive-sharing plumbing (ported pacing from
-        `src/orchestrator/socializing.py`). Curiosity publishes
-        `curiosity.share.proposed` (`curiosity/service.py`); this
-        subscriber decides, by cooldown, quiet period and hourly cap,
-        whether to say it now as a `ui.notice`."""
-        kind = message.payload.get("kind", "growth")
-        content_ref = message.payload.get("content_ref", "")
-        now = self._ctx.clock.now()
-        decision = self._share_policy.decide(kind, now)
-        if not decision.share:
-            return
-        self._share_policy.note_shared(kind, now)
-        phrase = mood_phrase(self._mood.current())
-        payload = {"level": "info", "text": f"({phrase}) I found something ({kind}): {content_ref}", "source": self._ctx.source}
-        await self._ctx.bus.publish(Message.new(topics.UI_NOTICE, source=self._ctx.source, payload=payload))
-        await self._persist("persona:shares", topics.UI_NOTICE, {"kind": kind, "content_ref": content_ref})
+    # `_on_share_proposed` lived here and is gone (2026-09-20).
+    #
+    # It was the second path for unprompted speech: Curiosity proposed
+    # a share, Persona paced it by cooldown and hourly cap and put it
+    # on screen as a `ui.notice`, while Initiative -- which exists to
+    # be the one path, and weighs the room, the hour, who is present
+    # and which channel reaches them -- weighed the same event
+    # separately. Two modules answering one event with two policies is
+    # how a household ends up being told things at two in the morning
+    # by whichever one happened to be laxer.
+    #
+    # Stage 6 item 6 says unprompted speech has exactly one path.
+    # Initiative is it. Persona keeps the mood, the voice block and
+    # the user model; what it does not keep is an opinion about when
+    # to interrupt people.
 
 
 __all__ = ["Service", "VERSION"]

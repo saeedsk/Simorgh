@@ -22,7 +22,10 @@ CuriosityInterestUpdated = define(t.CURIOSITY_INTEREST_UPDATED, [
 CuriosityShareProposed = define(t.CURIOSITY_SHARE_PROPOSED, [
     F("kind", Enum("growth", "news")),
     F("content_ref", Str),
-])
+    O("summary", Str),
+], doc="Something worth telling the household. `summary` is the words; a share without them is "
+       "suppressed by Initiative, because a reference is not a thing to say. The scheduler has "
+       "always computed one and the publisher dropped it on the line below (fixed 2026-09-20).")
 CuriosityDiscoverRequest = define(t.CURIOSITY_DISCOVER_REQUEST, [])
 CuriosityDiscoverReply = define(t.CURIOSITY_DISCOVER_REPLY, [F("created", List(Str))])
 CuriosityShareRequest = define(t.CURIOSITY_SHARE_REQUEST, [F("kind", Enum("growth", "news"))])

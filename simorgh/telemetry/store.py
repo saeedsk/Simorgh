@@ -142,6 +142,23 @@ class TelemetryStore:
                     "samples": conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]}
 
     # -------------------------------------------------------------- retention
+    def prune(self, older_than_ts: float, *, spans: bool = False) -> dict[str, int]:
+        """Delete samples older than `older_than_ts` in one transaction
+        (and spans too when `spans` is True). Returns the rows removed."""
+        with self._lock:
+            conn = self._require()
+            conn.execute("BEGIN")
+            try:
+                samples = conn.execute("DELETE FROM samples WHERE ts < ?", (older_than_ts,)).rowcount
+                deleted_spans = 0
+                if spans:
+                    deleted_spans = conn.execute("DELETE FROM spans WHERE start < ?", (older_than_ts,)).rowcount
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+        return {"samples": samples, "spans": deleted_spans}
+
     def retain(self, *, now: float, span_max_age_s: float, sample_max_age_s: float,
                downsample_after_s: float, bucket_s: float) -> dict[str, int]:
         """Delete spans that started more than `span_max_age_s` ago and

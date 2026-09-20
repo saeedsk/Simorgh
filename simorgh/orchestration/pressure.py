@@ -94,7 +94,7 @@ async def stub_old_results(
 
 def recall_ref(args: dict) -> str:
     """The ref a `recall_result` call names, whatever key the model used."""
-    for key in ("ref", "argument", "id"):
+    for key in ("ref", "argument", "id", "reference", "blob_ref", "result_id"):
         value = args.get(key)
         if value:
             return " ".join(str(value).split())

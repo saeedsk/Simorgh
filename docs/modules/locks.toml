@@ -17,6 +17,18 @@ task = "stage 11 item 8: the latency table"
 since = "2026-09-20T20:09:27+00:00"
 until = "2026-09-21T04:09:27+00:00"
 
+[locks.growth]
+by = "opus-main"
+task = "a share's summary was computed and dropped"
+since = "2026-09-20T23:11:17+00:00"
+until = "2026-09-21T07:11:17+00:00"
+
+[locks.initiative]
+by = "opus-main"
+task = "a share with a summary is something to say"
+since = "2026-09-20T23:11:17+00:00"
+until = "2026-09-21T07:11:17+00:00"
+
 [locks.interface]
 by = "opus-main"
 task = "a telegram turn renders as ? · ? · (no description)"
@@ -28,6 +40,12 @@ by = "opus-main"
 task = "tell a config that still uses the pre-merge section names"
 since = "2026-09-20T19:50:56+00:00"
 until = "2026-09-21T03:50:56+00:00"
+
+[locks.persona]
+by = "opus-main"
+task = "unprompted speech has two paths; initiative is the one that gates"
+since = "2026-09-20T23:11:17+00:00"
+until = "2026-09-21T07:11:17+00:00"
 
 [locks.simloader]
 by = "opus-main"

@@ -41,10 +41,6 @@ class Config:
     # still ends up worse off than a quick clean failure, which is the
     # right shape for a protracted struggle.
     outcome_nudge_blocked: float = -0.03
-    growth_cooldown_s: float = 900.0
-    news_cooldown_s: float = 1800.0
-    quiet_when_active_s: float = 20.0
-    max_shares_per_hour: int = 4
     voice_max_chars: int = 600
 
     def resolved_soul_path(self) -> Path:
@@ -55,7 +51,6 @@ class Config:
         data = data or {}
         root = Path(data.get("repo_root", default_repo_root or Path(__file__).resolve().parents[2]))
         baseline = data.get("baseline") or {}
-        share = data.get("share") or {}
         voice = data.get("voice") or {}
         return cls(
             repo_root=root,
@@ -71,9 +66,5 @@ class Config:
             outcome_nudge_success=float(data.get("outcome_nudge", {}).get("success", 0.08)) if isinstance(data.get("outcome_nudge"), dict) else 0.08,
             outcome_nudge_failure=float(data.get("outcome_nudge", {}).get("failure", -0.10)) if isinstance(data.get("outcome_nudge"), dict) else -0.10,
             outcome_nudge_blocked=float(data.get("outcome_nudge", {}).get("blocked", -0.03)) if isinstance(data.get("outcome_nudge"), dict) else -0.03,
-            growth_cooldown_s=float(share.get("growth_cooldown_s", 900.0)),
-            news_cooldown_s=float(share.get("news_cooldown_s", 1800.0)),
-            quiet_when_active_s=float(share.get("quiet_when_active_s", 20.0)),
-            max_shares_per_hour=int(share.get("max_per_hour", 4)),
             voice_max_chars=int(voice.get("max_chars", 600)),
         )

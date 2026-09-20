@@ -155,31 +155,26 @@ class PersonaTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertLess(self.service._mood.current().valence, 0.5)
         self.assertGreater(self.service._mood.current().valence, 0.0)
 
-    async def test_share_proposal_is_paced_by_recent_user_activity(self):
-        seen = []
-        sub = await self.requester.subscribe(topics.UI_NOTICE, lambda m: seen.append(m) or asyncio.sleep(0))
-        await self.bus.publish(self.bus.new(topics.PERCEPT_TEXT_RECEIVED, {
-            "channel": "cli", "text": "hi", "session_id": "s1",
-        }))
-        await self._pump()
-        await self.bus.publish(self.bus.new(topics.CURIOSITY_SHARE_PROPOSED, {
-            "kind": "growth", "content_ref": "blob:abc",
-        }))
-        await self._pump()
-        self.assertFalse(seen)  # quiet period after user activity -- suppressed, not shared
+    async def test_a_share_is_not_persona_s_to_pace_any_more(self):
+        """Unprompted speech has one path, and it is Initiative's.
 
-        self.clock.advance(60)
+        Persona used to subscribe to `curiosity.share.proposed` and
+        put a share on screen once its own cooldown and hourly cap
+        allowed -- while Initiative weighed the same event against
+        the room, the hour, who is present and which channel reaches
+        them. Two policies answering one event is how a household
+        gets told something at two in the morning by whichever module
+        happened to be laxer (stage 6 item 6).
+        """
+        seen = []
+        sub = await self.bus.subscribe(topics.UI_NOTICE, lambda m: seen.append(m))
         await self.bus.publish(self.bus.new(topics.CURIOSITY_SHARE_PROPOSED, {
-            "kind": "growth", "content_ref": "blob:abc",
+            "kind": "growth", "content_ref": "blob:abc", "summary": "something worth saying",
         }))
         await self._pump()
         await sub.unsubscribe()
-        self.assertTrue(seen)
-
-    async def test_state_changed_suspends_sharing(self):
-        await self.bus.publish(self.bus.new(topics.SYSTEM_STATE_CHANGED, {"state": "paused"}))
-        await self._pump()
-        self.assertTrue(self.service._share_policy._suspended)
+        self.assertEqual(seen, [], "Persona answered a share; that is Initiative's decision now")
+        self.assertNotIn(topics.CURIOSITY_SHARE_PROPOSED, self.service.consumes)
 
     async def test_health_ok(self):
         health = await self.service.health()

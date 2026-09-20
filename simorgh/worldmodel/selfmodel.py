@@ -70,6 +70,62 @@ class SelfModel:
             "goals": self.goals, "continuity": self.continuity, "open_questions": self.open_questions,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "SelfModel | None":
+        """Rebuild a SelfModel from `to_dict()` output. Returns None on any
+        malformed input (missing keys, bad types) so callers fall back to
+        the empty/static model rather than crash on a corrupt snapshot --
+        honest degraded continuity, like load_identity's missing-SOUL floor."""
+        try:
+            identity = Identity(
+                name=data["identity"]["name"],
+                soul_sha256=data["identity"]["soul_sha256"],
+                directives=tuple(data["identity"]["directives"]),
+                summary=data["identity"]["summary"],
+            )
+            return cls(
+                version=int(data["version"]),
+                updated_at=float(data["updated_at"]),
+                identity=identity,
+                capabilities=dict(data.get("capabilities", {})),
+                competence=dict(data.get("competence", {})),
+                limitations=list(data.get("limitations", [])),
+                change_history=list(data.get("change_history", [])),
+                goals=dict(data.get("goals", {})),
+                continuity=dict(data.get("continuity", {})),
+                open_questions=list(data.get("open_questions", [])),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> SelfModel | None:
+        """Rebuild a SelfModel from `to_dict()` output. Returns None on any
+        malformed input (missing keys, bad types) so callers fall back to
+        the empty/static model rather than crash on a corrupt snapshot --
+        honest degraded continuity, like load_identity's missing-SOUL floor."""
+        try:
+            identity = Identity(
+                name=data["identity"]["name"],
+                soul_sha256=data["identity"]["soul_sha256"],
+                directives=tuple(data["identity"]["directives"]),
+                summary=data["identity"]["summary"],
+            )
+            return cls(
+                version=int(data["version"]),
+                updated_at=float(data["updated_at"]),
+                identity=identity,
+                capabilities=dict(data.get("capabilities", {})),
+                competence=dict(data.get("competence", {})),
+                limitations=list(data.get("limitations", [])),
+                change_history=list(data.get("change_history", [])),
+                goals=dict(data.get("goals", {})),
+                continuity=dict(data.get("continuity", {})),
+                open_questions=list(data.get("open_questions", [])),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
 
 def load_identity(soul_path: Path) -> Identity:
     """Never raises: a missing SOUL.md is an honest, degraded identity

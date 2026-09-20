@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/curiosity.share.proposed.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Payload of `curiosity.share.proposed` (catalog v1).",
+  "description": "Something worth telling the household. `summary` is the words; a share without them is suppressed by Initiative, because a reference is not a thing to say. The scheduler has always computed one and the publisher dropped it on the line below (fixed 2026-09-20).",
   "properties": {
     "content_ref": {
       "type": "string"
@@ -13,6 +13,12 @@
         "news"
       ],
       "type": "string"
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

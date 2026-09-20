@@ -4,7 +4,7 @@ One-line status: layer 5 · 806 lines · 4 test files · lock: `persona` in docs
 
 ## Purpose
 
-Persona owns Sim's continuous mood (valence, arousal, cognitive load), the rule-based emotion floor that moves it, the identity-plus-mood "voice" block Cognition puts in prompts, a narrow regex user model ("call me X", "I prefer X"), and the pacing of proactive shares Curiosity proposes. It never calls Cognition and never sits in a model call path: it reacts to bus events and answers `persona.voice` requests, so it keeps working with every provider down (`service.py:1-5`, `emotion.py`). It is the single writer of `persona:state` and restores mood from it at start, decayed forward by the time the process was down (`service.py:131-181`). The shaping decision is that mood is cheap deterministic arithmetic on an injected clock, announced on the bus only when it has really moved: a delta below 1e-4 is dropped, and decay is announced only after drifting `decay_announce_delta` from the last announced state (V6).
+Persona owns Sim's continuous mood (valence, arousal, cognitive load), the rule-based emotion floor that moves it, the identity-plus-mood "voice" block Cognition puts in prompts, and a narrow regex user model ("call me X", "I prefer X"). It no longer paces proactive shares: that was a second path for unprompted speech beside Initiative's, and stage 6 item 6 says there is one (removed 2026-09-20 with `sharing.py`, its four `[persona.share]` keys and its subscription). It never calls Cognition and never sits in a model call path: it reacts to bus events and answers `persona.voice` requests, so it keeps working with every provider down (`service.py:1-5`, `emotion.py`). It is the single writer of `persona:state` and restores mood from it at start, decayed forward by the time the process was down (`service.py:131-181`). The shaping decision is that mood is cheap deterministic arithmetic on an injected clock, announced on the bus only when it has really moved: a delta below 1e-4 is dropped, and decay is announced only after drifting `decay_announce_delta` from the last announced state (V6).
 
 ## Files
 
@@ -15,7 +15,7 @@ Persona owns Sim's continuous mood (valence, arousal, cognitive load), the rule-
 | `simorgh/persona/config.py` | frozen `Config`, `resolved_soul_path`, `from_mapping` for `[persona]` |
 | `simorgh/persona/emotion.py` | lexicon-based `react(text)` -> mood delta; no model |
 | `simorgh/persona/mood.py` | `EmotionalState` and `MoodEngine`: apply delta, set, decay toward baseline, restore, bounded history |
-| `simorgh/persona/service.py` | the `Service`: subscriptions, mood restore, announce-on-change, voice replies, share notices |
+| `simorgh/persona/service.py` | the `Service`: subscriptions, mood restore, announce-on-change, voice replies |
 | `simorgh/persona/sharing.py` | `SharePolicy`: per-kind cooldown, quiet period after user activity, hourly cap |
 | `simorgh/persona/user_model.py` | `UserModel`: regex facet extraction with confidence merge, values sanitised for a protected prompt block |
 | `simorgh/persona/voice.py` | `mood_phrase` and `VoiceComposer`: identity summary + mood phrase within `voice_max_chars` |
@@ -34,8 +34,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 | `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/persona/service.py | every `decay_interval_s`, decays mood; announces only past `decay_announce_delta` |
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/persona/service.py | suspends sharing unless the state is `running` |
 | `persona.voice` | `messages/persona.py::PersonaVoice` | simorgh/persona/service.py | replies with the style block and mood phrase (requested by `cognition/assembler.py`) |
-| `ui.prompt.answered` | `messages/ui.py::UiPromptAnswered` | simorgh/persona/service.py | notes user activity (holds shares back for `quiet_when_active_s`) |
-| `curiosity.share.proposed` | `messages/curiosity.py::CuriosityShareProposed` | simorgh/persona/service.py | decides whether to share now; if yes publishes a `ui.notice` |
+| `ui.prompt.answered` | `messages/ui.py::UiPromptAnswered` | simorgh/persona/service.py | somebody is at the keyboard |
 
 ## Produces
 
@@ -44,7 +43,6 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 | `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/persona/service.py | a mood change of at least 1e-4, a health reset, or decay past `decay_announce_delta` (consumed by Reflection, Curiosity, Interface, Voice) |
 | `persona.user_model.updated` | `messages/persona.py::PersonaUserModelUpdated` | simorgh/persona/service.py | a facet is extracted from a percept (consumed by World Model) |
 | `persona.voice.reply` | `messages/persona.py::PersonaVoiceReply` | simorgh/persona/service.py | reply to `persona.voice` (via `bus.reply`) |
-| `ui.notice` | `messages/ui.py::UiNotice` | simorgh/persona/service.py | a Curiosity share passes the pacing policy (`level: info`) |
 
 ## Ledger streams
 
@@ -56,7 +54,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 
 ## Config
 
-`[persona]` in simorgh.toml; dataclass in `simorgh/persona/config.py`. Several keys are nested in the TOML: `[persona.baseline] valence/arousal`, `[persona.outcome_nudge] success/failure/blocked`, `[persona.share] growth_cooldown_s/news_cooldown_s/quiet_when_active_s/max_per_hour`, `[persona.voice] max_chars` (`config.py:50-77`). An explicitly constructed `Config` wins over `ctx.config`. `[persona.user_model] min_confidence_to_use` (field `user_model_min_confidence`) was removed 2026-09-19: nothing read it (its only reader, `UserModel.register`, had no caller and was removed too); a `[persona]` section holding only that key is now reported by the Kernel's config check as changing nothing. The confidence floor for user facets in prompts is Cognition's own constant (`cognition/assembler.py::_MIN_FACET_CONFIDENCE`).
+`[persona]` in simorgh.toml; dataclass in `simorgh/persona/config.py`. Several keys are nested in the TOML: `[persona.baseline] valence/arousal`, `[persona.outcome_nudge] success/failure/blocked`, `[persona.voice] max_chars` (`config.py:50-77`). An explicitly constructed `Config` wins over `ctx.config`. `[persona.user_model] min_confidence_to_use` (field `user_model_min_confidence`) was removed 2026-09-19: nothing read it (its only reader, `UserModel.register`, had no caller and was removed too); a `[persona]` section holding only that key is now reported by the Kernel's config check as changing nothing. The confidence floor for user facets in prompts is Cognition's own constant (`cognition/assembler.py::_MIN_FACET_CONFIDENCE`).
 
 | Key | Default | Read in the package |
 |---|---|---|

@@ -286,8 +286,17 @@ class VerificationService:
         try:
             result = await asyncio.wait_for(fut, timeout=timeout or self._config.action_timeout_seconds)
         except asyncio.TimeoutError:
-            self._pending_actions.pop(action_id, None)
             return ActionResult(ok=False, error="timeout", error_kind="transient")
+        finally:
+            # Cleanup on every exit path: on timeout, or if the task running
+            # _act is cancelled (e.g. service stop), the future would
+            # otherwise stay pending in _pending_actions forever -- a leaked
+            # entry and a coroutine that never resumes. Pop the entry and
+            # cancel the future so a late sibling reply finds nothing to
+            # set (_on_action_result already guards on fut.done()).
+            self._pending_actions.pop(action_id, None)
+            if not fut.done():
+                fut.cancel()
         return ActionResult(
             ok=result.get("ok", False), output=result.get("stdout_preview", ""),
             output_ref=result.get("output_ref", ""), error=result.get("error"),

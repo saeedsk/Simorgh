@@ -318,8 +318,10 @@ class Service:
     async def _offer_share(self, kind: str) -> None:
         decision = self._sharing.maybe_share(self._now())
         if decision is not None and decision.kind == kind:
-            await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref})
-            await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref})
+            await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref,
+                 "summary": decision.summary})
+            await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref,
+                 "summary": decision.summary})
 
     # -- request/reply handlers -------------------------------------------------------------
     async def _on_discover_request(self, message) -> None:
@@ -331,8 +333,10 @@ class Service:
         decision = self._sharing.maybe_share(self._now())
         shared = decision is not None and decision.kind == kind
         if shared:
-            await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref})
-            await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref})
+            await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref,
+                 "summary": decision.summary})
+            await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref,
+                 "summary": decision.summary})
         await self._bus.reply(message, type=topics.CURIOSITY_SHARE_REPLY, payload={
             "shared": shared, **({"content_ref": decision.content_ref} if shared else {}),
         })
@@ -378,8 +382,10 @@ class Service:
         await self._run_tick(idle_seconds=message.payload["idle_seconds"])
         decision = self._sharing.maybe_share(self._now())
         if decision is not None:
-            await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref})
-            await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref})
+            await self._append(_SHARES_STREAM, "proposed", {"kind": decision.kind, "content_ref": decision.content_ref,
+                 "summary": decision.summary})
+            await self._publish(topics.CURIOSITY_SHARE_PROPOSED, {"kind": decision.kind, "content_ref": decision.content_ref,
+                 "summary": decision.summary})
 
     async def _on_tick_metrics(self, _message) -> None:
         """`status` read a counter `curiosity.interests` that nothing has
