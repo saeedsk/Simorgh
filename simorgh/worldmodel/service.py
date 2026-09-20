@@ -21,6 +21,7 @@ from .facets.capability_map import CapabilityMapFacet
 from .facets.file_index import FileIndexFacet
 from .facets.git_state import GitStateFacet
 from .facets.home import HomeFacet
+from .facets.people import PeopleFacet
 from .facets.registry_facets import ToolsFacet, UserProfileFacet
 from .selfmodel import (
     add_change,
@@ -96,10 +97,13 @@ class Service:
         # What the house is doing and who is in it (stage 6 item 3), folded
         # from the evidence Sim already sees.
         self._home = HomeFacet(clock=ctx.clock.now)
+        # Who the people are (stage 6 item 4): one record per person, on
+        # disk beside the rest of what Sim knows, seeded from the household.
+        self._people = PeopleFacet(ctx.data_dir / "people.json")
         self._facets = {
             "capability_map": self._capability_map, "file_index": self._file_index,
             "git_state": self._git_state, "tools": self._tools, "user_profile": self._user_profile,
-            "home": self._home,
+            "home": self._home, "people": self._people,
         }
         self._model = build_static_model(
             soul_path=self.config.resolved_soul_path(), clock_now=self._started_at,

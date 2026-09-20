@@ -10,7 +10,7 @@ from .. import topics as t
 
 WorldEnvQuery = define(t.WORLD_ENV_QUERY, [
     # `home`: what the house is doing and who is in it (stage 6 item 3).
-    F("what", Enum("capability_map", "file_index", "tools", "user_profile", "git_state", "home")),
+    F("what", Enum("capability_map", "file_index", "tools", "user_profile", "git_state", "home", "people")),
     O("args", Obj()),
 ], doc="file_index accepts args {path, max_chars} for a bounded content preview.")
 WorldEnvQueryReply = define(t.WORLD_ENV_QUERY_REPLY, [
