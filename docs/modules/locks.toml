@@ -4,39 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.contracts]
-by = "opus-main"
-task = "stage 8 item 4: policy topics"
-since = "2026-09-20T13:40:13+00:00"
-until = "2026-09-20T21:40:13+00:00"
-
-[locks.docs]
-by = "opus-main"
-task = "stage 8 item 1: merge into growth"
-since = "2026-09-20T13:21:14+00:00"
-until = "2026-09-20T21:21:14+00:00"
-
-[locks.growth]
-by = "opus-main"
-task = "stage 8 item 1: merge into growth"
-since = "2026-09-20T13:21:14+00:00"
-until = "2026-09-20T21:21:14+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "stage 8 item 4: policy topics"
-since = "2026-09-20T13:40:13+00:00"
-until = "2026-09-20T21:40:13+00:00"
-
-[locks.kernel]
-by = "opus-main"
-task = "stage 8 item 1: merge into growth"
-since = "2026-09-20T13:21:14+00:00"
-until = "2026-09-20T21:21:14+00:00"
-
-[locks.shared]
-by = "opus-main"
-task = "stage 8 item 1: merge into growth"
-since = "2026-09-20T13:21:14+00:00"
-until = "2026-09-20T21:21:14+00:00"
