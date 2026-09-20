@@ -1,6 +1,6 @@
 # Stage 6 -- Self and world projections, People, safety tiers, Initiative
 
-Status: **in progress** (2026-09-19: items 1-6 in part; item 7 done) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
+Status: **in progress** (2026-09-20: items 4 and 5 mostly done; items 1-3 and 6 in part; item 7 done) · Depends on: stages 4 and 5 · Estimated: 3 weeks · Modules touched: worldmodel, contracts, guardian, persona, curiosity, execution, voice, interface, initiative (new)
 
 ## Outcome
 
@@ -55,5 +55,5 @@ Done 2026-09-19 (item 5, in part): `guardian/tiers.py` gives every proposal a ti
 
 ## Definition of done
 
-- [ ] Items 1-7 with tests; new package in LAYERS, AGENTS.md and the boundary test; CONTRACT.md for every touched module.
+- [ ] Items 1-7 with tests; new package in LAYERS, AGENTS.md and the boundary test; CONTRACT.md for every touched module. **Item 7 done; `initiative` is in LAYERS, AGENTS.md and the boundary test with its own CONTRACT. Item 4: the People store, the channel-edge resolution (a linked handle shares one memory namespace) and the `people` tool are done; still to fold in are `persona/user_model.py`, the Telegram/WhatsApp allow-lists and the speaker book. Item 5: tiers, `PersonRule`, `TierRule` and `PresenceRule` are done (presence carries whether the voice was verified); the per-person permission matrix waits on the rest of item 4, and the tier is not yet a span attribute. Items 1-3 and 6 in part, as before.**
 - [ ] Findings entry.
