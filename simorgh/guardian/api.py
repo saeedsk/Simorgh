@@ -76,6 +76,12 @@ class DecisionContext:
     budgets: Mapping[str, BudgetStatus] = field(default_factory=dict)
     rejected_similarity: Callable[[str], tuple[float, str] | None] = lambda code: None
     classify: Callable[[Proposal], Awaitable[str | None]] | None = None  # None | "ALLOW"/"DENY"/"ASK"
+    #: `(person) -> (belief, verified)` from World Model's `world:home`
+    #: (stage 6 item 5): how sure Sim is that this person is in the
+    #: house right now, and whether the voice that said so was
+    #: speaker-verified. None where nothing can answer -- which
+    #: `PresenceRule` treats as "not present", never as "present".
+    presence: Callable[[str], Awaitable[tuple[float, bool]]] | None = None
 
 
 @dataclass(frozen=True)

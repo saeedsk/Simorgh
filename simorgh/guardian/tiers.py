@@ -82,6 +82,61 @@ class PersonRule:
                         (f"{who} is a {role} here, and this {why}: an adult should say yes",))
 
 
+#: How sure Sim must be that somebody is in the house before their
+#: voice may approve a human-class action (stage 6 item 5).
+PRESENT_ENOUGH = 0.8
+
+
+class PresenceRule:
+    """A voice may only approve what a present, recognised person said.
+
+    The house's biggest hole is not a stranger typing at the console --
+    it is a voice. A television, a phone on speaker, a recording, or a
+    guest in the hallway can all say "yes, unlock the door", and until
+    now the only question asked was whether the words sounded like
+    approval.
+
+    So for an action that needs a person (tier 3, or a human-class
+    physical action), arriving by voice: the person Sim thinks is
+    asking must be somewhere in the house with belief above
+    `PRESENT_ENOUGH`, and the voice must have been speaker-verified
+    rather than guessed. Otherwise the voice path is refused and the
+    answer has to come the other way -- the phone, the console -- which
+    is a channel somebody has to hold in their hand.
+
+    Nothing to ask means not present. A World Model that does not answer
+    is not evidence that the room is full, and the failure this rule
+    exists to stop is exactly the one where nobody is there.
+    """
+
+    name = "presence"
+    layer = "presence"
+
+    async def evaluate(self, proposal: Proposal, ctx) -> Decision:
+        if (getattr(proposal, "requester_channel", "") or "") != "voice":
+            return Decision("abstain", self.layer)
+        tier, why = tier_of(proposal, getattr(ctx, "tool", None))
+        if tier < 3:
+            return Decision("abstain", self.layer)
+        who = (getattr(proposal, "requester", "") or "").strip()
+        if not who:
+            return Decision("deny", self.layer,
+                            (f"a voice I cannot place asked for this, and it {why}",))
+        ask = getattr(ctx, "presence", None)
+        belief, verified = (0.0, False)
+        if ask is not None:
+            try:
+                belief, verified = await ask(who)
+            except Exception:  # noqa: BLE001 -- no answer is not a yes
+                belief, verified = (0.0, False)
+        if belief >= PRESENT_ENOUGH and verified:
+            return Decision("abstain", self.layer)
+        unsure = ("I am not sure that was really you" if not verified
+                  else f"I cannot tell that {who} is here")
+        return Decision("deny", self.layer,
+                        (f"{unsure}, and this {why}: say yes from your phone instead",))
+
+
 class TierRule:
     """Tier 3 needs a person, in every posture (stage 6 item 5).
 
@@ -102,5 +157,5 @@ class TierRule:
         return Decision("escalate", self.layer, (f"tier 3 needs a person: {why}",))
 
 
-__all__ = ["CEILING", "LOCAL_IRREVERSIBLE", "PersonRule", "REACHES_OUTSIDE", "TIER_NAMES", "TierRule",
-           "role_of", "tier_of"]
+__all__ = ["CEILING", "LOCAL_IRREVERSIBLE", "PRESENT_ENOUGH", "PersonRule", "PresenceRule", "REACHES_OUTSIDE",
+           "TIER_NAMES", "TierRule", "role_of", "tier_of"]

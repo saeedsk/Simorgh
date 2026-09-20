@@ -877,7 +877,7 @@ class ReversibilityRule:
         return Decision("allow", self.layer)
 
 
-from .tiers import PersonRule, TierRule  # noqa: E402 -- the tier rules, beside the rest of the pipeline
+from .tiers import PersonRule, PresenceRule, TierRule  # noqa: E402 -- the tier rules, beside the rest of the pipeline
 
 DEFAULT_PIPELINE: tuple = (
     PausedRule(),
@@ -896,6 +896,10 @@ DEFAULT_PIPELINE: tuple = (
     # Who is asking, then how far the action reaches (stage 6 item 5),
     # before the ordinary physical and reversibility rules.
     PersonRule(),
+    # A voice may only approve what a present, recognised person said
+    # (stage 6 item 5) -- before TierRule, which would otherwise offer
+    # the escalation to whoever is talking.
+    PresenceRule(),
     TierRule(),
     PhysicalRule(),
     ReversibilityRule(),

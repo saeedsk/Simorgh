@@ -5,11 +5,12 @@ nine-year-old is the failure this exists for."""
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from simorgh.guardian.api import DecisionContext, Proposal, ToolInfo
 from simorgh.guardian.config import Config
 from simorgh.guardian.posture import Posture
-from simorgh.guardian.tiers import CEILING, PersonRule, TierRule, role_of, tier_of
+from simorgh.guardian.tiers import CEILING, PersonRule, PresenceRule, TierRule, role_of, tier_of
 
 
 def _proposal(tool: str, *, requester: str = "", channel: str = "", reversibility: str = "irreversible",
@@ -95,3 +96,74 @@ class TierThreeNeedsAPerson(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PresenceByVoice(unittest.IsolatedAsyncioTestCase):
+    """Stage 6 item 5: a voice may only approve what a present,
+    recognised person said.
+
+    A television, a phone on speaker, a recording and a guest in the
+    hallway can all say "yes, unlock the door". The words are not the
+    evidence; the person being in the house, and the voice being
+    theirs, is.
+    """
+
+    @staticmethod
+    def _ctx_with(belief: float, verified: bool = True, *, fails: bool = False) -> DecisionContext:
+        async def _presence(person: str):
+            if fails:
+                raise TimeoutError("world model did not answer")
+            return (belief, verified)
+
+        ctx = _ctx()
+        return replace(ctx, presence=_presence)
+
+    async def test_a_present_verified_person_is_left_to_the_other_rules(self):
+        decision = await PresenceRule().evaluate(
+            _proposal("home_call", requester="Saeed", channel="voice",
+                      args={"service": "lock.unlock", "target": "lock.front_door"}),
+            self._ctx_with(0.95))
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_a_voice_from_nowhere_is_refused(self):
+        decision = await PresenceRule().evaluate(
+            _proposal("notify", requester="Saeed", channel="voice"), self._ctx_with(0.0))
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("phone", decision.reasons[0])
+
+    async def test_an_unverified_voice_is_refused_even_when_someone_is_there(self):
+        decision = await PresenceRule().evaluate(
+            _proposal("notify", requester="Saeed", channel="voice"),
+            self._ctx_with(0.99, verified=False))
+        self.assertEqual(decision.kind, "deny")
+        self.assertIn("really you", decision.reasons[0])
+
+    async def test_a_voice_nobody_can_place_is_refused(self):
+        decision = await PresenceRule().evaluate(
+            _proposal("notify", requester="", channel="voice"), self._ctx_with(0.99))
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_no_answer_is_not_a_yes(self):
+        """A World Model that is slow or silent is not evidence of a
+        room with somebody in it."""
+        decision = await PresenceRule().evaluate(
+            _proposal("notify", requester="Saeed", channel="voice"), self._ctx_with(0.99, fails=True))
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_nothing_to_ask_is_not_a_yes_either(self):
+        decision = await PresenceRule().evaluate(
+            _proposal("notify", requester="Saeed", channel="voice"), _ctx())
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_typing_is_not_talking(self):
+        """The console is somebody's hands on the machine; this rule is
+        only about voices in a room."""
+        decision = await PresenceRule().evaluate(
+            _proposal("notify", requester="Saeed", channel="cli"), self._ctx_with(0.0))
+        self.assertEqual(decision.kind, "abstain")
+
+    async def test_a_small_action_by_voice_is_not_policed(self):
+        decision = await PresenceRule().evaluate(
+            _proposal("home_call", requester="Saeed", channel="voice", reversibility="reversible"),
+            self._ctx_with(0.0))
+        self.assertEqual(decision.kind, "abstain", "turning a light on is not tier 3")

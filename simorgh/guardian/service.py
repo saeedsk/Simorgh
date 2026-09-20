@@ -592,6 +592,10 @@ class Service:
             # the proposal's label is used only for a tool nothing has
             # registered, and the decision's notes say so.
             tool=self._tools.info_for(proposal.tool, proposal.reversibility),
+            # Whether the person whose voice asked is actually in the
+            # house (stage 6 item 5). Asked of World Model, which owns
+            # the belief; Guardian keeps no presence of its own.
+            presence=self._presence_of,
         )
 
         stream = f"action:{action_id}"
@@ -710,6 +714,30 @@ class Service:
             source="guardian",
         ))
         self._decided[action_id] = (fingerprint, True)
+
+    async def _presence_of(self, person: str) -> tuple[float, bool]:
+        """`(belief, speaker-verified)` for `person`, from `world:home`.
+
+        A short timeout and a hard default of "not here": this is read
+        on the path that decides whether a voice may unlock a door, and
+        a World Model that is slow or silent must never read as a room
+        with somebody in it.
+        """
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        try:
+            reply = await self._ctx.bus.request(
+                Message.new(topics.WORLD_ENV_QUERY, source=self._ctx.source,
+                            payload={"what": "home", "args": {"person": person}}),
+                timeout=0.5)
+        except Exception:  # noqa: BLE001 -- no answer is not a yes
+            return (0.0, False)
+        payload = reply.payload or {}
+        area = str(payload.get("area") or "unknown")
+        if area == "unknown":
+            return (0.0, False)   # somewhere unknown is not somewhere in the house
+        return (float(payload.get("belief") or 0.0), bool(payload.get("verified", True)))
 
     def _rejected_similarity(self, code: str):
         return rule_defs.similarity(code, self._rejected_excerpts, self._config.immunity_similarity_threshold)
