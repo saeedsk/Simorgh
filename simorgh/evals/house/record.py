@@ -82,6 +82,9 @@ class Record:
     said: list[Said] = field(default_factory=list)
     spoke: list[Spoke] = field(default_factory=list)
     house: list[Acted] = field(default_factory=list)
+    #: The sandbox's data directory, so an expectation can look at what
+    #: was written as well as what was said. Set by `Sandbox.start`.
+    data_dir: object = None
     started_at: float = field(default_factory=time.monotonic)
 
     # -- writing (the sandbox's side) -------------------------------------------

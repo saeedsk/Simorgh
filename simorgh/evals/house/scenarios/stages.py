@@ -14,8 +14,8 @@ pretending to be a test, and there are enough of those already.
 from __future__ import annotations
 
 from ..script import (
-    Beat, Scenario, answered, asked_a_person, did_not_run, identified_as, quiet, remembered,
-    the_house_did_nothing, tui_is_sane, was_denied,
+    Beat, Scenario, answered, asked_a_person, did_not_run, identified_as, nothing_wrote_a_trace,
+    quiet, remembered, the_house_did_nothing, tui_is_sane, was_denied,
 )
 
 # ---------------------------------------------------------------- stage 0
@@ -110,6 +110,47 @@ TWO_PEOPLE_AND_THEN_SIM = Scenario(
              expect=(answered(),)),
     ),
 )
+
+# ---------------------------------------------------------------- stage 1
+#: An ordinary evening, and afterwards: nothing in `trace:`.
+#:
+#: Traces were once written per step and per tool, and one night they
+#: were 192,000 files. The rule since is that spans go to telemetry
+#: and the ledger keeps decisions. This is the kind of regression
+#: that arrives quietly and is noticed by a full disk.
+AN_EVENING_LEAVES_NO_TRACES = Scenario(
+    id="stage1/an-evening-leaves-no-traces",
+    stage="1",
+    because="192,000 files appeared once and nobody saw them arrive",
+    beats=(
+        Beat(who="Mara", says="Sim, what is on this evening?", ask_directly=True),
+        Beat(who="Mara", says="Sim, and tomorrow?", ask_directly=True,
+             expect=(answered(), nothing_wrote_a_trace())),
+    ),
+)
+
+# ---------------------------------------------------------------- stage 4
+# There is no stage-4 scenario here, and the reason is worth more than
+# a green one would be.
+#
+# Stage 4 item 4 promises a cacheable system prefix: identical from
+# one turn to the next, so a provider's prompt cache actually hits. I
+# wrote `the_prefix_did_not_change()` to check it from the record and
+# it failed on a healthy system -- because `cognition.think` does not
+# carry the prefix. The blocks Orchestration sends are the per-turn
+# context (the conversation so far, the relevant memory), which are
+# SUPPOSED to change every turn; the cacheable part -- persona, the
+# soul, the tool instructions -- is assembled inside Cognition from
+# protected blocks and only ever exists in the provider request
+# (`cognition/service.py`, "Protected blocks ... go as a real system
+# message").
+#
+# So the promise is real and this harness cannot see it. Checking it
+# needs either a cognition-level test on the assembled request or a
+# seam that records what went to the provider; a scenario that
+# asserted on what IS visible would be asserting that the
+# conversation block changes, which is not the promise and would pass
+# for ever.
 
 # ---------------------------------------------------------------- stage 5
 #: Told on one evening, asked on another, in different words. The
@@ -232,6 +273,7 @@ SCENARIOS = (
     A_GUEST_ASKS_TO_REACH_OUT,
     THE_OWNER_IS_ASKED_NOT_REFUSED,
     TWO_PEOPLE_AND_THEN_SIM,
+    AN_EVENING_LEAVES_NO_TRACES,
     REMEMBERED_ACROSS_A_RESTART,
     REMEMBERED_ACROSS_A_LONG_CONVERSATION,
     THE_SAME_PERSON_TWICE,

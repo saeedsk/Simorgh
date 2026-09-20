@@ -189,6 +189,71 @@ def did_not_run(tool: str) -> Expectation:
     return Expectation(f"{tool} never ran", _check, stage="0")
 
 
+def the_prefix_did_not_change() -> Expectation:
+    """The leading system blocks are the same on two turns.
+
+    **Not usable as a stage-4 check today, and kept for when it is.**
+    `cognition.think` carries the per-turn context -- the conversation
+    so far, the relevant memory -- which is supposed to change every
+    turn. The cacheable prefix (persona, the soul, the tool
+    instructions) is assembled inside Cognition from protected blocks
+    and exists only in the provider request, so nothing here can see
+    it. Pointing this at `cognition.think` fails on a healthy system.
+    It becomes the real check the moment a seam records what went to
+    the provider.
+
+    Stage 4 item 4's whole point: a prefix that changes every turn is
+    a prompt cache that never hits, and the change that broke it was
+    a single line repeating the person's question inside the system
+    blocks. From the record it is checkable exactly -- compare the
+    leading system messages of two `cognition.think` calls -- and it
+    is the kind of regression nothing else would notice until a bill
+    arrived.
+    """
+    def _check(record: Record, since: float) -> str:
+        thinks = record.of("cognition.think", since=since)
+        if len(thinks) < 2:
+            return f"only {len(thinks)} turns thought; two are needed to compare"
+        first, last = _prefix(thinks[0]), _prefix(thinks[-1])
+        if first == last:
+            return ""
+        for a, b in zip(first, last):
+            if a != b:
+                return f"the prefix changed: {a[:70]!r} became {b[:70]!r}"
+        return f"the prefix changed length: {len(first)} blocks became {len(last)}"
+    return Expectation("the prefix did not change", _check, stage="4")
+
+
+def _prefix(think) -> list[str]:
+    """The leading run of system messages of one think call."""
+    out = []
+    for message in (think.payload.get("messages") or []):
+        if str(message.get("role")) != "system":
+            break
+        out.append(str(message.get("content") or ""))
+    return out
+
+
+def nothing_wrote_a_trace() -> Expectation:
+    """No `trace:` stream after a session (stage 1).
+
+    Traces were written per step and per tool, and one evening they
+    were 192,000 files. The rule since is that spans go to telemetry
+    and the ledger keeps decisions; a `trace:` stream reappearing is
+    that mistake coming back, and it comes back quietly.
+    """
+    def _check(record: Record, _since: float) -> str:
+        # On disk, not on the bus: a stream nobody announces is
+        # exactly the kind that grows to 192,000 files unnoticed.
+        from pathlib import Path
+
+        if record.data_dir is None:
+            return "the record does not know where the ledger is"
+        found = sorted(p.name for p in Path(record.data_dir).rglob("trace:*"))
+        return "" if not found else f"trace streams were written: {found[:3]}"
+    return Expectation("nothing wrote a trace", _check, stage="1")
+
+
 def the_house_did_nothing() -> Expectation:
     """No service reached a device.
 
@@ -395,5 +460,6 @@ def _with_room(config: dict | None, room: str) -> dict:
 
 __all__ = ["Beat", "Check", "Expectation", "Scenario", "answered", "asked_a_person", "called",
            "did_not_call", "did_not_run", "first_audio_under", "identified_as", "play", "play_all", "quiet",
-           "remembered", "said_something_like", "the_house_did_nothing", "tui_is_sane",
+           "nothing_wrote_a_trace", "remembered", "said_something_like", "the_house_did_nothing",
+           "the_prefix_did_not_change", "tui_is_sane",
            "was_denied"]

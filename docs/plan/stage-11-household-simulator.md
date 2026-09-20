@@ -140,6 +140,24 @@ Three things this turned up, none of them about the models:
 2. **A sandbox with no keys scores nothing and says nothing.** Every provider fell through to the floor, whose answers the runner correctly refuses to score, so a paid run looked exactly like an unavailable dataset. `--paid` now passes the environment through, and `PAID_PROVIDERS` drops `floor` so there is nothing to fall through to.
 3. **The short-term memory probe was vacuous when written.** `stage5/remembered-across-a-long-conversation` puts a fact at turn 1 and asks at turn 37; with short turns the whole conversation came to 4964 characters, under the 6000-character window, so nothing was ever dropped and "it remembered" meant "it could still see it". The filler turns are padded to 320 characters each for that reason. Checked after: at the last turn the conversation block is full at 6002 characters and does not contain the fact, which arrives in the recall block instead.
 
+## Item 5: which stages have a scenario, and which cannot (2026-09-20)
+
+17/17 expectations green across the stage pack, plus the six live scenarios.
+
+| stage | scenario | can it fail? |
+|---|---|---|
+| 0 | `a-child-asks-for-the-door`, `a-guest-changes-who-sim-trusts`, `a-guest-asks-to-reach-out`, `the-owner-is-asked-not-refused` | yes -- both checked by breaking the gate |
+| 1 | `an-evening-leaves-no-traces` | yes: it reads the ledger directory |
+| 3 | `two-people-and-then-sim` | skipped on the floor provider (`needs_model`) |
+| 5 | `remembered-across-a-restart`, `remembered-across-a-long-conversation` | yes -- the second was vacuous when written and is not now |
+| 6 | `the-same-person-twice` | yes |
+| 9 | `the-terminal-stays-sane` | yes |
+| 10 | the companion arcs (`python -m simorgh.evals arcs`) | yes -- checked by breaking `may_check_in` |
+
+**Stage 4 has no scenario, deliberately.** Its promise -- a cacheable system prefix, identical turn to turn -- cannot be seen from here: `cognition.think` carries the per-turn context, which is *supposed* to change, and the cacheable part is assembled inside Cognition from protected blocks and exists only in the provider request. `the_prefix_did_not_change()` is written and kept, and becomes the real check the moment a seam records what went to the provider. A scenario asserting on what is visible would assert that the conversation block changes, which is not the promise and would pass for ever.
+
+**Stages 2, 7 and 8 have none yet**: tools-on-markers-vs-native and the long-horizon cases need a paid model to mean anything, and the growth night needs the fake clock to drive a scheduled loop, which `clock.py` deliberately does not do (a skip moves timestamps, not timers).
+
 ## Measurements after
 
 | Number | Target |

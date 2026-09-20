@@ -112,6 +112,7 @@ class Sandbox:
             self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore(self._secrets),
                                  clock=self.clock)
             await self.kernel.boot()
+        self.record.data_dir = self.data_dir
         await self._watch()
         self._wire_the_house()
         return self
