@@ -61,7 +61,7 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 ### Open
 
 28. **The echo canceller.** *Lock `voice`.* (V7) The NLMS canceller is built only in `Pipeline`'s speak path, which the live `VoiceSession` never runs: wire it into `VoiceSession` or delete it. Decide by measuring echo false-positives with it on and off on speakers (needs the microphone; record in findings).
-29. **Test-suite consolidation, one directory at a time.** (Done so far: v1 tests deleted; full tier 1:34-1:52; module tier skips `slow`; the 30 s cast test takes 0.2 s.) *Parallel per module; lock the module.* Using `docs/testing.md` section 3 and the per-directory analysis in `docs/reviews/2026-09-18/tests/` when it exists: mark `slow`, `integration`, `contract`; merge duplicate shape tests; delete tests that test a mock or a constant; name the contract tier in the module's `CONTRACT.md`. Target: full tier under 5 minutes; module tier under 60 s for every module. Acceptance: `python tools/modtest.py --tier full` time recorded in findings.
+29. **Test-suite consolidation, one directory at a time.** **DONE 2026-09-20**: full tier 3:43 for 6,764 tests, worst module tier `evals` at 52 s (it boots a whole Sim per integration case; the next worst is 18 s). (Done so far: v1 tests deleted; full tier 1:34-1:52; module tier skips `slow`; the 30 s cast test takes 0.2 s.) *Parallel per module; lock the module.* Using `docs/testing.md` section 3 and the per-directory analysis in `docs/reviews/2026-09-18/tests/` when it exists: mark `slow`, `integration`, `contract`; merge duplicate shape tests; delete tests that test a mock or a constant; name the contract tier in the module's `CONTRACT.md`. Target: full tier under 5 minutes; module tier under 60 s for every module. Acceptance: `python tools/modtest.py --tier full` time recorded in findings.
 30. **The rest of the gate.** *Lock `tools`, `docs`.* A kill-and-resume trial (`tools/trial.py --kill-at-step N`: kill -9 mid-task in a repo copy; the resumed task must not redo a step or repeat an irreversible action) and a trial-suite run (3 repeats) plus one GAIA slice through the benchmark unit, all with the real model; record the numbers with the recall scenario's in `docs/findings/`.
 32. **Follow-ups from contract writing, safety first.** *Lock the module.* Verification's `_baseline.py` runs the model's tests with `subprocess.run` outside Guardian and the sandbox; Verification ignores pause; Planning's plans under review are lost on restart; `config_path()` and the Kernel can disagree on which `simorgh.toml`; `[runtime] subsystems/disabled` are not applied. Then the dead-code list in `docs/findings/2026-09-19-contract-writing.md`, module by module.
 
@@ -69,14 +69,14 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 
 | Number | Before (2026-09-18) | Target |
 |---|---|---|
-| Full suite | 6,652 tests, 16:40 | under 5:00 |
-| Module tier, worst module | n/a | under 60 s |
+| Full suite | 6,652 tests, 16:40 | under 5:00 — **met 2026-09-20: 6,764 tests, 3:43** |
+| Module tier, worst module | n/a | under 60 s — **met 2026-09-20: `evals` 52 s** |
 | Ledger files after one day of use | 118,215 (44k/day) | under 5,000 |
 | Human escalations for a `human`-class physical action | 0 of 26,737 | 100% (the drill) |
 | Outcomes typed `unknown` | 91% | 0% |
 | One-sided topics without a reason | 25 | 0 (test) |
 | `capabilities["tools"]` | empty | 98 |
-| Recall scenario: machine names at turn 14 and 19; birthday correction wins | fails | passes |
+| Recall scenario: machine names at turn 14 and 19; birthday correction wins | fails | passes — **3/3 since 2026-09-19** |
 | Trial suite score | recorded by item 30 | no regression |
 
 ## Risks and mitigations
