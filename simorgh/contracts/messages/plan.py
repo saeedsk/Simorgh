@@ -14,6 +14,22 @@ STEP = Obj(
     F("why", Str),
     O("subject", Str),
 )
+#: A plan node as the planner agent writes it (stage 7 item 3), and what
+#: `planning/decomposer.py::parse_plan` validates its JSON against. Not a
+#: message: the plan reaches Planning as the planner task's artifact, and
+#: a shape nobody publishes should not pretend to be a topic. Wider
+#: than STEP on purpose: a household goal decomposes into `action` and
+#: `wait` nodes that name no repo path, and every node carries the
+#: acceptance criteria the checkpoint critic scores it against.
+PLAN_NODE = Obj(
+    F("id", Str),
+    F("kind", Enum("patch", "skill", "research", "action", "question", "wait")),
+    F("description", Str),
+    O("subject", Str),
+    O("acceptance", List(Str)),
+    O("depends_on", List(Str)),
+    O("agent", Str),
+)
 CHECKLIST_ITEM = Obj(F("q", Str), F("answer", Str), F("evidence", Str))
 
 PlanProposed = define(t.PLAN_PROPOSED, [

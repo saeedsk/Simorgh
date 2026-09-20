@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import replace
 from typing import Protocol
 
 from .model import Step
@@ -42,6 +43,82 @@ these two formats:
 2. RESEARCH :: <question or topic to investigate>
 ...
 No other text before or after the list."""
+
+
+def parse_plan(text: str, *, expected: int = 0) -> tuple[list[Step], str]:
+    """`(steps, problem)` from a planner's JSON plan (stage 7 item 3).
+
+    The regex form (`parse_steps`) reads two line shapes and silently
+    ignores everything else, which is how 21 of the creator's projects
+    came to sit at 0/0 steps: the model answered in prose and nobody
+    could tell the difference between "no steps" and "steps nobody could
+    read". A typed plan fails loudly instead, and says what was wrong.
+
+    A household goal decomposes into `action` and `wait` nodes that name
+    no repo path, which the line format could not express at all.
+    """
+    import json
+
+    match = re.search(r"\{.*\}", text or "", re.S)
+    if not match:
+        return [], "no JSON object in the answer"
+    try:
+        data = json.loads(match.group(0))
+    except ValueError as exc:
+        return [], f"the plan is not valid JSON: {exc}"
+    nodes = data.get("nodes") if isinstance(data, dict) else None
+    if not isinstance(nodes, list) or not nodes:
+        return [], "the plan has no `nodes`"
+    steps: list[Step] = []
+    ids: dict[str, str] = {}
+    for raw in nodes:
+        if not isinstance(raw, dict):
+            return [], "every node must be an object"
+        kind = str(raw.get("kind") or "").strip().lower()
+        description = " ".join(str(raw.get("description") or "").split())
+        if kind not in PLAN_KINDS:
+            return [], f"unknown node kind {kind!r}; the kinds are {', '.join(sorted(PLAN_KINDS))}"
+        if not description:
+            return [], f"a {kind} node with no description"
+        node_id = str(raw.get("id") or "").strip() or uuid.uuid4().hex[:8]
+        ids[node_id] = uuid.uuid4().hex[:8]
+        steps.append(Step(
+            step_id=ids[node_id], kind=_STEP_KIND.get(kind, "research"), description=description,
+            depends_on=(), why=_why_of(raw), subject=(str(raw.get("subject")).strip() or None)
+            if raw.get("subject") else None,
+        ))
+    # Edges, after every id is known, so a node may depend on a later one
+    # being rejected rather than silently dropped.
+    out: list[Step] = []
+    for raw, step in zip(nodes, steps):
+        wanted = [str(d) for d in (raw.get("depends_on") or [])]
+        unknown = [d for d in wanted if d not in ids]
+        if unknown:
+            return [], f"{step.description[:40]!r} depends on {unknown[0]!r}, which is not a node in this plan"
+        out.append(replace(step, depends_on=tuple(ids[d] for d in wanted)))
+    if expected and len(out) > expected:
+        out = out[:expected]
+    return out, ""
+
+
+#: What a plan node may be (stage 7 item 3). `action` and `wait` are why
+#: this exists: "put the bins out on Tuesday" is a plan with neither a
+#: repo path nor a question in it.
+PLAN_KINDS = frozenset({"patch", "skill", "research", "action", "question", "wait"})
+
+#: Planning's own Step has three kinds; the wider plan kinds map onto
+#: them until Planning grows its own (stage 7 item 4).
+_STEP_KIND = {"patch": "patch", "skill": "skill", "research": "research",
+              "action": "patch", "question": "research", "wait": "research"}
+
+
+def _why_of(node: dict) -> str:
+    acceptance = [" ".join(str(a).split()) for a in (node.get("acceptance") or []) if str(a).strip()]
+    if acceptance:
+        # The acceptance criteria travel with the step: the checkpoint
+        # critic (stage 7 item 6) scores the trajectory against them.
+        return "done when: " + "; ".join(acceptance[:4])
+    return "from project decomposition"
 
 
 def parse_steps(text: str, expected: int, roots: tuple[str, ...] = DEFAULT_SOURCE_ROOTS) -> list[Step]:

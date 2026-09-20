@@ -17,7 +17,7 @@ from simorgh.contracts.registry import error_reply_payload
 from . import dag, planmode, reground
 from .bridge import BusCognitionCaller
 from .config import Config
-from .decomposer import decompose, parse_steps
+from .decomposer import decompose, parse_plan, parse_steps
 from .intake import Intake
 from .model import (
     DEPENDENCY_FAILED_NOTE,
@@ -1167,7 +1167,15 @@ class Service:
                 text = data.get("steps_text", "") if isinstance(data, dict) else ""
             except Exception:  # noqa: BLE001 -- a malformed artifact must not crash Planning
                 text = ""
-        steps = parse_steps(text, self.config.project_step_count, self.config.source_roots) if text else []
+        # A typed plan first (stage 7 item 3): JSON nodes with acceptance
+        # criteria and real edges, validated and refused by name when
+        # wrong. The line format stays as the fallback, because a planner
+        # that answers in the old shape should still decompose.
+        steps, problem = parse_plan(text, expected=self.config.project_step_count) if text else ([], "")
+        if not steps:
+            steps = parse_steps(text, self.config.project_step_count, self.config.source_roots) if text else []
+            if not steps and problem:
+                await self._notice("warning", f"the plan could not be read: {problem}")
         if not steps:
             # `in_progress -> pending` is not a legal transition, so this
             # raised `ValueError` unconditionally and the bus swallowed

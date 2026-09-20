@@ -36,8 +36,23 @@ Produce a plan, not a change. You have read-only tools, so ground the
 plan in what the code actually does today: read before you decide, and
 name the real files the work touches.
 
-Your final answer must be ONLY a numbered list, one step per line, each
-line in exactly one of these two forms:
+Answer with ONLY a JSON object, no prose around it:
+
+  {"nodes": [
+     {"id": "n1", "kind": "research", "description": "...",
+      "acceptance": ["what makes this step done"]},
+     {"id": "n2", "kind": "patch", "subject": "simorgh/<path>.py",
+      "description": "what to change and why", "depends_on": ["n1"]}
+  ]}
+
+`kind` is one of patch, skill, research, action, question, wait. `action`
+is for a step that changes something outside the repo -- a reminder, a
+light, a message -- and needs no path; `wait` is for a step that waits
+for a time or an event. `acceptance` is how anyone can tell the step is
+done: name the file, the number or the state that will be true.
+
+The older list form is still read, one step per line, each line in
+exactly one of these two forms:
 
   1. simorgh/<path>.py :: what to change in that file and why
   2. RESEARCH :: a question to settle before the later steps
