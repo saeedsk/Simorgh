@@ -1,6 +1,6 @@
 # Stage 8 -- Growth merge and the policy loop
 
-Status: **in progress** (2026-09-20: items 1-4 done; items 5-8 open) · Depends on: stages 4, 6, 7 (it consumes the eval sets and the Self Model they build) · Estimated: 3 weeks · Modules touched: learning, reflection, curiosity (merged into growth), guardian, orchestration, contracts, evals
+Status: **in progress** (2026-09-20: items 1-4 and 6-8 done; item 5 part done -- the protected subjects; its evaluate-in-a-worktree loop needs paid runs. Item 9 deferred by the plan, item 10 waits on a night's data) · Depends on: stages 4, 6, 7 (it consumes the eval sets and the Self Model they build) · Estimated: 3 weeks · Modules touched: learning, reflection, curiosity (merged into growth), guardian, orchestration, contracts, evals
 
 ## Outcome
 

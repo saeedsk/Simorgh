@@ -48,6 +48,36 @@ A **refusal** is not announced. It changed nothing, and a household that hears a
 
 `policy.adopted` and `policy.retired` have a real consumer -- the Interface prints one line with the measurement (`_on_policy_changed`). A behaviour change nobody can see is a behaviour change nobody consented to, and finding it out from a ledger stream is not being told.
 
+## The night (stage 8 item 8)
+
+Everything here happens when nobody is asking for anything, which is also when nobody is watching the bill. So a night is a fixed list of steps, each run **once**, in order, against one budget that caps the **day** rather than the function (`night.py::run_night`, `[growth] nightly_usd`, default $0.50).
+
+| Step | Costs | Does |
+|---|---|---|
+| `evals` | free | re-reads `evals.jsonl`, so the morning's estimates rest on the latest run rather than on whatever was there at boot |
+| `review` | free | retires policies whose TTL ran out or whose task type got worse (item 6) |
+| `diagnose` | free | counts what keeps going wrong and writes the candidates (item 3) |
+
+Cheapest first, deliberately: stopping early is the ordinary outcome, and the order means what is lost when it happens is the least important thing. The cap is checked **before** a step runs, because a model call cannot be taken back once it has been made; a step that does not report what it spent is charged its estimate rather than nothing, because guessing zero is how a budget quietly stops being one. A step that raises is recorded and the night goes on -- one bad step at 3am should not mean no evals ran.
+
+Not built yet: the drafting step (a lesson phrased by the skill-writer agent) and the proposal step. They are the ones that cost money, and they would go last.
+
+## Exploring (stage 8 item 7)
+
+`explore/thompson.py`. Each target -- a repo area, a recurring question nobody answered, a stale high-query fact, a device never probed, a skill never exercised -- has a Beta posterior, one draw is taken from each, and the **lowest draw wins**: Sim goes where it is worst. Anything unmeasured gets the flat prior, which says "no idea" rather than "probably fine". Boredom still flattens by temperature, which here widens the draws rather than the softmax.
+
+**The sampler's diversity rule is load-bearing, not decoration.** Lowest-draw-wins alone finds the worst thing rather than exploring: a target measured 80 times that always fails draws tightly around 0.01 and beats a flat prior 99 times in 100, so one hopeless area took 393 of 400 rounds in the first version and the unmeasured targets never came up. With `recent` (just-visited targets to the back until everything is recent, then a fresh lap -- `DriveWeightedSampler`'s own rule), the same 400 rounds spread 134 / 133 / 131 across the three uncertain targets and 2 to the one Sim is confidently good at. Starving that last one is correct: there is nothing left to learn there.
+
+`DriveWeightedSampler` is unchanged and its regression test is untouched.
+
+## Config
+
+`[growth]` in simorgh.toml. Each part reads its own `[growth.<part>]` section (`estimate`, `monitors`, `explore`), which the composite hands it at start.
+
+| Key | Default | Read in the package |
+|---|---|---|
+| `nightly_usd` | `0.50` | yes (`service.py::nightly_usd`) -- what one night may spend, counted against the day. Anything unreadable falls back to the default rather than to no cap |
+
 ## Ledger streams
 
 | Stream | Written by | Read by | Retention |

@@ -39,6 +39,8 @@ from dataclasses import replace
 from simorgh.contracts import topics
 from simorgh.contracts.protocols import Context, Health
 
+from .night import DEFAULT_NIGHTLY_USD
+
 from .estimate.service import Service as EstimateService
 from .explore.service import Service as ExploreService
 from .monitors.service import Service as MonitorsService
@@ -56,6 +58,19 @@ PARTS: tuple[tuple[str, type], ...] = (
 )
 
 
+def nightly_usd(config) -> float:
+    """`[growth] nightly_usd`, or the default (stage 8 item 8).
+
+    Anything unreadable falls back to the default rather than to no
+    cap: a malformed number in a config file must never be the reason
+    a night spends without limit.
+    """
+    try:
+        return max(0.0, float((config or {}).get("nightly_usd", DEFAULT_NIGHTLY_USD)))
+    except (AttributeError, TypeError, ValueError):
+        return DEFAULT_NIGHTLY_USD
+
+
 def _union(attr: str) -> tuple[str, ...]:
     """The three parts' manifests, deduplicated, in declaration order."""
     seen: dict[str, None] = {}
@@ -70,7 +85,7 @@ class Service:
 
     name = NAME
     version = VERSION
-    consumes: tuple[str, ...] = _union("consumes")
+    consumes: tuple[str, ...] = _union("consumes") + (topics.SYSTEM_TICK_SLEEP,)
     produces: tuple[str, ...] = _union("produces") + (
         # The subsystem's own, not any part's: what was decided
         # (stage 8 item 4).
@@ -89,6 +104,15 @@ class Service:
         #: What Sim decided to do differently (stage 8 item 4); built in
         #: `start` because it needs the ledger and the bus.
         self.policies = None
+        self._subs: list = []
+        #: Policies retired since boot, for `health()`.
+        self.retired = 0
+        #: What the night may spend, and what today already has
+        #: (stage 8 item 8).
+        self._nightly_usd = DEFAULT_NIGHTLY_USD
+        self._spent_today = 0.0
+        #: The last night's report, for `health()` and the tests.
+        self.last_night = None
         self._failed: dict[str, str] = {}
         self._ctx: Context | None = None
 
@@ -118,11 +142,19 @@ class Service:
             await ctx.bus.publish(Message.new(topic, source=ctx.bus.source, payload=payload,
                                               clock=ctx.clock.now))
 
+        # What a night may spend (stage 8 item 8). Read here, because a
+        # setting nothing reads is the bug this codebase keeps finding.
+        self._nightly_usd = nightly_usd(ctx.config)
         self.policies = PolicyStore(ctx.ledger, clock=ctx.clock, publish=_announce)
         try:
             await self.policies.sync()
         except Exception as exc:  # noqa: BLE001 -- an unreadable stream is not a failed start
             ctx.logger.warning("growth.policies_unreadable", error=repr(exc))
+        # The subsystem's own tick: watch what was adopted (stage 8
+        # item 6). It runs here rather than in a part because it reads
+        # one part's numbers to judge another part's decision, which is
+        # the whole reason these three stopped being separate.
+        self._subs = [await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)]
         for key, _factory in PARTS:
             part = self._parts[key]
             try:
@@ -150,7 +182,86 @@ class Service:
         return replace(ctx, name=f"{NAME}.{key}",
                        config=dict(section) if isinstance(section, dict) else {})
 
+    async def _on_sleep(self, _message) -> None:
+        """The night (stage 8 item 8): a fixed list of steps, each run
+        once, cheapest first, against one budget."""
+        from .night import Step, run_night
+
+        report = await run_night(self._night_steps(), budget_usd=self._nightly_usd,
+                                 spent_so_far=self._spent_today)
+        self._spent_today += report.spent_usd
+        self.last_night = report
+        if self._ctx is not None:
+            self._ctx.logger.info("growth.night", ran=report.ran, failed=report.failed,
+                                  stopped_at=report.stopped_at, spent_usd=round(report.spent_usd, 4))
+
+    def _night_steps(self) -> list:
+        """What a night does, cheapest first.
+
+        Ordered so that stopping early loses the least: the evals every
+        other judgement rests on are free, retiring a policy is free and
+        can only ever REMOVE one, and the counting is free. Only the
+        drafting costs money, and it is last for that reason.
+        """
+        from .night import Step
+
+        return [
+            Step("evals", self._step_evals, est_usd=0.0),
+            Step("review", self._step_review, est_usd=0.0),
+            Step("diagnose", self._step_diagnose, est_usd=0.0),
+        ]
+
+    async def _step_evals(self) -> dict:
+        """Re-read the eval record, so the morning's estimates rest on
+        the latest run rather than on whatever was there at boot."""
+        loaded = self.estimate.load_evals(self._evals_record())
+        return {"detail": f"{loaded} suite(s) read", "spent_usd": 0.0}
+
+    def _evals_record(self):
+        from pathlib import Path
+
+        config = getattr(self.estimate, "_config", None)  # noqa: SLF001 -- one subsystem, two parts
+        return Path(getattr(config, "evals_record", ".simorgh_loader/evals.jsonl"))
+
+    async def _step_review(self) -> dict:
+        """Retire what has run out or stopped working (stage 8 item 6).
+
+        A policy is a claim that Sim is better at something for having
+        it, checked against the same measure that justified adopting
+        it. Reversible, recorded, announced -- never a panic rollback.
+        """
+        if self.policies is None:
+            return {"detail": "no policy store", "spent_usd": 0.0}
+        gone = list(await self.policies.retire_expired())
+        gone += await self.policies.review(self._posterior_of)
+        self.retired += len(gone)
+        return {"detail": f"{len(gone)} retired", "spent_usd": 0.0}
+
+    async def _step_diagnose(self) -> dict:
+        """What keeps going wrong, counted (stage 8 item 3). Free: the
+        model is only ever asked to phrase what counting found, and
+        that is the drafting step, which costs money and comes last.
+        """
+        monitors = self.monitors
+        found = await monitors._record_candidates(  # noqa: SLF001 -- one subsystem, two parts
+            monitors._patterns.mine(self._now()))    # noqa: SLF001
+        return {"detail": f"{len(found)} candidate(s)", "spent_usd": 0.0}
+
+    def _now(self) -> float:
+        return float(self._ctx.clock.now()) if self._ctx is not None else 0.0
+
+    def _posterior_of(self, task_type: str) -> tuple[float, int]:
+        """`(mean, samples)` for a task type, from the estimate part."""
+        table = getattr(self.estimate, "_competence", None)  # noqa: SLF001 -- one subsystem, two parts
+        if table is None:
+            raise LookupError("no competence table")
+        estimate = table.estimate(task_type)
+        return float(estimate["mean"]), int(estimate["samples"])
+
     async def stop(self) -> None:
+        for sub in self._subs:
+            await sub.unsubscribe()
+        self._subs.clear()
         for key in reversed(self._started):
             try:
                 await self._parts[key].stop()
@@ -179,4 +290,4 @@ class Service:
         return Health.ok(summary) if not degraded else Health.degraded(summary)
 
 
-__all__ = ["NAME", "PARTS", "Service", "VERSION"]
+__all__ = ["NAME", "PARTS", "Service", "VERSION", "nightly_usd"]

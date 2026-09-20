@@ -127,6 +127,8 @@ class Service:
         topics.COGNITION_THINK, topics.REFLECT_REVIEW_REPLY,
         topics.TASK_CREATE,
         topics.REFLECT_ALERT_RAISED, topics.REFLECT_ALERT_CLEARED, topics.ACTION_PROPOSED,
+        # What the counting found, from every source at once (stage 8 item 3).
+        topics.GROWTH_LESSON_FOUND,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -574,7 +576,7 @@ class Service:
     async def _run_pass(self, message: Message) -> None:
         now = self._ctx.clock.now() if self._ctx is not None else message.ts
         patterns = self._patterns.mine(now)
-        await self._record_candidates(patterns)
+        await self._record_candidates(patterns, message)
         if patterns:
             await self._append(PATTERNS_STREAM, "mined", {"window": self.config.pattern_window_seconds, "count": len(patterns)})
             await self._publish(message, topics.REFLECT_PATTERNS_FOUND, {
@@ -845,7 +847,7 @@ class Service:
         assert self._ctx is not None
         await self._ctx.bus.publish(cause.caused(type_, payload, source=self._ctx.source))
 
-    async def _record_candidates(self, patterns) -> list:
+    async def _record_candidates(self, patterns, cause: Message | None = None) -> list:
         """What is worth a lesson right now, from every source at once
         (stage 8 item 3).
 
@@ -861,11 +863,12 @@ class Service:
         found = candidates([], denials=self._denials.counts(), patterns=patterns,
                            min_repeats=self.config.denial_min_repeats)
         for candidate in found:
-            await self._append(CANDIDATES_STREAM, "candidate", {
-                "source": candidate.source, "subject": candidate.subject,
-                "what": candidate.what, "count": candidate.count,
-                "evidence": list(candidate.evidence),
-            })
+            payload = {"source": candidate.source, "subject": candidate.subject,
+                       "what": candidate.what, "count": candidate.count,
+                       "evidence": list(candidate.evidence)}
+            await self._append(CANDIDATES_STREAM, "candidate", payload)
+            if cause is not None:
+                await self._publish(cause, topics.GROWTH_LESSON_FOUND, payload)
         return found
 
     async def _append(self, stream: str, event_type: str, payload: dict) -> None:
