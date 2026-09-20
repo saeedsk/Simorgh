@@ -292,7 +292,14 @@ class HomeCallTool(_HomeTool):
             side_effects=tuple(f"home:{service}:{entity_id}" for entity_id in entity_ids),
             metadata={"service": service, "entities": list(entity_ids), "changed": list(changed),
                       "unchanged": list(unchanged), "safety": worst, "undoable": undoable,
-                      "before": before})
+                      "before": before,
+                      # What each thing IS now, not only that it moved.
+                      # The World Model folds this so Sim knows the
+                      # kitchen light is on because Sim turned it on;
+                      # without it Sim changed the house and then had
+                      # to wait for a camera or a person to tell it
+                      # what it had done (stage 6 item 3).
+                      "after": {e: v.state for e, v in result.after.items()}})
 
 
 class HomeUndoTool(_HomeTool):

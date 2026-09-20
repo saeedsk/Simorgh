@@ -56,7 +56,7 @@ class Service:
         topics.SYSTEM_STARTED, topics.COGNITION_PROVIDER_STATUS,
         topics.TASK_CREATED, topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
         # The house (stage 6 item 3): the evidence the `home` facet folds.
-        topics.CAMERA_EVENT, topics.TV_STATE, topics.VOICE_TRANSCRIPT,
+        topics.CAMERA_EVENT, topics.TV_STATE, topics.VOICE_TRANSCRIPT, topics.ACTION_RESULT,
         # Who a person is, changed by a person (stage 6 item 4).
         topics.WORLD_PEOPLE_UPDATE,
         # How a consented person seems (stage 10 item 2): one trial per turn.
@@ -156,6 +156,7 @@ class Service:
             await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_finished),
             await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_blocked),
             await ctx.bus.subscribe(topics.CAMERA_EVENT, self._on_camera_event),
+            await ctx.bus.subscribe(topics.ACTION_RESULT, self._on_action_result),
             await ctx.bus.subscribe(topics.TV_STATE, self._on_tv_state),
             await ctx.bus.subscribe(topics.VOICE_TRANSCRIPT, self._on_voice_transcript),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
@@ -228,6 +229,38 @@ class Service:
         self._home.observe(f"camera.{camera.lower().replace(' ', '_')}", kind="camera",
                            state=", ".join(kinds) or "event", area=camera, detail={"kinds": kinds})
         await self._announce_situation()
+
+    async def _on_action_result(self, message: Message) -> None:
+        """What Sim itself changed in the house.
+
+        Every other source of the entity table is somebody else
+        telling Sim what happened -- a camera, the TV, a voice in a
+        room. Sim turning the kitchen light on was not evidence of
+        anything until a camera saw it, so asked a minute later
+        whether the light was on, Sim said it did not know. It had
+        done it (stage 6 item 3).
+
+        Only the entities the house reports as actually CHANGED, and
+        only with the state they are now in: `home_call`'s metadata
+        carries both, because Home Assistant answers 200 for a call
+        on an unplugged bulb and "the call succeeded" is not "the
+        house did something".
+        """
+        payload = message.payload or {}
+        if not payload.get("ok") or str(payload.get("tool") or "") not in ("home_call", "home_undo"):
+            return
+        metadata = payload.get("metadata") or {}
+        after = metadata.get("after") or {}
+        changed = [str(e) for e in (metadata.get("changed") or [])]
+        for entity_id in changed:
+            state = str(after.get(entity_id) or "")
+            if not state:
+                continue
+            kind = entity_id.split(".", 1)[0]
+            self._home.observe(entity_id, kind=kind, state=state,
+                               detail={"by": "sim", "service": str(metadata.get("service") or "")})
+        if changed:
+            await self._announce_situation()
 
     async def _on_tv_state(self, message: Message) -> None:
         mode = str(message.payload.get("mode") or "none")

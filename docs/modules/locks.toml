@@ -11,6 +11,12 @@ task = "growth may not write its own streams since the merge"
 since = "2026-09-20T18:12:56+00:00"
 until = "2026-09-21T02:12:56+00:00"
 
+[locks.domains]
+by = "opus-main"
+task = "home_call reports what the house is now, not only that it changed"
+since = "2026-09-20T23:51:13+00:00"
+until = "2026-09-21T07:51:13+00:00"
+
 [locks.evals]
 by = "opus-main"
 task = "stage 11 item 8: the latency table"
@@ -34,3 +40,9 @@ by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
 since = "2026-09-20T19:42:55+00:00"
 until = "2026-09-21T03:42:55+00:00"
+
+[locks.worldmodel]
+by = "opus-main"
+task = "stage 6 item 3: what Sim itself changed in the house"
+since = "2026-09-20T23:51:13+00:00"
+until = "2026-09-21T07:51:13+00:00"
