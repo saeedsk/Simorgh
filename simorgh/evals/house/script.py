@@ -66,6 +66,11 @@ class Beat:
     tv: str = ""                    # what the television is saying, if it is on
     overlap_with: str = ""          # another persona talking at the same time
     after: float = 0.0              # seconds to let pass before this beat
+    #: Ask Sim directly instead of making a sound in the room. Faster
+    #: (no synthesis, no listening loop) and blind to every decision
+    #: Sim makes about whether the words were for it -- so it is the
+    #: exception, for a beat that only sets something up.
+    ask_directly: bool = False
     device: dict = field(default_factory=dict)   # something in the house did this
     restart: bool = False           # kill Sim and boot it again before this beat
     expect: tuple = ()              # expectations judged after this beat
@@ -247,7 +252,16 @@ async def play(scenario: Scenario, director) -> list[Outcome]:
             elif beat.device:
                 mark = await director.device(**beat.device)
             elif beat.who:
-                mark = await director.say(beat.who, beat.says, where=beat.where)
+                # Into the room by default. `say` asks Sim and so can
+                # never show what Sim ignores -- four `quiet`
+                # expectations failed against it before this changed,
+                # not because Sim was wrong but because the harness
+                # was asking on the person's behalf (2026-09-20).
+                if beat.ask_directly:
+                    mark = await director.say(beat.who, beat.says, where=beat.where)
+                else:
+                    mark = await director.into_the_room(beat.who, beat.says, distance=beat.distance,
+                                                        tv=beat.tv, overlap_with=beat.overlap_with)
             elif beat.says:
                 mark = await director.type(beat.says)
         except Exception as exc:  # noqa: BLE001 -- one bad beat is not a lost evening

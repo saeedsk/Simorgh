@@ -27,6 +27,10 @@ from pathlib import Path
 
 from .record import Record
 
+#: One frame of audio, in seconds. The fake microphone hands frames
+#: over at this rate so the room runs in real time.
+FRAME_SECONDS = 0.03
+
 #: What the sandbox believes about the world unless a scenario says
 #: otherwise. The floor provider is the default because a scenario that
 #: costs money is a scenario nobody runs nightly.
@@ -197,7 +201,14 @@ def _voice_fakes(into: dict):
             def _voice():
                 from simorgh.voice.service import Service as VoiceService
 
-                into["microphone"] = FakeMicrophone()
+                # Frames at the rate a microphone makes them. With the
+                # default of 0 the fake room served 401 frames in 50 ms
+                # -- minutes of "silence" delivered in an instant --
+                # and the session's timers, which run on the wall
+                # clock, never lined up with them: the first utterance
+                # worked and every one after it was never heard
+                # (2026-09-20). 30 ms is one frame.
+                into["microphone"] = FakeMicrophone(frame_delay=FRAME_SECONDS)
                 into["speaker"] = FakeSpeaker()
                 into["recogniser"] = ScriptedRecogniser()
                 into["synthesiser"] = FakeSynthesiser()
@@ -226,4 +237,4 @@ def _merge(*layers: dict) -> dict:
     return out
 
 
-__all__ = ["DEFAULT_CONFIG", "Sandbox"]
+__all__ = ["DEFAULT_CONFIG", "FRAME_SECONDS", "Sandbox"]

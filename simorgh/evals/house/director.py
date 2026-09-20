@@ -109,6 +109,13 @@ class Director:
         persona = by_name(person)
         if persona is None:
             raise LookupError(f"nobody called {person!r} lives here")
+        # Wait until Sim is actually listening again. A person does
+        # not start the next sentence while the other one is still
+        # talking, and a beat fed into a session that is still
+        # finishing the last turn is dropped -- intermittently, which
+        # is worse than always (2026-09-20: beats 2 and 3 of four were
+        # lost, the other two fine).
+        await self._ready_to_listen()
         mark = self.now()
         audio = await self._voice_of(persona, text)
         other = None
@@ -135,12 +142,35 @@ class Director:
             self.scene.last_said = await self._voice_of(None, said[-1].text)
         return mark
 
+    async def _ready_to_listen(self, *, timeout: float = 20.0) -> bool:
+        """Wait for the session to be back on the microphone."""
+        from simorgh.voice.turns import LISTENING
+
+        session = getattr(self.sandbox.service("voice"), "_session", None)
+        if session is None:
+            return True
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            speaking = getattr(getattr(session, "_pipeline", None), "speaking", False)
+            if session.turns.state == LISTENING and not speaking:
+                # One extra beat of quiet, so the frame the session is
+                # mid-way through is finished before new speech starts.
+                await asyncio.sleep(0.15)
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
     async def _voice_of(self, persona, text: str):
         """`text` in a persona's voice, synthesised once and kept."""
         key = (getattr(persona, "voice", "af_heart"), text)
         if key in self._voices:
             return self._voices[key]
-        audio = await self._tts().synthesise(text, voice=key[0])
+        from .scene import resample
+
+        # At the microphone's rate, not the synthesiser's. Kokoro
+        # speaks at 24 kHz and the pipeline is 16 kHz; handing one to
+        # the other makes every persona sound like somebody else.
+        audio = resample(await self._tts().synthesise(text, voice=key[0]))
         self._voices[key] = audio
         return audio
 

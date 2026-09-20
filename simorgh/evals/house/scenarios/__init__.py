@@ -7,12 +7,12 @@ that happened is worth more than one anchored in bugs somebody
 imagined.
 """
 
-from . import live
+from . import live, stages
 
 #: Every scenario the pack knows, by id.
 def all_scenarios() -> list:
     found = []
-    for module in (live,):
+    for module in (live, stages):
         found.extend(getattr(module, "SCENARIOS", ()))
     return found
 
@@ -25,4 +25,4 @@ def by_id(scenario_id: str):
     return next((s for s in all_scenarios() if s.id == scenario_id), None)
 
 
-__all__ = ["all_scenarios", "by_id", "by_stage", "live"]
+__all__ = ["all_scenarios", "by_id", "by_stage", "live", "stages"]

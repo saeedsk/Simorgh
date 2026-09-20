@@ -77,6 +77,12 @@ The other reason is the ten stages. They describe an assistant that hears, remem
 
 12. **Findings entry** with: identification and WER tables per distance and SNR; scenarios per stage and their pass rates with intervals; check-in precision/recall; benchmark pass rates; the latency table before and after the first improvement; clusters found, fixed, and still open; cost per nightly run.
 
+## Known limitations (2026-09-20, from building it)
+
+- **The room path is dependable for the first utterance of a conversation, not the third.** `into_the_room` feeds real audio to the fake microphone and lets the listening loop decide, which is the only way to test what Sim *ignores*. Across a run of beats it drops roughly one in three: beat 1 places the speaker and answers, beat 2 often answers unplaced, beat 3 is not heard at all, beat 4 recovers. Waiting for the session to be back in `LISTENING` and for the player to be idle before feeding did not fix it, so it is not simply a race with the reply. Until it is understood, a scenario uses the room for the beat whose *listening decision* is the point and `ask_directly=True` for beats that only set up content. Three real harness faults were found and fixed on the way here (below) and this is the fourth, still open.
+- **Fixed on the way, each worth remembering**: Kokoro speaks at 24 kHz and the microphone is 16 kHz, so every persona reached the session pitched down and identified at 0.19 instead of 0.89; the fake microphone served 401 frames in 50 ms, so the session's wall-clock timers never lined up with its audio; and the echo gain modelled a machine with no echo cancellation at all, which made Sim's own voice louder in the mix than the room and left every second utterance unidentified.
+- **Scenarios run one per process.** Booting the whole system more than three times in one interpreter segfaults on the torch models. The pack takes about five minutes.
+
 ## Measurements after
 
 | Number | Target |

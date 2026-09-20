@@ -41,10 +41,48 @@ DISTANCES: dict[str, float] = {"at the mic": 0.3, "near": 1.0, "across the room"
 #: only to prove the harness itself is not the problem.
 ROOMS: dict[str, float] = {"clean": 60.0, "quiet": 30.0, "kitchen": 20.0, "dishwasher": 10.0, "party": 5.0}
 
-#: How much of what Sim says comes back into its own microphone. The
-#: laptop's speaker is centimetres from its microphone, so this is not
-#: small -- which is why the echo tests exist.
-ECHO_GAIN = 0.35
+#: How much of what Sim says comes back into its own microphone AFTER
+#: echo cancellation. Sim runs AEC (`[voice] aec_residual_threshold`),
+#: so the ordinary room leaves a residual rather than the raw speaker
+#: bleed -- and a scene that always modelled the raw bleed would be
+#: testing a machine nobody has. Measured effect of getting this
+#: wrong: at 0.35 the second utterance of every conversation went
+#: unidentified, because Sim's own voice was louder in the mix than
+#: the room (2026-09-20).
+ECHO_GAIN = 0.05
+#: The speaker bleed with no cancellation at all -- a laptop's speaker
+#: is centimetres from its microphone. What the echo scenarios turn on
+#: deliberately, and what the creator's own log showed on 2026-09-20
+#: when "Still checking." came back as a user turn.
+ECHO_GAIN_NO_AEC = 0.35
+
+
+def resample(audio: Audio, rate: int = SAMPLE_RATE) -> Audio:
+    """`audio` at `rate`, by linear interpolation.
+
+    Kokoro speaks at 24 kHz and the microphone is 16 kHz. Feeding one
+    to the other without this does not sound like noise -- it sounds
+    like a DIFFERENT PERSON, slowed and pitched down, and the speaker
+    book duly refuses to recognise them: every persona identified at
+    0.19 against the 0.89 they scored when the embedder was handed the
+    same audio directly (2026-09-20). The words still came through,
+    because the recogniser is scripted, so only identification looked
+    broken and the cause was two rates that never met.
+    """
+    if audio.sample_rate == rate:
+        return audio
+    source = _samples(audio)
+    if not source:
+        return Audio(b"", rate)
+    ratio = audio.sample_rate / float(rate)
+    out = array.array("h", [0]) * int(len(source) / ratio)
+    for i in range(len(out)):
+        at = i * ratio
+        left = int(at)
+        right = min(left + 1, len(source) - 1)
+        frac = at - left
+        out[i] = int(source[left] * (1.0 - frac) + source[right] * frac)
+    return Audio(out.tobytes(), rate)
 
 
 def silence(seconds: float, *, sample_rate: int = SAMPLE_RATE) -> Audio:
@@ -199,5 +237,5 @@ def _fit(bed: Audio, like: Audio) -> Audio:
     return Audio(grown[:want].tobytes(), bed.sample_rate)
 
 
-__all__ = ["DISTANCES", "ECHO_GAIN", "ROOMS", "Scene", "attenuate", "distance_gain", "mix",
-           "noise", "noise_for", "overlap", "reverb", "rms_of", "silence"]
+__all__ = ["DISTANCES", "ECHO_GAIN", "ECHO_GAIN_NO_AEC", "ROOMS", "Scene", "attenuate", "distance_gain", "mix",
+           "noise", "noise_for", "overlap", "resample", "reverb", "rms_of", "silence"]

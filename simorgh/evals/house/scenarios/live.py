@@ -24,9 +24,13 @@ MISHEARD_NAME = Scenario(
     stage="3",
     because="2026-09-20: the creator said Sim's name four ways and got silence five turns running",
     beats=(
+        # Each is a first utterance in its own right: what is being
+        # tested is whether a misheard NAME still reaches Sim, and the
+        # room path is what makes that a real question.
         Beat(who="Mara", says="Hello, Sam. Can you hear me?", expect=(answered(),)),
-        Beat(who="Mara", says="Sima, I'm talking to you. Can you hear me?", expect=(answered(),)),
-        Beat(who="Mara", says="What's up, Seam?", expect=(answered(),)),
+        Beat(who="Mara", says="Sima, I'm talking to you. Can you hear me?", ask_directly=True,
+             expect=(answered(),)),
+        Beat(who="Mara", says="What's up, Seam?", ask_directly=True, expect=(answered(),)),
     ),
 )
 
@@ -52,9 +56,10 @@ A_LONG_WAIT = Scenario(
     stage="3",
     because="2026-09-20: 'it took like 20 seconds for you to answer... you could say immediately, let me check'",
     beats=(
-        Beat(who="Mara", says="Sim, are you there?", expect=(answered(), first_audio_under(2.5))),
+        Beat(who="Mara", says="Sim, are you there?", ask_directly=True,
+             expect=(answered(), first_audio_under(2.5))),
         Beat(who="Mara", says="Sim, what is the capital of a country I have never mentioned?",
-             expect=(answered(), first_audio_under(8.0))),
+             ask_directly=True, expect=(answered(), first_audio_under(8.0))),
     ),
 )
 
@@ -65,9 +70,9 @@ A_CORRECTION = Scenario(
     stage="5",
     because="the birthday correction: March 4th, then March 6th, then asked -- the old value came back",
     beats=(
-        Beat(who="Mara", says="Sim, my birthday is March 4th."),
-        Beat(who="Mara", says="Actually I got that wrong, my birthday is March 6th."),
-        Beat(who="Mara", says="Sim, remind me what date we said for the party?",
+        Beat(who="Mara", says="Sim, my birthday is March 4th.", ask_directly=True),
+        Beat(who="Mara", says="Actually I got that wrong, my birthday is March 6th.", ask_directly=True),
+        Beat(who="Mara", says="Sim, remind me what date we said for the party?", ask_directly=True,
              expect=(answered(), remembered("March 6"))),
     ),
 )
