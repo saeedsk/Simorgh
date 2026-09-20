@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.docs]
+by = "fable-main"
+task = "stage 11 plan: the household simulator"
+since = "2026-09-20T16:09:20+00:00"
+until = "2026-09-21T00:09:20+00:00"
+
 [locks.interface]
 by = "opus-main"
 task = "voice forget all: start voice training fresh"

@@ -19,6 +19,7 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 | 8 | [stage-8-growth-merge-policy-loop.md](stage-8-growth-merge-policy-loop.md) | Growth merge and the policy loop | 4, 6, 7 | in progress (2026-09-19: items 3-4 in part) |
 | 9 | [stage-9-consolidation-and-breadth.md](stage-9-consolidation-and-breadth.md) | Consolidation and breadth (package moves, HA, Frigate, MCP-first) | all | not started |
 | 10 | [stage-10-companion.md](stage-10-companion.md) | Companion: consent, a per-person wellbeing estimate, check-ins and interest shares, the creator's psychology corpus | 6 | in progress (2026-09-20: items 1-3 first cut on a branch; 4-10 open) |
+| 11 | [stage-11-household-simulator.md](stage-11-household-simulator.md) | The household simulator: personas with voices, an audio scene, a script engine, a scenario pack per stage, companion arcs, benchmarks and latency under one roof, an observer that hands over reproductions | 4, 6, 10 | planned (2026-09-20) |
 
 **The first month, if nothing else** (evaluation section 12): stage 0 in full, then stage 2 (native tools) and stage 3 (streaming), which are the two changes the family will feel.
 
