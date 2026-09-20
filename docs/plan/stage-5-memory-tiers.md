@@ -1,6 +1,6 @@
 # Stage 5 -- Memory tiers
 
-Status: **in progress** (2026-09-19: items 1-3 and 6 done, 4 and 8 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
+Status: **in progress** (2026-09-19: items 1-3, 5 and 6 done, 4 and 8 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
 
 ## Outcome
 
@@ -25,6 +25,8 @@ Done 2026-09-19: item 3. `memory/facts.py` plus `memory:facts`: a fact keyed by 
 Item 4 in part, 2026-09-19: the facts block. What holds is rendered before the conversation lines, with the current value and what it replaced (`orchestration/context.py::FACTS_BLOCK_HEADER`). Still open in item 4: the per-person digest regenerated at sleep, and retiring `persona/user_model.py`'s regex extraction.
 
 Done 2026-09-19: item 6. `memory_search` is a session-local built-in (no Guardian, it only reads), offered by chat, voice_chat and research; a spoken turn searches under the speaker's tag and gets facts before episodes.
+
+Done 2026-09-19: item 5. The turn's recall starts at `percept.text.received`, beside session setup, with a 1 s budget; the session takes the prefetched reply. A recall slower than the old 0.25 s blocking budget now arrives in time (`tests/simorgh/orchestration/test_speculative_recall.py`). Voice's own STT-partial prefetch is not done.
 
 Item 8 in part, 2026-09-19: pruning never forgets a record a live fact was read from. Not done: a score with access counts (nothing records them yet).
 

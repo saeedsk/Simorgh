@@ -387,6 +387,17 @@ class Worker:
         finally:
             self.current_task_id, self.current_kind = None, None
 
+    def prefetch_recall(self, session_id: str, text: str, *, channel: str = "", trace_id: str = "") -> None:
+        """Start this turn's recall before its session exists (stage 5 item
+        5). Best effort: the session falls back to an ordinary recall."""
+        from . import profiles
+        from .context import _MEMORY_MATCHED_K
+
+        profile = profiles.for_percept(channel)
+        kinds = ["episodic", "semantic"] if profile.scaffold == "chat" else ["episodic", "semantic", "procedural"]
+        self._runner._assembler.prefetch(  # noqa: SLF001 -- the runner owns the assembler; this is its own service
+            session_id, text, kinds=kinds, k=_MEMORY_MATCHED_K, trace_id=trace_id)
+
     async def run_percept_chat(self, session_id: str, text: str, *, channel: str = "", speaker: str = "",
                                speaker_relation: str = "", room: str = "", speaker_before: str = "",
                                speaker_doubt: str = "", trace_id: str = "") -> None:

@@ -283,6 +283,11 @@ class Service:
         channel = str(message.payload.get("channel") or "")
         who = {k: str(message.payload.get(k) or "") for k in ("speaker", "speaker_relation", "room", "speaker_before",
                                                                   "speaker_doubt")}
+        # The recall this turn will want, started now (stage 5 item 5): it
+        # runs while the session is built, the profile chosen and the
+        # scaffold rendered, so Memory is off the critical path instead of
+        # being given 0.25 s in the middle of it.
+        worker.prefetch_recall(session_id, text, channel=channel, trace_id=message.trace_id)
         task = asyncio.create_task(
             worker.run_percept_chat(session_id, text, channel=channel, trace_id=message.trace_id, **who),
             name=f"chat-{session_id[:8]}",

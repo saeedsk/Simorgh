@@ -173,6 +173,9 @@ class Assembler:
         self._bus = bus
         self._clock = clock
         self._timeout_s = timeout_s
+        # Recalls started at the percept, waiting for the session that will
+        # want them: (session, query, kinds, k, filters) -> task.
+        self._prefetched: dict[tuple, asyncio.Future] = {}
         # Where the conversation's session stream is read (stage 4 item 3).
         self._ledger = ledger
 
@@ -247,6 +250,38 @@ class Assembler:
         blocks.extend(session.messages)
         return blocks
 
+    #: A recall started at the percept has until the session needs it, not
+    #: the 0.25 s a blocking one gets: it runs beside session setup, so the
+    #: budget is wall-clock the turn was going to spend anyway (stage 5
+    #: item 5).
+    SPECULATIVE_TIMEOUT_S = 1.0
+
+    def prefetch(self, session_id: str, query: str, *, kinds, k: int, filters=None, trace_id: str | None = None) -> None:
+        """Start a recall now, for a session that will ask for it shortly.
+
+        Nothing waits on this: a prefetch that fails or never finishes is
+        simply not there when `_memory_block` looks, and the ordinary
+        blocking recall happens instead.
+        """
+        if not session_id:
+            return
+        key = (session_id, query, tuple(kinds), k, repr(filters))
+        if key in self._prefetched:
+            return
+        payload = {"query": query, "kinds": list(kinds), "k": k, **({"filters": filters} if filters else {})}
+        self._prefetched[key] = asyncio.ensure_future(
+            self._request_with_reason(topics.MEMORY_RETRIEVE, payload, trace_id=trace_id,
+                                      timeout_s=self.SPECULATIVE_TIMEOUT_S))
+        if len(self._prefetched) > 32:       # a bounded cache; oldest out
+            self._prefetched.pop(next(iter(self._prefetched))).cancel()
+
+    def _take_prefetched(self, session_id: str, query: str, kinds, k: int, filters=None):
+        return self._prefetched.pop((session_id, query, tuple(kinds), k, repr(filters)), None)
+
+    def forget_prefetched(self, session_id: str) -> None:
+        for key in [k for k in self._prefetched if k[0] == session_id]:
+            self._prefetched.pop(key).cancel()
+
     async def retrieve(self, payload: dict, *, trace_id: str | None = None) -> Message | None:
         """One `memory.retrieve`, for a caller that wants it mid-turn
         (`session.py::_memory_search`). The same timeout and the same
@@ -257,8 +292,8 @@ class Assembler:
         reply, _why = await self._request_with_reason(type_, payload, trace_id=trace_id)
         return reply
 
-    async def _request_with_reason(self, type_: str, payload: dict, *,
-                                   trace_id: str | None = None) -> tuple[Message | None, str]:
+    async def _request_with_reason(self, type_: str, payload: dict, *, trace_id: str | None = None,
+                                   timeout_s: float | None = None) -> tuple[Message | None, str]:
         """`(reply, why not)`. The reason exists because dropping a
         block in silence is indistinguishable from having nothing to
         put in it -- and it is read off the reply, not assumed, because
@@ -284,7 +319,7 @@ class Assembler:
         # pass (they don't uniformly have a task id in scope the way every
         # orchestration call site already does via `session`).
         req = Message.new(type_, source=self._bus.source, payload=payload, trace_id=trace_id, clock=self._clock)
-        reply = await self._bus.request_or_error(req, timeout=self._timeout_s)
+        reply = await self._bus.request_or_error(req, timeout=self._timeout_s if timeout_s is None else timeout_s)
         if reply.payload.get("ok") is False:
             return None, _why_not(reply.payload.get("error") or {})
         return reply, ""
@@ -316,11 +351,12 @@ class Assembler:
         # Sim's work, not about the person (2026-09-18 evaluation, C7).
         chat = getattr(session.profile, "scaffold", "") == "chat"
         matched_kinds = ["episodic", "semantic"] if chat else ["episodic", "semantic", "procedural"]
-        matched_call = self._request_with_reason(
-            topics.MEMORY_RETRIEVE,
-            {"query": query, "kinds": matched_kinds, "k": _MEMORY_MATCHED_K},
-            trace_id=session.trace,
-        )
+        matched_call = self._take_prefetched(session.task_id, query, matched_kinds, _MEMORY_MATCHED_K) \
+            or self._request_with_reason(
+                topics.MEMORY_RETRIEVE,
+                {"query": query, "kinds": matched_kinds, "k": _MEMORY_MATCHED_K},
+                trace_id=session.trace,
+            )
         recent_call = self._request_with_reason(
             topics.MEMORY_RETRIEVE,
             {"query": "", "kinds": ["episodic"], "k": _MEMORY_RECENT_K},
