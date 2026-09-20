@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.shared]
-by = "opus-main"
-task = "flaky pause test: wait on state, not a sleep"
-since = "2026-09-20T14:59:04+00:00"
-until = "2026-09-20T22:59:04+00:00"
