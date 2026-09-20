@@ -89,3 +89,23 @@ class Extraction(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForgettingSparesWhatAFactCites(unittest.IsolatedAsyncioTestCase):
+    """Stage 5 item 8: a fact whose source has been forgotten asserts
+    something nothing can check. Pruning leaves those records alone."""
+
+    async def test_a_cited_record_survives_a_prune(self):
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        engine = MemoryEngine(ledger, Config(half_life_seconds=1.0), clock=_Clock())
+        refs = []
+        for i in range(5):
+            refs.append(await engine.store(kind="episodic", content=f"e{i}", tags=[], source_ref="", confidence=1.0))
+        await engine.store_fact(subject="wifi password", predicate="is on", object="the fridge",
+                                source_refs=(refs[0],))
+        pruned = await engine.prune(kind="episodic", keep=1)
+        self.assertEqual(pruned, 3, "four would have gone; the cited one stays")
+        self.assertIn(refs[0], engine._kept_back)  # noqa: SLF001
+        found, _ = await engine.retrieve(query="", kinds=["episodic"], k=10, filters=None)
+        self.assertIn(refs[0], [item.ref for item in found])

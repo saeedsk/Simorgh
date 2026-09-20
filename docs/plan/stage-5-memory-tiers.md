@@ -1,6 +1,6 @@
 # Stage 5 -- Memory tiers
 
-Status: **in progress** (2026-09-19: items 1-3 and 6 done, 4 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
+Status: **in progress** (2026-09-19: items 1-3 and 6 done, 4 and 8 in part) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
 
 ## Outcome
 
@@ -25,6 +25,8 @@ Done 2026-09-19: item 3. `memory/facts.py` plus `memory:facts`: a fact keyed by 
 Item 4 in part, 2026-09-19: the facts block. What holds is rendered before the conversation lines, with the current value and what it replaced (`orchestration/context.py::FACTS_BLOCK_HEADER`). Still open in item 4: the per-person digest regenerated at sleep, and retiring `persona/user_model.py`'s regex extraction.
 
 Done 2026-09-19: item 6. `memory_search` is a session-local built-in (no Guardian, it only reads), offered by chat, voice_chat and research; a spoken turn searches under the speaker's tag and gets facts before episodes.
+
+Item 8 in part, 2026-09-19: pruning never forgets a record a live fact was read from. Not done: a score with access counts (nothing records them yet).
 
 1. **The embedder warms in a boot thread; vectors persist.** *Lock `memory`.* `[memory] embedder = "local"` loads the sentence-transformers model in `asyncio.to_thread` at start; each record is embedded at store time and the vector persisted as a projection keyed by ref (`array('f')` blob in the record's stream or a `memory:vectors` snapshot); each record stores which embedder produced its vector; hashing remains the floor until warm and forever when the dependency is absent. Recall never waits on embedding. Acceptance: a recall issued 0.1 s after boot answers (from hashing) and one issued after warm-up uses dense vectors; no per-recall embedding of stored records.
 2. **Index and fusion.** *Lock `memory`.* A numpy float32 matrix per kind with brute-force cosine (sub-10 ms to ~100k records; ANN only past ~200k); BM25 by extending the inverted index with tf and doc length (stdlib); reciprocal rank fusion of the two; rerank by recency half-life, person tag, confidence; optional cheap-model rerank of the top 20 for chat. Acceptance: `tests/simorgh/memory/test_hybrid_recall.py` on a fixture of 500 records: a paraphrase query finds its record in the top 3.

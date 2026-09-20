@@ -121,6 +121,8 @@ class MemoryEngine:
         # recall so a partial recovery can say so -- see
         # `_resolve_content`.
         self._content_chars: dict[str, int] = {}
+        #: Records a prune spared because a live fact cites them.
+        self._kept_back: list[str] = []
         #: Called with (fact, superseded id) so the Service can publish
         #: `memory.fact.stored` / `.superseded`; None in a bare engine.
         self._on_fact = None
@@ -577,9 +579,27 @@ class MemoryEngine:
             scored.append((item.score_confidence(now=now, half_life_seconds=self._config.half_life_seconds, penalty=penalties.get(ref, 1.0)), ref))
         scored.sort(key=lambda pair: pair[0], reverse=True)
         stale = [ref for _, ref in scored[keep:]] if keep >= 0 else []
+        # A record a live fact was read from is never forgotten (stage 5
+        # item 8): the fact would keep asserting something with no source
+        # left to check it against, which is how a memory store starts
+        # holding claims nobody can trace.
+        linked = await self._linked_refs()
+        if linked:
+            kept_back = [ref for ref in stale if ref in linked]
+            if kept_back:
+                stale = [ref for ref in stale if ref not in linked]
+                self._kept_back = kept_back
         if stale:
             await self.forget(stale, reason=f"pruned below top {keep} of kind={kind}")
         return len(stale)
+
+    async def _linked_refs(self) -> set[str]:
+        """Every record a live fact cites (`Fact.source_refs`)."""
+        index = await self._facts_synced()
+        refs: set[str] = set()
+        for fact in index.live_facts():
+            refs.update(fact.source_refs)
+        return refs
 
     async def counts(self) -> dict[str, int]:
         """Live (non-tombstoned) record count per durable kind -- a
