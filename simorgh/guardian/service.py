@@ -71,6 +71,7 @@ class _TaskInfo:
 #: process does not grow a map nobody prunes.
 _MAX_DECIDED = 50_000
 
+
 #: Argument names whose VALUE must never be printed in a question, even
 #: truncated. The name is shown so the person knows a secret is in play.
 _SECRET_ARG = ("token", "secret", "password", "passwd", "key", "credential", "api_key")
@@ -170,15 +171,34 @@ class Service:
         #
         # In memory and per process: a Guardian restart forgets, and so
         # does Execution's own replay guard, so the two stay consistent.
-        # action_id -> (fingerprint, answered). `answered` matters: the
-        # claim is taken before the work, and if anything between the
-        # claim and the verdict raises -- an oversized-args spill whose
-        # `put_blob` fails is the path a real patch takes -- the id
-        # stayed claimed and the legitimate retry was then dropped as a
-        # duplicate, answering nobody. Before this dedupe existed, that
-        # retry was answered (observer, 2026-09-10, on the fix from the
-        # same morning).
-        self._decided: dict[str, tuple[str, bool]] = {}
+        # action_id -> (fingerprint, answered, claimed_at). `answered`
+        # matters: the claim is taken before the work, and if anything
+        # between the claim and the verdict raises -- an oversized-args
+        # spill whose `put_blob` fails is the path a real patch takes --
+        # the id stayed claimed and the legitimate retry was then
+        # dropped as a duplicate, answering nobody. Before this dedupe
+        # existed, that retry was answered (observer, 2026-09-10, on the
+        # fix from the same morning).
+        #
+        # `claimed_at` is the third thing, and it is what tells an
+        # abandoned claim from one still being decided. Without it
+        # "unanswered" meant both, so a redelivery arriving DURING the
+        # first decision -- which an at-least-once bus is entitled to
+        # send, and which the integration drill sends with no await
+        # between the two -- was let through, decided a second time and
+        # minted a second token, and Execution then reported the
+        # successful action as `action.denied{layer: token}` "signature
+        # replayed". That is the 2026-09-10 bug this dedupe exists to
+        # prevent, reachable again through the one door left open
+        # (2026-09-20: the drill caught it when a subsystem's boot got
+        # heavier and the race widened).
+        self._decided: dict[str, tuple[str, bool, float]] = {}
+        #: Action ids whose decision is running right now (held by
+        #: `_on_proposed`'s `finally`). What tells an in-flight
+        #: decision from a dead one; `claimed_at` above is kept for the
+        #: record rather than for this judgement, because a handler
+        #: that RAISED is also recent.
+        self._deciding: set[str] = set()
         self.charter_text = ""
         self._tools = ToolRegistry()
 
@@ -529,17 +549,45 @@ class Service:
             pass
 
     async def _on_proposed(self, message: Message) -> None:
+        """The gate. `_deciding` is held for exactly as long as this
+        runs, so a redelivery can tell a decision still in progress
+        from one that died without answering -- the difference the
+        clock could not see (2026-09-20)."""
+        action_id = message.payload["action_id"]
+        try:
+            await self._decide_proposed(message)
+        finally:
+            self._deciding.discard(action_id)
+
+    async def _decide_proposed(self, message: Message) -> None:
         p = message.payload
         action_id = p["action_id"]
         fingerprint = self._fingerprint(p)
         seen = self._decided.get(action_id)
+        in_flight = False
         if seen is not None and not seen[1]:
-            # Claimed and never answered: whatever went wrong last time
-            # left nobody a reply. Let this delivery through.
-            self._decided.pop(action_id, None)
-            seen = None
+            if action_id in self._deciding:
+                # A decision for this id is running right now. The
+                # answer is coming from it; deciding again would mint a
+                # second token for one action, and Execution would
+                # report the successful one as a replayed signature.
+                # Weighed against the fingerprint below all the same:
+                # an id reused for a DIFFERENT call is the other thing
+                # this gate is for, and that does not stop being true
+                # while the first call is in flight.
+                in_flight = True
+            else:
+                # Claimed, unanswered, and nothing is running: the
+                # handler died before it could reply. Let this delivery
+                # through -- it is the bus's own retry, and the only
+                # thing that will answer anybody.
+                self._decided.pop(action_id, None)
+                seen = None
         if seen is not None:
             if seen[0] == fingerprint:
+                if in_flight:
+                    await self._record_duplicate(action_id, "redelivered while the first was being decided")
+                    return
                 # The same proposal again: already decided, already
                 # answered. Recorded so the stream shows what happened,
                 # and NOT re-answered, because the answer is already on
@@ -565,7 +613,8 @@ class Service:
         if len(self._decided) >= _MAX_DECIDED:
             for stale in list(self._decided)[: max(1, _MAX_DECIDED // 10)]:
                 self._decided.pop(stale, None)
-        self._decided[action_id] = (fingerprint, False)
+        self._decided[action_id] = (fingerprint, False, self._ctx.clock.now())
+        self._deciding.add(action_id)
         task = self._tasks.get(p.get("task_id") or "", _TaskInfo())
         proposal = Proposal(
             action_id=action_id, tool=p["tool"], args=p["args"], scope=p["scope"],
@@ -676,7 +725,7 @@ class Service:
                 payload,
                 source="guardian",
             ))
-            self._decided[action_id] = (fingerprint, True)
+            self._decided[action_id] = (fingerprint, True, self._ctx.clock.now())
             return
 
         if verdict.kind == "needs_human":
@@ -688,7 +737,7 @@ class Service:
             ))
             # Somebody has been told. The `ui.prompt` below is how the
             # answer gets back, not whether one was given.
-            self._decided[action_id] = (fingerprint, True)
+            self._decided[action_id] = (fingerprint, True, self._ctx.clock.now())
             # Live-caught (the creator, real use: answered "yes" three
             # separate times and every one silently resolved "no"
             # instead): `action.needs_human` alone was never actually
@@ -713,7 +762,7 @@ class Service:
              "approval_token": token, "mode_at_approval": self._config.mode},
             source="guardian",
         ))
-        self._decided[action_id] = (fingerprint, True)
+        self._decided[action_id] = (fingerprint, True, self._ctx.clock.now())
 
     async def _presence_of(self, person: str) -> tuple[float, bool]:
         """`(belief, speaker-verified)` for `person`, from `world:home`.

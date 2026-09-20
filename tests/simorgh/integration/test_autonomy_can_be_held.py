@@ -41,7 +41,7 @@ class AutonomyHoldTestCase(unittest.IsolatedAsyncioTestCase):
         return kernel
 
     def _curiosity(self, kernel: Kernel):
-        return kernel._supervisor.services["curiosity"].service  # noqa: SLF001
+        return kernel._supervisor.services["growth"].service.explore  # noqa: SLF001
 
     async def _tick(self, kernel: Kernel) -> dict:
         curiosity = self._curiosity(kernel)

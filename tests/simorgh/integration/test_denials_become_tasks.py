@@ -42,7 +42,7 @@ class DenialsBecomeTasksTestCase(unittest.IsolatedAsyncioTestCase):
             secrets=EnvSecretStore({}),
         )
         await self.kernel.boot()
-        self.reflection = self.kernel._supervisor.services["reflection"].service  # noqa: SLF001
+        self.reflection = self.kernel._supervisor.services["growth"].service.monitors  # noqa: SLF001
         self.planning = self.kernel._supervisor.services["planning"].service  # noqa: SLF001
 
     async def asyncTearDown(self) -> None:

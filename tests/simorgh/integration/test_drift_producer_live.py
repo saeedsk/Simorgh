@@ -140,7 +140,7 @@ class _DriftFlowTestCase(unittest.IsolatedAsyncioTestCase):
         await kernel.boot()
         self.assertEqual(kernel.state.state, RUNNING)
         self.assertEqual(kernel._supervisor.services["planning"].status, "ok")  # noqa: SLF001
-        self.assertEqual(kernel._supervisor.services["reflection"].status, "ok")  # noqa: SLF001
+        self.assertEqual(kernel._supervisor.services["growth"].status, "ok")  # noqa: SLF001
         self.addAsyncCleanup(kernel.shutdown)
         return kernel
 
@@ -246,7 +246,7 @@ class TestRealDriftTrackerFiresAndForcesRealReground(_DriftFlowTestCase):
         # already stands on: call Reflection's own real handler directly,
         # exactly where Guardian's publish would land, rather than fake a
         # second identity through the shared test bus client.
-        reflection = kernel._supervisor.services["reflection"].service  # noqa: SLF001
+        reflection = kernel._supervisor.services["growth"].service.monitors  # noqa: SLF001
         for _ in range(2):
             await reflection._on_action_denied(Message.new(  # noqa: SLF001
                 topics.ACTION_DENIED, source="guardian",
@@ -360,7 +360,7 @@ class TestDriftCanOnlyFireOnceForOneTask(_DriftFlowTestCase):
 
         _project_id, research, _patch = await self._propose_and_approve(kernel)
         research_id = research["task_id"]
-        reflection = kernel._supervisor.services["reflection"].service  # noqa: SLF001
+        reflection = kernel._supervisor.services["growth"].service.monitors  # noqa: SLF001
 
         await bus.request(Message.new(
             topics.TASK_CLAIM, source="tester", payload={"task_id": research_id, "worker_id": "w1"},
