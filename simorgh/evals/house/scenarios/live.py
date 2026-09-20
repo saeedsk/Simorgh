@@ -41,6 +41,7 @@ NOT_FOR_SIM = Scenario(
     id="live/an-aside-is-not-for-sim",
     stage="3",
     because="2026-09-20: a fix for the misheard name matched 'can you try a bit harder next time honey'",
+    needs_model=True,
     beats=(
         Beat(who="Devin", says="Can you try a bit harder next time, honey.", expect=(quiet(),)),
         Beat(who="Devin", says="I said we are leaving in five minutes.", expect=(quiet(),)),

@@ -96,6 +96,13 @@ class Scenario:
     #: Why this scenario exists. A live failure it reproduces, usually.
     because: str = ""
     room: str = "quiet"
+    #: Whether judging this needs a model that can think. For a voice
+    #: Sim has PLACED, "were these words for me?" is the model's
+    #: decision (`backchannel.is_quiet`) -- the deterministic gates
+    #: only cover voices it cannot place. So a scenario about staying
+    #: out of a conversation cannot be judged by the floor provider,
+    #: which answers everything, and says so rather than failing.
+    needs_model: bool = False
 
     def cases(self) -> int:
         return sum(len(b.expect) for b in self.beats) + len(self.expect)

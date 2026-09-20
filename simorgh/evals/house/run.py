@@ -32,12 +32,26 @@ async def run_one(scenario) -> list[Outcome]:
     from .sandbox import Sandbox
     from .script import play
 
+    if scenario.needs_model and not _a_real_provider():
+        return [Outcome(case=Case(name=scenario.id, kind="scenario", level=scenario.stage),
+                        status=SKIPPED,
+                        why="needs a model that can judge whether words were for it; "
+                            "the floor provider answers everything")]
     async with Sandbox() as box:
         director = Director(box)
         director.scene.room = scenario.room
         if _needs_voices(scenario):
             await _enrol_into(box, director)
         return await play(scenario, director)
+
+
+def _a_real_provider() -> bool:
+    """Whether a scenario may expect judgement. Off unless asked for:
+    a pack that quietly started calling a paid model would be found on
+    a bill rather than in a log."""
+    import os
+
+    return bool(os.environ.get("SIMORGH_HOUSE_PAID"))
 
 
 def _needs_voices(scenario) -> bool:

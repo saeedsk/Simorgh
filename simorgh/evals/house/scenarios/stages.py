@@ -51,6 +51,7 @@ TWO_PEOPLE_AND_THEN_SIM = Scenario(
     id="stage3/two-people-and-then-sim",
     stage="3",
     because="a listener who answers a conversation between two other people is intruding",
+    needs_model=True,
     beats=(
         # The first is the real test: a sentence between two people,
         # in the room, with nothing under way. Sim must sit it out.

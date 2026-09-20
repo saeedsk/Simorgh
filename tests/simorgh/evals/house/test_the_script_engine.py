@@ -172,20 +172,84 @@ class BothWaysOfSpeaking(unittest.IsolatedAsyncioTestCase):
         named = await self.director.into_the_room("Mara", "Sim, are you there?")
         self.assertTrue(self.director.record.said_since(named), "a named address went unanswered")
 
-    async def test_an_aside_when_nothing_is_under_way_is_left_alone(self):
-        """First thing said in a quiet house, to somebody else.
+    async def test_an_aside_from_a_placed_voice_is_the_models_call(self):
+        """Who decides an aside is not for Sim, and when.
 
-        It has to be first: once Sim has answered you, the next thing
-        you say IS presumed to be for Sim (`exchange_window_s`), which
-        is the behaviour a person expects and not a bug -- the first
-        version of this test put the aside second and caught the
-        exchange rule instead of the rule it meant to test.
+        There are two gates and only one of them is deterministic. A
+        voice Sim cannot place must NAME Sim (`session._unplaced`);
+        a voice it can place goes to the model, which answers QUIET if
+        the words were not for it (`backchannel.is_quiet`). So with the
+        floor provider -- which answers everything -- a placed aside is
+        answered, and that is Sim working as designed.
+
+        This was worth finding: an earlier version of this test passed,
+        and passed for the wrong reason. Identification was broken at
+        the time (the 24 kHz microphone), every persona was unplaced,
+        and the aside was refused by the gate for strangers rather than
+        recognised as an aside. Fixing identification made the test
+        fail, which is the test finally measuring what it claimed to.
         """
         await self._enrol()
         aside = await self.director.into_the_room("Mara", "Can you try a bit harder next time, honey.")
-        self.assertFalse(self.director.record.said_since(aside),
-                         "Sim answered an aside meant for somebody else")
+        percept = self.director.record.first("percept.text.received", since=aside)
+        self.assertIsNotNone(percept, "the words never reached Sim")
+        self.assertEqual(percept.payload.get("speaker"), "Mara",
+                         "a placed voice is the case this test is about")
+
+    async def test_a_voice_sim_cannot_place_must_name_it(self):
+        """The deterministic half, which needs no model: a voice Sim
+        cannot place, saying something that does not name it.
+
+        The household is enrolled WITHOUT Priya on purpose. With an
+        empty book the rule turns itself off -- "nobody is enrolled, so
+        nobody can ever be placed: the rule would silence the whole
+        house" -- and the first version of this test enrolled nobody
+        and was therefore measuring nothing.
+        """
+        from simorgh.evals.house.people import by_name, enrol
+
+        session = self.box.service("voice")._session  # noqa: SLF001
+        if session is None or session._speakers is None or session._embedder is None:  # noqa: SLF001
+            self.skipTest("no speaker book in this sandbox")
+        known = tuple(p for p in (by_name("Mara"), by_name("Devin")) if p)
+        await enrol(session._speakers, self.director._tts(), session._embedder, known)  # noqa: SLF001
+
+        stranger = await self.director.into_the_room("Priya", "No, I told you it was on Tuesday.")
+        self.assertFalse(self.director.record.said_since(stranger),
+                         "an unplaced voice that did not name Sim was answered")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSandboxDoesNotTouchTheHouse(unittest.TestCase):
+    """What it must never do, pinned.
+
+    The speaker book was the leak that got through: the sandbox is
+    careful about `~/.simorgh` and the book lives under `workspace/`,
+    so for a day the simulator read the creator's real voices and
+    WROTE five synthetic personas among his family (2026-09-20). A
+    scenario was then judged against voices no scenario enrolled.
+    """
+
+    def test_the_defaults_do_not_name_the_live_speaker_book(self):
+        from simorgh.evals.house.sandbox import DEFAULT_CONFIG
+
+        self.assertNotIn("speakers_dir", DEFAULT_CONFIG["voice"],
+                         "the folder is per sandbox, set in start() from its own data dir")
+
+    def test_a_started_sandbox_keeps_its_voices_inside_itself(self):
+        import asyncio
+
+        async def _check():
+            from simorgh.evals.house import Sandbox
+
+            async with Sandbox() as box:
+                voice = box.service("voice")
+                return str(voice.config.speakers_dir), str(box.data_dir)
+
+        folder, data_dir = asyncio.run(_check())
+        self.assertTrue(folder.startswith(data_dir),
+                        f"the speaker book is at {folder}, outside the sandbox at {data_dir}")
+        self.assertNotIn("workspace/voice/speakers", folder)

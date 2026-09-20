@@ -40,6 +40,16 @@ DEFAULT_CONFIG: dict = {
     # drive. Real audio arrives with the scene (item 3).
     "voice": {"enabled": True, "stt": "fake", "tts": "fake",
               "microphone": "fake", "speaker": "fake",
+              # `speakers_dir` is set per sandbox, in `start()`, to a
+              # folder inside its own data directory. Without it the
+              # sandbox reads and WRITES the live book at
+              # `workspace/voice/speakers` -- which it did until
+              # 2026-09-20, putting five synthetic personas among the
+              # creator's family and letting scenarios be judged
+              # against voices no scenario enrolled. "Never touches the
+              # live data" has to mean every store, not just the
+              # obvious one under ~/.simorgh.
+
               # A scenario says who is speaking; it does not mumble, and
               # an unheard word would be the scenario's bug rather than
               # Sim's.
@@ -80,7 +90,10 @@ class Sandbox:
         else:
             self._tmp = tempfile.TemporaryDirectory(prefix="simorgh-house-")
             self.data_dir = Path(self._tmp.name)
-        config = _merge(DEFAULT_CONFIG, {"runtime": {"data_dir": str(self.data_dir)}}, self._extra)
+        config = _merge(DEFAULT_CONFIG,
+                        {"runtime": {"data_dir": str(self.data_dir)},
+                         "voice": {"speakers_dir": str(self.data_dir / "speakers")}},
+                        self._extra)
         with _voice_fakes(self._voice_fakes):
             self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore({}))
             await self.kernel.boot()
