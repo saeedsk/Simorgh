@@ -13,9 +13,24 @@ from pathlib import Path
 from simorgh.voice.speakers import SpeakerBook, cosine
 
 
-def _vec(angle: float, dim: int = 8) -> list[float]:
+def _same_voice(k: int, dim: int = 24) -> list[float]:
+    """One voice, recorded again: the same direction as `_vec(0.0)` with
+    a different room in it. Pairwise cosine ~0.74 -- new enough to be
+    worth keeping, close enough to be the same person."""
+    v = [0.0] * dim
+    v[0] = 1.0
+    v[2 + (k % (dim - 2))] = 0.6
+    return v
+
+
+def _vec(angle: float, dim: int = 24) -> list[float]:
     """Unit vectors on a circle in the first two dimensions: their cosine
-    is cos(angle difference), so tests can pick similarities exactly."""
+    is cos(angle difference), so tests can pick similarities exactly.
+
+    The width is only so a take can also vary in a dimension the angle
+    does not touch (`_same_voice`), the way a real 192-d embedding
+    varies with the room. Every cosine here still comes from the first
+    two dimensions alone, so the numbers in these tests are unchanged."""
     v = [0.0] * dim
     v[0], v[1] = math.cos(angle), math.sin(angle)
     return v
@@ -158,10 +173,31 @@ class LeanAndRefineTestCase(unittest.TestCase):
         self.book.forget("Soodeh")                                 # alone in the book: nobody to be too close to
         self.book.enroll("Saeed", _vec(0.05)); self.book.enroll("Saeed", _vec(-0.05))
         first_three = [list(v) for v in self.book.get("Saeed").embeddings]
-        # each take 0.55 rad on from the last: clearly confident against it (0.85), new enough (< 0.9);
-        # the eleventh comes round the circle onto an enrolment take and is a near copy
-        accepted = sum(self.book.refine("Saeed", _vec(0.55 * k)) for k in range(1, 12))
-        self.assertEqual(accepted, 10)
+        # Takes of the SAME voice: each new enough to be worth keeping
+        # (under REFINE_NOVELTY) and each still looking like the others
+        # (over REFINE_AGREE). `_vec` alone cannot express that -- on a
+        # circle, anything novel is far -- so this varies a dimension
+        # the way a room and a distance vary a real 192-d embedding.
+        #
+        # It used to march 0.55 rad around the circle, each take
+        # confident against the LAST and every one further from the
+        # enrolment than the one before. That is drift, and it is how
+        # the creator's profile came to hold 21 takes with a median
+        # agreement of 0.37 and stop recognising him (2026-09-20); the
+        # case now has its own test below.
+        accepted = sum(self.book.refine("Saeed", _same_voice(k)) for k in range(1, 20))
+        self.assertGreaterEqual(accepted, MAX_TAKES - 3, "takes of one voice are kept")
         person = self.book.get("Saeed")
         self.assertEqual(len(person.embeddings), MAX_TAKES)
         self.assertEqual(person.embeddings[:3], first_three)
+
+    def test_a_take_that_drifts_off_the_person_is_refused(self):
+        """The guard the cap test used to walk straight through: each
+        take confident against the last, every one further from the
+        enrolment. A profile is a description of one voice, and a take
+        that does not look like the takes in it does not belong."""
+        self.book.forget("Soodeh")
+        self.book.enroll("Saeed", _vec(0.05))
+        self.book.enroll("Saeed", _vec(-0.05))
+        marched = sum(self.book.refine("Saeed", _vec(0.55 * k)) for k in range(1, 12))
+        self.assertLessEqual(marched, 3, "a march around the circle is drift, not practice")

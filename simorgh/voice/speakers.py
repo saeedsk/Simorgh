@@ -73,6 +73,16 @@ REFINE_NOVELTY = 0.9
 REFINE_ABOVE = 0.05   # was 0.2: above what a real voice scores in a real room, so the
                       # voices that most needed the practice never gave any (2026-09-15)
 REFINE_CLEAR = 0.15
+#: A learnt take must also agree with the takes already kept -- this is
+#: its median cosine against them. Without it the profile could drift
+#: off the person one take at a time: a take is judged against the WHOLE
+#: profile, so once a wrong voice is in, the profile is wider, which
+#: admits more, which widens it further. Measured live 2026-09-20: the
+#: creator's 18 takes had a median self-similarity of 0.37 (Iris's nine
+#: were at 0.85), so his own voice scored 0.37-0.44 against a 0.50
+#: threshold in a quiet room at 30 cm and Sim stayed silent turn after
+#: turn. Only four of the eighteen agreed with each other.
+REFINE_AGREE = 0.5
 #: An utterance shorter than this carries too little voice to judge...
 MIN_SECONDS = 0.8
 #: ...and an enrolment take shorter than this is not worth keeping.
@@ -455,9 +465,18 @@ class SpeakerBook:
         others = [self.score(vector, o) for o in self._people.values() if o is not person and o.embeddings]
         if others and own - max(others) < REFINE_CLEAR:
             return False    # too close to somebody else's voice to be sure whose lesson this is
+        if agreement(vector, person.embeddings) < REFINE_AGREE:
+            # It scored well against the profile as a whole and still
+            # does not look like the takes in it: that is how a profile
+            # drifts off its person. Refuse it (see REFINE_AGREE).
+            return False
         person.embeddings.append(vector)
-        if len(person.embeddings) > MAX_TAKES:
-            del person.embeddings[3]
+        # A loop, not a single delete: the cap was applied once per call
+        # and the creator's profile still reached 18 against MAX_TAKES
+        # of 12 (2026-09-20), so any path that ever appended twice left
+        # it over the cap for good.
+        while len(person.embeddings) > MAX_TAKES:
+            del person.embeddings[3]     # the three enrolment takes stay
         self._save(person)
         return True
 
@@ -473,6 +492,28 @@ class SpeakerBook:
         self._load()
         return sorted(((p.name, self.score(embedding, p)) for p in self._people.values() if p.embeddings),
                       key=lambda t: t[1], reverse=True)
+
+
+def agreement(vector: Sequence[float], embeddings: Sequence[Sequence[float]]) -> float:
+    """How much `vector` looks like the takes already kept: the median
+    cosine against them, or 1.0 when there are none to disagree with."""
+    scores = sorted(cosine(vector, e) for e in embeddings if e)
+    return scores[len(scores) // 2] if scores else 1.0
+
+
+def coherence(embeddings: Sequence[Sequence[float]]) -> float:
+    """How much a profile agrees with itself: the median cosine over
+    every pair of its takes. One voice recorded several times sits
+    around 0.8; a profile that has collected more than one voice falls
+    to 0.4 and below, and then the person it is named after stops being
+    recognised (2026-09-20). Used by `voice people` to say so out loud
+    instead of leaving somebody to wonder why Sim has gone deaf."""
+    vectors = [e for e in embeddings if e]
+    if len(vectors) < 2:
+        return 1.0
+    pairs = sorted(cosine(vectors[i], vectors[j])
+                   for i in range(len(vectors)) for j in range(i + 1, len(vectors)))
+    return pairs[len(pairs) // 2]
 
 
 def _safe(name: str) -> str:

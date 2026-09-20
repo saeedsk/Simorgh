@@ -87,7 +87,18 @@ LOOKING: dict[str, tuple[str, ...]] = {
 
 # Sim's names, as a person says them and as whisper writes them.
 # "Shin" is how whisper wrote the creator's "Sim" on 2026-09-11.
-_NAMED = re.compile(r"\b(?:sim|simorgh|simurgh|seemorgh|cyim|sym|shin|seem|sims|asim)\b|سیم|سیمرغ", re.I)
+# `sam`, `sima`, `seam` and `simma` are 2026-09-20, live: the creator
+# said "Hello, Sam. Can you hear me?", "Sima, I'm talking to you",
+# "What's up, Seam?" and got silence five turns running, because an
+# unplaced voice must name Sim (`session._unplaced`) and whisper had
+# written the name four ways that were not on this list. The list is
+# what whisper WRITES, not what is spelt: it already carries "seem",
+# an ordinary English word, because being deaf to your own name costs
+# more than the occasional false positive -- a person says "that seems
+# right" and Sim looks up, which is what a person in the room would do.
+_NAMED = re.compile(
+    r"\b(?:sim|simm|simma|sima|seema|simorgh|simurgh|seemorgh|cyim|sym|syme|shin|seem|seam|sam|sams|sims|asim)\b"
+    r"|سیم|سیمرغ", re.I)
 
 _QUESTION = re.compile(
     r"\?\s*$|^\s*(?:what|why|how|where|when|who|which|whose|is|are|was|were|do|does|did|can|could|would|"
