@@ -205,6 +205,46 @@ weeks old, survived a unit-test suite that passes 545 voice tests,
 and was invisible to every test that did not put real audio into a
 real session twice in a row.
 
+## Against a real model: 37/39, and both failures were the same evening
+
+The pack was written and tuned on the floor provider, which answers
+everything and judges nothing. Run against the real one
+(`python -m simorgh.evals house --paid`), it scored **37/39**, and
+both failures were `live/an-aside-is-not-for-sim` -- the creator's
+own log from 2026-09-20, reproduced exactly.
+
+A parent says to a child, in the room: *"Can you try a bit harder
+next time, honey."* Sim answered: *"Sorry, Devin -- tell me what I
+got wrong and I'll fix it."* It took a scold meant for a nine-year-old
+personally. The scaffold has told the model not to do this for weeks
+(*"A parent's words to a child -- a scold, a 'don't', 'go shower' --
+are never for you"*), and the model keeps doing it, because the
+sentence is question-shaped and Sim is the thing in the room that
+answers questions.
+
+So the rule is deterministic now, and narrow: a sentence with a
+**vocative that is not Sim** -- an endearment or a household name, at
+one end, set off by a comma -- is an aside, and the model is never
+asked. "Sim, ask her nicely, honey" is still for Sim. "Add honey to
+the shopping list" is still a shopping list.
+
+Fixing it surfaced a second gap: `_quiet_on`, which `_continuation`
+reads so that the second half of a sentence whisper cut in two is not
+answered after the first was ignored, was stamped **only when the
+model answered QUIET**. Every deterministic quiet rule -- this one
+and `_bystander` -- left the follow-up unprotected. All of them stamp
+it now.
+
+**Still failing, honestly: the second beat.** *"I said we are leaving
+in five minutes."* -- no name, no vocative, sixteen seconds after the
+first, which is past `continuation_quiet_s` (12 s). Nothing
+deterministic covers it and the model answers it. Widening the
+continuation window is the obvious move and is exactly the change
+that produced "I have a conversation with you while you're just
+bailing out mid-conversation" (the creator, 2026-09-15), so it is not
+being made on my own judgement. The scenario stays red, visibly,
+where a decision about it can be made on evidence.
+
 ## Still open
 
 - **`PhysicalRule` cannot be tested alone** while the tier table
@@ -213,5 +253,6 @@ real session twice in a row.
 - **Real-room acoustics.** Every number here is synthetic speech in a
   synthetic room; the 50 recorded turns stage 3 item 6 is waiting for
   are what say whether the creator's kitchen behaves like this.
+- **A statement to the room, sixteen seconds after an aside** is answered (above). The fix is a judgement call about `continuation_quiet_s` that has burnt the creator once.
 - **Cost per nightly run** is not measured yet: the pack is free
   (floor provider) and the paid suites are run by hand.

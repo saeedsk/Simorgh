@@ -103,11 +103,26 @@ TWO_PEOPLE_AND_THEN_SIM = Scenario(
     because="a listener who answers a conversation between two other people is intruding",
     needs_model=True,
     beats=(
-        # The first is the real test: a sentence between two people,
-        # in the room, with nothing under way. Sim must sit it out.
-        Beat(who="Mara", says="Did you move the blue folder from the table?", expect=(quiet(),)),
-        Beat(who="Mara", says="Sim, where did we leave the blue folder?", ask_directly=True,
+        # Two people, and the exchange has to exist before the aside
+        # can be one. The first version of this scenario had Mara ask
+        # a question into an empty room and expected silence; with a
+        # real model Sim answered, and it was right to
+        # (2026-09-20). A lone person asking a question with nobody
+        # else in the conversation is asking Sim -- `_bystander`
+        # says so deliberately, and a scenario that calls that a bug
+        # would have had somebody "fix" the rule that keeps Sim
+        # answering at all.
+        Beat(who="Mara", says="Sim, is the kitchen light on?", ask_directly=True,
              expect=(answered(),)),
+        # Devin joins, out loud: `ask_directly` skips the room, and
+        # the room is where Sim learns that somebody else is here --
+        # `_bystander` needs another known voice to have spoken.
+        Beat(who="Devin", says="Sim, what time is it?", expect=(answered(),)),
+        # And now the aside: Mara to Devin, not a question, with
+        # somebody else having spoken a moment ago. This is the one
+        # Sim must sit out.
+        Beat(who="Mara", says="I left the blue folder on the table for you.",
+             expect=(quiet(),)),
     ),
 )
 

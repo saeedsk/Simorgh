@@ -547,3 +547,42 @@ class StopWordTestCase(unittest.TestCase):
         for text in ("can you stop the music later", "I did not stop at the shop",
                      "what time is it", "the bus stop is closed"):
             self.assertFalse(opens_with_stop(text), text)
+
+
+class WordsThatNameSomebodyElseTestCase(unittest.TestCase):
+    """"Can you try a bit harder next time, honey."
+
+    A parent to a child, in the room, question-shaped. Sim answered it
+    with "Sorry, Devin -- tell me what I got wrong and I'll fix it":
+    taking a scold meant for a nine-year-old personally. The scaffold
+    has asked the model not to do this for weeks and the model keeps
+    doing it, so the rule is deterministic now -- a sentence that says
+    who it is for has said who it is for, and question-shape does not
+    argue with that.
+
+    Narrow on purpose: a vocative only, at one end, set off by a
+    comma, and never when Sim is named too.
+    """
+
+    def _to(self, text, names=("Ira", "Devin")):
+        from simorgh.voice.backchannel import to_someone_else
+
+        return to_someone_else(text, names=names)
+
+    def test_a_parents_aside_names_the_child(self):
+        self.assertEqual(self._to("Can you try a bit harder next time, honey."), "honey")
+        self.assertEqual(self._to("Honey, can you get the door"), "honey")
+        self.assertEqual(self._to("Ira, put your shoes on"), "Ira")
+
+    def test_sim_named_too_is_for_sim(self):
+        self.assertEqual(self._to("Sim, ask her nicely, honey"), "")
+        self.assertEqual(self._to("Sim, what time is it?"), "")
+
+    def test_a_word_in_the_middle_of_a_sentence_is_not_a_vocative(self):
+        """The shopping list, not the child."""
+        self.assertEqual(self._to("add honey to the shopping list"), "")
+        self.assertEqual(self._to("I love that one"), "")
+        self.assertEqual(self._to("Ira went to the shop"), "")
+
+    def test_a_sentence_naming_nobody_is_left_to_the_other_rules(self):
+        self.assertEqual(self._to("I said we are leaving in five minutes."), "")

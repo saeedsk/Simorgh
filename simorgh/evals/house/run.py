@@ -37,7 +37,7 @@ async def run_one(scenario) -> list[Outcome]:
                         status=SKIPPED,
                         why="needs a model that can judge whether words were for it; "
                             "the floor provider answers everything")]
-    async with Sandbox() as box:
+    async with Sandbox(**_paid_sandbox()) as box:
         director = Director(box)
         director.scene.room = scenario.room
         if _needs_voices(scenario):
@@ -52,6 +52,25 @@ def _a_real_provider() -> bool:
     import os
 
     return bool(os.environ.get("SIMORGH_HOUSE_PAID"))
+
+
+def _paid_sandbox() -> dict:
+    """The sandbox's arguments when a real model is allowed.
+
+    Same shape as `house/bench.py`: the live provider order minus the
+    floor, and the environment's keys, because a provider without one
+    falls quietly through to the floor and the run then measures the
+    floor while looking like it measured Sim.
+    """
+    import os
+
+    if not _a_real_provider():
+        return {}
+    from .bench import PAID_PROVIDERS, SPEND_CAP_USD
+
+    return {"config": {"cognition": {"provider_order": list(PAID_PROVIDERS),
+                                     "max_spend_usd": SPEND_CAP_USD}},
+            "secrets": dict(os.environ), "spend_cap_usd": SPEND_CAP_USD}
 
 
 def _needs_voices(scenario) -> bool:

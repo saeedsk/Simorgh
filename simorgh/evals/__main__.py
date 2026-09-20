@@ -41,6 +41,8 @@ def main(argv: list[str]) -> int:
     house.add_argument("--fast", action="store_true", help="the bless subset: one per stage, free, a few minutes")
     house.add_argument("--timing", action="store_true", help="with --one: where the turn's seconds went")
     house.add_argument("--findings", default="", metavar="PATH", help="write clustered findings there (default docs/findings/<date>-house.md)")
+    house.add_argument("--paid", action="store_true",
+                       help="let the scenarios reach a real model (costs money; runs the needs_model ones)")
     house.add_argument("--json", action="store_true")
     arcs = sub.add_parser("arcs", help="the companion arcs: weeks of a household (stage 11 item 6)")
     arcs.add_argument("--only", default="", help="one person's arc by name")
@@ -55,6 +57,12 @@ def main(argv: list[str]) -> int:
             print(f"{name:<12} {'costs money' if name in PAID else 'free'}")
         return 0
     if args.command == "house":
+        if args.paid:
+            import os
+
+            # Read by `house/run.py::_a_real_provider`, and by the
+            # child process each scenario runs in.
+            os.environ["SIMORGH_HOUSE_PAID"] = "1"
         from .house.run import as_json, run_one, run_pack
         from .house.scenarios import all_scenarios, by_id
 

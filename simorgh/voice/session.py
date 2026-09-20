@@ -30,7 +30,9 @@ from simorgh.contracts.household import HOUSEHOLD
 from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
-from .backchannel import GREETING, Backchannel, addressed, classify, is_quiet, strip_lead
+from .backchannel import (
+    GREETING, Backchannel, addressed, classify, is_quiet, strip_lead, to_someone_else,
+)
 from .commands import MUTE, OFF, RESTART, STOP, opens_with_stop, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
@@ -1140,6 +1142,8 @@ class VoiceSession:
         # named or mid-exchange (voice/backchannel.py::addressed).
         if await self._bystander(turn_id, speaker, text):
             return
+        if await self._named_somebody_else(turn_id, speaker, text):
+            return
         # Within the exchange window, test against everything Sim said
         # recently -- a long reply returns as fragments, each too short
         # for the run matcher and each landing after `last_said` moved on.
@@ -1390,6 +1394,7 @@ class VoiceSession:
                   if now - at <= self._config.exchange_window_s * 2 and who != me and who != "someone"}
         if not others:
             return False
+        self._quiet_on[me] = now      # so `_continuation` covers the second half
         self._room.append((me, text, now, "aside"))
         self._log_overheard(me, text)
         partner = sorted(others)[0]
@@ -1400,6 +1405,66 @@ class VoiceSession:
         self.turns.state = LISTENING
         await self._announce(self.turns.state)
         return True
+
+    async def _named_somebody_else(self, turn_id: int, speaker: str, text: str) -> bool:
+        """True when the words name who they are for, and it is not Sim.
+
+        `_bystander` needs another known voice to have spoken recently
+        before it will call anything an aside; a parent turning to a
+        child at the start of an evening has no such history, and
+        every one of those went to the model to judge. With a real
+        provider "Can you try a bit harder next time, honey." came
+        back as "Sorry, Devin -- tell me what I got wrong and I'll fix
+        it": Sim taking a parent's word to their child personally.
+        The creator's log, 2026-09-20, and reproduced by the household
+        simulator against the paid provider the same day
+        (`live/an-aside-is-not-for-sim`).
+
+        A sentence that says who it is for has said who it is for, and
+        no amount of question-shape argues with that. Deliberately not
+        applied inside a conversation Sim is already in: "thanks, love"
+        to Sim mid-exchange is for Sim, and `_in_conversation` is the
+        rule that has settled that question twice already.
+        """
+        if not self._config.bystander or self._in_conversation(speaker):
+            return False
+        other = to_someone_else(text, names=self._household_names())
+        if not other:
+            return False
+        me = speaker or "someone"
+        now = self._now()
+        # `_continuation` reads this: whisper cuts one sentence into
+        # two turns, and the second half used to be answered after
+        # the first was rightly ignored. It was stamped only when the
+        # MODEL answered QUIET, so every deterministic quiet rule --
+        # this one and `_bystander` -- left the follow-up unprotected
+        # (found with the paid provider, 2026-09-20: "Can you try a
+        # bit harder next time, honey." went quiet and "I said we are
+        # leaving in five minutes." was answered).
+        self._quiet_on[me] = now
+        self._room.append((me, text, now, "aside"))
+        self._log_overheard(me, text)
+        await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
+            "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id,
+            "quiet": True, "reason": f"{me} was talking to {other}"})
+        self.stats.turns += 1
+        self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+        return True
+
+    def _household_names(self) -> tuple[str, ...]:
+        """Who else lives here, so their name in a vocative counts too.
+
+        From the speaker book, which is the list this process actually
+        has: the People store is another subsystem and a query per
+        turn on the listening path is the wrong trade for a name.
+        """
+        if self._speakers is None:
+            return ()
+        try:
+            return tuple(person.name for person in self._speakers.people())
+        except Exception:  # noqa: BLE001 -- a name list is never worth a dropped turn
+            return ()
 
     def _in_conversation(self, speaker: str) -> bool:
         """Sim answered this person within `conversation_window_s`.

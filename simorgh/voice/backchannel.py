@@ -176,6 +176,49 @@ def addressed(partial: str, *, since_sim_spoke_s: float, exchange_window_s: floa
     return 0.0 <= since_sim_spoke_s <= exchange_window_s
 
 
+#: Words people use INSTEAD of a name, for somebody who is not Sim.
+#: Only ever read as a vocative -- set off by a comma, at one end of
+#: the sentence -- so "add honey to the list" is a shopping list and
+#: "try a bit harder next time, honey" is a parent talking to a child.
+_ENDEARMENTS = r"honey|sweetheart|sweetie|darling|dear|love|babe|baby|buddy|mate|kiddo|pal"
+_VOCATIVE_TAIL = re.compile(rf",\s*(?:my\s+)?({_ENDEARMENTS})\s*[.!?…]*\s*$", re.I)
+_VOCATIVE_LEAD = re.compile(rf"^\s*(?:hey\s+|oi\s+)?({_ENDEARMENTS})\s*,", re.I)
+
+
+def to_someone_else(text: str, *, names: tuple[str, ...] = ()) -> str:
+    """The person this was addressed to, if it was not Sim: `"honey"`,
+    `"Ira"`, or `""`.
+
+    A sentence that names who it is for has told you who it is for,
+    and the shape of it -- a question, a request -- says nothing
+    against that. This is the rule the model kept getting wrong: with
+    a real model behind it, "Can you try a bit harder next time,
+    honey." was answered "Sorry, Devin -- tell me what I got wrong
+    and I'll fix it", which is Sim taking a parent's word to their
+    child personally (the creator's log, 2026-09-20; reproduced by
+    the household simulator against the paid provider the same day).
+    The scaffold has told the model not to do this for weeks.
+
+    Deliberately narrow: a vocative only, at one end of the sentence,
+    set off by a comma; and never when Sim is named too, because
+    "Sim, ask her nicely, honey" is for Sim.
+    """
+    text = (text or "").strip()
+    if not text or _NAMED.search(text):
+        return ""
+    for pattern in (_VOCATIVE_TAIL, _VOCATIVE_LEAD):
+        found = pattern.search(text)
+        if found:
+            return found.group(1).lower()
+    for name in names:
+        if not name:
+            continue
+        who = re.escape(name)
+        if re.search(rf",\s*{who}\s*[.!?…]*\s*$", text, re.I) or re.search(rf"^\s*{who}\s*,", text, re.I):
+            return name
+    return ""
+
+
 #: What the model answers when the words were not for it.
 QUIET = "QUIET"
 _QUIET = re.compile(r"^\W*quiet\W*$", re.I)
@@ -235,4 +278,4 @@ class Backchannel:
 
 
 __all__ = ["Backchannel", "EMPATHY", "GREETING", "HEARD", "HUM", "LOOKING", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
-           "classify", "is_quiet", "strip_lead"]
+           "classify", "is_quiet", "strip_lead", "to_someone_else"]
