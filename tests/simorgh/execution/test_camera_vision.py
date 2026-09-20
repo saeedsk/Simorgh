@@ -133,7 +133,7 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
             await task
 
     # -- the whole chain ---------------------------------------------------
-    async def test_an_event_becomes_a_described_scene_on_screen_and_out_loud(self):
+    async def test_an_event_becomes_a_described_scene_on_screen_and_an_offer(self):
         self._knows()
         vision = self._vision()
         await self._event(vision)
@@ -156,9 +156,16 @@ class CameraVisionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("a delivery van has pulled up", notice)
         self.assertRegex(notice, r"\d{2} \w{3} \d{2}:\d{2}", f"the date and the time belong on screen: {notice!r}")
 
-        spoken = self.bus.of_type(topics.VOICE_SPEAK_REQUEST)[-1].payload["text"]
-        self.assertIn("a delivery van has pulled up", spoken)
-        self.assertNotRegex(spoken, r"\d{2}:\d{2}", "nobody wants the timestamp read aloud")
+        # Offered, not spoken. Execution publishing `voice.speak.request`
+        # meant a camera described the street aloud at any hour, past
+        # Guardian and past Initiative -- the one module that knows who
+        # is asleep and which channel reaches them (fixed 2026-09-20).
+        self.assertEqual(self.bus.of_type(topics.VOICE_SPEAK_REQUEST), [],
+                         "Execution must not speak; Initiative decides whether this is worth saying")
+        described = self.bus.of_type(topics.CAMERA_DESCRIBED)[-1].payload
+        self.assertEqual(described["camera"], "Front Door")
+        self.assertIn("a delivery van has pulled up", described["text"])
+        self.assertNotRegex(described["text"], r"\d{2}:\d{2}", "nobody wants the timestamp read aloud")
 
     # -- not once per motion event ----------------------------------------
     async def test_one_camera_is_looked_at_once_until_the_cooldown_passes(self):

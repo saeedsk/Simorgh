@@ -52,5 +52,9 @@ WorldWellbeingChanged = define(t.WORLD_WELLBEING_CHANGED, [
        "low-side rate against their own baseline and `evidence` the fresh turns' worth it rests on. Published "
        "only for an adult who said yes (contracts.people.may_check_in), only on a change, and never with "
        "their words. Initiative decides whether a check-in is worth it.")
+CameraDescribed = define(t.CAMERA_DESCRIBED, [F("camera", Str), F("text", Str), O("kinds", List(Str))],
+                        doc="What the vision model made of a camera event, in words somebody could say. "
+                            "Initiative decides whether it is worth interrupting anybody with, and "
+                            "through which channel; Execution never speaks it itself.")
 CameraEvent = define(t.CAMERA_EVENT, [F("channel", Int), F("camera", Str), F("kinds", List(Str)), O("host", Str)],
                      doc="kinds: motion, person, vehicle, pet, face, package -- whatever the NVR reported.")

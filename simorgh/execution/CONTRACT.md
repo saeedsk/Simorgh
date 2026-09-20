@@ -69,7 +69,7 @@ Each domain exports one `<name>_tools(config, secrets=...)` factory; `simorgh/do
 | `ui.hook.received` | `messages/ui.py::UiHookReceived` | simorgh/domains/home/cameras.py | while `cam_watch` is on, turns the NVR's push into `world.camera.event` |
 | replies | `memory.retrieve`, `cognition.think`, `world.env.query`, `task.create`, `task.list.request`, `ui.command.request`, `memory.forget`, `voice.voices.request`, `voice.control.request` | service.py, vision.py, tools.py | replies to Execution's own `bus.request`s (not subscriptions) |
 
-The generated rows for `action.denied`, `action.result`, `cognition.think`, `percept.web.fetched`, `system.metrics`, `tool.*`, `ui.notice` and `voice.speak.request` as consumed topics were wrong (Execution publishes them) and are deleted.
+The generated rows for `action.denied`, `action.result`, `cognition.think`, `percept.web.fetched`, `system.metrics`, `tool.*`, `ui.notice` and `voice.speak.request` (the `speak` TOOL only -- `vision.py` no longer speaks: its description goes out as `world.camera.described` for Initiative to weigh, 2026-09-20) as consumed topics were wrong (Execution publishes them) and are deleted.
 
 ## Produces
 

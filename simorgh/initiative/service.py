@@ -51,7 +51,7 @@ from .api import (
 VERSION = "0.2.0"
 
 _CONSUMES = (
-    topics.CAMERA_EVENT, topics.PERCEPT_TIME_SCHEDULED, topics.CURIOSITY_SHARE_PROPOSED,
+    topics.CAMERA_EVENT, topics.CAMERA_DESCRIBED, topics.PERCEPT_TIME_SCHEDULED, topics.CURIOSITY_SHARE_PROPOSED,
     topics.WORLD_WELLBEING_CHANGED, topics.SYSTEM_TICK_SLEEP,
 )
 _PRODUCES = (topics.ACTION_PROPOSED, topics.INITIATIVE_OFFERED, topics.INITIATIVE_SUPPRESSED,
@@ -86,6 +86,7 @@ class Service:
         self._ctx = ctx
         self._subs = [
             await ctx.bus.subscribe(topics.CAMERA_EVENT, self._on_camera_event),
+            await ctx.bus.subscribe(topics.CAMERA_DESCRIBED, self._on_camera_described),
             await ctx.bus.subscribe(topics.PERCEPT_TIME_SCHEDULED, self._on_schedule_fired),
             await ctx.bus.subscribe(topics.CURIOSITY_SHARE_PROPOSED, self._on_share_proposed),
             await ctx.bus.subscribe(topics.WORLD_WELLBEING_CHANGED, self._on_wellbeing_changed),
@@ -106,6 +107,25 @@ class Service:
         kind = "safety_alert" if "person" in kinds and "front" in camera.lower() else "event_fyi"
         await self.offer(Notice(kind=kind, text=f"{camera}: {', '.join(kinds) or 'movement'}",
                                 ref=f"camera:{camera}"))
+
+    async def _on_camera_described(self, message: Message) -> None:
+        """The vision model's own words about a camera event.
+
+        Better than `_on_camera_event`'s "Front Door: person" and
+        weighed the same way. Execution used to say this aloud itself
+        (`vision.py` published `voice.speak.request`), so a camera
+        described the street in the room at two in the morning with
+        nothing weighing the hour or the sleeping child; the cooldown
+        on `event_fyi` also means the raw event and its description
+        are one interruption rather than two.
+        """
+        camera = str(message.payload.get("camera") or "a camera")
+        text = str(message.payload.get("text") or "").strip()
+        if not text:
+            return
+        kinds = [str(k) for k in (message.payload.get("kinds") or [])]
+        kind = "safety_alert" if "person" in kinds and "front" in camera.lower() else "event_fyi"
+        await self.offer(Notice(kind=kind, text=f"{camera}: {text}", ref=f"camera:{camera}"))
 
     async def _on_schedule_fired(self, message: Message) -> None:
         payload = message.payload

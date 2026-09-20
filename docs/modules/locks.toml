@@ -17,6 +17,18 @@ task = "stage 11 item 8: the latency table"
 since = "2026-09-20T20:09:27+00:00"
 until = "2026-09-21T04:09:27+00:00"
 
+[locks.execution]
+by = "opus-main"
+task = "a camera description spoke aloud without passing Guardian or Initiative"
+since = "2026-09-20T23:20:23+00:00"
+until = "2026-09-21T07:20:23+00:00"
+
+[locks.initiative]
+by = "opus-main"
+task = "the camera's own words, weighed like everything else"
+since = "2026-09-20T23:20:23+00:00"
+until = "2026-09-21T07:20:23+00:00"
+
 [locks.interface]
 by = "opus-main"
 task = "a telegram turn renders as ? · ? · (no description)"

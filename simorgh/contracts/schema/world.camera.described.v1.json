@@ -1,0 +1,29 @@
+{
+  "$id": "https://simorgh.local/schema/world.camera.described.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "What the vision model made of a camera event, in words somebody could say. Initiative decides whether it is worth interrupting anybody with, and through which channel; Execution never speaks it itself.",
+  "properties": {
+    "camera": {
+      "type": "string"
+    },
+    "kinds": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "camera",
+    "text"
+  ],
+  "title": "world.camera.described",
+  "type": "object"
+}

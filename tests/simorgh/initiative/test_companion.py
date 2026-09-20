@@ -413,3 +413,28 @@ class TheDeliveryPathsExist(unittest.IsolatedAsyncioTestCase):
                 required = set(tools[tool_name].args_schema.get("required") or ())
                 self.assertTrue(required <= set(args),
                                 f"{tool_name} requires {sorted(required - set(args))} and Initiative sends none")
+
+
+class ACameraDoesNotSpeakForItself(unittest.IsolatedAsyncioTestCase):
+    """The vision model's words go through the same gate as everything else.
+
+    `execution/vision.py` used to publish `voice.speak.request` with
+    its description, so a camera talked in the room at any hour --
+    past Guardian, and past the one module that knows who is asleep,
+    who is present and which channel reaches them. At 02:00 that is
+    the exact failure stage 6 item 6's acceptance names.
+    """
+
+    async def test_at_two_in_the_morning_it_goes_to_the_phone(self):
+        from simorgh.initiative.api import Notice, Situation, decide
+
+        # 02:00, a child asleep in the living room.
+        night = Situation(quiet_hours=True, someone_asleep=True, child_alone=True,
+                          people={"Otto": "living room"})
+        delivery = decide(Notice(kind="event_fyi", text="Front Door: a delivery van has pulled up",
+                                 ref="camera:Front Door"),
+                          night, owner="Mara", now=0.0, last_by_kind={}, delivered_today=0,
+                          do_not_disturb=())
+        if delivery is not None:
+            self.assertEqual(delivery.tool, "notify",
+                             "a camera at 02:00 with a child asleep must not use the speaker")

@@ -181,6 +181,12 @@ WORLD_ENV_QUERY = "world.env.query"
 # A camera saw something: motion, a person, a vehicle, an animal
 # (execution/home/cameras.py, from the NVR's event push).
 CAMERA_EVENT = "world.camera.event"
+#: What the vision model saw, in words. Published instead of speaking:
+#: `execution/vision.py` used to put its description straight on
+#: `voice.speak.request`, so a camera talked in the room at any hour
+#: without passing Guardian or Initiative -- the one path that knows
+#: who is asleep, who is present and which channel reaches them.
+CAMERA_DESCRIBED = "world.camera.described"
 #: A situation fact of `world:home` flipped (stage 6 items 3 and 7): the
 #: house went quiet, the TV started, a child was left alone. Only the
 #: changes, never a tick: a fact that has not moved is not news.

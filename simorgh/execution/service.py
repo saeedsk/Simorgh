@@ -154,7 +154,7 @@ class Service:
         topics.ACTION_PROPOSED, topics.ACTION_RESULT, topics.ACTION_DENIED,
         topics.TOOL_REGISTERED, topics.TOOL_INVOKED, topics.TOOL_PROBED, topics.TOOL_UNAVAILABLE,
         topics.SYSTEM_METRICS, topics.PERCEPT_WEB_FETCHED, topics.LEARN_SKILL_ACQUIRED,
-        topics.UI_NOTICE, topics.VOICE_SPEAK_REQUEST, topics.COGNITION_THINK, topics.MEMORY_RETRIEVE,
+        topics.UI_NOTICE, topics.VOICE_SPEAK_REQUEST, topics.CAMERA_DESCRIBED, topics.COGNITION_THINK, topics.MEMORY_RETRIEVE,
         topics.CAMERA_EVENT, topics.TV_STATE, topics.DASH_STATE, topics.UI_DASH_KEY,
         topics.SYSTEM_SCHEDULE_ADD, topics.WORLD_ENV_QUERY, topics.WORLD_PEOPLE_UPDATE,
         topics.TASK_CREATE, topics.TASK_LIST_REQUEST, topics.TASK_CANCEL, topics.UI_COMMAND_REQUEST,

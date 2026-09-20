@@ -543,10 +543,19 @@ class CameraVision:
         await self._notice(f"📷 {stamp} — {camera}: {said}")
         if not getattr(self._config, "camera_vision_speak", True):
             return
-        # Spoken without the date: a person standing in the room already
-        # knows what day it is, and the screen line carries it anyway.
+        # Offered, not spoken. This used to publish `voice.speak.request`
+        # directly, so a camera described the street aloud in the room
+        # at any hour, past Guardian and past Initiative -- the one
+        # module that knows who is asleep, who is present and which
+        # channel actually reaches them. Everything else Sim says
+        # unprompted goes through `action.proposed`; this went round
+        # it (stage 6 item 6, fixed 2026-09-20).
+        #
+        # Without the date: a person in the room knows what day it is,
+        # and the screen line above carries it anyway.
         await self._ctx.bus.publish(Message.new(
-            topics.VOICE_SPEAK_REQUEST, source="execution", payload={"text": f"{camera}: {said}"},
+            topics.CAMERA_DESCRIBED, source="execution",
+            payload={"camera": camera, "text": said},
         ))
 
     async def _notice(self, text: str) -> None:
