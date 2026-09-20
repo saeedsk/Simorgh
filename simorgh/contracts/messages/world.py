@@ -10,7 +10,9 @@ from .. import topics as t
 
 WorldEnvQuery = define(t.WORLD_ENV_QUERY, [
     # `home`: what the house is doing and who is in it (stage 6 item 3).
-    F("what", Enum("capability_map", "file_index", "tools", "user_profile", "git_state", "home", "people")),
+    # `wellbeing`: how a consented person seems against their own usual (stage 10 item 2).
+    F("what", Enum("capability_map", "file_index", "tools", "user_profile", "git_state", "home", "people",
+                   "wellbeing")),
     O("args", Obj()),
 ], doc="file_index accepts args {path, max_chars} for a bounded content preview.")
 WorldEnvQueryReply = define(t.WORLD_ENV_QUERY_REPLY, [
@@ -43,5 +45,12 @@ WorldHomeSituationChanged = define(t.WORLD_HOME_SITUATION_CHANGED, [
     F("fact", Str), F("value", Bool), O("people", Obj()), O("since", Float),
 ], doc="One situation fact of world:home changed value: quiet_hours, tv_playing, someone_asleep, "
        "child_alone, nobody_home. An open session is told, so it can act on the house it is in.")
+WorldWellbeingChanged = define(t.WORLD_WELLBEING_CHANGED, [
+    F("person", Str), F("state", Enum("unknown", "usual", "low", "high")),
+    F("mean", Float), F("evidence", Float), O("since", Float),
+], doc="A tracked person's wellbeing state flipped (stage 10 item 2). `mean` is the posterior mean of the "
+       "low-side rate against their own baseline and `evidence` the fresh turns' worth it rests on. Published "
+       "only for an adult who said yes (contracts.people.may_check_in), only on a change, and never with "
+       "their words. Initiative decides whether a check-in is worth it.")
 CameraEvent = define(t.CAMERA_EVENT, [F("channel", Int), F("camera", Str), F("kinds", List(Str)), O("host", Str)],
                      doc="kinds: motion, person, vehicle, pet, face, package -- whatever the NVR reported.")

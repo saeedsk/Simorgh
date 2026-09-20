@@ -185,6 +185,11 @@ CAMERA_EVENT = "world.camera.event"
 #: house went quiet, the TV started, a child was left alone. Only the
 #: changes, never a tick: a fact that has not moved is not news.
 WORLD_HOME_SITUATION_CHANGED = "world.home.situation_changed"
+#: A tracked person's wellbeing state moved (stage 10 item 2): `unknown`,
+#: `usual`, `low` or `high` against their own baseline. Flips only, for
+#: a consented adult only, and never a word of theirs -- Initiative
+#: weighs whether a check-in is worth it.
+WORLD_WELLBEING_CHANGED = "world.wellbeing.changed"
 WORLD_ENV_QUERY_REPLY = "world.env.query.reply"
 #: Change who a person IS, as far as Sim is concerned (stage 6 item 4):
 #: link a handle to them, unlink one, set their role. A write, unlike

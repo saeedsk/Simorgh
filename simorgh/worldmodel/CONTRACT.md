@@ -19,6 +19,7 @@ World Model owns two read models: the environment facets (the code areas under `
 | `simorgh/worldmodel/facets/git_state.py` | `git_state` facet: read-only `git` subprocess observation |
 | `simorgh/worldmodel/facets/home.py` | `home` facet: the entity table, presence beliefs with decay, situation facts, `now_block` (stage 6 item 3) |
 | `simorgh/worldmodel/facets/people.py` | `people` facet: the People store (`people.json`), resolution by identity or name, link/unlink/set_role, and since stage 10 grant/revoke/add_interest/remove_interest |
+| `simorgh/worldmodel/facets/wellbeing.py` | `wellbeing` facet: a per-person baseline of cheap turn features, a Beta posterior over low-side turns with a half-life, states `unknown/usual/low/high`, `now_block(person=)`, `wellbeing.json`; keeps nothing about anybody `may_check_in` refuses (stage 10 item 2) |
 | `simorgh/worldmodel/facets/registry_facets.py` | `tools` facet (from `tool.*`) and `user_profile` facet (from Persona) |
 | `simorgh/worldmodel/selfmodel.py` | `SelfModel` dataclass, pure mutators, summary and markdown rendering, `compute_gaps` |
 | `simorgh/worldmodel/service.py` | the bus subsystem: facet queries, Self Model folding, loader-rollback ingestion |
@@ -29,7 +30,7 @@ Authority: `Service.consumes` in `service.py:45-53`.
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `world.env.query` | `messages/world.py::WorldEnvQuery` | simorgh/worldmodel/service.py | answers one facet by `what` (`capability_map`, `file_index`, `git_state`, `tools`, `user_profile`) |
+| `world.env.query` | `messages/world.py::WorldEnvQuery` | simorgh/worldmodel/service.py | answers one facet by `what` (`capability_map`, `file_index`, `git_state`, `tools`, `user_profile`, `home`, `people`, `wellbeing`) |
 | `self.summary` | `messages/self_.py::SelfSummary` | simorgh/worldmodel/service.py | rescans areas, replies a token-bounded summary (Cognition's assembler prepends it to prompts) |
 | `self.gaps` | `messages/self_.py::SelfGaps` | simorgh/worldmodel/service.py | rescans areas, replies the k least-known task types and unmeasured areas |
 | `tool.registered` | `messages/tool.py::ToolRegistered` | simorgh/worldmodel/service.py | adds to the tools facet; after `system.started`, syncs `capabilities["tools"]` |
@@ -51,6 +52,7 @@ Authority: `Service.consumes` in `service.py:45-53`.
 
 Also read at boot: `SIMORGH_LOADER_NOTES/last_rollback.json`, turned into a limitation once per rollback (`service.py:133-172`).
 | `world.people.update` | `messages/world.py::WorldPeopleUpdate` | simorgh/worldmodel/service.py | link a handle to a person, unlink one, set a role (stage 6 item 4); grant or revoke a permission, add or remove an interest (stage 10 item 1). The only write in this subsystem; tier 3 on the way in, so a person has already confirmed it. A `grant` of a name that is not in `contracts.people.PERMISSIONS` is a `refused` reply |
+| `turn.completed` | `messages/task.py::TurnCompleted` | simorgh/worldmodel/service.py `_on_turn_completed` | one wellbeing trial per turn for a speaker `may_check_in` admits: `user_text` (word count), the reply's tone tag (`contracts/tone.py::split_tone`; `warm`/`sorry` read as soft), and for `channel: voice` the last `voice.transcript`'s `seconds` for that speaker within 120 s (speech rate). A turn with no `speaker` is nobody's and is dropped (stage 10 item 2) |
 
 ## Produces
 
@@ -61,12 +63,13 @@ Also read at boot: `SIMORGH_LOADER_NOTES/last_rollback.json`, turned into a limi
 | `self.summary.reply` | `messages/self_.py::SelfSummaryReply` | simorgh/worldmodel/service.py | reply to every `self.summary`: `text`, `version`, `tokens` |
 | `self.gaps.reply` | `messages/self_.py::SelfGapsReply` | simorgh/worldmodel/service.py | reply to every `self.gaps`: `gaps`, `unexplored_areas`, `version` |
 | `self.model.updated` | `messages/self_.py::SelfModelUpdated` | simorgh/worldmodel/service.py | once per version bump, with the changed section and reason (no subscriber; allow-listed as an announcement) |
+| `world.wellbeing.changed` | `messages/world.py::WorldWellbeingChanged` | simorgh/worldmodel/service.py `_announce_wellbeing` | when a tracked person's state flips (`unknown/usual/low/high`), with the posterior mean of the low-side rate and the fresh evidence it rests on; never their words; only for an adult who said yes. Consumer: initiative (stage 10 item 3) |
 
 The generated draft also listed `world.env.observed` and `system.health`; this package publishes neither.
 
 ## Ledger streams
 
-None. World Model neither reads nor writes the Ledger. Its only durable outputs are `<data_dir>/self/SELF.md` (re-rendered on every version) and the `.last_rollback_ingested` stamp in the loader-notes directory. This is evaluation C6.
+None. World Model neither reads nor writes the Ledger. Its durable outputs are `<data_dir>/self/SELF.md` (re-rendered on every version), the `.last_rollback_ingested` stamp in the loader-notes directory, `<data_dir>/people.json` (the People store) and `<data_dir>/wellbeing.json` (per-person baselines and a bounded window of `(when, z)` trials; never words). This is evaluation C6; the wellbeing file is the same stopgap shape as `people.json` until a ledger fold.
 
 ## Config
 
@@ -98,6 +101,7 @@ The TOML shape is nested, not the field names: `from_mapping` reads `repo_root`,
 - `capabilities["tools"]` is the sorted set of registered tools not currently unavailable; it is written once at `system.started` and on every change after, never per tool during boot.
 - `compute_gaps` ranks by `success_rate - 1/sqrt(samples+1)` ascending; types with no samples are not gaps; areas with no measured `type:area` are `unexplored`.
 - Identity is loaded and hashed from the SOUL file; World Model never writes it.
+- The `wellbeing` facet stores nothing about anybody `contracts.people.may_check_in` refuses (a child, a guest, an unknown voice, an adult who has not said yes): `observe` returns False before any record exists, `now_block(person=)` renders nothing for them, and revoking `wellbeing_checkins` deletes the person's record (`forget`). Nothing is asserted from silence: no turns, a baseline under `BASELINE_MIN` (12) turns, no turn in `FRESH_S` (24 h) or under `MIN_EVIDENCE` (3) turns' worth of fresh weight is `unknown`, never `usual` and never `low`. `world.wellbeing.changed` is published only on a flip and never carries a person's words.
 - A loader rollback note becomes exactly one limitation, whatever the number of boots.
 - No SUBSCRIBE_ONLY_BY or PUBLISH_PAYLOAD_CONSTRAINTS entry names worldmodel.
 
@@ -110,6 +114,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/worldmodel/test_file_index_facet.py` -- the file index answers the path asked and refreshes on its window.
 - `tests/simorgh/worldmodel/test_capability_map.py` -- the capability areas and modules listed from `simorgh/`.
 - `tests/simorgh/worldmodel/test_substrate.py` -- `cognition.provider.status` reaches the Self Model and its rendering.
+- `tests/simorgh/worldmodel/test_wellbeing_facet.py` and `test_wellbeing_over_the_bus.py` -- the wellbeing facet: nothing from silence, the baseline forms before anything is scored, twelve usual turns then five short ones read `low` and the same five over two days do not, a quiet person is not low for being quiet, a long change becomes the new usual, flips are reported once, one person's line is never another's, a child's turns leave no record, a revoke deletes, a flip on the bus carries no words (stage 10 item 2).
 - `tests/simorgh/worldmodel/test_people_store.py` and `test_people_consent.py` -- the People store: one person across channels, `unknown` by default; a grant lands on the record and on disk, survives a restart, is refused for a name that is not a permission, and a guest with the flag is still refused by the role gate (stage 10 item 1).
 
 ## Known issues (2026-09-18 evaluation)
@@ -135,3 +140,5 @@ Lock it first (`python tools/modlock.py claim worldmodel --by <you> --task "..."
 - ToolsFacet keeps each tool's `description` and `input_schema` from `tool.registered` (stage 2 item 1).
 
 - Stage 10 item 1, 2026-09-20: the `people` facet keeps what a person said yes to (`grant`/`revoke` of `contracts.people.PERMISSIONS`) and what they care about (`add_interest`/`remove_interest`), through the same `world.people.update` write and the same tier; `consented(name, permission)` answers the grant half and `contracts.people.may_check_in` the whole gate. `world.env.query{what: "people", args: {name}}` answers by name. A fresh install grants nothing. The store never infers a permission from a turn.
+
+- Stage 10 item 2, 2026-09-20: the `wellbeing` facet (`facets/wellbeing.py`). Per person and per feature (`words` = log1p of the turn's word count, `rate` = words per second when spoken, `soft` = whether Sim's reply tone was `warm` or `sorry`) an exponentially-weighted baseline (`Moments`, horizon 100 turns, trusted after `BASELINE_MIN` = 12); each turn after that is a composite z against the baseline (signed so fewer words, slower speech and a softer reply all point down, clipped to ±3, spread floored per feature); a turn at or beyond `Z_EDGE` = 1 is a low-side (or high-side) trial. The state is `Beta(1 + Σ w·low, 1 + Σ w·not-low)` over the kept trials with `w = 0.5 ** (age / HALF_LIFE_S)` (6 h): `low` when the mean ≥ `LOW_AT` (0.5) and the summed weight ≥ `MIN_EVIDENCE` (3), `high` mirrored, `usual` otherwise, `unknown` before the baseline, after `FRESH_S` (24 h) of silence, or under the evidence bar. The baseline learns from a turn after scoring it, so a long change becomes the new usual. `estimate(person)` returns `{state, tracked, low, high, spread, evidence, samples, baseline_turns, last_seen_s, why}`; `now_block(person=)` one line with numbers and no words; `changes()` flips only; `forget(person)` for a revoke. `world.env.query{what: "wellbeing", args: {person}}` returns the estimate plus `note`; without `person`, every tracked person. Consent is a callable the service supplies (`may_check_in(people.by_name(name))`), asked on every observation. Still open: the ledger fold, energy/pitch as further features on the same machinery, a latency feature (needs the turn's timestamps), seeding baselines from an archived ledger.

@@ -13,8 +13,10 @@ from dataclasses import replace
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
+from simorgh.contracts.people import may_check_in
 from simorgh.contracts.protocols import Context, Health
 from simorgh.contracts.registry import error_reply_payload
+from simorgh.contracts.tone import split_tone
 
 from .config import Config
 from .facets.capability_map import CapabilityMapFacet
@@ -23,6 +25,7 @@ from .facets.git_state import GitStateFacet
 from .facets.home import HomeFacet
 from .facets.people import PeopleFacet
 from .facets.registry_facets import ToolsFacet, UserProfileFacet
+from .facets.wellbeing import WellbeingFacet
 from .selfmodel import (
     add_change,
     add_limitation,
@@ -56,10 +59,12 @@ class Service:
         topics.CAMERA_EVENT, topics.TV_STATE, topics.VOICE_TRANSCRIPT,
         # Who a person is, changed by a person (stage 6 item 4).
         topics.WORLD_PEOPLE_UPDATE,
+        # How a consented person seems (stage 10 item 2): one trial per turn.
+        topics.TURN_COMPLETED,
     )
     produces: tuple[str, ...] = (
         topics.WORLD_ENV_QUERY_REPLY, topics.SELF_SUMMARY_REPLY, topics.SELF_GAPS_REPLY, topics.SELF_MODEL_UPDATED,
-        topics.WORLD_HOME_SITUATION_CHANGED, topics.WORLD_PEOPLE_UPDATE_REPLY,
+        topics.WORLD_HOME_SITUATION_CHANGED, topics.WORLD_PEOPLE_UPDATE_REPLY, topics.WORLD_WELLBEING_CHANGED,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -105,10 +110,19 @@ class Service:
         # Who the people are (stage 6 item 4): one record per person, on
         # disk beside the rest of what Sim knows, seeded from the household.
         self._people = PeopleFacet(ctx.data_dir / "people.json")
+        # How each consented adult seems against their own usual (stage
+        # 10 item 2). The consent gate is the People store's answer, asked
+        # on every observation, so a revoke takes effect on the next turn
+        # -- and `_on_permission_revoked` drops what was kept.
+        self._wellbeing = WellbeingFacet(ctx.data_dir / "wellbeing.json", clock=ctx.clock.now,
+                                         consent=lambda name: may_check_in(self._people.by_name(name)))
+        # The last spoken turn per speaker, so a `turn.completed` from the
+        # voice channel can be scored with how fast it was said.
+        self._spoken: dict[str, tuple[float, float]] = {}       # speaker -> (seconds, at)
         self._facets = {
             "capability_map": self._capability_map, "file_index": self._file_index,
             "git_state": self._git_state, "tools": self._tools, "user_profile": self._user_profile,
-            "home": self._home, "people": self._people,
+            "home": self._home, "people": self._people, "wellbeing": self._wellbeing,
         }
         self._model = build_static_model(
             soul_path=self.config.resolved_soul_path(), clock_now=self._started_at,
@@ -144,6 +158,7 @@ class Service:
             await ctx.bus.subscribe(topics.CAMERA_EVENT, self._on_camera_event),
             await ctx.bus.subscribe(topics.TV_STATE, self._on_tv_state),
             await ctx.bus.subscribe(topics.VOICE_TRANSCRIPT, self._on_voice_transcript),
+            await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
         ]
         await self._ingest_loader_rollback(ctx)
         ctx.logger.info("worldmodel.started", areas=len(self._capability_map.areas()))
@@ -237,7 +252,41 @@ class Service:
         # unless the speaker was actually recognised, and a 0.5 guess is
         # exactly the case where a television can be mistaken for Saeed.
         self._home.saw_person(speaker, area=area, strength=strength, verified=confidence >= 0.6)
+        # How long the turn took to say, kept for the `turn.completed` that
+        # follows it (stage 10 item 2). Only a verified voice: a lean is
+        # not a person, and a person's baseline must be their own.
+        if confidence >= 0.6 and float(p.get("seconds") or 0.0) > 0.0:
+            self._spoken[speaker] = (float(p["seconds"]), self._ctx.clock.now())
         await self._announce_situation()
+
+    # -- how each person seems (stage 10 item 2) ----------------------------------------
+    async def _on_turn_completed(self, message: Message) -> None:
+        """One trial per turn for the wellbeing facet. The facet refuses
+        anybody `may_check_in` refuses, so a child's or a guest's turn is
+        dropped here without a record. A turn with no known speaker is
+        nobody's and is dropped too: a baseline must be one person's."""
+        p = message.payload or {}
+        speaker = str(p.get("speaker") or "").strip()
+        user_text = str(p.get("user_text") or "")
+        if not speaker or not user_text.strip():
+            return
+        tone, _rest = split_tone(str(p.get("text") or ""))
+        seconds = None
+        if str(p.get("channel") or "") == "voice":
+            spoken = self._spoken.pop(speaker, None)
+            if spoken is not None and self._ctx.clock.now() - spoken[1] <= 120.0:
+                seconds = spoken[0]
+        if self._wellbeing.observe(speaker, text=user_text, seconds=seconds, tone=tone):
+            await self._announce_wellbeing()
+
+    async def _announce_wellbeing(self) -> None:
+        """Publish a state that moved (flips only), with the numbers it
+        rests on and never the words it came from."""
+        for person, est in self._wellbeing.changes():
+            await self._ctx.bus.publish(Message.new(
+                topics.WORLD_WELLBEING_CHANGED, source=self._ctx.bus.source,
+                payload={"person": person, "state": est["state"], "mean": float(est["low"] or 0.0),
+                         "evidence": float(est["evidence"] or 0.0), "since": self._ctx.clock.now()}))
 
     async def _announce_situation(self) -> None:
         """Publish the situation facts that have flipped (stage 6 item 7)."""
@@ -333,7 +382,9 @@ class Service:
     async def _on_permission_revoked(self, name: str, permission: str) -> None:
         """Withdrawing a permission also drops what was kept under it
         (stage 10): a revoked `wellbeing_checkins` is not only a flag."""
-        return None
+        if permission == "wellbeing_checkins":
+            self._wellbeing.forget(name)
+            await self._announce_wellbeing()
 
     async def _on_provider_status(self, message: Message) -> None:
         """Record what is actually doing the thinking.

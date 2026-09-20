@@ -1,0 +1,40 @@
+{
+  "$id": "https://simorgh.local/schema/world.wellbeing.changed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A tracked person's wellbeing state flipped (stage 10 item 2). `mean` is the posterior mean of the low-side rate against their own baseline and `evidence` the fresh turns' worth it rests on. Published only for an adult who said yes (contracts.people.may_check_in), only on a change, and never with their words. Initiative decides whether a check-in is worth it.",
+  "properties": {
+    "evidence": {
+      "type": "number"
+    },
+    "mean": {
+      "type": "number"
+    },
+    "person": {
+      "type": "string"
+    },
+    "since": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "state": {
+      "enum": [
+        "unknown",
+        "usual",
+        "low",
+        "high"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "person",
+    "state",
+    "mean",
+    "evidence"
+  ],
+  "title": "world.wellbeing.changed",
+  "type": "object"
+}
