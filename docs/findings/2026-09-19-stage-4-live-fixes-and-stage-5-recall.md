@@ -124,3 +124,26 @@ the "every offered tool exists" test (a session-local tool has to say so:
 `SESSION_LOCAL`), and "no phone number ever reaches the bus" (the first version of
 `person_for` fell back to the sender's handle, which would have written chat
 addresses into memory tags for ever).
+
+## Stages 6 and 7, the same evening
+
+Stage 6 (self and world projections, People, safety tiers, Initiative):
+
+| Item | State | What landed |
+|---|---|---|
+| 1-2 — the self estimate | in part | a Beta posterior per task type and strategy over `learn:outcomes`, asked over `self.estimate.request`; a task session starts on the strong tier when its kind succeeds under 45% over 8+ outcomes. `Beta(1,1)` reads 0.5 with a wide spread, so nothing escalates on no evidence |
+| 3 — `world:home` | in part | an entity table folded from camera events, TV state and placed voices; presence per (person, area) halving every 20 min; situation facts as pure rules; a world-now block in chat prompts |
+| 4 — People | in part | `contracts/people.py` and a `people.json` store: one person, their identities across channels, a role, one memory namespace. An unlinked identity is `unknown`, never a new person |
+| 5 — safety tiers | in part | tiers 0-3 from what the tool is; tier 3 asks a person in every posture; `PersonRule` weighs the requester's role — a child asking to unlock escalates to an adult, an unplaced voice is refused |
+| 6 — Initiative | in part | a new subsystem: urgency × relevance − interruption cost, per-class cooldowns, a daily cap, do-not-disturb. The plan's acceptance is a test: a camera event at 02:00 with a child asleep goes to the owner's phone |
+| 7 — the house reaches a task | done | `world.home.situation_changed` (published only on a flip) is appended to open task sessions as a turn |
+
+Stage 7 (long horizon): item 1 in part (a helper may be any agent; `max_children_concurrent`
+is read at last, so the cap is real), item 2 done (planner, verify, skill-writer, browser as
+agent files), item 7 done (`session.checkpoint` after every action that changes something, so
+a resumed session answers an already-completed call instead of repeating it — the SIGKILL
+between a commit and its step record).
+
+Two guards earned their keep again: the manifest test caught three subscriptions nobody had
+declared, and the module-boundary test caught Orchestration importing Guardian (the tier
+vocabulary moved to `contracts/tiers.py`, which both may read).
