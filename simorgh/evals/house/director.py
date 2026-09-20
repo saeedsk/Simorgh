@@ -250,6 +250,22 @@ class Director:
         """
         record, data_dir = self.sandbox.record, self.sandbox.data_dir
         config, cap = self.sandbox._extra, self.sandbox._spend_cap_usd  # noqa: SLF001
+        # Let what Sim just learnt reach the disk. Memory writes an
+        # episodic record on `turn.completed`, after the reply, so a
+        # restart that follows the reply too closely takes the memory
+        # with it -- and the scenario then reports that Sim forgot,
+        # which is a lie about Sim and a bug in the harness
+        # (2026-09-20: `remembered blue tin` failed in the pack and
+        # passed by hand, the difference being a few hundred
+        # milliseconds).
+        await self.settle(quiet_for=1.0)
+        # Keep the data directory: `stop()` deletes a temporary one,
+        # and the whole point of a restart is to come back to what was
+        # written there. Without this the "fresh" Sim booted on a path
+        # that had just been removed and remembered nothing, which the
+        # scenario then reported as Sim forgetting across a restart --
+        # a lie about Sim, produced by the harness (2026-09-20).
+        self.sandbox._keep = True  # noqa: SLF001
         await self.sandbox.stop()
         fresh = Sandbox(config=config, data_dir=data_dir, keep=True, spend_cap_usd=cap)
         fresh.record = record

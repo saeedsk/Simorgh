@@ -66,16 +66,41 @@ async def _enrol_into(box, director) -> None:
     sherpa."""
     from .people import enrol
 
-    session = box.service("voice")
-    session = getattr(session, "_session", None)
+    import sys
+
+    session = getattr(box.service("voice"), "_session", None)
     book = getattr(session, "_speakers", None)
-    embedder = getattr(session, "_embedder", None)
-    if book is None or embedder is None:
+    if session is None or book is None:
+        return
+    # Open the speaker engine first. A session only opens it when the
+    # book ALREADY has voices -- "a household known by name only pays
+    # nothing per turn" -- so a fresh sandbox has no embedder, and
+    # enrolling is exactly how it gets its first voice. `voice enroll`
+    # does the same thing.
+    why = session._open_embedder()  # noqa: SLF001
+    if why:
+        _say_loudly(box, f"no speaker recognition in this sandbox: {why}")
         return
     try:
-        await enrol(book, director._tts(), embedder)  # noqa: SLF001
+        report = await enrol(book, director._tts(), session._embedder)  # noqa: SLF001
     except Exception as exc:  # noqa: BLE001 -- no models, no identities; the scenario still runs
-        box.record.printed_line(f"[house] could not enrol the household: {exc!r}")
+        _say_loudly(box, f"could not enrol the household: {exc!r}")
+        return
+    # Loud, not swallowed. This failed silently for an hour and every
+    # scenario that turned on knowing who was speaking quietly measured
+    # nothing at all (2026-09-20).
+    weak = {name: round(score, 2) for name, score in report.scores.items() if score < 0.6}
+    if weak:
+        _say_loudly(box, f"personas the book barely recognises: {weak}")
+
+
+def _say_loudly(box, message: str) -> None:
+    """Into the record AND onto stderr: a harness that cannot set the
+    scene must not let a scenario report a result as though it had."""
+    import sys
+
+    box.record.printed_line(f"[house] {message}")
+    print(f"[house] {message}", file=sys.stderr)
 
 
 async def run_pack(scenarios, *, in_child: bool = True) -> list[Outcome]:
