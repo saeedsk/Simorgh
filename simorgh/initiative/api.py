@@ -77,6 +77,24 @@ DAILY_CAP = 12
 #: area, and cheaper then. Composed: the notice's text is a state note
 #: for the model, never the words to say.
 PERSONAL: frozenset[str] = frozenset({"check_in", "interest_share"})
+
+#: One check-in per stretch of feeling low, not one a day.
+#:
+#: The 24-hour cooldown is not the rule people actually want. A
+#: companion arc (stage 11 item 6) walked a consented adult through
+#: three quiet days and Sim asked on all three -- each one allowed,
+#: because the posterior decays overnight and comes back the next
+#: evening as a fresh flip, a day after the last one. Recall was 100%
+#: and every check-in was on a genuinely low day, so both numbers said
+#: it was working; a person on the receiving end would have called it
+#: nagging. Asking once and then being there is the friend; asking
+#: daily is a symptom tracker.
+#:
+#: So a second check-in waits until either the person has been seen
+#: their usual self in between (the stretch ended) or this long has
+#: passed anyway (they have been quiet for days and it is worth one
+#: more ask).
+CHECK_IN_AGAIN_S: float = 72 * 3600.0
 PRIVATE: frozenset[str] = PERSONAL
 COMPOSED: frozenset[str] = PERSONAL
 
@@ -309,7 +327,8 @@ def acceptable_line(text: str) -> tuple[str, str]:
     return line, ""
 
 
-__all__ = ["ALONE_DISCOUNT", "CHANNELS", "CHANNEL_COST", "COMPOSED", "COOLDOWN", "DAILY_CAP", "Delivery",
+__all__ = ["ALONE_DISCOUNT", "CHANNELS", "CHANNEL_COST", "CHECK_IN_AGAIN_S", "COMPOSED", "COOLDOWN",
+           "DAILY_CAP", "Delivery",
            "FORBIDDEN_WORDS", "LINE_MAX_CHARS", "NOTHING", "Notice", "PERSONAL", "PRIVATE", "REACH", "Situation",
            "URGENCY",
            "WORTH_IT", "acceptable_line", "alone", "companion_gate", "compose_prompt", "cooldown_key", "cost",

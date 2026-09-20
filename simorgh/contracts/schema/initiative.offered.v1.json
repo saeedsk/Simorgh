@@ -1,0 +1,44 @@
+{
+  "$id": "https://simorgh.local/schema/initiative.offered.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A notice Sim decided to deliver, before the words are composed: which kind, for whom, and by which channel. The proposal that follows is an effect; this is the judgement.",
+  "properties": {
+    "kind": {
+      "type": "string"
+    },
+    "person": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
+      "type": "string"
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "tool"
+  ],
+  "title": "initiative.offered",
+  "type": "object"
+}

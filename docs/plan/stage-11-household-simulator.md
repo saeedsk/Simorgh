@@ -104,6 +104,28 @@ Note on (3), which is unchanged and worth remembering: with `PhysicalRule` disab
 - **Whether words were for Sim is the MODEL's decision once the voice is placed.** Only an unplaced voice gets a deterministic gate (`session._unplaced`: name Sim or be ignored); a voice Sim knows goes to the model, which answers `QUIET` if the words were not for it. So a scenario about staying out of a conversation cannot be judged by the floor provider, which answers everything: those carry `needs_model=True` and are skipped, with the reason, unless `SIMORGH_HOUSE_PAID` is set. An earlier version of the aside test passed on the floor provider -- for the wrong reason, because identification was broken and the aside was refused as a stranger's.
 - **Scenarios run one per process.** Booting the whole system more than three times in one interpreter segfaults on the torch models. The pack takes about five minutes.
 
+## Item 6 as built (2026-09-20)
+
+Five arcs, one per person, each a baseline of five ordinary days and then a stretch of quiet ones: a consented owner, a child, a guest, an adult nobody asked, and an adult who revokes partway. Measured through the real path with the world's clock pushed a day on between them.
+
+| person | role | said yes | low stretch | check-ins | recall | precision | nagging | forbidden |
+|---|---|---|---|---|---|---|---|---|
+| Mara | owner | yes | days 5-7 | day 5 | 100% | 100% | 0 | 0 |
+| Otto | child | yes | days 5-7 | none | - | - | 0 | 0 |
+| Priya | guest | no | days 5-7 | none | - | - | 0 | 0 |
+| Dev | adult | no | days 5-7 | none | - | - | 0 | 0 |
+| Rhea | adult | yes, then stop | days 5-8 | day 5 | 100% | 100% | 0 | 0 |
+
+Falsified by breaking `may_check_in` to always allow: the child's arc goes red with `forbidden 1`.
+
+**Two decisions made here, and why.**
+
+*Recall is per stretch, not per day.* Sim asking on each of three quiet mornings scored 100%/100%; asking once on the first, which is what a friend does, scored 33%. The unit was measuring the wrong thing, and it would have rewarded the wrong behaviour.
+
+*One check-in per stretch (`CHECK_IN_AGAIN_S`, 72 h).* The first run of this arc had Sim asking on all three quiet days, each one legally inside the 24-hour cooldown: the posterior decays overnight, the state reads `unknown` by morning, and the evening's turns flip it low again as if it were news. `unknown` is the absence of a reading, not a recovery, so a stretch now ends only when the person is seen `usual` or `high` again. This is the arcs earning their cost -- both rates said the feature worked.
+
+*`initiative.offered` exists now.* There was no way to count what Sim decided to send: a suppression carried its `kind` and a delivery did not, so from the bus you could see every word held back and not one that went out. `topics.py` said as much in a comment about the suppression, one line above the gap.
+
 ## Measurements after
 
 | Number | Target |
@@ -127,7 +149,7 @@ Note on (3), which is unchanged and worth remembering: with `PhysicalRule` disab
 ## Definition of done
 
 - [ ] Items 1-4: a scenario runs end to end through the director, with people, noise, and per-expectation outcomes; the five live-log failures reproduced.
-- [ ] Items 5-7: a scenario pack per stage, the companion arcs with precision/recall, the benchmarks scoring through the sandbox.
+- [x] Item 6: the companion arcs, five of them, with recall per stretch and two counts that are not rates. Items 5 and 7: a scenario pack per stage, the companion arcs with precision/recall, the benchmarks scoring through the sandbox.
 - [ ] Items 8-9: the latency table and the TUI grammar as expectations.
 - [ ] Items 10-11: findings written and clustered from a run; `house-fast` in the bless.
 - [ ] Item 12: findings entry with the tables above.

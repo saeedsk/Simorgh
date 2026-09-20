@@ -42,6 +42,9 @@ def main(argv: list[str]) -> int:
     house.add_argument("--timing", action="store_true", help="with --one: where the turn's seconds went")
     house.add_argument("--findings", default="", metavar="PATH", help="write clustered findings there (default docs/findings/<date>-house.md)")
     house.add_argument("--json", action="store_true")
+    arcs = sub.add_parser("arcs", help="the companion arcs: weeks of a household (stage 11 item 6)")
+    arcs.add_argument("--only", default="", help="one person's arc by name")
+    arcs.add_argument("--json", action="store_true")
     scen = sub.add_parser("scenario", help="the household script, probe by probe")
     scen.add_argument("--json", action="store_true")
     scen.add_argument("--verbose", action="store_true")
@@ -91,6 +94,43 @@ def main(argv: list[str]) -> int:
             where = args.findings or f"docs/findings/{date.today().isoformat()}-house.md"
             print(f"\nfindings: {write(findings, where)}")
         return 0 if all(o.status != "failed" for o in outcomes) else 1
+
+    if args.command == "arcs":
+        import json as _json
+
+        from .house.arcs import play, table
+        from .house.scenarios.companion import ARCS, WANT_RECALL
+
+        chosen = [a for a in ARCS if not args.only or a.person.lower() == args.only.lower()]
+        if not chosen:
+            print(f"no arc for {args.only!r}; try {', '.join(a.person for a in ARCS)}", file=sys.stderr)
+            return 2
+
+        async def _all():
+            out = []
+            for arc in chosen:
+                # One sandbox per arc, and one arc at a time: each is a
+                # whole Sim, and two of them in one interpreter is the
+                # segfault the runner already forks around.
+                with contextlib.redirect_stdout(io.StringIO()):
+                    out.append(await play(arc))
+            return out
+
+        played = asyncio.run(_all())
+        if args.json:
+            print(_json.dumps([{"person": p.arc.person, "role": p.arc.role,
+                                "consented": p.arc.consented, "offered": p.offered,
+                                "recall": p.recall, "precision": p.precision,
+                                "nagging": p.nagging, "forbidden": p.forbidden}
+                               for p in played], indent=1))
+        else:
+            print(table(played))
+        # The two rules that are not rates: nobody who did not say yes,
+        # and nobody asked twice in one stretch.
+        strict = sum(p.forbidden + p.nagging for p in played)
+        consented = [p.recall for p in played if p.arc.may_be_checked_in_on and p.recall is not None]
+        recall = sum(consented) / len(consented) if consented else 1.0
+        return 0 if not strict and recall >= WANT_RECALL else 1
 
     if args.command == "scenario":
         from .scenario import main as scenario_main

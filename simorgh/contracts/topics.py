@@ -250,6 +250,14 @@ CURIOSITY_SHARE_PROPOSED = "curiosity.share.proposed"
 #: much a decision as a decision to speak, and only one of the two is
 #: visible unless it is recorded.
 INITIATIVE_SUPPRESSED = "initiative.suppressed"
+#: A thing Sim decided TO say, and to whom, before the words exist. The
+#: comment above was half true for a day: a suppression carried its
+#: `kind` and a delivery did not, so from the bus you could see every
+#: notice Sim held back and not one it chose to send -- an
+#: `action.proposed` for `speak` looks the same whoever asked for it.
+#: Anything counting what Sim offers per person (the companion arcs,
+#: stage 11 item 6) needs the decision, not the proposal that follows.
+INITIATIVE_OFFERED = "initiative.offered"
 CURIOSITY_DISCOVER_REQUEST = "curiosity.discover.request"
 CURIOSITY_DISCOVER_REPLY = "curiosity.discover.reply"
 CURIOSITY_SHARE_REQUEST = "curiosity.share.request"

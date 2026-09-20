@@ -34,6 +34,7 @@ from simorgh.contracts.people import Person, from_dict as person_from_dict
 from simorgh.contracts.protocols import Context, Health
 
 from .api import (
+    CHECK_IN_AGAIN_S,
     COMPOSED,
     PERSONAL,
     Notice,
@@ -53,7 +54,8 @@ _CONSUMES = (
     topics.CAMERA_EVENT, topics.PERCEPT_TIME_SCHEDULED, topics.CURIOSITY_SHARE_PROPOSED,
     topics.WORLD_WELLBEING_CHANGED, topics.SYSTEM_TICK_SLEEP,
 )
-_PRODUCES = (topics.ACTION_PROPOSED, topics.INITIATIVE_SUPPRESSED, topics.COGNITION_THINK, topics.WORLD_ENV_QUERY)
+_PRODUCES = (topics.ACTION_PROPOSED, topics.INITIATIVE_OFFERED, topics.INITIATIVE_SUPPRESSED,
+             topics.COGNITION_THINK, topics.WORLD_ENV_QUERY)
 
 #: How long to wait for the model to write a composed line. Unprompted
 #: speech is never urgent enough to hold anything else up.
@@ -73,6 +75,9 @@ class Service:
         self._subs: list = []
         self._owner = owner
         self._last_by_kind: dict[str, float] = {}
+        #: person -> when Sim last asked how they were, cleared when
+        #: they are seen their usual self again (`CHECK_IN_AGAIN_S`).
+        self._asked_about: dict[str, float] = {}
         self._delivered_today = 0
         self._day = 0
         self.do_not_disturb: set[str] = set()
@@ -137,14 +142,39 @@ class Service:
     async def _on_wellbeing_changed(self, message: Message) -> None:
         """The World Model's posterior says somebody who said yes seems
         quieter than usual. Whether that is worth a word is this
-        module's question; how to put it is the model's."""
+        module's question; how to put it is the model's.
+
+        Once per stretch, not once a day: see `CHECK_IN_AGAIN_S`. A
+        person who is quiet all week produces a fresh low flip most
+        evenings, because the evidence decays overnight and builds
+        again -- three in three days, each of them legitimately
+        inside the 24-hour cooldown.
+        """
         payload = message.payload or {}
-        if str(payload.get("state") or "") != "low":
-            return
         person = str(payload.get("person") or "")
+        state = str(payload.get("state") or "")
+        if state != "low":
+            # Back to themselves ends the stretch; `unknown` does not.
+            # Overnight the evidence decays below the threshold and the
+            # state reads `unknown` until they speak again -- which is
+            # the absence of a reading, not a recovery, and treating it
+            # as one is what let Sim ask three days running.
+            if state in ("usual", "high"):
+                self._asked_about.pop(person, None)
+            return
+        asked = self._asked_about.get(person)
+        now = self._ctx.clock.now()
+        if asked is not None and (now - asked) < CHECK_IN_AGAIN_S:
+            await self._suppress(Notice(kind="check_in", text=state_note(person, payload), person=person),
+                                 f"already asked {person} about this stretch "
+                                 f"{(now - asked) / 3600.0:.0f}h ago")
+            return
         note = state_note(person, payload)
-        await self.offer(Notice(kind="check_in", text=note, person=person, ref=f"wellbeing:{person}",
-                                weight=float(payload.get("mean") or 0.0)))
+        delivery = await self.offer(Notice(kind="check_in", text=note, person=person,
+                                           ref=f"wellbeing:{person}",
+                                           weight=float(payload.get("mean") or 0.0)))
+        if delivery is not None:
+            self._asked_about[person] = now
 
     # -- the decision ------------------------------------------------------------------
     async def offer(self, notice: Notice, *, situation: Situation | None = None) -> object | None:
@@ -180,6 +210,14 @@ class Service:
                 return None
         self._last_by_kind[cooldown_key(notice)] = now
         self._delivered_today += 1
+        # The decision, before the effect. An `action.proposed` for
+        # `speak` looks identical whoever asked for it, so without
+        # this nothing downstream can tell a check-in from a reminder
+        # -- including anything trying to measure how often Sim gets
+        # this right, and including a person reading the log.
+        await ctx.bus.publish(Message.new(topics.INITIATIVE_OFFERED, source=ctx.bus.source, payload={
+            "kind": notice.kind, "tool": delivery.tool, "person": notice.person or "",
+            "to": delivery.to or "", "why": delivery.why, "ref": notice.ref}))
         await ctx.bus.publish(Message.new(topics.ACTION_PROPOSED, source=ctx.bus.source, payload={
             "action_id": uuid.uuid4().hex,
             "tool": delivery.tool,

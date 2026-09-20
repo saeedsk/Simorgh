@@ -25,6 +25,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from .clock import SkippingClock
 from .record import Record
 
 #: One frame of audio, in seconds. The fake microphone hands frames
@@ -77,6 +78,9 @@ class Sandbox:
         self.record = Record()
         self._subs: list = []
         self._voice_fakes: dict = {}
+        #: The world's clock. `Director.advance(days=...)` pushes it;
+        #: see `clock.py` for what a skip does and does not mean.
+        self.clock = SkippingClock()
         #: The house the home tools reach, once booted: `FakeHomeAssistant`.
         self.house = None
 
@@ -97,7 +101,8 @@ class Sandbox:
                          "voice": {"speakers_dir": str(self.data_dir / "speakers")}},
                         self._extra)
         with _voice_fakes(self._voice_fakes):
-            self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore({}))
+            self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore({}),
+                                 clock=self.clock)
             await self.kernel.boot()
         await self._watch()
         self._wire_the_house()

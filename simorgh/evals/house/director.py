@@ -38,6 +38,12 @@ TURN_TIMEOUT_S = 120.0
 LISTEN_TIMEOUT_S = 12.0
 
 
+#: An `advance()` longer than this moves the world's clock instead of
+#: sleeping. Under it, real seconds -- a filler at two seconds and a
+#: "still checking" at six are exactly the timers being tested.
+SKIP_OVER_S = 60.0
+
+
 class Director:
     """Drives one sandbox through a scenario."""
 
@@ -63,7 +69,8 @@ class Director:
 
     # -- somebody speaks ------------------------------------------------------------
     async def say(self, person: str, text: str, *, where: str = "", wait: bool = True,
-                  confidence: float = 0.95, session: str = "", aloud: bool = True) -> float:
+                  confidence: float = 0.95, session: str = "", aloud: bool = True,
+                  seconds: float = 0.0) -> float:
         """`person` says `text` out loud. Returns the mark it went in at.
 
         Driven through the voice pipeline's own `ask`, not by putting a
@@ -79,6 +86,23 @@ class Director:
         """
         mark = self.record.somebody_spoke(person, text, in_the_room=False)
         pipeline = self._pipeline()
+        if seconds > 0.0:
+            # How long the person took to say it. `ask` skips the
+            # recogniser, so the transcript that carries this in the
+            # live path is never published; the World Model reads it
+            # for the wellbeing baseline (how fast somebody is
+            # talking), and without it a companion arc would be
+            # measuring word count alone. Published in the shape the
+            # real path publishes, and only when a scenario asks:
+            # `into_the_room` produces the genuine article.
+            from simorgh.contracts import topics
+            from simorgh.contracts.envelope import Message
+
+            await self.sandbox.kernel.bus.publish(Message.new(
+                topics.VOICE_TRANSCRIPT, source="voice",
+                payload={"text": text, "speaker": person, "confidence": float(confidence),
+                         "seconds": float(seconds), "engine": "scripted", "device": "fake",
+                         "room": where or "here", "session_id": session or ""}))
         session_id = session or self._session_ids.setdefault(person, uuid.uuid4().hex)
         reply = await pipeline.ask(text, session_id=session_id, speaker_name=person,
                                    confidence=float(confidence), room=where)
@@ -258,15 +282,23 @@ class Director:
         """Let time pass. Real seconds for now, so anything on a timer
         behaves as it does live.
 
-        A simulated week cannot be real seconds, so the fake clock
-        belongs here -- but a fake clock that the event loop does not
-        share makes every `asyncio.sleep` in the system lie. That is
-        the memory and companion arcs' problem to solve (items 5 and
-        6), and it will be solved here, in this method, so no scenario
-        changes.
+        Above `SKIP_OVER_S` it is the world's clock that moves instead
+        (`clock.SkippingClock`): a nine-day companion arc cannot be
+        nine days of real seconds, and a fake clock the event loop
+        shares would make every `asyncio.sleep` in the system lie. So
+        a skip moves what a skip can honestly mean -- decay,
+        baselines, cooldowns, half-lives, "last heard 40 minutes ago"
+        -- and nothing that waits waits any less. After a skip, poll
+        for the state you expect; do not wait for a timer to notice.
         """
         total = seconds + minutes * 60.0 + hours * 3600.0 + days * 86400.0
         if total <= 0:
+            return
+        if total >= SKIP_OVER_S:
+            self.sandbox.clock.skip(total)
+            # A beat of real time so whatever was mid-flight finishes
+            # on the new clock rather than straddling the jump.
+            await asyncio.sleep(0.2)
             return
         await asyncio.sleep(min(total, 5.0))
 
