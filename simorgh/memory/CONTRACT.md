@@ -4,7 +4,51 @@ One-line status: layer 2 · 1,901 lines · 12 test files · lock: `memory` in do
 
 ## Purpose
 
-Memory owns what Sim remembers across turns: durable episodic, semantic and procedural records, one Ledger event per record on `memory:<kind>`, and the in-process conversation window (`WorkingMemory`) keyed per (channel, person). It answers `memory.retrieve` by scoring every live record (similarity times decayed confidence, plus a recency term), writes a record for every chat `turn.completed`, and consolidates (flag contradictions, prune, optionally distil a summary through Cognition). It must never physically delete or rewrite a record: forgetting and pruning are tombstone events on `memory:tombstones`, and a contradiction is an event on `memory:contradictions`, never an edit. It must never store something nobody said: a distillation that names specifics absent from its transcript is dropped whole (`consolidation.py::untraceable`). The shaping decision is that the Ledger is the store and the index is a cache: `recall.py` keeps a per-kind cursor and in-memory inverted index so a recall does not re-read or re-embed the store, and the default embedder is `auto`: a local model when installed (warmed in a thread, vectors persisted, dense scores fused with BM25), the dependency-free hashing trick otherwise, which matches vocabulary, not meaning.
+Memory owns what Sim remembers across turns, in four tiers that differ in
+how long they live and what they are for -- **working** (this
+conversation), **episodic** (what happened), **semantic** (what holds),
+**procedural** (how to do a thing). The tiers are described one section
+down; everything else here is the machinery under them.
+
+One Ledger event per record on `memory:<kind>`; the in-process
+conversation window (`WorkingMemory`) keyed per (channel, person). It
+answers `memory.retrieve` by scoring every live record of the requested
+kinds and returning the facts the query touches alongside them, writes a
+record for every chat `turn.completed`, and consolidates on the sleep
+tick (extract facts, prune each kind, optionally distil a summary through
+Cognition).
+
+It must never physically delete or rewrite a record: forgetting and
+pruning are tombstone events on `memory:tombstones`, a correction is a new
+fact that supersedes the old one on `memory:facts`, and a contradiction is
+an event on `memory:contradictions` -- never an edit. It must never store
+something nobody said: a distillation that names specifics absent from its
+transcript is dropped whole (`consolidation.py::untraceable`), and a fact
+triple whose quote is not in its window is dropped the same way.
+
+The shaping decision is that the Ledger is the store and the index is a
+cache: `recall.py` keeps a per-kind cursor and in-memory index so a recall
+does not re-read or re-embed the store, and the default embedder is
+`auto` -- a local model when installed (warmed in a thread, vectors
+persisted to `memory:vectors`, dense scores fused with BM25 by reciprocal
+rank), the dependency-free hashing trick otherwise, which matches
+vocabulary rather than meaning.
+
+## The four tiers
+
+| Tier | Where it lives | Written by | Recalled by | Forgotten by |
+|---|---|---|---|---|
+| **working** -- the conversation in front of Sim | `WorkingMemory._sessions`, keyed `conversation_key(channel, speaker)`; in process only | every chat `turn.completed` | Orchestration's memory block, under the same key | the process ending, or `working_max_turns` / `working_max_chars` pushing the oldest turn out |
+| **episodic** -- what happened, with when and who | `memory:episodic` | every stored chat turn (not task turns, not QUIET replies), tagged `session:` and `person:<name>` | `memory.retrieve` with `kinds` containing `episodic` | `prune`, by the forgetting score below |
+| **semantic** -- what holds now | `memory:facts` (`Fact{subject, predicate, object, person_scope, valid_from, valid_to, superseded_by, source_refs}`) and `memory:semantic` records | consolidation's fact pass; `store_fact` | returned with every `memory.retrieve.reply` as `facts` -- the facts the query mentions plus the asking person's digest | superseded, never deleted: a new fact for the same normalised `(person_scope, subject, predicate)` closes the old one with `valid_to` |
+| **procedural** -- how to do a thing here | `memory:procedural` | Reflection's critiques, skills and learned habits | `memory.retrieve` with `kinds` containing `procedural`; chat does not ask for it | `prune`, by the same score |
+
+A fact is not an episode and does not decay: "the wifi password is on the
+fridge" was true before it was said and stays true after the conversation
+that mentioned it is forgotten. That is why a correction is structural
+(supersession by key) rather than a scoring contest between two records,
+and why `prune` never tombstones an episodic record a live fact cites --
+a fact whose source is gone asserts something nothing can check.
 
 ## Files
 
@@ -89,7 +133,9 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 ## Invariants
 
 - A record is never mutated or deleted: `forget`, `forget_window` and `prune` append to `memory:tombstones`; a tombstoned ref is never returned by `retrieve` and is not counted by `counts()`.
-- `prune` never re-tombstones an already-forgotten ref, and ranks by decayed, penalty-adjusted confidence, not insertion order (`store.py:465-496`).
+- `prune` never re-tombstones an already-forgotten ref, and ranks by the forgetting score -- confidence decayed from the last time the record was *recalled* (not from when it was written), times the contradiction penalty, lifted by `1 + 0.5 * ln(1 + recalls)`. Insertion order is not in it, and neither is anything a writer claimed about importance.
+- `prune` never tombstones a record cited by a live fact's `source_refs`, whatever its score; what it spared is in `MemoryEngine._kept_back`.
+- Recall counts its own uses: every record `retrieve` actually returns has its count and last-read time recorded (`_reads`, `_last_read`, in process). A record nobody has asked for since a restart is scored from its own timestamp, so a lost count can only make forgetting more likely, never less.
 - A `turn.completed` is stored as episodic only when all hold: some text on either side, not `cancelled`, not a QUIET reply (`contracts.settings.is_quiet_reply`), and `kind` is `chat` (`service.py:204-225`). Task sessions' turns are never episodic memory.
 - Every stored chat turn is also added to `WorkingMemory` under `conversation_key(channel, speaker)`, and Orchestration reads it back under the same key (pinned from the other side by `tests/simorgh/orchestration/test_the_memory_block_remembers_recent_turns.py`).
 - A spoken turn is tagged `person:<speaker>` for every named voice, and the tone tag is stripped from Sim's reply before storing.
@@ -118,7 +164,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 - C8 -- the conversation window had no producer. **Fixed 2026-09-18** (`1e486f1`): fed from every chat `turn.completed` under `conversation_key`.
 - C7 -- Reflection's critiques landed as episodic memory in chat prompts. **Fixed 2026-09-18** (`aa05475`): filed as procedural; chat does not recall procedural.
-- C10 -- recall is a 256-bucket hashed bag of words (paraphrases score 0.000), vectors are not persisted, and a local model costs ~25 s cold. Open; stage 5. The 2026-09-19 recall scenario (`tools/recall_scenario.py`) scores 2 of 3, missing exactly a paraphrased question.
+- C10 -- recall was a 256-bucket hashed bag of words (paraphrases scored 0.000), vectors were not persisted, and a local model cost ~25 s cold. **Fixed 2026-09-19** (stage 5 items 1-2): local embedder warmed in a thread, vectors persisted to `memory:vectors`, dense fused with BM25. The paraphrase set went 0/10 to 10/10 at p50 13 ms (`docs/findings/2026-09-19-stage-4-live-fixes-and-stage-5-recall.md`).
 - W7 -- four memory announcements have no subscriber. Accepted and allow-listed with reasons (`b5c2671`).
 - B7 -- the Ledger client is unbound; any subsystem can append to `memory:*`. Open; stage 1.
 
@@ -127,10 +173,10 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - Stage 4 (session stream): the `session:<id>` stream becomes the working tier; `WorkingMemory` as fed today is the stopgap it replaces.
 - Stage 5 item 1 done 2026-09-19: a local embedder loads in a thread after the index is built (`MemoryEngine.warm_embedder`); until then `Embedder.embed` answers from hashing at once, and afterwards the hashed records are re-embedded in batches (`RecallIndex.upgrade`, `Embedder.embed_many`) and persisted to `memory:vectors`, which a restart reads instead of re-embedding. The default embedder stays `hashing` until item 2's matrix makes a dense recall cheap.
 - Stage 5 item 4 in part, 2026-09-19: a `memory.retrieve` carrying a `person:<name>` tag gets that person's live facts back as well as the query's, up to `_DIGEST_FACTS` (8, about 150 tokens) -- the per-person digest, built from the facts themselves, so it is current with no sleep job to regenerate it. Facts scoped to the household are not repeated in it.
-- Stage 5 item 8 in part, 2026-09-19: `prune` never tombstones a record a live fact cites (`Fact.source_refs`); what it spared is in `MemoryEngine._kept_back`. The score is still confidence-decay plus the contradiction penalty; access counts are not recorded, so they are not in it.
+- Stage 5 item 8 done 2026-09-19: the forgetting score. `prune` never tombstones a record a live fact cites (`Fact.source_refs`); what it spared is in `MemoryEngine._kept_back`. The score is confidence decayed from the last recall rather than from the write, times the contradiction penalty, times `1 + 0.5 * ln(1 + recalls)`: age and confidence alone forget the thing the household asks for every week, because being old is not the same as being finished with. `memory forget` stays operator-initiated.
 - Stage 5 item 3 done 2026-09-19: the fact store. A fact is keyed by `(person_scope, subject, predicate)` normalised, so storing a new one supersedes the old (`fact.superseded`, with `valid_to`) and a correction wins by structure rather than by score; `memory.retrieve.reply` carries the facts the query mentions, each with `was`/`was_until` when it replaced one; a fact scoped to a person is never recalled for another; `memory.fact.stored`/`.superseded` are published. Facts are extracted at consolidation by a second `consolidate` call returning JSON triples, each with the sentence it came from -- a triple whose quote is not in the window is dropped (`consolidation.parse_facts`), the per-triple form of the `untraceable` rule. `flag_contradictions` is no longer called (it halved both sides and buried corrections); the method and `memory:contradictions` remain, read-only.
 - Stage 5 item 2 done 2026-09-19: with a dense embedder `retrieve` scores a kind with one float32 matrix product (`KindIndex.dense_scores`) and BM25 over words (`KindIndex.bm25`, stopwords dropped), fused by reciprocal rank (`recall.fused`, k=60, scaled 0..1) as the similarity in the existing score. The hashing path is unchanged (indexed score = full-scan score).
-- Stage 5 (memory tiers), all under the `memory` lock: items 1-2 (above); item 2 a float32 matrix plus BM25 fused by reciprocal rank; item 3 a `memory:facts` store (`Fact{subject, predicate, object, valid_from, valid_to, superseded_by, ...}`) extracted at consolidation, replacing `memory.contradiction.flagged`; item 4 an entity-linked facts block and per-person digest; item 7 person namespaces on every channel; item 8 forgetting by score, never a linked fact. This file is to be rewritten for the four tiers when stage 5 lands.
+- Stage 5 (memory tiers), all under the `memory` lock: items 1-2 (above); item 2 a float32 matrix plus BM25 fused by reciprocal rank; item 3 a `memory:facts` store (`Fact{subject, predicate, object, valid_from, valid_to, superseded_by, ...}`) extracted at consolidation, replacing `memory.contradiction.flagged`; item 4 an entity-linked facts block and per-person digest; item 7 person namespaces on every channel; item 8 forgetting by score, never a linked fact. Items 1-8 are done; this file was rewritten for the four tiers on 2026-09-19.
 
 ## Working on this module
 

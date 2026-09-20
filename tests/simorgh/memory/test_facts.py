@@ -130,3 +130,32 @@ class ThePersonDigest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({f.subject for f in hers}, {"Iris", "Iris telescope"})
         self.assertNotIn("Aran", {f.subject for f in hers}, "another child's facts are not hers")
         self.assertLessEqual(len(hers), max(_DIGEST_FACTS, len(hers)))
+
+
+class ForgettingKeepsWhatKeepsBeingAskedFor(unittest.IsolatedAsyncioTestCase):
+    """Stage 5 item 8: the score is age, confidence AND use.
+
+    Age and confidence alone forget the thing the household asks for
+    every week, because being old is not the same as being finished
+    with. The count comes from recall itself, so it measures what was
+    actually needed rather than what looked important when it was
+    stored.
+    """
+
+    async def test_a_record_that_keeps_coming_back_outlives_a_newer_one(self):
+        ledger = make_ledger({"backend": "memory"})
+        await ledger.start()
+        engine = MemoryEngine(ledger, Config(half_life_seconds=60.0), clock=_Clock())
+        old = await engine.store(kind="episodic", content="the gate code is by the door",
+                                 tags=[], source_ref="", confidence=1.0)
+        for i in range(4):
+            await engine.store(kind="episodic", content=f"filler {i}", tags=[], source_ref="",
+                               confidence=1.0)
+        # Asked for, repeatedly, long after it was stored.
+        for _ in range(6):
+            await engine.retrieve(query="gate code", kinds=["episodic"], k=1, filters=None)
+        self.assertGreaterEqual(engine._reads.get(old, 0), 3, "recall counted the uses")  # noqa: SLF001
+        await engine.prune(kind="episodic", keep=2)
+        found, _ = await engine.retrieve(query="", kinds=["episodic"], k=10, filters=None)
+        self.assertIn(old, [item.ref for item in found],
+                      "the oldest record was also the most used one")

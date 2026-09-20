@@ -1,6 +1,6 @@
 # Stage 5 -- Memory tiers
 
-Status: **in progress** (2026-09-19: items 1-7 done except part of 8; item 9 recorded in findings) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
+Status: **done** (2026-09-19: items 1-8 with tests, CONTRACT rewritten for the four tiers; item 9 recorded in findings) · Depends on: stage 4 (the session stream is the working tier) · Estimated: 3 weeks · Modules touched: memory, contracts, orchestration, persona
 
 ## Outcome
 
@@ -60,5 +60,5 @@ Item 8 in part, 2026-09-19: pruning never forgets a record a live fact was read 
 
 ## Definition of done
 
-- [ ] Items 1-8 with tests; memory's CONTRACT.md rewritten for the four tiers. **Items 1-7 done with tests; item 8 only in part (pruning spares what a fact cites; a score with access counts waits for something to record them). The CONTRACT has the new streams and rules appended but has not been rewritten around the four tiers.**
+- [x] Items 1-8 with tests; memory's CONTRACT.md rewritten for the four tiers. **Item 8 finished 2026-09-19: recall records its own uses, and the score is confidence decayed from the last recall, lifted by the count; a record a live fact cites is never tombstoned. The CONTRACT now opens on the four tiers with a table of where each lives, who writes it and how it is forgotten.**
 - [x] Findings entry with the table. **Paraphrase recall 0/10 -> 10/10, p50 13 ms, the correction case by construction.**

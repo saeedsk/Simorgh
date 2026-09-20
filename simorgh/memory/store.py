@@ -15,6 +15,7 @@ doesn't survive the way consolidated long-term memory does.
 from __future__ import annotations
 
 import asyncio
+import math
 
 import uuid
 from collections import defaultdict, deque
@@ -90,6 +91,11 @@ class WorkingMemory:
 
 _EXCERPT_CHARS = 600
 
+#: How much being recalled lifts a record against being forgotten. A log,
+#: so the thing asked for weekly outlives the thing asked for once, and the
+#: thing asked for 500 times does not become unforgettable.
+_USE_WEIGHT = 0.5
+
 
 def _excerpt(text, limit: int = _EXCERPT_CHARS) -> str:
     text = str(text or "")
@@ -123,6 +129,11 @@ class MemoryEngine:
         self._content_chars: dict[str, int] = {}
         #: Records a prune spared because a live fact cites them.
         self._kept_back: list[str] = []
+        #: How often each record has actually been recalled, and when it
+        #: was last recalled (stage 5 item 8): the use term of the
+        #: forgetting score.
+        self._reads: dict[str, int] = {}
+        self._last_read: dict[str, float] = {}
         #: Called with (fact, superseded id) so the Service can publish
         #: `memory.fact.stored` / `.superseded`; None in a bare engine.
         self._on_fact = None
@@ -411,6 +422,13 @@ class MemoryEngine:
 
         candidates.sort(key=lambda pair: pair[0], reverse=True)
         truncated = len(candidates) > k
+        for _score, entry in candidates[:k]:
+            # A record that keeps coming back is a record the household
+            # keeps needing (stage 5 item 8). Counted here, where it is
+            # actually used, rather than guessed at from its age.
+            ref = entry.ref if isinstance(entry, MemoryItem) else entry[1].ref
+            self._reads[ref] = self._reads.get(ref, 0) + 1
+            self._last_read[ref] = self._clock.now()
         # The relevance number travels with the item. Computing it and
         # throwing it away was why the reply had to report something
         # else under the name "score".
@@ -551,9 +569,15 @@ class MemoryEngine:
         ))
 
     async def prune(self, *, kind: str, keep: int) -> int:
-        """v1 `_prune_kind`: tombstone every record of `kind` past the
-        most recent `keep` (by score-confidence, not just insertion
-        order) -- a "forgotten" event, never a physical delete."""
+        """Tombstone every record of `kind` past the best `keep` -- a
+        "forgotten" event, never a physical delete.
+
+        The score is confidence decayed from the last time the record
+        was recalled, lifted by how often it has been (stage 5 item 8), and a record a live fact cites is
+        never forgotten at all. Age and confidence alone would forget the
+        thing the household asks for every week, because being old is not
+        the same as being finished with.
+        """
         now = self._clock.now()
         penalties = await self._contradiction_penalties()
         # Already-forgotten records take no part in this: not in the
@@ -576,7 +600,20 @@ class MemoryEngine:
             item = MemoryItem(ref=ref, kind=kind, content=event.payload.get("content", ""),
                               tags=tuple(event.payload.get("tags", [])), confidence=float(event.payload.get("confidence", 1.0)),
                               ts=event.ts)
-            scored.append((item.score_confidence(now=now, half_life_seconds=self._config.half_life_seconds, penalty=penalties.get(ref, 1.0)), ref))
+            # The forgetting score (stage 5 item 8): decayed confidence,
+            # lifted by how often this record has actually been needed.
+            # Age and confidence alone forget the thing somebody asks for
+            # every week just because it is old.
+            # Age counts from the last time this record was actually
+            # needed, not from when it was written: being recalled is
+            # evidence it is still live. Then the count lifts it again,
+            # so a thing asked for every week beats a thing asked for
+            # once.
+            seen = max(item.ts, self._last_read.get(ref, 0.0))
+            decayed = item.score_confidence(now=now - (seen - item.ts),
+                                            half_life_seconds=self._config.half_life_seconds,
+                                            penalty=penalties.get(ref, 1.0))
+            scored.append((decayed * (1.0 + _USE_WEIGHT * math.log1p(self._reads.get(ref, 0))), ref))
         scored.sort(key=lambda pair: pair[0], reverse=True)
         stale = [ref for _, ref in scored[keep:]] if keep >= 0 else []
         # A record a live fact was read from is never forgotten (stage 5
