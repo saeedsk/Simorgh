@@ -89,14 +89,18 @@ class TestRunConsolidation(unittest.IsolatedAsyncioTestCase):
         items, _ = await self.engine.retrieve(query="", kinds=["semantic"], k=5, filters=None)
         self.assertEqual(items, [])
 
-    async def test_contradictions_are_flagged_during_consolidation(self):
+    async def test_contradictions_are_no_longer_flagged(self):
+        """Stage 5 item 3: flagging halved BOTH sides, so a correction was
+        buried with what it corrected. A correction now wins in the fact
+        store instead, and `memory:contradictions` is left as it is."""
         await self.engine.store(kind="semantic", content="the sky is blue", tags=["sky"], source_ref="", confidence=1.0)
         self.clock.advance(1.0)
         await self.engine.store(kind="semantic", content="the sky is green", tags=["sky"], source_ref="", confidence=1.0)
         report = await run_consolidation(
             self.engine, bus=self.bus, source="memory", keep_per_kind={"episodic": 100, "semantic": 100},
         )
-        self.assertEqual(len(report.contradictions), 1)
+        self.assertEqual(report.contradictions, [])
+        self.assertEqual(await self.ledger.read("memory:contradictions"), [])
 
     async def test_pruning_reports_how_many_records_were_tombstoned_per_kind(self):
         for i in range(5):
@@ -172,9 +176,12 @@ class TestRunConsolidation(unittest.IsolatedAsyncioTestCase):
         finally:
             await sub.unsubscribe()
 
-        self.assertEqual(len(seen_messages), 1)
-        self.assertIn("recent relevant event", seen_messages[0])
-        self.assertNotIn("old irrelevant event", seen_messages[0])
+        # Two calls since stage 5 item 3: the distillation and the fact
+        # extraction, both over the same window.
+        self.assertEqual(len(seen_messages), 2)
+        for window in seen_messages:
+            self.assertIn("recent relevant event", window)
+            self.assertNotIn("old irrelevant event", window)
 
 
 if __name__ == "__main__":

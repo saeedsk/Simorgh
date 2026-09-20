@@ -28,6 +28,71 @@
             "null"
           ]
         },
+        "facts": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "confidence": {
+                "type": "number"
+              },
+              "id": {
+                "type": "string"
+              },
+              "object": {
+                "type": "string"
+              },
+              "person_scope": {
+                "type": "string"
+              },
+              "predicate": {
+                "type": "string"
+              },
+              "source_refs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "subject": {
+                "type": "string"
+              },
+              "valid_from": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "was_until": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "subject",
+              "predicate",
+              "object",
+              "person_scope",
+              "confidence"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "items": {
           "items": {
             "additionalProperties": true,

@@ -121,6 +121,9 @@ class MemoryEngine:
         # recall so a partial recovery can say so -- see
         # `_resolve_content`.
         self._content_chars: dict[str, int] = {}
+        #: Called with (fact, superseded id) so the Service can publish
+        #: `memory.fact.stored` / `.superseded`; None in a bare engine.
+        self._on_fact = None
 
     # -- store -----------------------------------------------------------------------
     #: The Ledger refuses any string longer than this inline
@@ -191,6 +194,56 @@ class MemoryEngine:
         seconds = await asyncio.to_thread(self._embedder.warm)
         await self._index.upgrade(write=self.write_vector)
         return seconds
+
+    # -- facts (stage 5 item 3) ------------------------------------------------------
+
+    async def _facts_synced(self):
+        """The fact index, caught up with `memory:facts`."""
+        from .facts import FACT_STREAM, FactIndex
+
+        index = getattr(self, "_facts", None)
+        if index is None:
+            index = self._facts = FactIndex()
+        for event in await self._ledger.read(FACT_STREAM, from_seq=index.cursor + 1):
+            index.cursor = event.seq
+            index.apply(event)
+        return index
+
+    async def store_fact(self, *, subject: str, predicate: str, object: str, person_scope: str = "",
+                         confidence: float = 1.0, source_refs=()) -> "object":
+        """Remember that something holds, replacing what held before.
+
+        The correction case, by construction: a new fact for the same
+        `(person, subject, predicate)` marks the old one superseded at this
+        moment, so recall never has to judge which of two records is later.
+        """
+        from .facts import EVERYONE, FACT_STREAM, STORED, SUPERSEDED, Fact
+
+        index = await self._facts_synced()
+        now = self._clock.now()
+        fact = Fact(id=uuid.uuid4().hex[:12], subject=subject.strip(), predicate=predicate.strip(),
+                    object=str(object).strip(), person_scope=(person_scope or EVERYONE).strip() or EVERYONE,
+                    valid_from=now, confidence=confidence, source_refs=tuple(source_refs))
+        previous_id = index.by_key.get(fact.key)
+        await self._ledger.append(FACT_STREAM, Event(
+            stream=FACT_STREAM, type=STORED, ts=now, trace_id="", causation_id=None,
+            idempotency_key=f"{FACT_STREAM}:{fact.id}", payload=fact.to_dict()))
+        if previous_id and previous_id != fact.id:
+            await self._ledger.append(FACT_STREAM, Event(
+                stream=FACT_STREAM, type=SUPERSEDED, ts=now, trace_id="", causation_id=None,
+                idempotency_key=f"{FACT_STREAM}:{previous_id}:by:{fact.id}",
+                payload={"id": previous_id, "valid_to": now, "superseded_by": fact.id}))
+        await self._facts_synced()
+        if self._on_fact is not None:
+            await self._on_fact(fact, previous_id)
+        return fact
+
+    async def facts_for(self, query: str, *, person: str = "", limit: int = 5) -> list:
+        """The live facts this query mentions: `(fact, what it replaced)`."""
+        from .facts import matching
+
+        index = await self._facts_synced()
+        return [(fact, index.previous(fact)) for fact in matching(index.live_facts(person=person), query, limit=limit)]
 
     async def warm(self, kinds=KINDS) -> int:
         """Build the recall index before anything asks a question of it.

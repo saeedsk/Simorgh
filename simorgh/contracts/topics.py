@@ -139,6 +139,8 @@ MEMORY_RETRIEVE_REPLY = "memory.retrieve.reply"
 MEMORY_STORE = "memory.store"
 MEMORY_STORED = "memory.stored"
 MEMORY_CONTRADICTION_FLAGGED = "memory.contradiction.flagged"
+MEMORY_FACT_STORED = "memory.fact.stored"
+MEMORY_FACT_SUPERSEDED = "memory.fact.superseded"
 MEMORY_CONSOLIDATED = "memory.consolidated"
 MEMORY_FORGOTTEN = "memory.forgotten"
 #: "forget the last minute, that was the TV" (the creator, 2026-09-13):

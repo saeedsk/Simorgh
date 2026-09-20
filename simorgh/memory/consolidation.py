@@ -119,17 +119,24 @@ class ConsolidationReport:
     #: Specifics a distillation invented, when one was refused for it.
     #: Non-empty means nothing was stored this cycle, on purpose.
     refused: list[str] = field(default_factory=list)
+    #: The facts extracted this cycle (stage 5 item 3).
+    facts: list = field(default_factory=list)
 
 
 async def run_consolidation(
     engine: MemoryEngine, *, bus: Bus, source: str, keep_per_kind: dict[str, int],
     since: float | None = None, cognition_timeout: float = 30.0,
 ) -> ConsolidationReport:
-    flagged = await engine.flag_contradictions(kind="semantic")
+    # `flag_contradictions` is retired (stage 5 item 3): it halved BOTH
+    # sides of a disagreement, so a correction was buried with what it
+    # corrected. A correction now wins by structure in the fact store, and
+    # `memory:contradictions` is kept read-only for what is already there.
+    flagged: list[tuple[str, str, str]] = []
     pruned = {kind: await engine.prune(kind=kind, keep=keep) for kind, keep in keep_per_kind.items()}
 
     distilled = False
     refused: list[str] = []
+    stored_facts: list = []
     filters = {"since": since} if since is not None else None
     episodic_items, _ = await engine.retrieve(query="", kinds=["episodic"], k=20, filters=filters)
     if episodic_items:
@@ -173,9 +180,95 @@ async def run_consolidation(
                 )
                 distilled = True
 
+        stored_facts = await extract_facts(engine, bus=bus, source=source, window=window,
+                                           refs=[i.ref for i in episodic_items], timeout=cognition_timeout)
     return ConsolidationReport(contradictions=flagged, pruned=pruned, distilled=distilled,
-                               refused=refused)
+                               refused=refused, facts=stored_facts)
 
 
-__all__ = ["DISTILL_INSTRUCTION", "DISTILL_PREFIX", "NOTHING", "untraceable",
-           "ConsolidationReport", "run_consolidation"]
+EXTRACT_INSTRUCTION = (
+    "You are reading a transcript of things a household said, to record what HOLDS -- a "
+    "fact that is still true afterwards, not an event. Reply with ONLY a JSON array, no "
+    "prose. Each element is "
+    '{"subject": "...", "predicate": "...", "object": "...", "person": "<name or empty for the household>", '
+    '"quote": "<the exact sentence from the transcript that says it>"}. '
+    "The quote must be copied from the transcript word for word. Record a fact only when the "
+    "transcript states it; record nothing you inferred, guessed or would like to be true. A "
+    "correction replaces what it corrects: record the corrected value, with the sentence that "
+    "corrected it as the quote. If nothing in the transcript holds, reply with []"
+)
+#: How many facts one cycle may record. A window of 20 exchanges that
+#: yields more than this is a model writing an essay, not reading facts.
+MAX_FACTS = 12
+
+
+def parse_facts(text: str, window: str) -> tuple[list[dict], list[str]]:
+    """`(facts, rejected quotes)` from a model's JSON array.
+
+    The same rule as `untraceable`, per triple: a fact is kept only when
+    its quote really appears in the transcript. A fact nobody said is worse
+    than no fact, because recall hands it back as history for ever.
+    """
+    import json
+    import re as _re
+
+    match = _re.search(r"\[.*\]", text or "", _re.S)
+    if not match:
+        return [], []
+    try:
+        data = json.loads(match.group(0))
+    except ValueError:
+        return [], []
+    flat = " ".join(window.split()).lower()
+    kept, rejected = [], []
+    for entry in data if isinstance(data, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        subject, predicate = str(entry.get("subject") or "").strip(), str(entry.get("predicate") or "").strip()
+        object_ = str(entry.get("object") or "").strip()
+        quote = " ".join(str(entry.get("quote") or "").split())
+        if not (subject and predicate and object_):
+            continue
+        if not quote or quote.lower() not in flat:
+            rejected.append(quote or f"{subject} {predicate} {object_}")
+            continue
+        kept.append({"subject": subject, "predicate": predicate, "object": object_,
+                     "person": str(entry.get("person") or "").strip(), "quote": quote})
+        if len(kept) >= MAX_FACTS:
+            break
+    return kept, rejected
+
+
+async def extract_facts(engine: MemoryEngine, *, bus: Bus, source: str, window: str, refs: list[str],
+                        timeout: float) -> list:
+    """Read the window for facts and store them; the ones stored.
+
+    Nothing here is fatal: cognition unreachable, a floor answer or
+    unparseable JSON all mean "no facts this cycle", never a wrong one.
+    """
+    request = Message.new(topics.COGNITION_THINK, source=source, payload={
+        "purpose": "consolidate",
+        "messages": [
+            {"role": "system", "content": EXTRACT_INSTRUCTION},
+            {"role": "user", "content": DISTILL_PREFIX + window},
+        ],
+        "budget": {"max_tokens": 1_500, "max_cost_usd": 0.1},
+        "require_real_provider": False,
+    })
+    try:
+        reply = await bus.request(request, timeout=timeout)
+    except Exception:  # noqa: BLE001 -- no cognition, no facts this cycle
+        return []
+    if reply.payload.get("ok") is False or reply.payload.get("floor", True):
+        return []
+    kept, _rejected = parse_facts(str(reply.payload.get("text") or ""), window)
+    stored = []
+    for entry in kept:
+        stored.append(await engine.store_fact(
+            subject=entry["subject"], predicate=entry["predicate"], object=entry["object"],
+            person_scope=entry["person"], source_refs=tuple(refs[:3])))
+    return stored
+
+
+__all__ = ["DISTILL_INSTRUCTION", "DISTILL_PREFIX", "EXTRACT_INSTRUCTION", "MAX_FACTS", "NOTHING", "untraceable",
+           "ConsolidationReport", "extract_facts", "parse_facts", "run_consolidation"]

@@ -195,7 +195,7 @@ class MemoryServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0].payload["gauges"]["records"]["episodic"], 1)
 
-    async def test_sleep_tick_publishes_consolidated_and_contradiction_events(self):
+    async def test_sleep_tick_publishes_consolidated_and_no_longer_flags_contradictions(self):
         await self._store_and_wait({"kind": "semantic", "content": "the sky is blue", "tags": ["sky"], "source_ref": ""})
         self.clock.advance(1.0)
         await self._store_and_wait({"kind": "semantic", "content": "the sky is green", "tags": ["sky"], "source_ref": ""})
@@ -218,8 +218,10 @@ class MemoryServiceTestCase(unittest.IsolatedAsyncioTestCase):
         await sub2.unsubscribe()
 
         self.assertEqual(len(consolidated), 1)
-        self.assertEqual(len(contradictions), 1)
-        self.assertEqual(contradictions[0].payload["confidence_after"], 0.5)
+        # Stage 5 item 3: flagging is retired -- it halved both sides, so a
+        # correction was buried with what it corrected. The fact store
+        # settles a disagreement by superseding instead.
+        self.assertEqual(contradictions, [])
 
     async def test_sleep_tick_with_pruning_publishes_forgotten(self):
         for i in range(5):

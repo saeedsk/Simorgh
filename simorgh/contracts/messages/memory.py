@@ -21,6 +21,13 @@ MemoryRetrieveReply = define(t.MEMORY_RETRIEVE_REPLY, [
         F("score", Float), F("confidence", Float), F("ts", Float),
     ))),
     F("truncated", Bool),
+    # What HOLDS, as opposed to what was said (stage 5 item 3): the facts
+    # the query mentions, each with what it replaced when it replaced one.
+    O("facts", List(Obj(
+        F("id", Str), F("subject", Str), F("predicate", Str), F("object", Str),
+        F("person_scope", Str), F("confidence", Float), O("valid_from", Float),
+        O("was", Str), O("was_until", Float), O("source_refs", List(Str)),
+    ))),
 ])
 MemoryStore = define(t.MEMORY_STORE, [
     F("kind", MEMORY_KIND),
@@ -30,6 +37,15 @@ MemoryStore = define(t.MEMORY_STORE, [
     O("confidence", Float),
 ], doc="Command.")
 MemoryStored = define(t.MEMORY_STORED, [F("ref", Str), F("kind", MEMORY_KIND)])
+_FACT = [
+    F("id", Str), F("subject", Str), F("predicate", Str), F("object", Str),
+    F("person_scope", Str), F("valid_from", Float), F("confidence", Float),
+    O("source_refs", List(Str)),
+]
+MemoryFactStored = define(t.MEMORY_FACT_STORED, _FACT)
+MemoryFactSuperseded = define(t.MEMORY_FACT_SUPERSEDED, [
+    F("id", Str), F("valid_to", Float), F("superseded_by", Str),
+])
 MemoryContradictionFlagged = define(t.MEMORY_CONTRADICTION_FLAGGED, [
     F("ref_a", Str),
     F("ref_b", Str),

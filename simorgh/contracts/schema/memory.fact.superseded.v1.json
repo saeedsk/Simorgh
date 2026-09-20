@@ -1,0 +1,24 @@
+{
+  "$id": "https://simorgh.local/schema/memory.fact.superseded.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.fact.superseded` (catalog v1).",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "superseded_by": {
+      "type": "string"
+    },
+    "valid_to": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "valid_to",
+    "superseded_by"
+  ],
+  "title": "memory.fact.superseded",
+  "type": "object"
+}

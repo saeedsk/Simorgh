@@ -1,0 +1,49 @@
+{
+  "$id": "https://simorgh.local/schema/memory.fact.stored.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.fact.stored` (catalog v1).",
+  "properties": {
+    "confidence": {
+      "type": "number"
+    },
+    "id": {
+      "type": "string"
+    },
+    "object": {
+      "type": "string"
+    },
+    "person_scope": {
+      "type": "string"
+    },
+    "predicate": {
+      "type": "string"
+    },
+    "source_refs": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "subject": {
+      "type": "string"
+    },
+    "valid_from": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "subject",
+    "predicate",
+    "object",
+    "person_scope",
+    "valid_from",
+    "confidence"
+  ],
+  "title": "memory.fact.stored",
+  "type": "object"
+}

@@ -57,6 +57,7 @@ class Service:
         if self._config_from_caller is None and ctx.config:
             self._config = Config.from_mapping(dict(ctx.config))
         self.engine = MemoryEngine(ctx.ledger, self._config, clock=ctx.clock)
+        self.engine._on_fact = self._announce_fact  # noqa: SLF001 -- the Service owns the bus, the engine the store
         self._sub_retrieve = await ctx.bus.subscribe(topics.MEMORY_RETRIEVE, self._on_retrieve)
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
         self._sub_forget = await ctx.bus.subscribe(topics.MEMORY_FORGET, self._on_forget)
@@ -159,8 +160,33 @@ class Service:
         await self._ctx.bus.reply(message, type=topics.MEMORY_FORGET_REPLY,
                                   payload={"forgotten": len(refs), "refs": refs, "since": since})
 
+    async def _announce_fact(self, fact, superseded_id: str) -> None:
+        """A fact that now holds, and the one it replaced (stage 5 item 3)."""
+        await self._ctx.bus.publish(Message.new(topics.MEMORY_FACT_STORED, source=self._ctx.bus.source, payload={
+            "id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
+            "person_scope": fact.person_scope, "valid_from": fact.valid_from, "confidence": fact.confidence,
+            "source_refs": list(fact.source_refs)}))
+        if superseded_id:
+            await self._ctx.bus.publish(Message.new(
+                topics.MEMORY_FACT_SUPERSEDED, source=self._ctx.bus.source,
+                payload={"id": superseded_id, "valid_to": fact.valid_from, "superseded_by": fact.id}))
+
     async def _on_retrieve(self, message: Message) -> None:
         payload = message.payload
+        person = ""
+        for tag in (payload.get("filters") or {}).get("tags") or ():
+            if str(tag).startswith("person:"):
+                person = str(tag)[len("person:"):]
+        facts = []
+        for fact, was in await self.engine.facts_for(payload.get("query", ""), person=person):
+            entry = {"id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
+                     "person_scope": fact.person_scope, "confidence": fact.confidence,
+                     "valid_from": fact.valid_from, "source_refs": list(fact.source_refs)}
+            if was is not None:
+                # What it replaced, so a reply can say "March 6th (was March
+                # 4th)" rather than leaving the old value to resurface.
+                entry["was"], entry["was_until"] = was.object, float(was.valid_to or 0.0)
+            facts.append(entry)
         items, truncated = await self.engine.retrieve(
             query=payload.get("query", ""), kinds=payload.get("kinds", []),
             k=payload.get("k", self._config.default_k), filters=payload.get("filters"),
@@ -180,6 +206,7 @@ class Service:
                 for i in items
             ],
             "truncated": truncated,
+            **({"facts": facts} if facts else {}),
         })
 
     async def _on_store(self, message: Message) -> None:

@@ -80,7 +80,9 @@ class TestConsolidationAsksForASummary(unittest.IsolatedAsyncioTestCase):
                                 tags=[], source_ref="", confidence=1.0)
         await self._consolidate("a summary")
 
-        self.assertEqual(len(self.seen), 1)
+        # Two requests since stage 5 item 3: the distillation, then the
+        # fact extraction. This is about the distillation's framing.
+        self.assertEqual(len(self.seen), 2)
         messages = self.seen[0]
         self.assertGreater(len(messages), 1, "the window travelled alone -- nothing said not to answer it")
         instructions = " ".join(m["content"] for m in messages if m["role"] == "system")
