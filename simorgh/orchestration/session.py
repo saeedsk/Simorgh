@@ -25,6 +25,10 @@ import uuid
 from simorgh.contracts import topics
 
 from . import pressure as pressure_mod
+
+#: Agentic recall (stage 5 item 6): session-local, effect-free, so it never
+#: reaches Guardian. Offered by the agents that list it.
+MEMORY_SEARCH = "memory_search"
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here
@@ -986,6 +990,8 @@ class SessionRunner:
                         ok, summary, detail = await self._use_skill(session, call)
                     elif call.get("tool") == pressure_mod.RECALL_TOOL:
                         ok, summary, detail = await self._recall_result(call)
+                    elif call.get("tool") == MEMORY_SEARCH:
+                        ok, summary, detail = await self._memory_search(session, call)
                     else:
                         ok, summary, detail = await self._propose_and_await(session, call, step_no)
                     # `detail` (narration/Ledger, generously bounded) vs `summary`
@@ -1448,6 +1454,8 @@ class SessionRunner:
             return await self._use_skill(session, call)
         if call.get("tool") == pressure_mod.RECALL_TOOL:
             return await self._recall_result(call)
+        if call.get("tool") == MEMORY_SEARCH:
+            return await self._memory_search(session, call)
         return await self._propose_and_await(session, call, step_no)
 
     async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:
@@ -1563,6 +1571,41 @@ class SessionRunner:
             return
         if measured >= pressure_mod.NOTE_AT and session.profile.scaffold != "chat" and not session.budget.is_last_step:
             await self._reground(session, forced=True)
+
+    async def _memory_search(self, session: Session, call: dict) -> tuple[bool, str, str]:
+        """`memory_search <what>` -- ask Memory, in the middle of a turn.
+
+        Recall already runs once per turn before the model speaks; this is
+        for the second question the first answer raises ("when did she say
+        that?"), which used to be unanswerable without waiting for the next
+        turn. Effect-free, so it never goes to Guardian (like `delegate`),
+        and a person's memories stay theirs: a spoken turn searches with the
+        speaker's tag, exactly as the turn's own recall does.
+        """
+        args = call.get("args") or {}
+        query = " ".join(str(args.get("argument") or args.get("query") or "").split())
+        if not query:
+            text = "memory_search needs something to look for"
+            return False, text, text
+        kinds = [k for k in str(args.get("kinds") or "").replace(",", " ").split() if k] or ["episodic", "semantic"]
+        payload = {"query": query, "kinds": kinds, "k": int(args.get("k") or 8)}
+        speaker = str(getattr(session, "speaker", "") or "")
+        if speaker:
+            payload["filters"] = {"tags": [f"person:{speaker}"]}
+        reply = await self._assembler.retrieve(payload, trace_id=session.trace)
+        if reply is None:
+            text = "memory could not be reached just now"
+            return False, text, text
+        items = list(reply.payload.get("items") or [])
+        facts = list(reply.payload.get("facts") or [])
+        lines = [f"- {f.get('subject','')} {f.get('predicate','')} {f.get('object','')}"
+                 + (f" (was {f['was']})" if f.get("was") else "") for f in facts]
+        lines += [f"- {str(i.get('content') or '')[:400]}" for i in items]
+        if not lines:
+            text = f"nothing remembered about {query!r}"
+            return True, text, text
+        body = "\n".join(lines[:12])
+        return True, f"What you remember about {query!r}:\n{body}", f"searched memory for {query!r}: {len(lines)} line(s)"
 
     async def _recall_result(self, call: dict) -> tuple[bool, str, str]:
         """`recall_result <ref>`: a tool result set aside under pressure,

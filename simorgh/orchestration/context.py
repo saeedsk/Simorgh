@@ -247,6 +247,12 @@ class Assembler:
         blocks.extend(session.messages)
         return blocks
 
+    async def retrieve(self, payload: dict, *, trace_id: str | None = None) -> Message | None:
+        """One `memory.retrieve`, for a caller that wants it mid-turn
+        (`session.py::_memory_search`). The same timeout and the same
+        honesty about a Memory that does not answer."""
+        return await self._request(topics.MEMORY_RETRIEVE, payload, trace_id=trace_id)
+
     async def _request(self, type_: str, payload: dict, *, trace_id: str | None = None) -> Message | None:
         reply, _why = await self._request_with_reason(type_, payload, trace_id=trace_id)
         return reply

@@ -2,6 +2,8 @@
 name = "research"
 tools = [
     "self_map", "read_file", "list_dir", "search_code", "web_search", "web_fetch",
+    # Agentic recall (stage 5 item 6): ask memory mid-turn, not only at the start.
+    "memory_search",
     "search_listings", "geocode", "find_package", "run_tests", "run_shell",
     # "go and find out X" about the creator's own life is a
     # research question whose sources are on this machine.
