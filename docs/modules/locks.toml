@@ -29,12 +29,6 @@ task = "tell a config that still uses the pre-merge section names"
 since = "2026-09-20T19:50:56+00:00"
 until = "2026-09-21T03:50:56+00:00"
 
-[locks.planning]
-by = "opus-main"
-task = "stage 6 item 2: a plan for work Sim is measurably bad at asks a person"
-since = "2026-09-21T00:19:22+00:00"
-until = "2026-09-21T08:19:22+00:00"
-
 [locks.simloader]
 by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
