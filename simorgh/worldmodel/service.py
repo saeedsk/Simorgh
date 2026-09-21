@@ -35,6 +35,7 @@ from .selfmodel import (
     build_static_model,
     compute_gaps,
     mitigate_limitations,
+    observe_tool,
     render_full_markdown,
     render_summary,
     replay,
@@ -253,7 +254,20 @@ class Service:
         house did something".
         """
         payload = message.payload or {}
-        if not payload.get("ok") or str(payload.get("tool") or "") not in ("home_call", "home_undo"):
+        # Every result, before the home-specific part: how often each
+        # tool works and how long it takes is the one thing Sim can
+        # learn about itself from ordinary use, and it was being
+        # thrown away on the line below (stage 6 item 1).
+        tool = str(payload.get("tool") or "")
+        # `_model` is None until `start()` has built it; a result that
+        # arrives before then has nowhere to go and is not worth
+        # crashing the handler over.
+        if tool and getattr(self, "_model", None) is not None:
+            self._model = observe_tool(
+                self._model, tool=tool, ok=bool(payload.get("ok")),
+                duration_ms=float(payload.get("duration_ms") or 0.0),
+                updated_at=self._ctx.clock.now())
+        if not payload.get("ok") or tool not in ("home_call", "home_undo"):
             return
         metadata = payload.get("metadata") or {}
         after = metadata.get("after") or {}
