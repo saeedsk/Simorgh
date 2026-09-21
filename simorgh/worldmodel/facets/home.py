@@ -31,8 +31,29 @@ from dataclasses import dataclass, field
 
 #: A presence belief halves every twenty minutes without new evidence.
 HALF_LIFE_S = 20 * 60.0
-#: An entity nobody has observed for two hours is reported as stale.
+#: An entity nobody has observed for two hours is reported as stale,
+#: when nothing better is known about how often it changes.
 STALE_AFTER_S = 2 * 60 * 60.0
+
+#: How many of an entity's own change-intervals to remember. Enough
+#: for a median to mean something, few enough that a device whose
+#: rhythm changes catches up within a day.
+INTERVALS_KEPT = 8
+
+#: An observation is worth trusting for this many times the entity's
+#: typical gap between changes (stage 6 item 3, "staleness = age /
+#: learned typical change rate").
+#:
+#: A flat two hours treats a front door and a thermostat alike, and
+#: they are not alike: a door sensor observed thirty minutes ago tells
+#: you nothing, and a thermostat observed this morning is almost
+#: certainly still right. One number cannot be correct for both.
+STALE_AT_CHANGES = 3.0
+
+#: ...within these bounds, whatever the rhythm says. Nothing is fresh
+#: forever, and nothing that has just been seen is instantly stale.
+STALE_FLOOR_S = 5 * 60.0
+STALE_CEILING_S = 24 * 60 * 60.0
 #: Below this, a belief is not worth reporting as presence at all.
 PRESENT_AT = 0.25
 #: Quiet hours, local time: the house is asleep between these.
@@ -49,16 +70,41 @@ class Entity:
     area: str = ""
     at: float = 0.0
     detail: dict = field(default_factory=dict)
+    #: When the state last actually CHANGED, and the recent gaps
+    #: between changes. Carried across observations by `observe`.
+    changed_at: float = 0.0
+    intervals: list = field(default_factory=list)
 
     def age(self, now: float) -> float:
         return max(0.0, now - self.at)
 
+    def typical_change_s(self) -> float | None:
+        """How long this thing usually goes between changes, or None
+        with too little history to say. The median, not the mean: one
+        device left untouched over a weekend should not make a
+        minute-by-minute sensor look slow."""
+        if len(self.intervals) < 3:
+            return None
+        ordered = sorted(self.intervals)
+        middle = len(ordered) // 2
+        return (ordered[middle] if len(ordered) % 2
+                else (ordered[middle - 1] + ordered[middle]) / 2.0)
+
+    def stale_after_s(self) -> float:
+        """How long an observation of THIS entity is worth trusting."""
+        typical = self.typical_change_s()
+        if typical is None:
+            return STALE_AFTER_S
+        return max(STALE_FLOOR_S, min(STALE_CEILING_S, typical * STALE_AT_CHANGES))
+
     def stale(self, now: float) -> bool:
-        return self.age(now) > STALE_AFTER_S
+        return self.age(now) > self.stale_after_s()
 
     def as_dict(self, now: float) -> dict:
         return {"key": self.key, "kind": self.kind, "state": self.state, "area": self.area,
-                "age_s": round(self.age(now), 1), "stale": self.stale(now), **({"detail": self.detail} if self.detail else {})}
+                "age_s": round(self.age(now), 1), "stale": self.stale(now),
+                "stale_after_s": round(self.stale_after_s(), 1),
+                **({"detail": self.detail} if self.detail else {})}
 
 
 def decayed(belief: float, seconds: float) -> float:
@@ -93,8 +139,23 @@ class HomeFacet:
     # -- evidence in ---------------------------------------------------------------
     def observe(self, key: str, *, kind: str, state: str, area: str = "", detail: dict | None = None,
                 at: float | None = None) -> Entity:
+        when = at if at is not None else self._now()
+        before = self.entities.get(key)
+        changed_at, intervals = when, []
+        if before is not None:
+            intervals = list(before.intervals)
+            changed_at = before.changed_at or before.at
+            if before.state != state and changed_at and when > changed_at:
+                # A CHANGE, not an observation: how often a thing is
+                # looked at says nothing about how often it moves, and
+                # it is the moving that decides when an old reading
+                # stops being worth anything.
+                intervals.append(when - changed_at)
+                del intervals[:-INTERVALS_KEPT]
+                changed_at = when
         entity = Entity(key=key, kind=kind, state=state, area=area or self._area_of(key),
-                        at=at if at is not None else self._now(), detail=dict(detail or {}))
+                        at=when, detail=dict(detail or {}),
+                        changed_at=changed_at, intervals=intervals)
         self.entities[key] = entity
         return entity
 
