@@ -16,9 +16,3 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
-
-[locks.worldmodel]
-by = "opus-main"
-task = "stage 6 item 3: learned staleness"
-since = "2026-09-21T14:49:58+00:00"
-until = "2026-09-21T22:49:58+00:00"
