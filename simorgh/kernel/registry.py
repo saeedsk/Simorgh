@@ -89,7 +89,18 @@ DEFAULT_SECRETS: dict[str, frozenset[str]] = {
     # else -- an ordinary env secret still has to be declared. The
     # alternative is a `simorgh.toml` line per mailbox, which is a line
     # people forget and then report the feature as broken.
-    "execution": frozenset({"vault:*"}),
+    # `HOME_ASSISTANT_*` by name, because `contracts/home/client.py`
+    # tells people to set exactly those -- "generate a long-lived
+    # token on your HA profile page and set HOME_ASSISTANT_TOKEN" --
+    # and a name an error message recommends has to be readable when
+    # they do. Live, 2026-09-20: the creator's keys were in
+    # secrets.toml as `vault:home_assistant:url`, which reaches
+    # through `vault:*`; I renamed them to the plain names to fix a
+    # TOML syntax error (a colon in a bare key does not parse) and
+    # that moved them out of scope, so Sim answered "I can't reach
+    # Home Assistant -- it's not configured" with the token sitting
+    # right there, correctly spelled. Both spellings work now.
+    "execution": frozenset({"vault:*", "HOME_ASSISTANT_URL", "HOME_ASSISTANT_TOKEN"}),
 }
 
 
