@@ -27,7 +27,13 @@ is one stream per action, and the item's worry was exactly that shape.
 
 ## Two rows that cannot be ticked
 
-**`action:` streams per dashboard hour.** There is no hour stamp on a
+**`action:` streams per dashboard hour.** Measured after this document was
+first written, and it is a 100x miss with a single cause: a WebRTC
+keep-alive is modelled as a gated action, so a live Ring view spends 640
+proposals an hour telling Guardian that a video is still playing. Full
+numbers and the shape of the fix in
+`2026-09-20-the-action-stream-flood.md`. The original note below stands for
+why file-counting is not the measurement. There is no hour stamp on a
 stream, only a file mtime, and the dashboard was not running. Counting
 files answers a different question. Whoever picks this up should open the
 dashboard for an hour and count what appears in that hour; until then the
