@@ -105,8 +105,12 @@ class PanelFitsTestCase(unittest.TestCase):
                     panel.tree_end(record, elapsed=61.0, detail=LONG),
                     *panel.tree_note(["+" + LONG, "-" + LONG]),
                 ]
-                for line in lines:
-                    self.assertLessEqual(display_width(line), width, f"{width}: {line!r}")
+                # Every PHYSICAL line: `tree_end` wraps a long answer
+                # across several rather than cutting it (2026-09-20), so
+                # the rendered block is checked line by line.
+                for block in lines:
+                    for line in block.splitlines():
+                        self.assertLessEqual(display_width(line), width, f"{width}: {line!r}")
 
     def test_the_tree_rail_survives_a_long_diff_line(self):
         with _at(60):

@@ -156,6 +156,8 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 
 ## Invariants
 
+`panel.tree_end` wraps a long detail under the completion line instead of cutting it: the detail is usually Sim's own answer, and a four-sentence reply came out as one truncated line ending `as she li…` (live, 2026-09-20). A short detail still sits inline, where it reads best. Every physical line is fitted to the terminal.
+
 
 - Every chat turn is named in the activity feed from its own percept (`_on_percept`), whatever channel it arrived on. The console names its own turn and `voice.transcript` names a spoken one; a Telegram, WhatsApp or HTTP turn had neither and rendered as `⏺ • ? · ? · (no description)` -- for every message the creator had ever sent from his phone, until 2026-09-20. The percept handler only fills a gap: a turn something better already named is left alone.
 - A Telegram or WhatsApp turn carries `speaker` when the sender resolves to a household member, so what is said there is remembered under that person. Resolution asks the People store first (`world.env.query{what: "people", args: {identity: "telegram:<handle>"}}`, stage 6 item 4) and falls back to `contracts.channels.person_for` -- so a handle somebody LINKED to Ira shares her one memory namespace, and a handle that simply is a household name still works on a fresh install with no links. An address that matches nobody yields no `speaker`: a handle or phone number must never reach the bus.

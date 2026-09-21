@@ -183,3 +183,52 @@ class StepTimingTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ALongAnswerIsWrappedNotCut(unittest.TestCase):
+    """Live, 2026-09-20: asked how to comfort a nine-year-old who is
+    sad, Sim answered in four careful sentences and the terminal
+    showed the first line and a half, ending `as she li…`.
+
+    The answer was spoken aloud a moment later, so nothing was lost
+    -- but the creator had to wait for the audio to find out how the
+    sentence ended. A terminal that cannot show a paragraph is
+    advertising the answer, not showing it.
+    """
+
+    def _record(self):
+        from simorgh.interface.activity import TaskRecord
+
+        return TaskRecord(task_id="8708af2a", status="completed")
+
+    def test_the_whole_answer_survives(self):
+        answer = ("I'd keep it gentle and simple: get down to her level, ask what happened without "
+                  "pushing, and let her talk or stay quiet as she likes. No lectures, no fixing "
+                  "right away; at nine, feeling heard matters more than a solution.")
+        out = panel.tree_end(self._record(), elapsed=1.9, detail=answer)
+        flat = " ".join(out.split())
+        for phrase in ("get down to her level", "stay quiet as she likes", "more than a solution"):
+            self.assertIn(phrase, flat, "the answer was cut again")
+        self.assertNotIn("…", out, "nothing should be elided")
+
+    def test_a_short_detail_stays_on_the_line_where_it_reads_best(self):
+        """"blocked in 3s -- no budget" is one thought. Wrapping every
+        detail underneath would turn a glance into two lines."""
+        out = panel.tree_end(self._record(), elapsed=3.0, detail="no budget")
+        self.assertEqual(len(out.splitlines()), 1)
+        self.assertIn("-- no budget", out)
+
+    def test_the_headline_is_still_one_line(self):
+        out = panel.tree_end(self._record(), elapsed=1.9, detail="a long answer " * 20)
+        self.assertIn("✅ completed in 1.9s", out.splitlines()[0])
+        self.assertNotIn("a long answer", out.splitlines()[0],
+                         "the status line is a status line; the answer goes underneath")
+
+    def test_the_answer_sits_inside_the_tree_rail(self):
+        out = panel.tree_end(self._record(), elapsed=1.0, detail="a long answer " * 20)
+        for line in out.splitlines()[1:]:
+            self.assertTrue(line.startswith("       "), f"outside the rail: {line!r}")
+
+    def test_no_detail_is_still_a_single_line(self):
+        out = panel.tree_end(self._record(), elapsed=1.0)
+        self.assertEqual(len(out.splitlines()), 1)

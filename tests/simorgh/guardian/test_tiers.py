@@ -167,3 +167,53 @@ class PresenceByVoice(unittest.IsolatedAsyncioTestCase):
             _proposal("home_call", requester="Saeed", channel="voice", reversibility="reversible"),
             self._ctx_with(0.0))
         self.assertEqual(decision.kind, "abstain", "turning a light on is not tier 3")
+
+
+class SimsOwnIdeaIsNotAStranger(unittest.IsolatedAsyncioTestCase):
+    """Live, 2026-09-20, in the middle of a conversation the creator
+    was having with Sim:
+
+        [warn] 🚫 denied (policy): ['a voice I cannot place is not
+        someone I know, and this people changes who I trust']
+
+    Twice. Nobody unplaced had said anything -- the creator had just
+    been recognised by name. It was Sim's OWN proposal, to remember
+    an interest he had mentioned a moment earlier, and everything
+    Initiative proposes arrives with no requester, because that is
+    what makes it unprompted.
+
+    Read as a stranger's voice, it was denied outright, which is
+    frightening to read, wrong about what happened, and makes the
+    feature impossible: nothing Sim proposes about people could ever
+    reach the person who would say yes.
+    """
+
+    def _sims_idea(self, tool="people", **args):
+        return _proposal(tool, requester="", channel="initiative", reversibility="reversible",
+                         args=args or {"action": "add_interest", "name": "Aran", "interest": "lego"})
+
+    def test_it_is_its_own_role_not_unknown(self):
+        self.assertEqual(role_of("", channel="initiative"), "sim")
+        self.assertEqual(role_of("", channel="voice"), "unknown", "an unplaced voice is still unplaced")
+        self.assertEqual(role_of("", channel="cli"), "owner", "the console is the owner's keyboard")
+
+    async def test_a_tier_three_idea_of_sims_own_asks_rather_than_dying(self):
+        decision = await PersonRule().evaluate(self._sims_idea(), _ctx())
+        self.assertEqual(decision.kind, "escalate")
+        self.assertIn("my own idea", " ".join(decision.reasons))
+        self.assertNotIn("voice I cannot place", " ".join(decision.reasons))
+
+    async def test_an_unplaced_voice_is_still_refused(self):
+        """The rule this must not weaken: a voice nobody can place
+        does not get to change who Sim trusts."""
+        decision = await PersonRule().evaluate(
+            _proposal("people", requester="", channel="voice", reversibility="reversible",
+                      args={"action": "grant", "name": "Priya", "permission": "wellbeing_checkins"}),
+            _ctx())
+        self.assertEqual(decision.kind, "deny")
+
+    async def test_sim_still_does_ordinary_things_without_asking(self):
+        """A ceiling of 1, not 3: reading a file on its own initiative
+        is not a question for anybody."""
+        quiet = _proposal("read_file", requester="", channel="initiative", reversibility="read_only")
+        self.assertEqual((await PersonRule().evaluate(quiet, _ctx())).kind, "abstain")

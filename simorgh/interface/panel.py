@@ -217,11 +217,54 @@ def tree_note(lines: list[str], *, unicode: bool = True) -> list[str]:
 
 
 def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", unicode: bool = True) -> str:
+    """How a task ended, and what it answered -- WRAPPED, not cut.
+
+    The detail here is usually Sim's actual reply, and it used to be
+    squeezed onto the end of this one line and truncated with an
+    ellipsis. Live, 2026-09-20, asked how to comfort a nine-year-old
+    who is sad, Sim gave a careful four-sentence answer and the
+    terminal showed:
+
+        ⎿  ✅ completed in 1.9s -- I'd keep it gentle and simple ...
+           let her talk or stay quiet as she li…
+
+    The whole answer was spoken aloud a moment later, so nothing was
+    lost -- but what was on the screen was a sentence cut mid-word,
+    and the creator had to wait for the audio to find out how it
+    ended. A terminal that cannot show a paragraph is not showing
+    the answer, it is advertising it.
+
+    So the headline stays one line and the answer wraps beneath it,
+    inside the tree's own rail. Every physical line is still fitted
+    to the terminal, which is what `test_no_tree_line_overruns_any_width`
+    is really asking for.
+    """
+    from .render import terminal_width
+
     icon = _END_ICON.get(record.status, "•") if unicode else ""
-    corner = "  ⎿  " if unicode else "  `- "
     took = f" in {_took(elapsed)}" if elapsed is not None else ""
-    tail = f" -- {detail}" if detail else ""
-    return _line(f"{corner}{icon} {record.status}{took}{tail}")
+    corner = "  ⎿  " if unicode else "  `- "
+    head = _line(f"{corner}{icon} {record.status}{took}")
+    if not detail:
+        return head
+    import textwrap
+
+    from .render import display_width
+
+    # A short one stays where it reads best. "blocked in 3s -- no
+    # budget" is one thought and belongs on one line; it is a
+    # four-sentence answer that needs its own space.
+    inline = f"{corner}{icon} {record.status}{took} -- {' '.join(detail.split())}"
+    if display_width(inline) <= terminal_width():
+        return inline
+
+    # Under the corner, not beside it: the answer is its own thing and
+    # reads as one when it starts at a margin of its own.
+    indent = "       " if unicode else "      "
+    room = max(24, terminal_width())
+    wrapped = textwrap.wrap(" ".join(detail.split()), width=room,
+                            initial_indent=indent, subsequent_indent=indent) or [indent]
+    return "\n".join([head] + [_line(line) for line in wrapped])
 
 
 # ------------------------------------------------- the live section (above the prompt)

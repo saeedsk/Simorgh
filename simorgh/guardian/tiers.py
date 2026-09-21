@@ -32,7 +32,7 @@ from simorgh.contracts.tiers import LOCAL_IRREVERSIBLE, REACHES_OUTSIDE, TIER_NA
 from .api import Decision, Proposal
 
 #: What each role may reach, at most. A role absent here is `unknown`.
-CEILING: dict[str, int] = {"owner": 3, "adult": 3, "child": 1, "guest": 1, "unknown": 0}
+CEILING: dict[str, int] = {"owner": 3, "adult": 3, "child": 1, "guest": 1, "sim": 1, "unknown": 0}
 
 
 def role_of(person: str, *, channel: str = "") -> str:
@@ -46,7 +46,21 @@ def role_of(person: str, *, channel: str = "") -> str:
 
     name = (person or "").strip()
     if not name:
-        return "owner" if channel in ("", "cli") else "unknown"
+        if channel in ("", "cli"):
+            return "owner"
+        # Sim's own idea, which is not a voice and not a stranger.
+        # Everything Initiative proposes arrives with no requester --
+        # that is what makes it unprompted -- and it was being read as
+        # "a voice I cannot place" and denied outright. Live,
+        # 2026-09-20: two `[warn] denied (policy): a voice I cannot
+        # place ...` lines in the middle of a conversation the creator
+        # was having, for an interest Sim had just heard him mention.
+        # Frightening to read, wrong about what happened, and it made
+        # the feature impossible: nothing Sim proposes about people
+        # could ever reach the person who would say yes.
+        if channel == "initiative":
+            return "sim"
+        return "unknown"
     known = member(name)
     if known is None:
         return "guest"
@@ -78,6 +92,14 @@ class PersonRule:
         if role == "unknown":
             return Decision("deny", self.layer,
                             (f"{who} is not someone I know, and this {why}",))
+        if role == "sim":
+            # Sim asking for itself. Escalate, never deny: an idea of
+            # Sim's own that reaches this far is exactly the kind a
+            # person should get to say yes or no to, and denying it
+            # silently is how a feature ends up existing but never
+            # working.
+            return Decision("escalate", self.layer,
+                            (f"my own idea, and this {why}: a person should say yes",))
         return Decision("escalate", self.layer,
                         (f"{who} is a {role} here, and this {why}: an adult should say yes",))
 
