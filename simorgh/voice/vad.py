@@ -441,11 +441,22 @@ class EchoTracker:
         `max(gain, this reply's middle)` until then, so a room that
         does turn out to echo raises the bar as soon as it does.
         """
-        if not self._runs:
-            return   # nothing was played, so nothing was there to hear
+        if not self._runs or not self._ratios:
+            # Nothing was played, or nothing was heard back while it was.
+            # Either way NOTHING WAS MEASURED, and the whole point of
+            # `learnt` is that it means measured. Setting it here anyway
+            # was the second half of this bug, put in this morning and
+            # caught the same evening: one reply where no mic frame
+            # happens to land during playback -- a half-duplex device, a
+            # reply that ends between frames, the stream reopening --
+            # declared "Sim is inaudible to its own microphone" on no
+            # evidence, and a gain of zero is a bar of zero, so from the
+            # next reply on Sim's own echo cleared the bar and counted
+            # as a person. The creator, 2026-09-20: "it seems heared
+            # back its voice at some part".
+            return
         if not self.learnt:
-            if self._ratios:
-                self.gain = self._middle()
+            self.gain = self._middle()
             self.learnt = True
 
     def start(self) -> None:
@@ -544,7 +555,15 @@ class EchoTracker:
         if not self.active(now):
             return 0.0
         if self.calibrating:
-            return float("inf")
+            # Infinite only where Sim is actually making a sound. In the
+            # gap between two sentences the reference is silence, Sim is
+            # audible to nobody, and there is nothing for a bar to mask
+            # -- so a person who starts talking in a pause is heard at
+            # once, even in the first second of the first reply. This is
+            # what the quiet-room fix was really after; it got there by
+            # calling an unmeasured gain "learnt" instead, which cost
+            # more than it bought.
+            return float("inf") if self.reference(now) >= self.MIN_REFERENCE else 0.0
         # Learning still (a later reply): the last reply's gain, or this
         # one's so far if the volume has gone up since.
         gain = max(self.gain, self._middle()) if self._seen < self._calibrate else self.gain

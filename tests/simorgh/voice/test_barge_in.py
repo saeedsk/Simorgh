@@ -291,27 +291,85 @@ class AQuietRoomIsNotAWallTestCase(unittest.TestCase):
     Headphones, a good speaker, working echo cancellation, a quiet
     kitchen: the honest gain is zero -- Sim is inaudible to its own
     microphone, so the person is always louder. Read instead as "no
-    gain learnt yet", it made the bar INFINITE for the start of every
-    reply, where nothing anybody says can count as a person. The
-    household simulator found it as every second beat going unheard,
-    and it is the likeliest cause of "Sim, can you hear me?" in a
-    quiet room 30 cm from the speaker (2026-09-20).
+    gain learnt yet", that made the bar INFINITE for the start of
+    every reply, where nothing anybody says can count as a person.
+    The household simulator found it as every second beat going
+    unheard, and it is the likeliest cause of "Sim, can you hear me?"
+    in a quiet room 30 cm from the speaker (2026-09-20).
+
+    The first fix for it was wrong in the other direction and lasted
+    one day. It called a reply that measured NOTHING "learnt, gain
+    zero", so one reply where no mic frame happened to land during
+    playback left the bar at zero for good -- and Sim's own echo
+    clears a bar of zero, which is the creator hearing his own Sim
+    interrupt itself the same evening. `learnt` means measured, and
+    an unmeasured room is not a quiet one.
+
+    What actually rescues the quiet room is narrower and truer: the
+    bar is infinite only where Sim is *making a sound*. In the gap
+    between two sentences the reference is silence, there is nothing
+    to mask, and the person is heard at once -- first reply included.
     """
 
-    def _speaking(self, tracker):
+    def _speaking(self, tracker, at=100.0):
         tracker.start()
-        tracker.play(_tone(0.3, 8000), at=100.0)
+        tracker.play(_tone(0.3, 8000), at=at)
 
-    def test_a_reply_nobody_heard_back_does_not_leave_an_infinite_bar(self):
+    def test_a_person_in_a_gap_is_heard_from_the_very_first_reply(self):
+        """The quiet room's real complaint, and the one case that must
+        never regress: Sim between sentences, nothing playing, nobody
+        yet calibrated -- and a person speaks.
+
+        The gap has to be wider than `BEFORE_S`, the half second a
+        syllable takes to come back off the walls. Inside that the bar
+        is legitimately still up, because Sim's last word is still in
+        the air; it is the pause between two paragraphs this rescues,
+        not the breath between two sentences.
+        """
         from simorgh.voice.vad import EchoTracker
 
         tracker = EchoTracker(calibrate_frames=40)
-        self._speaking(tracker)                  # a reply with no mic frames at all
-        self.assertEqual(tracker.expected(100.1), float("inf"), "during the first reply, nothing may cut in")
+        tracker.start()
+        tracker.play(_tone(0.3, 8000), at=100.0)      # a sentence
+        tracker.play(_tone(0.3, 8000), at=102.0)      # and the next one
+        self.assertEqual(tracker.expected(100.1), float("inf"), "while Sim is audible, nothing may cut in")
+        self.assertEqual(tracker.expected(101.2), 0.0,
+                         "in a pause there is no sound of Sim to be louder than")
+
+    def test_a_reply_that_measured_nothing_learnt_nothing(self):
+        """No mic frame landed. That is not evidence of a quiet room."""
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=40)
+        self._speaking(tracker)
         tracker.settle()
-        self._speaking(tracker)                  # the next one
-        self.assertEqual(tracker.expected(100.1), 0.0,
-                         "a mic that never hears Sim means the person is always louder")
+        self.assertFalse(tracker.learnt, "nothing was heard, so nothing was measured")
+
+    def test_an_unmeasured_room_does_not_let_sim_interrupt_itself(self):
+        """The 2026-09-20 regression, as the creator met it: a reply
+        that measured nothing, then a room that does echo."""
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=40)
+        self._speaking(tracker)
+        tracker.settle()
+        self._speaking(tracker, at=200.0)
+        echo = tracker.reference(200.1) * 0.4        # Sim's own voice at the mic
+        self.assertFalse(echo > tracker.expected(200.1) * 2.8, "Sim's own echo is not a person cutting in")
+
+    def test_a_quiet_room_that_did_measure_zero_is_believed(self):
+        """Frames arrived and heard nothing: THAT is a quiet room, and
+        the person is always louder there."""
+        from simorgh.voice.vad import EchoTracker
+
+        tracker = EchoTracker(calibrate_frames=40)
+        self._speaking(tracker)
+        for _ in range(40):
+            tracker.observe(0.0, 100.1)              # the mic hears nothing of Sim
+        self.assertTrue(tracker.learnt)
+        self.assertEqual(tracker.gain, 0.0)
+        self._speaking(tracker, at=200.0)
+        self.assertEqual(tracker.expected(200.1), 0.0, "a mic that never hears Sim means the person is always louder")
 
     def test_a_reply_too_short_to_calibrate_keeps_what_it_measured(self):
         from simorgh.voice.vad import EchoTracker
@@ -326,17 +384,19 @@ class AQuietRoomIsNotAWallTestCase(unittest.TestCase):
         self.assertAlmostEqual(tracker.gain, 0.4, places=2)
 
     def test_a_room_that_does_echo_raises_the_bar_again(self):
-        """The zero is not final: it is what we know so far."""
+        """A measured zero is not final: it is what we knew so far."""
         from simorgh.voice.vad import EchoTracker
 
         tracker = EchoTracker(calibrate_frames=40)
         self._speaking(tracker)
-        tracker.settle()                         # learnt nothing: gain 0
-        self._speaking(tracker)
-        reference = tracker.reference(100.1)
+        for _ in range(40):
+            tracker.observe(0.0, 100.1)          # measured quiet: gain 0
+        tracker.settle()
+        self._speaking(tracker, at=200.0)
+        reference = tracker.reference(200.1)
         for _ in range(10):                      # this reply IS audible to the mic
-            tracker.observe(reference * 0.7, 100.1)
-        self.assertGreater(tracker.expected(100.1), reference * 0.5,
+            tracker.observe(reference * 0.7, 200.1)
+        self.assertGreater(tracker.expected(200.1), reference * 0.5,
                            "a room that turns out to echo must raise the bar without waiting")
 
 
