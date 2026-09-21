@@ -34,6 +34,33 @@ _UNASKED = "never asked --"
 # The task finished, but on Cognition's offline floor: a canned template,
 # not an answer. One dropped Together connection put a run on the floor
 # and 16 of its 20 cases were scored wrong in a second (2026-09-14).
+
+#: Outcomes that END a case. `blocked` is deliberately not one.
+#:
+#: A blocked task is paused -- waiting on a human approval, or sent
+#: back by the checkpoint critic for another attempt -- and it answers
+#: afterwards. Treating it as terminal is how the creator's GAIA run
+#: on 2026-09-20 reported 1/5: two cases were scored `wrong` the
+#: moment they blocked, and then the same task ids completed, one of
+#: them with the right answer, into a suite that had stopped
+#: listening. A benchmark that races its own retry path measures the
+#: race.
+TERMINAL: frozenset[str] = frozenset({"completed", "failed"})
+
+#: How long to keep listening after a case blocks, in case it resumes.
+#:
+#: A blocked answer is still scored -- that is deliberate and older
+#: than this, because it is how we learn our own verifier is throwing
+#: away right answers. What was missing is that the task often carries
+#: on afterwards: in the creator's run both blocked cases resumed
+#: within seconds and one answered correctly. So the block is recorded
+#: and the clock keeps running for a short while; whichever arrives
+#: first, a terminal outcome or this deadline, is what gets scored.
+#:
+#: Short on purpose. A task blocked on a HUMAN approval will not come
+#: back in thirty seconds, and making every such case wait out the
+#: full `case_timeout_s` would turn a five-minute suite into an hour.
+BLOCKED_GRACE_S = 30.0
 _FLOORED = "not the model --"
 
 
@@ -186,7 +213,7 @@ class Runner:
         # between the create reply and a later subscribe, and the answer
         # would land on nobody -- the case would then time out and score
         # zero for a right answer (caught by the flow test, 2026-09-07).
-        watch = _AnswerWatch(self._bus)
+        watch = _AnswerWatch(self._bus, blocked_grace_s=self._config.blocked_grace_s)
         await watch.start()
         try:
             try:
@@ -391,8 +418,9 @@ class _AnswerWatch:
     Buffers by task_id, because the subscription is necessarily older
     than the id it is waiting for."""
 
-    def __init__(self, bus) -> None:
+    def __init__(self, bus, *, blocked_grace_s: float = BLOCKED_GRACE_S) -> None:
         self._bus = bus
+        self._grace_s = max(0.0, float(blocked_grace_s))
         self._subs: list = []
         self._steps: dict[str, int] = {}
         # What each case's task spent. `task.step` carries it now, and
@@ -420,10 +448,27 @@ class _AnswerWatch:
         def _finisher(kind: str):
             async def _on(message: Message) -> None:
                 task_id = message.payload.get("task_id", "")
-                if not task_id or task_id in self._outcomes:
+                if not task_id:
                     return
+                terminal = kind in TERMINAL
+                if task_id in self._outcomes:
+                    # A blocked task is not a finished one, and the
+                    # answer that arrives afterwards is the real one.
+                    # The creator's GAIA run, 2026-09-20: two cases
+                    # scored `wrong` on `blocked`, then the SAME task
+                    # ids completed with answers, one of them the
+                    # correct one -- so the suite reported 1/5 for a
+                    # run it had not finished watching.
+                    if not terminal or self._outcomes[task_id][0] in TERMINAL:
+                        return
                 self._outcomes[task_id] = (kind, message.payload)
                 self._mark_started(task_id)  # finished is as started as it gets
+                if not terminal:
+                    # Recorded, so a case that never resumes is still
+                    # scored on what it had -- but not woken yet: it
+                    # may answer in a moment, and `BLOCKED_GRACE_S` is
+                    # what bounds the wait rather than the case clock.
+                    return
                 waiter = self._waiters.get(task_id)
                 if waiter is not None and not waiter.done():
                     waiter.set_result(None)
@@ -484,13 +529,19 @@ class _AnswerWatch:
         return True
 
     async def wait(self, task_id: str, timeout_s: float) -> tuple[str, int, str]:
-        if task_id not in self._outcomes:
+        # A `blocked` entry is a note, not an answer. Keep listening for
+        # a terminal one -- for the case clock if nothing has arrived at
+        # all, for `BLOCKED_GRACE_S` if the case blocked and may resume.
+        while self._outcomes.get(task_id, ("", {}))[0] not in TERMINAL:
+            blocked = task_id in self._outcomes
             waiter: asyncio.Future = asyncio.get_running_loop().create_future()
             self._waiters[task_id] = waiter
             try:
-                await asyncio.wait_for(waiter, timeout=timeout_s)
+                await asyncio.wait_for(waiter, timeout=min(timeout_s, self._grace_s) if blocked else timeout_s)
             except asyncio.TimeoutError:
-                return "", self._steps.get(task_id, 0), f"no answer within {timeout_s:.0f}s"
+                if not blocked:
+                    return "", self._steps.get(task_id, 0), f"no answer within {timeout_s:.0f}s"
+                break      # it blocked and stayed blocked: score what it had
             finally:
                 self._waiters.pop(task_id, None)
         kind, payload = self._outcomes[task_id]
@@ -503,4 +554,4 @@ class _AnswerWatch:
         return text, steps, ""
 
 
-__all__ = ["Runner"]
+__all__ = ["BLOCKED_GRACE_S", "Runner", "TERMINAL"]

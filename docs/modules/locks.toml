@@ -5,8 +5,8 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.evals]
+[locks.benchmark]
 by = "opus-main"
-task = "stage 11 item 11: tools/house.py"
-since = "2026-09-21T04:47:05+00:00"
-until = "2026-09-21T12:47:05+00:00"
+task = "a blocked case is not a finished one"
+since = "2026-09-21T05:05:58+00:00"
+until = "2026-09-21T13:05:58+00:00"

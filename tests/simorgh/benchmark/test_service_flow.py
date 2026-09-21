@@ -548,6 +548,65 @@ class StopAndBusyTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(reply.payload["ok"], reply.payload)
 
 
+class ABlockedCaseThatResumesIsScoredOnWhatItFinallySaidTestCase(unittest.IsolatedAsyncioTestCase):
+    """The creator's GAIA run, 2026-09-20: 1/5.
+
+    Two cases were scored `wrong` the moment they blocked
+    ("verification failed after max revisions"), and then the SAME
+    task ids came back and completed -- one of them, Mercedes Sosa,
+    with the right answer. The suite had stopped listening, so it
+    reported a score for a run it had not finished watching. A
+    benchmark that races its own retry path measures the race.
+
+    `blocked` is not terminal now. The answer it had is still kept and
+    still scored if nothing follows (that behaviour is older than this
+    and has its own case below: it is how we learn our verifier is
+    throwing away right answers), but a completion within
+    `blocked_grace_s` replaces it.
+    """
+
+    async def _run(self, *, blocked_text: str, then: str | None, grace_s: float = 5.0):
+        async with Harness() as h:
+            other = h.client("orchestration")
+
+            async def _on_create(message: Message) -> None:
+                await other.reply(message, type=topics.TASK_CREATE_REPLY, payload={"task_id": "tb"})
+                await other.publish(other.new(topics.TASK_BLOCKED, {
+                    "task_id": "tb", "reason": "verification failed after max revisions",
+                    "result_summary": blocked_text}))
+                if then is not None:
+                    await other.publish(other.new(topics.TASK_COMPLETED, {
+                        "task_id": "tb", "result_summary": then,
+                        "artifacts": [], "verification_ref": ""}))
+
+            sub = await other.subscribe(topics.TASK_CREATE, _on_create)
+            try:
+                runner = Runner(h.client("benchmark"),
+                                config=Config(case_timeout_s=5.0, blocked_grace_s=grace_s),
+                                clock=h.clock.now)
+                one = Suite(name="toy", version="v1", cases=(
+                    Case(id="c1", question="capital of France", answer="Paris", level="1", suite="toy"),
+                ))
+                return await runner.run(one, model="m")
+            finally:
+                await sub.unsubscribe()
+
+    async def test_the_answer_after_the_block_is_the_one_that_counts(self):
+        record = await self._run(blocked_text="FINAL ANSWER: Lyon", then="FINAL ANSWER: Paris")
+        [result] = record.results
+        self.assertTrue(result.correct, f"the completion should win: {result.answer!r} {result.error!r}")
+
+    async def test_a_block_that_never_resumes_is_still_scored_on_what_it_had(self):
+        record = await self._run(blocked_text="FINAL ANSWER: Paris", then=None)
+        [result] = record.results
+        self.assertTrue(result.correct, "a blocked answer is still an answer")
+
+    async def test_a_case_that_resumes_wrong_is_still_wrong(self):
+        record = await self._run(blocked_text="FINAL ANSWER: Paris", then="FINAL ANSWER: Lyon")
+        [result] = record.results
+        self.assertFalse(result.correct, "the last word is the answer, right or wrong")
+
+
 class BlockedAnswersAreStillScoredTestCase(unittest.IsolatedAsyncioTestCase):
     """A task our own pipeline blocked still carries the answer it had.
     Scoring it is what tells us whether our verifier is throwing away

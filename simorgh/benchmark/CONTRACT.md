@@ -36,7 +36,7 @@ Exact subscription list: `_CONSUMES` (`service.py:32-42`). The five `task.*` sub
 | `task.step` | `messages/task.py::TaskStep` | simorgh/benchmark/runner.py | sums `cost_usd` and counts steps per case task |
 | `task.completed` | `messages/task.py::TaskCompleted` | simorgh/benchmark/runner.py | the case's answer (`result_summary`; `floor` means skipped) |
 | `task.failed` | `messages/task.py::TaskFailed` | simorgh/benchmark/runner.py | case outcome with its reason |
-| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/benchmark/runner.py | case outcome with its reason (any partial answer is still scored) |
+| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/benchmark/runner.py | NOT terminal (2026-09-20): the answer it had is kept and scored if nothing follows, but the runner keeps listening for `blocked_grace_s` and a `task.completed` within it replaces the blocked answer. A blocked task usually resumes -- the creator's GAIA run scored two cases wrong the moment they blocked, and both then completed, one correctly, into a suite that had stopped listening |
 
 ## Produces
 
@@ -70,6 +70,7 @@ Exact subscription list: `_CONSUMES` (`service.py:32-42`). The five `task.*` sub
 |---|---|---|
 | `default_cases` | `10` | yes |
 | `case_timeout_s` | `600.0` | yes |
+| `blocked_grace_s` | `30.0` | yes |
 | `case_claim_timeout_s` | `1800.0` | yes |
 | `case_max_steps` | `30` | yes |
 | `floor_retries` | `3` | yes |

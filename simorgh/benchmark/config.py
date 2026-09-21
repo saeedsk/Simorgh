@@ -15,6 +15,17 @@ class Config:
     # Per case. A GAIA Level 3 question can legitimately take many
     # steps; beyond this it is not going to arrive.
     case_timeout_s: float = 600.0
+    # How long to keep listening after a case BLOCKS, in case it
+    # resumes. A blocked answer is still scored -- that is how we
+    # learn our own verifier is throwing away right answers -- but a
+    # blocked task usually carries on, and in the creator's GAIA run
+    # on 2026-09-20 both blocked cases resumed within seconds, one
+    # with the right answer, into a suite that had stopped listening
+    # and scored them wrong. Short on purpose: a case blocked on a
+    # HUMAN approval will not come back in thirty seconds, and making
+    # every one of those wait out `case_timeout_s` would turn a
+    # five-minute suite into an hour.
+    blocked_grace_s: float = 30.0
     # How long a case may wait for a worker before the run gives up on
     # it. Separate from `case_timeout_s` because they are different
     # facts: "never started" is the queue's doing, "started and did not
