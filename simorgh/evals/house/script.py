@@ -302,6 +302,23 @@ def asked_a_person() -> Expectation:
     return Expectation("asked a person", _check, stage="0")
 
 
+def nobody_was_asked() -> Expectation:
+    """Guardian let it through without stopping.
+
+    The counterweight to `asked_a_person`, and the half nothing tested
+    until the creator typed `home off family room` on 2026-09-20 and
+    was asked to approve turning a lamp off. A gate that fires on
+    lamps is a gate people click through without reading, which is
+    how the gate on the front door stops working too.
+    """
+    def _check(record: Record, since: float) -> str:
+        asked = record.of("action.needs_human", since=since) or record.of("ui.prompt", since=since)
+        if asked:
+            return "a person was asked to approve something reversible"
+        return ""
+    return Expectation("nobody was asked", _check, stage="0")
+
+
 def was_denied(layer: str = "") -> Expectation:
     """Guardian refused, optionally at a named layer."""
     def _check(record: Record, since: float) -> str:
@@ -489,6 +506,7 @@ def _with_room(config: dict | None, room: str) -> dict:
 
 
 __all__ = ["Beat", "Check", "Expectation", "Scenario", "answered", "asked_a_person", "called",
+           "nobody_was_asked",
            "did_not_call", "did_not_run", "first_audio_under", "identified_as", "play", "play_all", "quiet",
            "nothing_wrote_a_trace", "remembered", "said_something_like", "the_house_did", "the_house_did_nothing",
            "the_prefix_did_not_change", "tui_is_sane",

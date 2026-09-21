@@ -14,8 +14,9 @@ pretending to be a test, and there are enough of those already.
 from __future__ import annotations
 
 from ..script import (
-    Beat, Scenario, answered, asked_a_person, did_not_run, identified_as, nothing_wrote_a_trace,
-    quiet, remembered, the_house_did, the_house_did_nothing, tui_is_sane, was_denied,
+    Beat, Scenario, answered, asked_a_person, did_not_run, identified_as, nobody_was_asked,
+    nothing_wrote_a_trace, quiet, remembered, the_house_did, the_house_did_nothing,
+    tui_is_sane, was_denied,
 )
 
 # ---------------------------------------------------------------- stage 0
@@ -310,6 +311,45 @@ THE_HOUSE_DOES_AN_ORDINARY_THING = Scenario(
     ),
 )
 
+
+#: The gate fires on the things that matter and stays out of the way
+#: on the things that do not (stage 9 item 11, stage 0's tiers).
+#:
+#: The creator, 2026-09-20, typing `home off family room`: "physical
+#: action needs a person". Turning a lamp off. The cause was that
+#: `homeassistant.turn_off` -- the generic service the shorthand
+#: commands use, because it works on anything -- carried no domain, so
+#: the policy could not tell a lamp from a lock and took the cautious
+#: branch for both. Cautious sounds free and is not: a gate that fires
+#: on lamps is a gate people learn to click through, and then the gate
+#: on the front door does not work either.
+#:
+#: These two run the SAME generic service and must part company.
+A_LAMP_IS_NOT_A_DECISION = Scenario(
+    id="stage9/a-lamp-is-not-a-decision",
+    stage="9",
+    because="a gate that fires on lamps is a gate people click through without reading",
+    beats=(
+        Beat(proposes={"tool": "home_call",
+                       "args": {"service": "homeassistant.turn_off", "target": "light.living_room"},
+                       "requester": "Mara", "channel": "cli", "reversibility": "reversible"},
+             expect=(the_house_did("homeassistant.turn_off", "light.living_room"), nobody_was_asked())),
+    ),
+)
+
+#: And the same service on something that is a decision.
+A_SIREN_IS_A_DECISION = Scenario(
+    id="stage9/a-siren-is-a-decision",
+    stage="9",
+    because="the generic service must not launder a security device into a lamp",
+    beats=(
+        Beat(proposes={"tool": "home_call",
+                       "args": {"service": "homeassistant.turn_on", "target": "switch.alarm_siren"},
+                       "requester": "Mara", "channel": "cli", "reversibility": "irreversible"},
+             expect=(asked_a_person(),)),
+    ),
+)
+
 SCENARIOS = (
     A_CHILD_ASKS_FOR_THE_DOOR,
     A_GUEST_CHANGES_WHO_SIM_TRUSTS,
@@ -322,6 +362,8 @@ SCENARIOS = (
     THE_SAME_PERSON_TWICE,
     THE_TERMINAL_STAYS_SANE,
     THE_HOUSE_DOES_AN_ORDINARY_THING,
+    A_LAMP_IS_NOT_A_DECISION,
+    A_SIREN_IS_A_DECISION,
 )
 
 __all__ = ["SCENARIOS"] + [s.id.split("/")[-1].replace("-", "_").upper() for s in SCENARIOS]
