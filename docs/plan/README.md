@@ -13,7 +13,7 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 | 2 | [stage-2-native-tool-use.md](stage-2-native-tool-use.md) | Schemas to the model, then native tool use behind a capability flag | 0 | in progress (items 1-9 done; no provider flipped) |
 | 3 | [stage-3-streaming.md](stage-3-streaming.md) | Streaming end to end | 2 | in progress (items 1-4, 8 done; streamed speech on by default 2026-09-19) |
 | 4 | [stage-4-session-stream-context-compaction-evals.md](stage-4-session-stream-context-compaction-evals.md) | Session stream, ContextBuilder, compaction, evals package | 1, 2 | in progress (2026-09-19: items 1-3, 5, 6, 7, 10, 11 done; 4 and 8 in part; 9 open) |
-| 5 | [stage-5-memory-tiers.md](stage-5-memory-tiers.md) | Memory tiers | 4 | in progress (2026-09-19: items 1-7, 9 done; 8 in part) |
+| 5 | [stage-5-memory-tiers.md](stage-5-memory-tiers.md) | Memory tiers | 4 | **done** (2026-09-20: items 1-9; forgetting was already finished and the status line had not caught up) |
 | 6 | [stage-6-self-world-people-tiers-initiative.md](stage-6-self-world-people-tiers-initiative.md) | Self and world projections, People, safety tiers, Initiative | 4, 5 | in progress (2026-09-20: items 1-5 and 7 done or mostly; 6 done bar the digest; 8 started -- tier 3 without a human is 0) |
 | 7 | [stage-7-long-horizon.md](stage-7-long-horizon.md) | Long horizon: sub-agents, plans, waits, checkpoint critic | 4, 6 | in progress (2026-09-20: items 2, 3, 5, 6, 7, 9 done; 8 done for the test runner; 1 and 4 in part) |
 | 8 | [stage-8-growth-merge-policy-loop.md](stage-8-growth-merge-policy-loop.md) | Growth merge and the policy loop | 4, 6, 7 | in progress (2026-09-19: items 3-4 in part) |
