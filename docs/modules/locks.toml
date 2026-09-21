@@ -5,20 +5,26 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.contracts]
+by = "opus-main"
+task = "samples on the wire is a float"
+since = "2026-09-21T23:47:51+00:00"
+until = "2026-09-22T07:47:51+00:00"
+
 [locks.domains]
 by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
+[locks.growth]
+by = "opus-main"
+task = "samples on the wire is a float"
+since = "2026-09-21T23:47:52+00:00"
+until = "2026-09-22T07:47:52+00:00"
+
 [locks.initiative]
 by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "an echo mid-sentence is an echo"
-since = "2026-09-21T23:12:05+00:00"
-until = "2026-09-22T07:12:05+00:00"

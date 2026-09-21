@@ -39,7 +39,7 @@
           ]
         },
         "samples": {
-          "type": "integer"
+          "type": "number"
         },
         "strategy": {
           "additionalProperties": true,
