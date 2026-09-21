@@ -291,6 +291,12 @@ BENCHMARK_LOAD_REQUEST = "benchmark.load.request"
 BENCHMARK_LOAD_REPLY = "benchmark.load.reply"
 BENCHMARK_STOP_REQUEST = "benchmark.stop.request"
 BENCHMARK_STOP_REPLY = "benchmark.stop.reply"
+#: Forget the recorded runs -- for one model, or for all of them. Not a
+#: deletion: the Ledger is append-only and the runs stay where they
+#: were written. A clear is a MARK, and history reads from it forward,
+#: so "clear" and "lie about what happened" stay different things.
+BENCHMARK_CLEAR_REQUEST = "benchmark.clear.request"
+BENCHMARK_CLEAR_REPLY = "benchmark.clear.reply"
 BENCHMARK_SUITES_REQUEST = "benchmark.suites.request"
 BENCHMARK_SUITES_REPLY = "benchmark.suites.reply"
 PERSONA_USER_MODEL_UPDATED = "persona.user_model.updated"

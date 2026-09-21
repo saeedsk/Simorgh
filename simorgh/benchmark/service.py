@@ -33,6 +33,7 @@ VERSION = "0.1.0"
 _CONSUMES = (
     topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST,
     topics.BENCHMARK_SUITES_REQUEST, topics.BENCHMARK_LOAD_REQUEST, topics.BENCHMARK_STOP_REQUEST,
+    topics.BENCHMARK_CLEAR_REQUEST,
     topics.COGNITION_PROVIDER_STATUS,
     # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
     topics.TASK_BLOCKED,
@@ -43,7 +44,7 @@ _CONSUMES = (
 )
 _PRODUCES = (
     topics.BENCHMARK_RUN_REPLY, topics.BENCHMARK_HISTORY_REPLY, topics.BENCHMARK_SUITES_REPLY,
-    topics.BENCHMARK_LOAD_REPLY, topics.BENCHMARK_STOP_REPLY,
+    topics.BENCHMARK_LOAD_REPLY, topics.BENCHMARK_STOP_REPLY, topics.BENCHMARK_CLEAR_REPLY,
     topics.BENCHMARK_PROGRESS, topics.BENCHMARK_RUN_COMPLETED, topics.TASK_CREATE, topics.UI_NOTICE,
 )
 
@@ -96,6 +97,7 @@ class Service:
             topics.BENCHMARK_HISTORY_REQUEST: self._on_history,
             topics.BENCHMARK_LOAD_REQUEST: self._on_load,
             topics.BENCHMARK_STOP_REQUEST: self._on_stop,
+            topics.BENCHMARK_CLEAR_REQUEST: self._on_clear,
             topics.COGNITION_PROVIDER_STATUS: self._on_provider,
         }
         for topic, handler in handlers.items():
@@ -188,6 +190,33 @@ class Service:
             })
         await self._ctx.bus.reply(message, type=topics.BENCHMARK_SUITES_REPLY, payload={
             "suites": suites, "model": self._model, "running": bool(self._task and not self._task.done()),
+        })
+
+    async def _on_clear(self, message: Message) -> None:
+        """Forget recorded runs: one model, or all of them.
+
+        A name or `all`, never a bare "clear everything" -- a default
+        that wipes the lot is the kind somebody finds out about
+        afterwards. The runs stay on the stream; what the history
+        SHOWS starts again from the mark.
+        """
+        payload = message.payload or {}
+        model = str(payload.get("model") or "").strip()
+        everything = bool(payload.get("all"))
+        if not model and not everything:
+            await self._ctx.bus.reply(message, type=topics.BENCHMARK_CLEAR_REPLY, payload={
+                "cleared": 0, "detail": "name a model, or pass all: nothing was cleared"})
+            return
+        if self._task is not None and not self._task.done():
+            await self._ctx.bus.reply(message, type=topics.BENCHMARK_CLEAR_REPLY, payload={
+                "cleared": 0, "detail": "a run is in flight; `benchmark stop` first"})
+            return
+        cleared = await self._store.clear(model=model, everything=everything)
+        whose = "every model" if everything else model
+        await self._ctx.bus.reply(message, type=topics.BENCHMARK_CLEAR_REPLY, payload={
+            "cleared": cleared, "model": model, "all": everything,
+            "detail": (f"history cleared for {whose}: {cleared} run(s) hidden. "
+                       "The runs stay in the ledger; the history reads from here."),
         })
 
     async def _on_stop(self, message: Message) -> None:

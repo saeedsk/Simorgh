@@ -108,7 +108,23 @@ BenchmarkHistoryReply = define(t.BENCHMARK_HISTORY_REPLY, [
     O("progress", Any_),
 ])
 
+BenchmarkClearRequest = define(t.BENCHMARK_CLEAR_REQUEST, [
+    O("model", Str),
+    O("all", Bool),
+], doc="Forget recorded runs: one model by name, or every model with `all`. One of the two is "
+       "required -- a bare clear that wiped everything by default is the kind of default somebody "
+       "finds out about afterwards.")
+BenchmarkClearReply = define(t.BENCHMARK_CLEAR_REPLY, [
+    F("cleared", Int),
+    O("model", Str),
+    O("all", Bool),
+    O("detail", Str),
+], doc="How many runs the history will no longer show. The events themselves stay on the stream: a "
+       "clear is a mark that history reads forward from, because an append-only log that can be "
+       "rewritten is not one.")
+
 __all__ = [
+    "BenchmarkClearReply", "BenchmarkClearRequest",
     "BenchmarkLoadReply", "BenchmarkLoadRequest", "BenchmarkStopReply", "BenchmarkStopRequest",
     "BenchmarkHistoryReply", "BenchmarkHistoryRequest", "BenchmarkProgress", "BenchmarkRunCompleted",
     "BenchmarkRunReply", "BenchmarkRunRequest", "BenchmarkSuitesReply", "BenchmarkSuitesRequest",

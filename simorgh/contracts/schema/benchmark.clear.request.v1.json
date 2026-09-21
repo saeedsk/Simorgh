@@ -1,0 +1,23 @@
+{
+  "$id": "https://simorgh.local/schema/benchmark.clear.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Forget recorded runs: one model by name, or every model with `all`. One of the two is required -- a bare clear that wiped everything by default is the kind of default somebody finds out about afterwards.",
+  "properties": {
+    "all": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "benchmark.clear.request",
+  "type": "object"
+}

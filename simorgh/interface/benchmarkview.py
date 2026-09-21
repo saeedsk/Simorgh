@@ -232,6 +232,25 @@ def latest(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def cleared(payload: dict) -> str:
+    """What `benchmark clear` did, and what it did not do.
+
+    Says the runs are still in the ledger, because "cleared" and
+    "deleted" are different promises and only one of them is true:
+    the history reads from the mark forward, and the evidence is
+    where it always was.
+    """
+    if payload.get("error"):
+        return f"benchmark clear: {payload['error']}"
+    count = int(payload.get("cleared") or 0)
+    if not count and payload.get("detail"):
+        return str(payload["detail"])
+    whose = "every model" if payload.get("all") else (payload.get("model") or "?")
+    plural = "run" if count == 1 else "runs"
+    return (f"cleared the benchmark history for {whose}: {count} {plural} will no longer be shown.\n"
+            f"  the runs are still in the ledger (`benchmark:runs`); the history reads from here")
+
+
 def history(payload: dict) -> str:
     records, empty = _scored(_records(payload))
     if not records:
@@ -280,4 +299,5 @@ def detail(payload: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["detail", "history", "latest", "loaded", "parse_run", "started", "stopped", "suites"]
+__all__ = [
+    "cleared","detail", "history", "latest", "loaded", "parse_run", "started", "stopped", "suites"]

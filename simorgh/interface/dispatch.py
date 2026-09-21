@@ -452,6 +452,7 @@ BENCHMARK_VERBS: tuple[tuple[str, str, str], ...] = (
     ("run", "<suite> [n] [level=L] [refresh]", "run it, and record the result"),
     ("stop", "", "end the run in flight, keeping what it scored"),
     ("history", "[suite]", "accuracy over time, per model"),
+    ("clear", "<model|all>", "forget the recorded runs for one model, or for all of them"),
     ("show", "<run_id>", "one run, case by case"),
 )
 _BENCHMARK_COLUMN = max(len(f"{verb} {args}".strip()) for verb, args, _w in BENCHMARK_VERBS) + 2
@@ -584,6 +585,17 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
     if verb == "history":
         return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {"suite": rest.strip()},
                               timeout=10.0, render=benchmarkview.history)
+    if verb == "clear":
+        # A name or `all`, never a bare "clear". A default that wipes
+        # every model's history is the kind somebody finds out about
+        # afterwards; the usage line costs one keystroke instead.
+        target = rest.strip()
+        if not target:
+            models = "`benchmark history` lists which models have runs"
+            return Outcome(f"usage: benchmark clear <model|all>  --  {models}")
+        payload = {"all": True} if target in ("all", "*", "everything") else {"model": target}
+        return await _request(bus, topics.BENCHMARK_CLEAR_REQUEST, payload,
+                              timeout=15.0, render=benchmarkview.cleared)
     if verb == "show":
         if not rest:
             return Outcome("usage: benchmark show <run_id>")
