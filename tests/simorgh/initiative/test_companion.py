@@ -234,7 +234,13 @@ ARAN = Person("aran", "Aran", "child").with_permission("interest_shares").with_i
 LINE = "Hey Soodeh -- quiet day? I'm around if you fancy a chat."
 
 
-class TheService(unittest.IsolatedAsyncioTestCase):
+class _CompanionHarness(unittest.IsolatedAsyncioTestCase):
+    """A started Service with a fake bus, a canned house and a canned model.
+
+    Its own class so a test case can reuse the setup without also
+    inheriting and re-running every test written against it.
+    """
+
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -265,6 +271,8 @@ class TheService(unittest.IsolatedAsyncioTestCase):
         await self.bus.deliver(topics.WORLD_WELLBEING_CHANGED,
                                {"person": person, "state": "low", "mean": mean, "evidence": 5.0, "since": 1.0})
 
+
+class TheService(_CompanionHarness):
     async def test_a_consented_adult_alone_in_the_evening_is_asked_aloud_in_the_models_words(self):
         await self._low("Soodeh")
         proposals = self.bus.of(topics.ACTION_PROPOSED)
@@ -674,7 +682,7 @@ class SomethingWorthTelling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offered, [])
 
 
-class TheDigest(TheService):
+class TheDigest(_CompanionHarness):
     """Everything too small to interrupt for, once, together.
 
     `WORTH_IT` has said "it waits for the digest instead" since it was
@@ -752,3 +760,67 @@ class TheDigest(TheService):
         body = proposals[0]["args"].get("text") or proposals[0]["args"].get("body")
         self.assertIn("3 smaller things", body)
         self.assertNotIn("thing 0", body)
+
+
+class ShadowMode(_CompanionHarness):
+    """Two weeks of what Sim WOULD have said, to whom (stage 10 item 10).
+
+    The thresholds in `api.py` -- `LOW_AT`, `MIN_EVIDENCE`,
+    `URGENCY["check_in"]` -- are guesses, and the plan is explicit
+    that they get decided from measurement rather than argument.
+    Shadow mode is how the measurement happens without a household
+    being the experiment: the check-in is composed and weighed
+    exactly as it would be, and then goes to the owner's phone
+    instead of to the person.
+
+    The cooldown and the day's cap are still spent, because a shadow
+    run that is cheaper than the real thing measures the wrong
+    system.
+    """
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.service.companion_shadow = True
+
+    async def test_a_check_in_is_composed_and_sent_to_the_owner_instead(self):
+        await self._low("Soodeh")
+        proposals = self.bus.of(topics.ACTION_PROPOSED)
+        self.assertEqual(len(proposals), 1, self.bus.of(topics.INITIATIVE_SUPPRESSED))
+        self.assertEqual(proposals[0]["tool"], "notify", "never the room, in shadow")
+        body = proposals[0]["args"]["body"]
+        self.assertIn(LINE, body, "the real composed words, or the shadow measures nothing")
+        self.assertIn("Soodeh", body, "who it would have gone to")
+        self.assertIn("shadow", proposals[0]["rationale"])
+
+    async def test_the_cooldown_is_still_spent(self):
+        """A shadow run cheaper than the real thing measures a system
+        that is not the one being shipped."""
+        await self._low("Soodeh")
+        self.bus.published.clear()
+        await self._low("Soodeh")
+        self.assertEqual(self.bus.of(topics.ACTION_PROPOSED), [])
+
+    async def test_it_is_off_unless_the_section_says_so(self):
+        from simorgh.initiative.service import Service
+
+        self.assertFalse(Service().companion_shadow,
+                         "a measurement that turns itself on is a behaviour")
+
+
+class MarkedWrong(_CompanionHarness):
+    """The only score of an unprompted message that is worth anything.
+
+    Sim cannot judge this one itself: an interruption nobody answered
+    looks exactly like one that landed, and reading "they did not
+    mind" out of silence is how a companion becomes a nuisance nobody
+    can be bothered to complain about.
+    """
+
+    async def test_the_household_can_say_one_was_wrong(self):
+        await self.bus.deliver(topics.INITIATIVE_MARKED_WRONG,
+                               {"ref": "check_in:Soodeh:1", "by": "cli", "why": "she was fine"})
+        self.assertEqual(self.service.marked_wrong["check_in:Soodeh:1"], "she was fine")
+
+    async def test_a_mark_with_no_ref_is_not_recorded(self):
+        await self.bus.deliver(topics.INITIATIVE_MARKED_WRONG, {"ref": "", "by": "cli"})
+        self.assertEqual(self.service.marked_wrong, {})

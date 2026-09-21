@@ -35,6 +35,7 @@ Since stage 10 item 3 it also owns the companion's two reasons to speak first: a
 |---|---|---|
 | `action.proposed` | service.py `offer` | `speak` (the room) or `notify` (a person's phone), with the utility reasoning as the rationale; `requester: ""`, `requester_channel: "initiative"` |
 | `initiative.offered` | service.py `offer` | the decision to deliver, published just before the `action.proposed` that carries it out: `kind`, `tool`, `person`, `to`, `why`, `ref`. A proposal for `speak` looks the same whoever asked for it, so without this a household -- or anything measuring how often Sim gets a check-in right -- could see every notice held back and not one that went out. Written before the words are composed, so it is the judgement rather than the wording |
+| `initiative.marked_wrong` | `messages/initiative.py::InitiativeMarkedWrong` | consumed by `service.py::_on_marked_wrong`, published by `interface/dispatch.py` (`people wrong <ref>`) | A household member said an unprompted notice was wrong or unwanted. Sim cannot score this itself: an interruption nobody answered looks exactly like one that landed, so it is recorded from the person rather than inferred from silence. Stage 10 item 10's false-alarm rate counts these against `initiative.offered` |
 | `initiative.suppressed` | service.py `_suppress` | what was held back and why — a decision to stay quiet is a decision. Reasons include the gate that refused (`... is child; a check-in is for an adult who said yes`, `nobody Sim knows`, `... has not said yes to check-ins`), `the model had nothing worth saying`, `the line named a condition (...)`, `the model did not answer`, `the share carried no summary to say` |
 | `cognition.think` | service.py `_compose` | `purpose: chat`, one user message from `compose_prompt`, `max_tokens` 120, `max_cost_usd` 0.01, `require_real_provider: false` |
 | `world.env.query` | service.py `_world` | `what: home` (the situation) and `what: people` (one person by name, or everybody) |
@@ -58,7 +59,9 @@ Since stage 10 item 3 it also owns the companion's two reasons to speak first: a
 
 ## Config
 
-None yet: the numbers are constants in `api.py` (`URGENCY`, `CHANNEL_COST`, `REACH`, `ALONE_DISCOUNT`, `WORTH_IT`, `COOLDOWN`, `DAILY_CAP`, `FORBIDDEN_WORDS`, `LINE_MAX_CHARS`, `DIGESTIBLE`, `DIGEST_MAX`) and `service.py` (`COMPOSE_TIMEOUT_S`, `COMPOSE_MAX_TOKENS`, `COMPOSE_MAX_COST_USD`) until the household has told us which of them are wrong; stage 10 item 10's shadow mode is how they will.
+`companion_shadow` (bool, default false): compose and weigh the companion classes exactly as normal, then send them to the owner's phone instead of to the person (stage 10 item 10), so two weeks of what Sim WOULD have said can be read before any of it is said to anybody. The cooldown and the daily cap are still spent -- a shadow run cheaper than the real thing measures a system nobody is shipping. It is the first `[initiative]` key this module has ever read.
+
+The rest are constants in `api.py` (`URGENCY`, `CHANNEL_COST`, `REACH`, `ALONE_DISCOUNT`, `WORTH_IT`, `COOLDOWN`, `DAILY_CAP`, `FORBIDDEN_WORDS`, `LINE_MAX_CHARS`, `DIGESTIBLE`, `DIGEST_MAX`) and `service.py` (`COMPOSE_TIMEOUT_S`, `COMPOSE_MAX_TOKENS`, `COMPOSE_MAX_COST_USD`) until the household has told us which of them are wrong; stage 10 item 10's shadow mode is how they will.
 
 ## Contract tests
 

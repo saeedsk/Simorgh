@@ -32,4 +32,15 @@ InitiativeOffered = define(t.INITIATIVE_OFFERED, [
 ], doc="A notice Sim decided to deliver, before the words are composed: which kind, for whom, "
        "and by which channel. The proposal that follows is an effect; this is the judgement.")
 
-__all__ = ["InitiativeOffered", "InitiativeSuppressed"]
+InitiativeMarkedWrong = define(t.INITIATIVE_MARKED_WRONG, [
+    F("ref", Str),
+    O("person", Str),
+    O("by", Str),
+    O("why", Str),
+], doc="A household member said one of Sim's unprompted notices was wrong or unwanted "
+       "(`people wrong <ref>`). The only measurement of this that is worth anything comes "
+       "from the person on the receiving end, so it is recorded as its own event rather "
+       "than inferred from silence -- stage 10 item 10's false-alarm rate is a count of these "
+       "against `initiative.offered`.")
+
+__all__ = ["InitiativeMarkedWrong", "InitiativeOffered", "InitiativeSuppressed"]

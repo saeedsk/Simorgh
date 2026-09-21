@@ -1,0 +1,34 @@
+{
+  "$id": "https://simorgh.local/schema/initiative.marked_wrong.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A household member said one of Sim's unprompted notices was wrong or unwanted (`people wrong <ref>`). The only measurement of this that is worth anything comes from the person on the receiving end, so it is recorded as its own event rather than inferred from silence -- stage 10 item 10's false-alarm rate is a count of these against `initiative.offered`.",
+  "properties": {
+    "by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "person": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ref": {
+      "type": "string"
+    },
+    "why": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "ref"
+  ],
+  "title": "initiative.marked_wrong",
+  "type": "object"
+}

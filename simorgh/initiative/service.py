@@ -27,6 +27,7 @@ decision to speak and only one of them is visible by default.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -61,7 +62,7 @@ _CONSUMES = (
     topics.CAMERA_EVENT, topics.CAMERA_DESCRIBED, topics.PERCEPT_TIME_SCHEDULED, topics.CURIOSITY_SHARE_PROPOSED,
     topics.TURN_COMPLETED,
     topics.WORLD_WELLBEING_CHANGED, topics.SYSTEM_TICK_SLEEP, topics.SYSTEM_TICK_IDLE,
-    topics.TASK_COMPLETED,
+    topics.TASK_COMPLETED, topics.INITIATIVE_MARKED_WRONG,
 )
 _PRODUCES = (topics.ACTION_PROPOSED, topics.INITIATIVE_OFFERED, topics.INITIATIVE_SUPPRESSED,
              topics.COGNITION_THINK, topics.WORLD_ENV_QUERY, topics.TASK_CREATE)
@@ -103,9 +104,25 @@ class Service:
         #: fell off the end today.
         self._held: list[tuple[str, str]] = []
         self._dropped = 0
+        #: Compose and weigh the companion classes, then send them to
+        #: the owner's phone rather than to the person (stage 10 item
+        #: 10). Off by default: shadow mode is a measurement, and a
+        #: measurement that turns itself on is a behaviour.
+        self.companion_shadow = False
+        #: What the household said was wrong, by `ref` (`people wrong`).
+        self.marked_wrong: dict[str, str] = {}
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
+        # The first `[initiative]` setting this module has ever read.
+        # `companion_shadow` (stage 10 item 10) is how the numbers get
+        # measured before the thresholds are decided: a check-in is
+        # composed and weighed exactly as it would be, and then goes
+        # to the owner's phone instead of to the person, so the
+        # creator can read two weeks of what Sim WOULD have said to
+        # whom before any of it is said to anybody.
+        section = dict(ctx.config or {})
+        self.companion_shadow = bool(section.get("companion_shadow", self.companion_shadow))
         self._subs = [
             await ctx.bus.subscribe(topics.CAMERA_EVENT, self._on_camera_event),
             await ctx.bus.subscribe(topics.CAMERA_DESCRIBED, self._on_camera_described),
@@ -116,6 +133,7 @@ class Service:
             await ctx.bus.subscribe(topics.MEMORY_FACT_STORED, self._on_fact_stored),
             await ctx.bus.subscribe(topics.SYSTEM_TICK_IDLE, self._on_idle),
             await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_completed),
+            await ctx.bus.subscribe(topics.INITIATIVE_MARKED_WRONG, self._on_marked_wrong),
         ]
 
     async def stop(self) -> None:
@@ -127,6 +145,24 @@ class Service:
         return Health.ok(f"{self._delivered_today} unprompted delivery(ies) today")
 
     # -- what might be worth saying ---------------------------------------------------
+    async def _on_marked_wrong(self, message: Message) -> None:
+        """Somebody said one of these was wrong (stage 10 item 10).
+
+        The only judgement of an unprompted message that is worth
+        anything comes from the person who received it. Sim cannot
+        score itself here: an interruption that went unanswered looks
+        the same as one that landed, and inferring "they did not mind"
+        from silence is how a companion becomes a nuisance nobody can
+        be bothered to complain about.
+
+        Held in memory and recorded on the bus; the numbers for the
+        findings entry are counted from `initiative.marked_wrong`
+        against `initiative.offered`, not from this dict.
+        """
+        ref = str(message.payload.get("ref") or "").strip()
+        if ref:
+            self.marked_wrong[ref] = str(message.payload.get("why") or "wrong")
+
     async def _on_camera_event(self, message: Message) -> None:
         kinds = [str(k) for k in (message.payload.get("kinds") or [])]
         camera = str(message.payload.get("camera") or "a camera")
@@ -434,6 +470,15 @@ class Service:
             if why:
                 await self._suppress(notice, why)
                 return None
+        if self.companion_shadow and notice.kind in PERSONAL:
+            # Weighed and composed exactly as it would be, then sent
+            # somewhere it cannot hurt anybody (stage 10 item 10). The
+            # cooldown and the day's cap are still spent, because a
+            # shadow run that is cheaper than the real thing measures
+            # the wrong system.
+            delivery = replace(delivery, channel="phone", to=self._owner,
+                               why=f"shadow: would have been {delivery.channel} to {delivery.to} -- {delivery.why}")
+            text = f"[shadow, for {notice.person or 'the household'}] {text}"
         self._last_by_kind[cooldown_key(notice)] = now
         self._delivered_today += 1
         # The decision, before the effect. An `action.proposed` for

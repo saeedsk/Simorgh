@@ -1043,6 +1043,7 @@ PEOPLE_VERBS: tuple[tuple[str, str, str], ...] = (
     ("role", "<name> <owner|adult|child|guest>", "what their role may ask for"),
     ("link", "<name> <identity>", "tie a handle or voice to a person: telegram:x, voice:y"),
     ("unlink", "<identity>", "that handle is nobody's again"),
+    ("wrong", "<ref> [why]", "that unprompted message was wrong or unwanted"),
 )
 _PEOPLE_COLUMN = max(len(f"{verb} {args}".strip()) for verb, args, _w in PEOPLE_VERBS) + 2
 _PEOPLE_USAGE = "\n".join(f"  people {f'{verb} {args}'.strip():<{_PEOPLE_COLUMN}}{what}"
@@ -1090,6 +1091,18 @@ async def _people(args: str, *, bus: BusClient, ledger: LedgerClient, session_id
         if len(rest) != 1:
             return Outcome("usage: people unlink <identity>")
         return await _change("unlink", {"identity": rest[0]})
+    if verb == "wrong":
+        # Not through the `people` tool: this changes nobody's
+        # permissions and needs no gate, and putting a tier-3 approval
+        # in front of "that was annoying" is how feedback stops
+        # arriving (stage 10 item 10).
+        if not rest:
+            return Outcome("usage: people wrong <ref> [why]\n"
+                           "  the ref is on the notice, and in `initiative.offered`")
+        return await _publish(
+            bus, topics.INITIATIVE_MARKED_WRONG,
+            {"ref": rest[0], "by": "cli", "why": " ".join(rest[1:]) or "wrong"},
+            render_ok=f"noted: {rest[0]} was wrong. That is the only score of this Sim can trust.")
     if verb in ("help", "?"):
         return Outcome(_PEOPLE_USAGE)
     # Anything else is a name: one person in detail.

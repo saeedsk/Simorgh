@@ -264,6 +264,7 @@ INITIATIVE_SUPPRESSED = "initiative.suppressed"
 #: Anything counting what Sim offers per person (the companion arcs,
 #: stage 11 item 6) needs the decision, not the proposal that follows.
 INITIATIVE_OFFERED = "initiative.offered"
+INITIATIVE_MARKED_WRONG = "initiative.marked_wrong"
 CURIOSITY_DISCOVER_REQUEST = "curiosity.discover.request"
 CURIOSITY_DISCOVER_REPLY = "curiosity.discover.reply"
 CURIOSITY_SHARE_REQUEST = "curiosity.share.request"

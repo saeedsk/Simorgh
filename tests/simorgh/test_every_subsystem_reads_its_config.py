@@ -56,6 +56,15 @@ class TestASettingReachesItsSubsystem(unittest.IsolatedAsyncioTestCase):
         service = await self._started(Service(), {"lease_seconds": 123.0})
         self.assertEqual(service.config.lease_seconds, 123.0)
 
+    async def test_initiative_reads_its_section(self) -> None:
+        """Added 2026-09-20 with the first setting this module has: it
+        had no `[initiative]` reader at all, which is the shape this
+        whole file exists to catch."""
+        from simorgh.initiative.service import Service
+
+        service = await self._started(Service(), {"companion_shadow": True})
+        self.assertTrue(service.companion_shadow)
+
     async def test_persona_reads_its_section(self) -> None:
         from simorgh.persona.service import Service
 
