@@ -129,6 +129,9 @@ class Service:
         # and a restart lost every pending plan (found writing planning's
         # CONTRACT.md).
         self._plans: dict[str, planmode.PlanState] = {}
+        #: In-flight posterior lookups, held so the loop does not
+        #: garbage-collect a task nobody awaits.
+        self._estimating: set = set()
         self._persisted_plans: dict[str, str] = {}
         self._plan_by_task: dict[str, str] = {}
         self._prompt_to_plan: dict[str, str] = {}
@@ -219,6 +222,9 @@ class Service:
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs = []
+        for task in list(self._estimating):
+            task.cancel()
+        self._estimating.clear()
 
     async def health(self) -> Health:
         if self._ctx is None or self._store is None:
@@ -1219,6 +1225,11 @@ class Service:
         state = planmode.PlanState(plan_id=plan_id, task_id=task.id, goal=task.description, steps=steps, risk=task.risk)
         self._plans[plan_id] = state
         self._plan_by_task[task.id] = plan_id
+        # Ask the Self Model how good Sim is at this, in the background:
+        # the review that follows takes far longer than the estimate, so
+        # the answer is there when the decision is made, and a bus
+        # request with no responder never holds the decision up.
+        self._estimating.add(asyncio.get_running_loop().create_task(self._estimate_into(state, task)))
         # The plan-mode Worker's own lease was for exploring, not for the
         # review-plus-possible-human-decision window that starts now; left
         # alone it would keep counting down from whenever `task.step` last
@@ -1244,7 +1255,16 @@ class Service:
             },
         ))
 
-    async def _how_good_is_sim_at_this(self, state) -> tuple[float | None, int]:
+    async def _estimate_into(self, state, task) -> None:
+        """Fetch the posterior for `task` and remember it on `state`."""
+        try:
+            state.posterior, state.posterior_samples = await self._how_good_is_sim_at_this(task)
+        except Exception:  # noqa: BLE001 -- no estimate is not an escalation
+            state.posterior, state.posterior_samples = None, 0
+        finally:
+            self._estimating.discard(asyncio.current_task())
+
+    async def _how_good_is_sim_at_this(self, task) -> tuple[float | None, int]:
         """The Beta posterior for this kind of work, or `(None, 0)`.
 
         Risk is what a plan says about itself; the posterior is what
@@ -1259,7 +1279,6 @@ class Service:
         recorded yet, so treating it as bad would send every new kind
         of work to a person on its first try.
         """
-        task = await self._store.get(state.task_id) if self._store is not None else None
         if task is None:
             return None, 0
         subject = getattr(task, "subject", "") or ""
@@ -1282,10 +1301,9 @@ class Service:
             return
         if state.status in planmode.RESOLVED_STATUSES:
             return  # duplicate/late `plan.reviewed` for a plan already decided -- a no-op (spec section 8)
-        posterior, samples = await self._how_good_is_sim_at_this(state)
         decision = planmode.approval_decision(
             p["verdict"], state.risk, self.config.auto_approve_max_risk,
-            posterior=posterior, samples=samples,
+            posterior=state.posterior, samples=state.posterior_samples,
             weak_below=float(self.config.ask_human_below_posterior),
             min_samples=int(self.config.ask_human_min_samples))
         if decision == "reject":

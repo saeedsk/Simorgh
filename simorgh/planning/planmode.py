@@ -47,6 +47,14 @@ class PlanState:
     # on it forever (see this module's docstring and spec section 5.4's
     # "timeout -> project task paused with reason").
     prompt_asked_at: float | None = None
+    #: The Self Model's Beta posterior for this plan's task type, and
+    #: how many outcomes it rests on. Asked for when the plan is
+    #: proposed, not when it is decided: the review round trip is far
+    #: longer than the estimate, so the answer is there by the time it
+    #: matters, and the decision path never waits on a bus request that
+    #: may have no responder (stage 6 item 2).
+    posterior: float | None = None
+    posterior_samples: int = 0
 
 
 def approval_decision(verdict: str, risk: str, auto_approve_max_risk: str,
