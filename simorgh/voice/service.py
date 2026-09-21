@@ -222,7 +222,30 @@ class Service:
             return Health.ok("off" if not self._problems else "; ".join(self._problems))
         if self._problems:
             return Health("degraded", "; ".join(self._problems))
+        # A muddled profile is not an engine fault, so it never reached
+        # `status` -- and it is the one thing that explains both "Sim
+        # cannot hear me" and "Sim answered the television" (2026-09-20).
+        rough = self._muddled_profiles()
+        if rough:
+            return Health("degraded", "; ".join(
+                f"{name}'s voice profile agrees with itself only {score:.2f} over {takes} takes "
+                f"(re-enrol: `voice forget {name}`, `voice enroll {name}`)"
+                for name, score, takes in rough))
         return Health.ok("listening" if not self._muted else "muted")
+
+    def _muddled_profiles(self) -> list[tuple[str, float, int]]:
+        """Profiles with more than one voice in them. Never raises: a
+        health check that can fail is one more thing to go wrong."""
+        try:
+            from .speakers import SpeakerBook, muddled
+
+            session = self._session
+            book = getattr(session, "_speakers", None) if session is not None else None
+            if book is None:
+                book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold)
+            return muddled(book.people())
+        except Exception:  # noqa: BLE001
+            return []
 
     # ------------------------------------------------------------ engines
     async def _pipeline_ready(self) -> tuple[Pipeline | None, str]:
@@ -438,6 +461,11 @@ class Service:
 
                 about = p.relation or describe(p.name)
                 lines.append(f"  {p.name}" + (f" ({about})" if about else "") + f" -- {len(p.embeddings)} take(s){heard}{said}")
+            from .speakers import muddled
+
+            for name, score, takes in muddled(people):
+                lines.append(f"  ! {name}'s profile only agrees with itself {score:.2f} over {takes} takes -- "
+                             f"more than one voice is in it. `voice forget {name}` then `voice enroll {name}`.")
             return True, "\n".join(lines)
         if action == "pronounce":
             say_as = str(payload.get("value") or "").strip()

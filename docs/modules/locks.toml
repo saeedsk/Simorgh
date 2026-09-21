@@ -11,12 +11,6 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
-[locks.evals]
-by = "opus-main"
-task = "the television is not a person"
-since = "2026-09-21T06:46:15+00:00"
-until = "2026-09-21T14:46:15+00:00"
-
 [locks.initiative]
 by = "opus-main"
 task = "a reminder knows whose it is"
@@ -28,3 +22,9 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "a muddled voice profile is said out loud"
+since = "2026-09-21T06:53:48+00:00"
+until = "2026-09-21T14:53:48+00:00"

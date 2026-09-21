@@ -517,6 +517,41 @@ def agreement(vector: Sequence[float], embeddings: Sequence[Sequence[float]]) ->
     return scores[len(scores) // 2] if scores else 1.0
 
 
+#: Below this a profile has more than one voice in it, and the person
+#: it is named after stops being reliably told from everybody else.
+#:
+#: Measured on the creator's machine, 2026-09-20: Iris 0.85 over nine
+#: takes, Ira 0.78 over seven, and the creator's own 0.54 over twelve
+#: -- his file records it at 0.37 earlier the same day. A weak profile
+#: is why his `speaker_threshold` is 0.30 against the 0.50 default,
+#: and at 0.30 a television documentary matched him at 0.37 and was
+#: answered as conversation. 0.65 sits clear of both healthy profiles
+#: and above the one that was causing trouble.
+MUDDLED_BELOW = 0.65
+
+
+def muddled(people: Sequence["Person"]) -> list[tuple[str, float, int]]:
+    """`(name, coherence, takes)` for every profile with more than one
+    voice in it, worst first.
+
+    `coherence` was written to be said out loud -- its own docstring
+    says "used by `voice people` to say so out loud instead of leaving
+    somebody to wonder why Sim has gone deaf" -- and until 2026-09-20
+    nothing called it at all. The one diagnostic that explains both
+    "Sim cannot hear me" and "Sim answered the television" was sitting
+    there computing nothing.
+    """
+    out = []
+    for person in people:
+        takes = list(getattr(person, "embeddings", ()) or ())
+        if len(takes) < 3:
+            continue      # too few to say anything about agreement
+        score = coherence(takes)
+        if score < MUDDLED_BELOW:
+            out.append((person.name, round(score, 2), len(takes)))
+    return sorted(out, key=lambda row: row[1])
+
+
 def coherence(embeddings: Sequence[Sequence[float]]) -> float:
     """How much a profile agrees with itself: the median cosine over
     every pair of its takes. One voice recorded several times sits
@@ -566,5 +601,7 @@ def doubt_of(identification, *, threshold: float) -> str:
     return ""
 
 
-__all__ = ["SURE_GAP", "doubt_of", "DEFAULT_MARGIN", "DEFAULT_THRESHOLD", "Identification", "ENROLL_MIN_SECONDS", "MIN_SECONDS", "Person", "SPEAKER_MODEL",
+__all__ = [
+    "MUDDLED_BELOW",
+    "muddled","SURE_GAP", "doubt_of", "DEFAULT_MARGIN", "DEFAULT_THRESHOLD", "Identification", "ENROLL_MIN_SECONDS", "MIN_SECONDS", "Person", "SPEAKER_MODEL",
            "SherpaEmbedder", "SpeakerBook", "SpeakerEmbedder", "available", "cosine", "seconds_of"]

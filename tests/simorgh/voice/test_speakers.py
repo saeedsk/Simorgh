@@ -201,3 +201,62 @@ class LeanAndRefineTestCase(unittest.TestCase):
         self.book.enroll("Saeed", _vec(-0.05))
         marched = sum(self.book.refine("Saeed", _vec(0.55 * k)) for k in range(1, 12))
         self.assertLessEqual(marched, 3, "a march around the circle is drift, not practice")
+
+
+class AMuddledProfileIsSaidOutLoud(unittest.TestCase):
+    """`coherence()` was written to be said out loud and nothing called it.
+
+    Its own docstring says it is "used by `voice people` to say so out
+    loud instead of leaving somebody to wonder why Sim has gone deaf".
+    Nothing called it at all until 2026-09-20 -- the one diagnostic
+    that explains both "Sim cannot hear me" and "Sim answered the
+    television" was sitting there computing nothing.
+
+    Measured on the creator's machine that day: Iris 0.85 over nine
+    takes, Ira 0.78 over seven, the creator's own 0.54 over twelve.
+    """
+
+    @staticmethod
+    def _person(name, takes):
+        from simorgh.voice.speakers import Person
+
+        return Person(name=name, embeddings=list(takes))
+
+    def _tight(self, n):
+        """n takes of one voice: all nearly the same vector."""
+        return [[1.0, 0.01 * i, 0.0] for i in range(n)]
+
+    def _two_voices(self, n):
+        """n takes that are really two different people."""
+        return [([1.0, 0.0, 0.0] if i % 2 else [0.0, 1.0, 0.0]) for i in range(n)]
+
+    def test_a_clean_profile_is_not_reported(self):
+        from simorgh.voice.speakers import muddled
+
+        self.assertEqual(muddled([self._person("Iris", self._tight(9))]), [])
+
+    def test_a_profile_with_two_voices_in_it_is(self):
+        from simorgh.voice.speakers import muddled
+
+        [(name, score, takes)] = muddled([self._person("Saeed", self._two_voices(12))])
+        self.assertEqual((name, takes), ("Saeed", 12))
+        self.assertLess(score, 0.65)
+
+    def test_too_few_takes_says_nothing(self):
+        """Two takes agree or they do not; neither means a thing."""
+        from simorgh.voice.speakers import muddled
+
+        self.assertEqual(muddled([self._person("New", self._two_voices(2))]), [])
+
+    def test_the_worst_comes_first(self):
+        from simorgh.voice.speakers import muddled
+
+        rough = muddled([self._person("a", self._two_voices(6)), self._person("b", self._tight(6))])
+        self.assertEqual([r[0] for r in rough], ["a"])
+
+    def test_the_bar_sits_between_the_measured_profiles(self):
+        """0.65: clear of Ira's 0.78 and above the creator's 0.54."""
+        from simorgh.voice.speakers import MUDDLED_BELOW
+
+        self.assertLess(0.54, MUDDLED_BELOW)
+        self.assertLess(MUDDLED_BELOW, 0.78)
