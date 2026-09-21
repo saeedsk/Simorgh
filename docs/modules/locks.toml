@@ -11,14 +11,14 @@ task = "homeassistant.turn_on made every lamp ask"
 since = "2026-09-21T04:02:38+00:00"
 until = "2026-09-21T12:02:38+00:00"
 
-[locks.initiative]
-by = "opus-main"
-task = "stage 6 item 6: the digest"
-since = "2026-09-21T04:30:30+00:00"
-until = "2026-09-21T12:30:30+00:00"
-
 [locks.interface]
 by = "opus-main"
 task = "a bare home asked the house for a thing called on"
 since = "2026-09-21T04:02:57+00:00"
 until = "2026-09-21T12:02:57+00:00"
+
+[locks.verification]
+by = "opus-main"
+task = "stage 7 item 6: the critic's vote"
+since = "2026-09-21T04:33:10+00:00"
+until = "2026-09-21T12:33:10+00:00"

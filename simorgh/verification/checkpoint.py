@@ -72,4 +72,62 @@ def parse(text: str) -> dict:
     return out
 
 
-__all__ = ["PROMPT", "VERDICTS", "parse", "prompt_for"]
+#: Verdicts that change what happens next, and so are worth a second
+#: opinion. `on_track` and `insufficient_evidence` both mean "carry
+#: on", so confirming them buys nothing and costs a model call at
+#: every progress note of every long task.
+ACTIONABLE = ("drifting", "blocked")
+
+#: How many samples an actionable verdict is decided by.
+SAMPLES = 3
+
+
+def wants_confirming(verdict: str) -> bool:
+    """Whether this verdict is worth asking twice more about.
+
+    The plan (stage 7 item 6) says "majority vote of three cheap
+    samples" flatly, and three samples at every note of every long
+    task is three times the cost for a question that is usually
+    "yes, fine". So the vote is spent where it changes something:
+    ending an attempt on one cheap sample is the call worth being
+    sure about, and carrying on is the default anyway. Recorded as a
+    decision in the plan file, 2026-09-20.
+    """
+    return verdict in ACTIONABLE
+
+
+def majority(answers: list[dict]) -> dict:
+    """The verdict most of the samples agree on, with that sample's
+    reasoning. A tie falls back to the first answer, which is the one
+    that raised the question.
+
+    `insufficient_evidence` votes count: a critic that could not read
+    the trajectory twice out of three times has not established
+    drifting, and abandoning an attempt on that is exactly the
+    rubber-stamp-in-reverse this module exists to avoid.
+    """
+    if not answers:
+        return {"verdict": "insufficient_evidence", "why": "the critic was not asked"}
+    counts: dict[str, int] = {}
+    for answer in answers:
+        verdict = str(answer.get("verdict") or "insufficient_evidence")
+        counts[verdict] = counts.get(verdict, 0) + 1
+    verdict, votes = max(counts.items(), key=lambda kv: kv[1])
+    if votes * 2 <= len(answers):
+        # Three samples, three different answers. A plurality of one
+        # is the single sample this vote exists to stop trusting, and
+        # that is just as true of an encouraging answer as a damning
+        # one -- so no verdict without agreement, in either direction.
+        return {"verdict": "insufficient_evidence",
+                "why": f"the critics did not agree ({', '.join(sorted(counts))})",
+                "votes": f"{votes}/{len(answers)}"}
+    for answer in answers:
+        if answer.get("verdict") == verdict:
+            out = dict(answer)
+            out["votes"] = f"{votes}/{len(answers)}"
+            return out
+    return {"verdict": verdict, "votes": f"{votes}/{len(answers)}"}
+
+
+__all__ = ["ACTIONABLE", "PROMPT", "SAMPLES", "VERDICTS", "majority", "parse", "prompt_for",
+           "wants_confirming"]

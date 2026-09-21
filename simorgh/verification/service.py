@@ -120,14 +120,29 @@ class VerificationService:
         """Score a trajectory against its acceptance criteria (stage 7
         item 6), on the cheap tier -- a critic that costs as much as the
         work is one nobody runs at every note."""
-        from .checkpoint import parse, prompt_for
+        from .checkpoint import SAMPLES, majority, parse, prompt_for, wants_confirming
 
         p = message.payload
-        reply = await self._think(purpose="reground", prompt=prompt_for(
-            goal=str(p.get("goal") or ""), acceptance=p.get("acceptance") or [],
-            trajectory=str(p.get("trajectory") or "")))
-        answer = ({"verdict": "insufficient_evidence", "why": "no real provider for the critic"}
-                  if (reply.floor or not reply.ok) else parse(reply.text))
+        prompt = prompt_for(goal=str(p.get("goal") or ""), acceptance=p.get("acceptance") or [],
+                            trajectory=str(p.get("trajectory") or ""))
+
+        async def ask() -> dict:
+            reply = await self._think(purpose="reground", prompt=prompt)
+            if reply.floor or not reply.ok:
+                return {"verdict": "insufficient_evidence", "why": "no real provider for the critic"}
+            return parse(reply.text)
+
+        answer = await ask()
+        # The vote, spent where it changes something (stage 7 item 6).
+        # Three samples at every note of every long task is three times
+        # the cost of a question that is usually "yes, fine"; ending an
+        # attempt is the call worth being sure about, and carrying on is
+        # what happens anyway.
+        if wants_confirming(str(answer.get("verdict") or "")):
+            answers = [answer]
+            for _ in range(SAMPLES - 1):
+                answers.append(await ask())
+            answer = majority(answers)
         await self._ctx.bus.reply(message, type=topics.VERIFY_CHECKPOINT_REPLY, payload=answer)
 
     async def _on_verify_requested(self, message: Message) -> None:

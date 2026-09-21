@@ -19,9 +19,11 @@ VerifyCheckpointRequest = define(t.VERIFY_CHECKPOINT_REQUEST, [
 ])
 VerifyCheckpointReply = define(t.VERIFY_CHECKPOINT_REPLY, [
     F("verdict", Enum("on_track", "drifting", "blocked", "insufficient_evidence")),
-    O("unmet", List(Str)), O("next", Str), O("why", Str),
+    O("unmet", List(Str)), O("next", Str), O("why", Str), O("votes", Str),
 ], doc="Whether the work so far is still going to meet the acceptance criteria. "
-       "`insufficient_evidence` when the trajectory does not say -- never guessed.")
+       "`insufficient_evidence` when the trajectory does not say -- never guessed. "
+       "`votes` (\"2/3\") is present when the verdict was confirmed by a second and "
+       "third cheap sample, which happens only for a verdict that would end the attempt.")
 VerifyResult = define(t.VERIFY_RESULT, [
     F("verification_id", Str),
     F("task_id", Str),
