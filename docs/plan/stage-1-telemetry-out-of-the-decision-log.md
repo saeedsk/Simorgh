@@ -54,13 +54,21 @@ Deferred, with reasons:
 
 ## Measurements after
 
-| Number | Before | Target |
-|---|---|---|
-| Ledger stream files after a day | 44k/day | under 500/day |
-| `action:` streams per dashboard hour | ~200 | under 10 |
-| One spoken turn: spans with STT/LLM/first-audio in ms | none | present, queryable |
-| Tool calls outside the action path | 6 sites | 0 |
-| Idle CPU of the process | ~6.6% of a core | under 2% |
+| Number | Before | Target | Measured 2026-09-20 |
+|---|---|---|---|
+| Ledger stream files after a day | 44k/day | under 500/day | **490 on 2026-09-20**, 2,581 on the 19th (a day of trials and observer runs) |
+| `action:` streams per dashboard hour | ~200 | under 10 | not measurable as written -- see below |
+| One spoken turn: spans with STT/LLM/first-audio in ms | none | present, queryable | **present**: 98 `voice.stt`, 98 `voice.think`, 97 `voice.first_audio` spans in `telemetry.sqlite`, 104 distinct span names |
+| Tool calls outside the action path | 6 sites | 0 | 0 |
+| Idle CPU of the process | ~6.6% of a core | under 2% | **16-37% of a core** while listening -- worse than before, and the number needs re-taking on a quiet machine |
+
+Three notes on those numbers, because two of them are not what they look like.
+
+**`action:` streams per dashboard hour** cannot be read off the ledger: there is no hour stamp on a stream file, only its mtime, and the dashboard is not running. What IS visible is that `action:` is by far the biggest prefix -- 775 of 1,954 stream files -- which is one stream per action and, at a glance, the shape the item was worried about. Whoever takes this up should measure it with the dashboard open for an hour rather than counting files.
+
+**Idle CPU was measured while the machine was busy** with a paid scenario pack (5 processes, 570% CPU), so 16-37% is an upper bound contaminated by contention, and it is also not "idle": Sim was listening, which means VAD on every 30 ms frame plus the silero model. The honest statement is that nobody has measured idle CPU on a quiet machine since the target was written, and the one reading taken is far enough above 2% to be worth a morning. Item 10 stays open with that note rather than a tick.
+
+**`trace:` streams are 0**, as of the same check.
 
 ## Risks and mitigations
 
