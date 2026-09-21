@@ -35,6 +35,8 @@ from tests.simorgh.helpers import FakeClock, make_message
 _TOY_EVENT = topics.PERCEPT_TEXT_RECEIVED
 
 
+from tests.simorgh.integration import assert_up
+
 class _ToyCognition:
     name = "cognition"
     version = "0.0.1-toy"
@@ -108,7 +110,7 @@ class TestKernelBootsTwoToySubsystems(unittest.IsolatedAsyncioTestCase):
                     # layer 1 (bus, ledger) must have been fully up before layer 2 started
                     self.assertLess(order.index("cognition.start"), len(order))
                     self.assertEqual(kernel._supervisor.services["bus"].status, "ok")  # noqa: SLF001
-                    self.assertEqual(kernel._supervisor.services["ledger"].status, "ok")  # noqa: SLF001
+                    assert_up(self, kernel._supervisor.services["ledger"], "ledger")  # noqa: SLF001
                     self.assertEqual(kernel._supervisor.services["cognition"].status, "ok")  # noqa: SLF001
                     self.assertEqual(kernel._supervisor.services["memory"].status, "ok")  # noqa: SLF001
                     # both started concurrently within layer 2, in either order

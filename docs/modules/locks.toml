@@ -28,3 +28,9 @@ by = "opus-main"
 task = "a long answer was cut off instead of wrapped on the completion line"
 since = "2026-09-21T01:32:45+00:00"
 until = "2026-09-21T09:32:45+00:00"
+
+[locks.ledger]
+by = "opus-main"
+task = "a boot test asserted ok when the disk is what is low"
+since = "2026-09-21T01:58:48+00:00"
+until = "2026-09-21T09:58:48+00:00"

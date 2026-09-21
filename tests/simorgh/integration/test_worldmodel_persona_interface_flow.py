@@ -75,6 +75,8 @@ def _patched_build_factories(instances: dict):
     return _build
 
 
+from tests.simorgh.integration import assert_up
+
 class WorldModelPersonaInterfaceFlowTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -94,7 +96,7 @@ class WorldModelPersonaInterfaceFlowTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_booted_through_the_real_supervisor_healthy(self):
         for name in ("bus", "ledger", "worldmodel", "persona", "interface"):
-            self.assertEqual(self.kernel._supervisor.services[name].status, "ok")  # noqa: SLF001
+            assert_up(self, self.kernel._supervisor.services[name], name)  # noqa: SLF001
 
     async def test_capability_map_against_the_real_repository(self):
         reply = await self.kernel.bus.request(
