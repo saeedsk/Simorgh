@@ -5,12 +5,6 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.cognition]
-by = "opus-main"
-task = "a 50 ms assembly timeout made a gate test flaky under load"
-since = "2026-09-21T00:09:22+00:00"
-until = "2026-09-21T08:09:22+00:00"
-
 [locks.contracts]
 by = "opus-main"
 task = "growth may not write its own streams since the merge"
@@ -22,12 +16,6 @@ by = "opus-main"
 task = "stage 11 item 8: the latency table"
 since = "2026-09-20T20:09:27+00:00"
 until = "2026-09-21T04:09:27+00:00"
-
-[locks.guardian]
-by = "opus-main"
-task = "an approval-expiry test waited a fixed 0.3s and flaked under load"
-since = "2026-09-21T00:10:52+00:00"
-until = "2026-09-21T08:10:52+00:00"
 
 [locks.interface]
 by = "opus-main"
@@ -46,9 +34,3 @@ by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
 since = "2026-09-20T19:42:55+00:00"
 until = "2026-09-21T03:42:55+00:00"
-
-[locks.worldmodel]
-by = "opus-main"
-task = "stage 6 item 1: the self model is a fold of its own stream"
-since = "2026-09-20T23:54:26+00:00"
-until = "2026-09-21T07:54:26+00:00"
