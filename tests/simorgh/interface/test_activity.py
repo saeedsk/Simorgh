@@ -25,7 +25,7 @@ from simorgh.bus.config import Config as BusConfig
 from simorgh.bus.factory import make_backend, make_client
 from simorgh.contracts import topics
 from simorgh.contracts.protocols import Context
-from simorgh.interface.activity import TaskBook, finished_line, footer, started_line, step_line
+from simorgh.interface.activity import TaskBook, footer
 from simorgh.interface.config import Config as InterfaceConfig
 from simorgh.interface.service import Service
 from simorgh.ledger.factory import make_ledger
@@ -100,39 +100,14 @@ class TestTheBook(unittest.TestCase):
         self.assertIn("t699", book.tasks)  # the newest survive
 
 
-class TestTheLines(unittest.TestCase):
-    def setUp(self) -> None:
-        self.book = TaskBook()
-        self.record = self.book.on_created(_created(kind="research", origin="curiosity"))
-
-    def test_a_start_names_the_kind_the_origin_and_the_topic(self):
-        line = started_line(self.record, unicode=False)
-        for fragment in ("research", "curiosity", "memory package", self.record.task_id[:8]):
-            self.assertIn(fragment, line)
-
-    def test_the_origin_distinguishes_sims_own_idea_from_a_request(self):
-        """"Sim decided to do this" and "you asked for this" were
-        indistinguishable before."""
-        mine = self.book.on_created(_created("t2", origin="human"))
-        self.assertIn("human", started_line(mine, unicode=False))
-        self.assertIn("curiosity", started_line(self.record, unicode=False))
-
-    def test_a_step_says_which_tool_and_on_what(self):
-        line = step_line(self.record, tool="search_code", summary="simorgh/memory", ok=True, unicode=False)
-        self.assertIn("search_code", line)
-        self.assertIn("simorgh/memory", line)
-
-    def test_a_long_step_is_truncated_rather_than_flooding_the_screen(self):
-        line = step_line(self.record, tool="read_file", summary="x" * 500, ok=True, unicode=False)
-        self.assertLess(len(line), 130)
-
-    def test_an_outcome_reports_status_duration_and_topic(self):
-        self.book.on_finished(self.record.task_id, "completed")
-        line = finished_line(self.record, elapsed=12.0, detail="found three exports", unicode=False)
-        self.assertIn("completed", line)
-        self.assertIn("12s", line)
-        self.assertIn("memory package", line)
-
+# `TestTheLines` tested `started_line`, `step_line` and
+# `finished_line`, which are gone with them (2026-09-20): the
+# pre-panel renderers, superseded by `panel.tree_start/tree_step/
+# tree_end` and called by nothing but these tests for weeks. The
+# behaviour they described is tested against the live renderers in
+# `test_panel.py` -- including, now, that a long answer WRAPS rather
+# than being cut, which is what `finished_line` got wrong and what
+# the creator saw on his screen.
 
 class TestTheFooter(unittest.TestCase):
     def test_idle_says_idle(self):
@@ -284,33 +259,44 @@ class WidthFollowsTheTerminalTestCase(unittest.TestCase):
         return unittest.mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((columns, 24)))
 
     def test_a_wide_terminal_shows_more_of_the_topic(self):
+        from simorgh.interface import panel
+
         record = self._record()
         with self._at(80):
-            narrow = started_line(record)
+            narrow = panel.tree_start(record)
         with self._at(160):
-            wide = started_line(record)
+            wide = panel.tree_start(record)
         self.assertGreater(len(wide), len(narrow))
         self.assertIn("parser.py", wide)
         self.assertNotIn("parser.py", narrow)
 
     def test_no_line_overruns_the_terminal(self):
+        from simorgh.interface import panel
+
         record = self._record()
         for columns in (60, 80, 120, 200):
             with self._at(columns):
-                for line in (started_line(record),
-                             step_line(record, tool="apply_source_patch", summary=self.LONG, ok=True),
-                             finished_line(record, elapsed=12.0, detail=self.LONG)):
-                    self.assertLessEqual(len(line), columns + 2, f"{columns}: {line!r}")
+                rendered = (panel.tree_start(record),
+                            panel.tree_step(tool="apply_source_patch", head=self.LONG, ok=True, took=1.0),
+                            panel.tree_end(record, elapsed=12.0, detail=self.LONG))
+                for block in rendered:
+                    for line in block.splitlines():
+                        self.assertLessEqual(len(line), columns + 2, f"{columns}: {line!r}")
 
     def test_a_very_wide_terminal_is_still_bounded(self):
+        from simorgh.interface import panel
+
         record = self._record()
         with self._at(500):
-            self.assertLessEqual(len(started_line(record)), 220)
+            self.assertLessEqual(len(panel.tree_start(record)), 220)
 
     def test_a_terminal_that_cannot_be_measured_still_renders(self):
+        """A terminal whose size cannot be read is still a terminal."""
+        from simorgh.interface import panel
+
         record = self._record()
         with unittest.mock.patch("shutil.get_terminal_size", side_effect=OSError):
-            line = started_line(record)
+            line = panel.tree_start(record)
         self.assertIn("patch", line)
         self.assertTrue(line.strip())
 

@@ -252,43 +252,15 @@ def _fit_line(line: str, width: int | None = None) -> str:
     return fit(line, terminal_width() if width is None else width)
 
 
-def started_line(record: TaskRecord, *, unicode: bool = True) -> str:
-    """The line that was missing entirely: work beginning, and what it is.
-
-    `origin` is on it because "Sim decided to do this" and "you asked for
-    this" are different events and were indistinguishable before.
-    """
-    icon = (_KIND_ICON.get(record.kind, "•") + " ") if unicode else ""
-    return _fit_line(f"{icon}{record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]")
-
-
-def step_line(record: TaskRecord, *, tool: str | None, summary: str, ok: bool | None,
-              unicode: bool = True) -> str:
-    mark = "  " + ("→" if unicode else "-")
-    outcome = "" if ok is None else ("  ok" if ok else "  failed")
-    what = f"{tool}: {summary}" if tool else summary
-    what = " ".join(what.split())
-    width = topic_width(overhead=len(mark) + len(outcome) + 2)
-    if len(what) > width:
-        what = what[: width - 1] + "…"
-    return _fit_line(f"{mark} {what}{outcome}")
-
-
-def finished_line(record: TaskRecord, *, elapsed: float | None, detail: str = "",
-                  unicode: bool = True) -> str:
-    icon = (_END_ICON.get(record.status, "•") + " ") if unicode else ""
-    took = f" in {elapsed:.0f}s" if elapsed is not None else ""
-    # The outcome carries two variable pieces -- the topic and the
-    # result -- so they share what the terminal has rather than each
-    # taking a full line's worth and overrunning together.
-    head = f"{icon}{record.status}{took}: "
-    room = max(_MIN_TOPIC, topic_width(overhead=len(head) + 12))
-    share = room // 2 if detail else room
-    line = f"{head}{record.short_topic(share)}  [{record.task_id[:8]}]"
-    if detail:
-        line += f" -- {' '.join(detail.split())[:room - share]}"
-    return _fit_line(line)
-
+# `started_line`, `step_line` and `finished_line` lived here and are
+# gone (2026-09-20). They were the pre-panel renderers, superseded by
+# `panel.tree_start/tree_step/tree_end`, and nothing outside their own
+# tests had called them for weeks -- but they still looked maintained,
+# and `finished_line` carried the same bug `tree_end` was just fixed
+# for: it squeezed Sim's whole answer onto the end of one line and cut
+# it with an ellipsis. Dead code that duplicates a live path is worse
+# than dead code; it is a place to fix a bug where nobody will see the
+# fix. `_fit_line` and `topic_width` stay: `footer` uses them.
 
 def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
     """One live line under the prompt: what is running, and what waits.
@@ -312,5 +284,5 @@ def footer(book: TaskBook, *, now: float, extra: str = "") -> str:
 
 
 __all__ = [
-    "TaskBook", "TaskRecord", "finished_line", "footer", "short_title", "started_line", "step_line",
+    "TaskBook", "TaskRecord", "footer", "short_title",
 ]

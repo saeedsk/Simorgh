@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from simorgh.interface import panel
-from simorgh.interface.activity import TaskBook, TaskRecord, finished_line, footer, started_line, step_line
+from simorgh.interface.activity import TaskBook, TaskRecord, footer
 from simorgh.interface.render import display_width, fit, terminal_width
 
 WIDTHS = (60, 80, 100, 120, 200)
@@ -55,11 +55,16 @@ class NarrationFitsTestCase(unittest.TestCase):
     """Every scrolling line the feed emits."""
 
     def _lines(self, record: TaskRecord):
+        # The live renderers. `activity.started_line/step_line/
+        # finished_line` were tested here and are gone (2026-09-20):
+        # superseded by these, called by nothing else, and the last of
+        # them still carried the truncation bug `tree_end` was fixed
+        # for.
         return {
-            "started_line": started_line(record),
-            "step_line": step_line(record, tool="apply_source_patch", summary=LONG, ok=True),
-            "step_line ascii": step_line(record, tool="run_tests", summary=LONG, ok=False, unicode=False),
-            "finished_line": finished_line(record, elapsed=61.0, detail=LONG),
+            "tree_start": panel.tree_start(record),
+            "tree_step": panel.tree_step(tool="apply_source_patch", head=LONG, ok=True, took=1.0),
+            "tree_step ascii": panel.tree_step(tool="run_tests", head=LONG, ok=False, took=1.0, unicode=False),
+            "tree_end": panel.tree_end(record, elapsed=61.0, detail=LONG),
             "footer": footer(_book(3, running=1), now=12.0),
         }
 
@@ -67,15 +72,16 @@ class NarrationFitsTestCase(unittest.TestCase):
         for width in WIDTHS:
             with _at(width):
                 record = _book().get("t0")
-                for name, line in self._lines(record).items():
-                    self.assertLessEqual(display_width(line), width, f"{name} at {width}: {line!r}")
+                for name, block in self._lines(record).items():
+                    for line in block.splitlines():
+                        self.assertLessEqual(display_width(line), width, f"{name} at {width}: {line!r}")
 
     def test_a_wide_terminal_is_actually_used(self):
         record = _book().get("t0")
         with _at(80):
-            narrow = display_width(started_line(record))
+            narrow = display_width(panel.tree_start(record))
         with _at(160):
-            wide = display_width(started_line(record))
+            wide = display_width(panel.tree_start(record))
         self.assertGreater(wide, narrow)
 
 
