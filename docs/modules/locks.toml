@@ -4,15 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.initiative]
-by = "opus-main"
-task = "stage 10 item 7: an interest reaches Person.interests only by asking"
-since = "2026-09-21T01:22:34+00:00"
-until = "2026-09-21T09:22:34+00:00"
-
-[locks.memory]
-by = "opus-main"
-task = "stage 10 item 7: an interest is a fact like any other"
-since = "2026-09-21T01:22:34+00:00"
-until = "2026-09-21T09:22:34+00:00"
