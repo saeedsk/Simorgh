@@ -245,6 +245,35 @@ bailing out mid-conversation" (the creator, 2026-09-15), so it is not
 being made on my own judgement. The scenario stays red, visibly,
 where a decision about it can be made on evidence.
 
+## The second paid run: 38/41, and one of the failures was mine
+
+Run again after the day's fixes (`python -m simorgh.evals house --paid`).
+The aside that Sim used to answer -- "Can you try a bit harder next time,
+honey" -- now passes; the deterministic vocative rule held against the real
+model.
+
+Three failures, and they are three different kinds of thing:
+
+1. **`quiet`, the second beat of the aside** -- "I said we are leaving in
+   five minutes", sixteen seconds later, past `continuation_quiet_s`. Known,
+   open, and deliberately not fixed on my own judgement (above).
+2. **`first audio under 2.5s`: 7.87 s.** The first honest reading of stage
+   3's budget against a paid provider rather than the floor. Not investigated
+   yet; it is the number the latency table was built to produce and the first
+   time the table has had a real model behind it.
+3. **`the terminal is sane`: "a line 285 characters wide"** -- and that one
+   was mine, introduced an hour earlier. `tree_end` now wraps a long answer
+   under its status line, so one `printed_line` carries three; the grammar
+   measured the whole block as a single line and reported a width that was
+   really three short lines with newlines between them. It reads physical
+   lines now.
+
+The third is the pack working exactly as intended: a change landed at
+18:30 and its own harness caught the regression before anybody typed at
+Sim. It is also a lesson about checkers -- one that cannot read what it is
+checking invents failures, and an invented failure costs more trust than
+the bug it was guarding against.
+
 ## Still open
 
 - **`PhysicalRule` cannot be tested alone** while the tier table
@@ -253,6 +282,7 @@ where a decision about it can be made on evidence.
 - **Real-room acoustics.** Every number here is synthetic speech in a
   synthetic room; the 50 recorded turns stage 3 item 6 is waiting for
   are what say whether the creator's kitchen behaves like this.
+- **First audio takes 7.87 s with a real model**, against stage 3's 2.5 s budget. Measured 2026-09-20 in the second paid run; the floor provider never showed it because the floor answers instantly. This is the next latency question and it now has a number.
 - **A statement to the room, sixteen seconds after an aside** is answered (above). The fix is a judgement call about `continuation_quiet_s` that has burnt the creator once.
 - **Cost per nightly run** is not measured yet: the pack is free
   (floor provider) and the paid suites are run by hand.

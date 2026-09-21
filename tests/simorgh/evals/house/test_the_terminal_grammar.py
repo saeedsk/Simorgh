@@ -110,3 +110,54 @@ class ATelegramTurnIsNamed(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnePrintCanCarrySeveralLines(unittest.TestCase):
+    """The grammar reads physical lines, not prints.
+
+    A task tree's end wraps Sim's answer under its status line, so
+    one `printed_line` carries three. Measured as a single string it
+    reported "a line 285 characters wide" -- which was three short
+    lines with newlines between them. Caught by this expectation
+    itself, against the paid provider, an hour after the wrapping
+    landed (2026-09-20).
+
+    A checker that cannot read what it is checking invents failures,
+    and an invented failure costs more trust than the bug it was
+    guarding against.
+    """
+
+    def _record(self, *prints):
+        from simorgh.evals.house.record import Record
+
+        record = Record()
+        for text in prints:
+            record.printed_line(text)
+        return record
+
+    def test_a_wrapped_block_is_read_line_by_line(self):
+        from simorgh.evals.house.script import tui_is_sane
+
+        block = "  ⎿  ✅ completed in 2.5s\n       " + "Good evening, Mara. " * 6
+        self.assertEqual(tui_is_sane().check(self._record(block), 0.0), "")
+
+    def test_a_genuinely_wide_line_is_still_caught(self):
+        from simorgh.evals.house.script import tui_is_sane
+
+        why = tui_is_sane().check(self._record("x" * 260), 0.0)
+        self.assertIn("260 characters wide", why)
+
+    def test_a_wide_line_inside_a_block_is_caught(self):
+        """The point of splitting is to see INTO the block, not to
+        stop looking."""
+        from simorgh.evals.house.script import tui_is_sane
+
+        why = tui_is_sane().check(self._record("  ⎿  ✅ completed\n       " + "y" * 260), 0.0)
+        self.assertIn("characters wide", why)
+
+    def test_a_stack_trace_inside_a_block_is_caught(self):
+        from simorgh.evals.house.script import tui_is_sane
+
+        why = tui_is_sane().check(
+            self._record("  ⎿  ✅ completed\n       Traceback (most recent call last):"), 0.0)
+        self.assertIn("stack trace", why)

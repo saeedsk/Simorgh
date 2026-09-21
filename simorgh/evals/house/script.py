@@ -377,8 +377,18 @@ def tui_is_sane(*, width: int = 200) -> Expectation:
     answer line, the same line twice, a line wider than any terminal.
     """
     def _check(record: Record, since: float) -> str:
-        lines = [line.text for line in record.printed_since(since)]
-        plain = [_uncoloured(text) for text in lines]
+        # PHYSICAL lines. One print can carry several -- a task tree's
+        # end now wraps Sim's answer under its status line -- and
+        # measuring the block as one line reported a "285-character
+        # line" that was really three short ones with newlines in
+        # between (caught by this very expectation against the paid
+        # provider, 2026-09-20, an hour after the wrapping landed). A
+        # checker that cannot read what it is checking invents
+        # failures, which costs more trust than the bug it was
+        # guarding against.
+        plain = [_uncoloured(part)
+                 for line in record.printed_since(since)
+                 for part in line.text.split("\n")]
         for text in plain:
             for needle, why in _FORBIDDEN:
                 if needle in text:

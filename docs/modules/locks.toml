@@ -5,8 +5,26 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.evals]
+by = "opus-main"
+task = "tui_is_sane measured a multi-line block as one line"
+since = "2026-09-21T02:23:28+00:00"
+until = "2026-09-21T10:23:28+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "every isolated test run copied 8 GB of voice models"
+since = "2026-09-21T02:21:28+00:00"
+until = "2026-09-21T10:21:28+00:00"
+
 [locks.growth]
 by = "opus-main"
 task = "finish Sim's backlog-expiry change with injected time"
 since = "2026-09-21T02:17:44+00:00"
 until = "2026-09-21T10:17:44+00:00"
+
+[locks.verification]
+by = "opus-main"
+task = "the same 8 GB copy in the baseline rerun"
+since = "2026-09-21T02:21:35+00:00"
+until = "2026-09-21T10:21:35+00:00"
