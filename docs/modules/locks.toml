@@ -29,8 +29,8 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
-[locks.worldmodel]
+[locks.orchestration]
 by = "opus-main"
-task = "stage 6 item 1: per-tool p(ok) and latency"
-since = "2026-09-21T06:18:18+00:00"
-until = "2026-09-21T14:18:18+00:00"
+task = "a task commits only what it wrote"
+since = "2026-09-21T06:24:26+00:00"
+until = "2026-09-21T14:24:26+00:00"

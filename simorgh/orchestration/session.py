@@ -531,6 +531,52 @@ def chat_outside_workspace_refusal(session: Session, tool: str, args: dict) -> s
             "is verified before its change lands. Do not edit it from chat.")
 
 
+def commit_of_unwritten_refusal(session: Session, tool: str, args: dict) -> str:
+    """Why this session may not commit this path, or "" when it may.
+
+    Live, 2026-09-20, and the worst thing in that evening's log. A
+    GAIA *research* case -- a question about how many bird species
+    appear in a video -- found the creator's uncommitted edits to
+    `simorgh/interface/service.py` sitting in the working tree, ran
+    the tests on them, and committed them to `main`. Authored as the
+    creator. Under the message "interface: import media clips via
+    yt-dlp subprocess callout", which describes nothing in the diff:
+    the commit was a hundred percent somebody else's in-flight work
+    on an approval picker, and contained no yt-dlp code at all.
+
+    Three separate things went wrong and this refuses the one that
+    makes the rest possible. A task may commit what IT wrote. It may
+    not commit what it merely found: work in progress is not an
+    untidy repository to be helpfully swept up, and a commit message
+    written about a diff the author never made is the honesty rule
+    broken in the most durable place there is -- the history.
+
+    `subject` counts as written, because a patch task names its file
+    up front and a resumed session that lost its write log would
+    otherwise be refused its own commit.
+    """
+    if tool != "git_commit":
+        return ""
+    path = str((args or {}).get("path") or "").strip()
+    if not path:
+        return ""
+    # `uncommitted` as well as `wrote`: it is exactly the set of files
+    # this session wrote that still need committing, and it is what a
+    # legitimate `git_commit` is for.
+    wrote = {str(p) for p in getattr(session, "wrote", ()) or ()}
+    wrote |= {str(p) for p in getattr(session, "uncommitted", ()) or ()}
+    if getattr(session, "subject", ""):
+        wrote.add(str(session.subject))
+    if path in wrote:
+        return ""
+    if any(path.startswith(f"{w.rstrip('/')}/") for w in wrote if w):
+        return ""     # a directory this session wrote into
+    mine = ", ".join(sorted(wrote)[:5]) or "nothing"
+    return (f"refused: this task did not write {path}, so it may not commit it. "
+            f"What it wrote: {mine}. Uncommitted changes you did not make are somebody "
+            f"else's work in progress -- leave them alone and say so in your answer.")
+
+
 def unplaced_voice_refusal(session: Session, tool: str) -> str:
     """Why a spoken turn may not run `tool`, or "" when it may.
 
@@ -2072,6 +2118,9 @@ class SessionRunner:
             text = f"{call.get('tool')} was already done before this attempt was interrupted: {already}"
             return True, text, Detail(text, "")
         refused = chat_outside_workspace_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
+        if refused:
+            return False, refused, Detail(refused, "refused")
+        refused = commit_of_unwritten_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
         if refused:
             return False, refused, Detail(refused, "refused")
         # How long this session waits for the result, on the wire (stage 1
