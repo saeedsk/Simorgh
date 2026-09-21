@@ -11,12 +11,6 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
-[locks.growth]
-by = "opus-main"
-task = "a benchmark case is not a skill"
-since = "2026-09-21T06:41:33+00:00"
-until = "2026-09-21T14:41:33+00:00"
-
 [locks.initiative]
 by = "opus-main"
 task = "a reminder knows whose it is"
