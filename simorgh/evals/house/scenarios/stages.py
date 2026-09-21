@@ -370,8 +370,16 @@ THE_TELEVISION_IS_NOT_A_PERSON = Scenario(
     stage="11",
     because="a documentary played in the room was answered as the creator, for several turns",
     beats=(
-        Beat(television="But one challenge stops them in their tracks."),
-        Beat(television="They try to flee, but running isn't an emperor's strong point."),
+        # EVERY beat, not just the last. With the expectation only on
+        # the third this passed three runs in a row on 2026-09-21
+        # while the bug was untouched: beat 1 is answered, `_quiet_on`
+        # is stamped, and `_continuation` then covers beats 2 and 3 --
+        # so the scenario went green on the rule that fires AFTER the
+        # mistake. The live failure was Sim answering the FIRST line
+        # of narration it heard.
+        Beat(television="But one challenge stops them in their tracks.", expect=(quiet(),)),
+        Beat(television="They try to flee, but running isn't an emperor's strong point.",
+             expect=(quiet(),)),
         Beat(television="They form a defensive circle and prepare to stand their ground.",
              expect=(quiet(),)),
     ),

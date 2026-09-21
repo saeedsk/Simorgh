@@ -75,7 +75,18 @@ been played. `Director.from_the_television` and a `television=` beat
 do that now.
 
 **The scenario is red, deliberately**, and is not in the bless
-subset. It reproduces the live failure on demand, which is what turns
+subset.
+
+Corrected 2026-09-21: the first version put its expectation on the
+LAST beat only, and passed three runs in a row with the bug
+untouched. Beat 1 is answered, `_quiet_on` is stamped, and
+`_continuation` covers beats 2 and 3 -- so the scenario went green on
+the rule that fires *after* the mistake. It asserts every beat now
+and fails 1/3, which is the shape of the live failure: Sim answered
+the FIRST line of narration it heard.
+
+A scenario that can pass without the bug being fixed is worse than no
+scenario, because it reports the bug gone. It reproduces the live failure on demand, which is what turns
 this from an anecdote into something a fix can be measured against.
 It goes green when the profile is repaired, or when a rule change is
 justified by evidence that does not exist yet.
