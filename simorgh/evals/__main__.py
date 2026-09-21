@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import io
 import json
+import pathlib
 import sys
 
 from .runner import record, run, table
@@ -44,6 +45,9 @@ def main(argv: list[str]) -> int:
     house.add_argument("--only", default="", help="every scenario whose id starts with this")
     house.add_argument("--fast", action="store_true", help="the bless subset: one per stage, free, a few minutes")
     house.add_argument("--timing", action="store_true", help="with --one: where the turn's seconds went")
+    house.add_argument("--profile", metavar="PATH", nargs="?", const="-",
+                       help="with --one: sample every thread's stack; PATH gets collapsed stacks "
+                            "for flamegraph.pl or speedscope", default="")
     house.add_argument("--findings", default="", metavar="PATH", help="write clustered findings there (default docs/findings/<date>-house.md)")
     house.add_argument("--paid", action="store_true",
                        help="let the scenarios reach a real model (costs money; runs the needs_model ones)")
@@ -78,15 +82,32 @@ def main(argv: list[str]) -> int:
             # In THIS process, so the parent can capture it: the parent
             # is what gives each scenario its own interpreter.
             timings = None
-            with contextlib.redirect_stdout(io.StringIO()):
-                if args.timing:
-                    from .house.run import run_with_timing
+            # The timing table says which SEGMENT is slow; the sampler
+            # says which STACK. You want the second one when a segment
+            # is slow for no reason the table can see, or when a thread
+            # spins with no I/O at all (stage 9 item 5, still open).
+            sampler = None
+            if args.profile:
+                from .house.profile import Sampler
 
-                    outcomes, timings = asyncio.run(run_with_timing(scenario))
-                else:
-                    outcomes = asyncio.run(run_one(scenario))
+                sampler = Sampler()
+            with contextlib.redirect_stdout(io.StringIO()):
+                with sampler if sampler is not None else contextlib.nullcontext():
+                    if args.timing:
+                        from .house.run import run_with_timing
+
+                        outcomes, timings = asyncio.run(run_with_timing(scenario))
+                    else:
+                        outcomes = asyncio.run(run_one(scenario))
             if timings is not None and not args.json:
                 print(timings.render())
+                print()
+            if sampler is not None and not args.json:
+                print(sampler.profile.render())
+                if args.profile != "-":
+                    pathlib.Path(args.profile).write_text(sampler.profile.collapsed())
+                    print(f"\ncollapsed stacks: {args.profile}"
+                          f"\n  flamegraph.pl {args.profile} > flame.svg, or open it in speedscope")
                 print()
         else:
             from .house.scenarios import fast

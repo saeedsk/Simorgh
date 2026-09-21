@@ -60,6 +60,16 @@ DEFAULT_CONFIG: dict = {
     # anything reads -- the config checker said so on the first boot,
     # which is the check doing its job.)
     "execution": {"shell": False, "remote": False},
+    # Hashing, not the real sentence-transformer. The sampler
+    # (`house/profile.py`, stage 11 item 8) found `memory.warm` loading
+    # a transformer model in EVERY scenario, including ones with no
+    # memory in them at all -- the single largest thing a household
+    # scenario was paying for, and it bought nothing: a scenario asks
+    # about a fact it planted itself, in the words it planted it with,
+    # which is the one case hashing is good at. `[memory] embedder`
+    # per scenario is how a recall test would opt back in, and the
+    # stage-5 pack was re-run on hashing before this landed.
+    "memory": {"embedder": "hashing"},
 }
 
 
