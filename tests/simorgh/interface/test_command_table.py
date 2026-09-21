@@ -302,3 +302,58 @@ class CommandHelpTestCase(unittest.IsolatedAsyncioTestCase):
         text = (await self._run("help")).text
         self.assertIn("Look around", text)
         self.assertIn("help <command>", text)
+
+
+class TheTwoListsOfSubcommandsAgree(unittest.TestCase):
+    """A command family is written down twice, and both have to say
+    the same thing.
+
+    `dispatch.<FAMILY>_VERBS` is what the family's own `help` prints
+    and what its dispatcher answers to. `parser.SUBCOMMANDS` is what
+    the completion menu offers and what `help` shows for the family.
+    Nothing joined them, so a verb added to one was simply absent from
+    the other.
+
+    The creator, 2026-09-20: "benchmark clear was not showing up in
+    command auto complete/suggestion and help". It worked perfectly
+    when typed. I had added it to the dispatcher and not to the menu
+    -- and `people wrong`, added the same evening, had gone the same
+    way and nobody had typed it yet.
+
+    dispatch.py's own comment says a `load` verb "did not exist until
+    a test compared the two (2026-09-08)". That test compared one
+    pair, once. This compares every family, every run.
+    """
+
+    def _families(self):
+        from simorgh.interface import dispatch
+
+        return (("benchmark", dispatch.BENCHMARK_VERBS),
+                ("people", dispatch.PEOPLE_VERBS),
+                ("home", dispatch.HOME_VERBS))
+
+    @staticmethod
+    def _offered(family: str) -> set:
+        from simorgh.interface.parser import SUBCOMMANDS
+
+        return {entry.split()[0] for entry, _d in SUBCOMMANDS.get(family, ()) if entry.split()}
+
+    def test_every_verb_can_be_completed(self):
+        for family, table in self._families():
+            real = {verb for verb, _a, _w in table if verb}
+            missing = sorted(real - self._offered(family))
+            self.assertEqual(missing, [],
+                             f"{family}: in the dispatcher, absent from the completion menu: {missing}")
+
+    def test_every_completion_is_a_real_verb(self):
+        """The other direction: a menu entry that does nothing sends
+        somebody to type a command that is not there."""
+        for family, table in self._families():
+            real = {verb for verb, _a, _w in table if verb} | {"<name>", "<thing>"}
+            offered = self._offered(family)
+            extra = sorted(w for w in offered - real if not w.startswith("<"))
+            self.assertEqual(extra, [], f"{family}: offered by the menu, not in the dispatcher: {extra}")
+
+    def test_the_two_verbs_that_started_this(self):
+        self.assertIn("clear", self._offered("benchmark"))
+        self.assertIn("wrong", self._offered("people"))

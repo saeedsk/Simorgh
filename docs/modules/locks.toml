@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.benchmark]
+by = "opus-main"
+task = "a blocked case is re-scored if it finishes later"
+since = "2026-09-21T06:08:44+00:00"
+until = "2026-09-21T14:08:44+00:00"
+
 [locks.contracts]
 by = "opus-main"
 task = "a reminder knows whose it is"
@@ -22,6 +28,12 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "benchmark clear and people wrong reach the completion menu"
+since = "2026-09-21T06:08:44+00:00"
+until = "2026-09-21T14:08:44+00:00"
 
 [locks.kernel]
 by = "opus-main"
