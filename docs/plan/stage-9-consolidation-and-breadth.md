@@ -34,6 +34,8 @@ Done 2026-09-19 (item 9): `docs/adding-capability.md` -- a new capability arrive
 8. **Frigate/go2rtc for the cameras (creator's decision).** *Lock `perception`, `channels`.* Tracked-object events replace whole-scene description; live view served by go2rtc, not by Sim's HTTP server; `workspace/cameras` no longer written. Acceptance: no ffmpeg child processes; the dashboard's camera tiles come from go2rtc URLs with the token.
 9. **MCP-first for new capability.** *Lock `execution`, `docs`.* A one-page `docs/adding-capability.md`: an MCP server with schemas, human-configured, Guardian-gated; no new tool classes for external services. Acceptance: the next integration arrives as a server.
 10. **The browser agent.** *Lock `agent`, `execution`.* `browse_page` grows into a snapshot-act loop (accessibility-tree snapshot, act by element id, bounded steps) used by `agents/browser.md`. Acceptance: a scripted three-page form task completes.
+Started 2026-09-20 (item 11): `stage9/the-house-does-an-ordinary-thing` -- an owner asks for the kitchen light, the lamp is on, and then it goes back off through the same path. The first breadth scenario that could exist, because the fake house was only wired into the sandbox that day; before it, a tool that quietly refused and a tool that worked produced the same green. Verified by unwiring the house and watching it go red. The rest of the item (the TV, a reminder, mail, a camera snapshot) grows the same way, one integration at a time.
+
 11. **The household end-to-end suite** in `simorgh/evals/household/` grows with every integration; "more general" is its coverage number (evaluation section 11).
 
 ## Measurements after

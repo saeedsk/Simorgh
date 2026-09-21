@@ -254,6 +254,26 @@ def nothing_wrote_a_trace() -> Expectation:
     return Expectation("nothing wrote a trace", _check, stage="1")
 
 
+def the_house_did(service: str, target: str = "") -> Expectation:
+    """A service really reached a device, and the device really moved.
+
+    The positive half of `the_house_did_nothing`, and the reason the
+    fake house had to be wired in at all: an owner asking for the
+    kitchen light should end with the kitchen light on, and until
+    2026-09-20 nothing in this harness could tell the difference
+    between that and a tool that quietly refused.
+    """
+    def _check(record: Record, since: float) -> str:
+        did = [a for a in record.house if a.at >= since and a.service == service]
+        if target:
+            did = [a for a in did if target in a.targets]
+        if did:
+            return ""
+        happened = ", ".join(sorted({a.service for a in record.house if a.at >= since})) or "nothing"
+        return f"the house did {happened}, not {service}" + (f" on {target}" if target else "")
+    return Expectation(f"the house did {service}", _check, stage="9")
+
+
 def the_house_did_nothing() -> Expectation:
     """No service reached a device.
 
@@ -460,6 +480,6 @@ def _with_room(config: dict | None, room: str) -> dict:
 
 __all__ = ["Beat", "Check", "Expectation", "Scenario", "answered", "asked_a_person", "called",
            "did_not_call", "did_not_run", "first_audio_under", "identified_as", "play", "play_all", "quiet",
-           "nothing_wrote_a_trace", "remembered", "said_something_like", "the_house_did_nothing",
+           "nothing_wrote_a_trace", "remembered", "said_something_like", "the_house_did", "the_house_did_nothing",
            "the_prefix_did_not_change", "tui_is_sane",
            "was_denied"]

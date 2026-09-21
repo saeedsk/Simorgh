@@ -11,6 +11,12 @@ task = "a library's progress bar reached the creator's screen"
 since = "2026-09-21T01:01:28+00:00"
 until = "2026-09-21T09:01:28+00:00"
 
+[locks.evals]
+by = "opus-main"
+task = "stage 9 item 11: a breadth scenario now that the fake house is wired"
+since = "2026-09-21T01:05:27+00:00"
+until = "2026-09-21T09:05:27+00:00"
+
 [locks.memory]
 by = "progress-bars"
 task = "a library's progress bar reached the creator's screen"
