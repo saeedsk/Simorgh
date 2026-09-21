@@ -79,14 +79,27 @@ def slug_for(description: str, existing: set[str] = frozenset()) -> str:
     return f"{base}_x"
 
 
+#: Origins whose tasks are never worth distilling.
+#:
+#: A benchmark case is a one-off trivia question chosen to be hard,
+#: not a job the household will ask for again. The creator's GAIA run
+#: of 2026-09-20 left ELEVEN of these queued behind it --
+#: `video_https_www_l1vxcyzayym`, `what_was_volume_fish` -- each one a
+#: model call and a queue slot spent writing a function nobody will
+#: ever call, named after a YouTube id.
+NOT_WORTH_KEEPING: frozenset[str] = frozenset({"benchmark"})
+
+
 def candidate_for(*, kind: str, succeeded: bool, description: str, tools: list[str] | set[str],
-                  existing_skills: set[str] = frozenset()) -> Candidate | None:
+                  origin: str = "", existing_skills: set[str] = frozenset()) -> Candidate | None:
     """The skill this task is worth turning into, or None.
 
     None is the common answer and should be: most tasks are ordinary
     work.
     """
     if not succeeded or kind not in DISTILLABLE_KINDS:
+        return None
+    if str(origin or "") in NOT_WORTH_KEEPING:
         return None
     used = {t for t in (tools or []) if t}
     if len(used) < _MIN_DISTINCT_TOOLS:

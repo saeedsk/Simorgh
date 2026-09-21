@@ -14,7 +14,7 @@ Since stage 8 item 1 (2026-09-20) Growth is also the **merge** of learning, refl
 |---|---|
 | `simorgh/growth/service.py` | the Subsystem: unions the parts' manifests, starts each with its own `[growth.<part>]` section, fans out `stop`/`health` |
 | `simorgh/growth/estimate/` | what Sim is good at, from outcomes (was `simorgh/growth/estimate/`): outcome recording, the competence table, strategy suggestion |
-| `simorgh/growth/monitors/` | what is going wrong, watched (was `simorgh/growth/monitors/`): drift, calibration, health findings, critique, denial analysis, pattern mining, distillation, digests |
+| `simorgh/growth/monitors/` | what is going wrong, watched (was `simorgh/growth/monitors/`): drift, calibration, health findings, critique, denial analysis, pattern mining, distillation, digests. Distillation refuses a task whose ORIGIN is in `distillation.NOT_WORTH_KEEPING` -- `benchmark` today: a GAIA question is a one-off chosen to be hard, not a job the household will ask for again, and the creator's run of 2026-09-20 left eleven skill-writing tasks queued behind it, one named after a YouTube id. An unknown origin is treated as ordinary work, because older records carry none and refusing to learn from all of them would cost more than the waste |
 | `simorgh/growth/explore/` | what is worth finding out (was `simorgh/growth/explore/`): drives, the diversity sampler, ideas, project proposals, interests, sharing pace |
 | `simorgh/growth/diagnose.py` | `Failure`, `Cluster`, `cluster()`: terminal failures grouped by what they share; `phrasing_prompt` is the only thing a model is asked |
 | `simorgh/growth/policies.py` | `Policy`, `PolicyStore`: propose → adopt-with-a-measurement → retire, over `growth:policies` |

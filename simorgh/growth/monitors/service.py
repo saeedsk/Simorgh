@@ -90,6 +90,8 @@ _CRITIQUE_KINDS = frozenset({"patch", "skill", "research", "project"})
 @dataclass
 class _TaskMeta:
     kind: str = "chat"
+    #: Who asked. A benchmark case is not work worth keeping.
+    origin: str = ""
     description: str = ""
     scope_paths: tuple[str, ...] = ()
     tracker: DriftTracker | None = None
@@ -249,7 +251,8 @@ class Service:
     async def _on_task_created(self, message: Message) -> None:
         p = message.payload
         scope = p.get("scope") or {}
-        meta = _TaskMeta(kind=p["kind"], description=p["description"], scope_paths=tuple(scope.get("paths", [])), started_ts=message.ts,
+        meta = _TaskMeta(kind=p["kind"], origin=str(p.get("origin") or ""), description=p["description"],
+                         scope_paths=tuple(scope.get("paths", [])), started_ts=message.ts,
                          last_step_ts=message.ts)
         meta.tracker = DriftTracker(p["task_id"], p["description"], list(meta.scope_paths), self.config)
         self._tasks[p["task_id"]] = meta
@@ -378,7 +381,7 @@ class Service:
         if not self.config.distillation_enabled or self._ctx is None:
             return
         candidate = distillation.candidate_for(
-            kind=meta.kind, succeeded=succeeded, description=meta.description,
+            kind=meta.kind, origin=meta.origin, succeeded=succeeded, description=meta.description,
             tools=meta.tools_used, existing_skills=self._existing_skills(),
         )
         if candidate is None:
