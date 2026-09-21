@@ -41,10 +41,15 @@ class TheLoopKeepsTurning(unittest.IsolatedAsyncioTestCase):
             (root / "tests" / "test_x.py").write_text("def test_x():\n    assert True\n")
             config = Config(repo_root=root)
 
-            def slow_pytest(*args, **kwargs):
-                import time
-                time.sleep(0.6)
-                return subprocess.CompletedProcess(args[0], 0, stdout="1 passed\n", stderr="")
+            async def slow_pytest(*args, **kwargs):
+                # A slow CHILD, not a slow thread: since stage 7 item 8
+                # the suite runs through `procs.run_child`, so the thing
+                # that must not block the loop is an await, and the
+                # stand-in has to be one too.
+                from simorgh.execution.procs import Completed
+
+                await asyncio.sleep(0.6)
+                return Completed(0, "1 passed\n", "", 0.6)
 
             ticks = 0
 
@@ -56,7 +61,7 @@ class TheLoopKeepsTurning(unittest.IsolatedAsyncioTestCase):
 
             task = asyncio.create_task(ticker())
             try:
-                with mock.patch.object(tools_module.subprocess, "run", side_effect=slow_pytest):
+                with mock.patch.object(tools_module, "run_child", side_effect=slow_pytest):
                     result = await RunTestsTool(config).run({"target": "tests"}, ctx=_ctx(config))
             finally:
                 task.cancel()

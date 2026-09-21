@@ -67,6 +67,7 @@ from .netsafety import FetchRefused, validate_public_http_url, wait_note
 from simorgh.contracts.text.doctext import document_to_text
 from .geocode import GeocodeTool
 from .packages import FindPackageTool, InstallPackageTool
+from .procs import run_child
 from simorgh.contracts.text.pdftext import looks_like_pdf, pdf_to_text
 from .realestate import RealEstateListingsTool
 from .script import RunScriptTool
@@ -1328,12 +1329,28 @@ class RunTestsTool:
         # the worker's own session was cancelled mid-verify and a
         # 40-line traceback landed on the prompt. A tool "isolated from
         # the live working tree" was not isolated from the live loop.
-        return await asyncio.to_thread(self._run_isolated, target, timeout=timeout, start=start, root=root)
+        return await self._run_isolated(target, timeout=timeout, start=start, root=root)
 
-    def gate(self, root: Path) -> ToolResult:
+    def gate_blocking(self, root: Path) -> ToolResult:
+        """`gate`, for a caller that is already on a worker thread.
+
+        `worktree.land()` does its git work inside `asyncio.to_thread`,
+        so there is no loop there to share and no cancellation to
+        honour -- a thread cannot be cancelled, which is the whole
+        reason stage 7 item 8 exists. This runs the gate in its own
+        loop and says so, rather than pretending the landing gate is
+        killable when the step around it is not. The model's own
+        `run_tests` does get the cancellable path.
+        """
+        return asyncio.run(self.gate(root))
+
+    async def gate(self, root: Path) -> ToolResult:
         """The whole suite against `root`, for `worktree_land`: the same
         isolated run the model gets, on the tree about to become main.
-        Blocking; the caller threads it.
+        A coroutine since stage 7 item 8, like `_run_isolated` itself:
+        the suite runs as a child process that dies with the step
+        rather than in a thread that cannot be cancelled. `land()` is
+        already async, so this changes nothing about where it runs.
 
         A green run is judged a second time by the bootloader's own
         `unit_verdict` (simloader.py), loaded from the MAIN checkout --
@@ -1345,8 +1362,8 @@ class RunTestsTool:
         exactly that since 2026-09-10 (evaluation S5). Now the gate
         requires exit 0, no failure in the summary, tests that ran, and
         a count within a tenth of the loader's last green run."""
-        result = self._run_isolated("tests", timeout=self._config.test_timeout_s, start=time.monotonic(),
-                                    root=Path(root).resolve())
+        result = await self._run_isolated("tests", timeout=self._config.test_timeout_s,
+                                          start=time.monotonic(), root=Path(root).resolve())
         if not result.ok:
             return result
         judged = _loader_verdict(self._config.repo_root, result.output or "")
@@ -1389,9 +1406,22 @@ class RunTestsTool:
                 return frozenset()
             return frozenset(failing_nodeids(done.stdout)) & frozenset(nodeids)
 
-    def _run_isolated(self, target: str, *, timeout: float, start: float, root: Path | None = None) -> ToolResult:
-        """Copy the repo, run pytest there, read the result. Blocking by
-        design: `run` hands it to a worker thread."""
+    async def _run_isolated(self, target: str, *, timeout: float, start: float, root: Path | None = None) -> ToolResult:
+        """Copy the repo, run pytest there as a real child, read the result.
+
+        A coroutine, not a worker thread, since stage 7 item 8. The
+        copy still goes to a thread -- it is blocking and cannot be
+        cancelled usefully -- but the pytest run is `procs.run_child`,
+        which puts the suite in its own process group and kills the
+        group when the step ends for ANY reason: the deadline, a
+        cancel, the session going away. A thread cannot be cancelled
+        and neither can the child inside it, so cancelling a task used
+        to hand control back to Sim while pytest carried on compiling
+        against a tree the task was about to discard.
+
+        `procs.py` was written for this item and nothing imported it
+        (2026-09-20). It does now.
+        """
         root = (root or self._config.repo_root).resolve()
         cap = self._config.test_output_max_chars
         with tempfile.TemporaryDirectory(prefix="simorgh-tests-") as workdir:
@@ -1402,7 +1432,9 @@ class RunTestsTool:
                 # test reads either; the copy is 17 MB without them.
                 # NOT "ledger": that pattern would also drop the
                 # `simorgh/ledger` package and its tests.
-                shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
+                await asyncio.to_thread(
+                    shutil.copytree, root, dest,
+                    ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not stage an isolated copy: {exc!r}")
             if not (dest / target).exists():
@@ -1430,20 +1462,21 @@ class RunTestsTool:
                 # WORKERS -- so a timed-out suite left several python
                 # processes compiling away against a tree the task was
                 # about to discard.
-                completed = subprocess.run(
+                completed = await run_child(
                     [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                      *pytest_parallel_args(dest / target), target],
-                    capture_output=True, text=True, start_new_session=True,
-                    cwd=dest, timeout=timeout, preexec_fn=preexec, stdin=subprocess.DEVNULL,
-                )
-            except subprocess.TimeoutExpired as exc:
-                _kill_group(exc)
-                return ToolResult(
-                    ok=False, output=(exc.stdout or "")[-cap:], error="timeout",
-                    metadata={"stderr": (exc.stderr or "")[-cap:], "duration_s": time.monotonic() - start},
+                    cwd=str(dest), timeout=timeout, preexec_fn=preexec,
                 )
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not run tests: {exc!r}")
+            if completed.timed_out:
+                # The group is already gone: `run_child` kills it on the
+                # way out, and hands back the partial output, because
+                # half a test run tells you more than nothing.
+                return ToolResult(
+                    ok=False, output=completed.stdout[-cap:], error="timeout",
+                    metadata={"stderr": completed.stderr[-cap:], "duration_s": time.monotonic() - start},
+                )
             # Same reading as the isolated suite above: exit 5 is "no
             # tests were collected", which is not a failing suite. This is
             # the one the model itself calls, and reporting a new file's

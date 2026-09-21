@@ -39,8 +39,16 @@ class TheLandingGateUsesTheLoadersVerdict(unittest.TestCase):
         self._tmp.cleanup()
 
     def _gate_with(self, result: ToolResult) -> ToolResult:
-        with mock.patch.object(RunTestsTool, "_run_isolated", return_value=result):
-            return self.tool.gate(self.root)
+        """`gate` is a coroutine since stage 7 item 8 (the suite runs as
+        a child that dies with the step, not in an uncancellable
+        thread), so the stand-in has to be awaitable too."""
+        import asyncio
+
+        async def _isolated(*_a, **_k):
+            return result
+
+        with mock.patch.object(RunTestsTool, "_run_isolated", side_effect=_isolated):
+            return asyncio.run(self.tool.gate(self.root))
 
     def test_a_full_green_run_lands(self):
         out = self._gate_with(ToolResult(ok=True, output="1000 passed in 60.0s"))

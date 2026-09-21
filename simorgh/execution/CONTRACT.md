@@ -18,6 +18,8 @@ Core (the part that stays in Execution after stage 9):
 | `simorgh/execution/verifier.py` | `ApprovalVerifier`: args hash, expiry, HMAC, replay check on every approval |
 | `simorgh/execution/config.py` | `[execution]` dataclass, `find_repo_root` |
 | `simorgh/execution/tools.py` | the core tools (read/search/list, sandboxes, `run_tests` and its landing gate, patch/replace/commit/revert/discard, tasks, skills, web_fetch, sim_command, memory_forget) and `builtin_tools()` |
+
+Since 2026-09-20 `run_tests` runs the suite through `procs.run_child`: its own process group, killed when the step ends for any reason -- the deadline, a cancel, the loop going away. It ran in `asyncio.to_thread(subprocess.run, ...)` before, and a thread cannot be cancelled, so cancelling a task handed control back to Sim while pytest carried on compiling against a tree the task was about to discard. `procs.py` was written for this in stage 7 item 8 and nothing imported it until now. `gate()` is a coroutine for the same reason; `gate_blocking()` is the landing path, which runs inside `asyncio.to_thread` where there is no loop to share and nothing to cancel |
 | `simorgh/execution/worktree.py` | `WorktreeManager` and `worktree_open` / `worktree_land` / `worktree_close` |
 | `simorgh/execution/pathsafety.py` | the read/write path boundary: readable roots, root files, credential names, traversal |
 | `simorgh/execution/netsafety.py` | SSRF guard for outbound URLs (`web_fetch`, `render_page`) |

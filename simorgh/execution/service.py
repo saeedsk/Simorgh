@@ -341,7 +341,9 @@ class Service:
         tests = RunTestsTool(self._config)
         gated = getattr(self._config, "landing_gate", True)
         manager = WorktreeManager(self._config.repo_root, Path(home),
-                                  gate=tests.gate if gated else None,
+                                  # `gate_blocking`: the landing runs inside
+                                  # `asyncio.to_thread`, where there is no loop to share.
+                                  gate=tests.gate_blocking if gated else None,
                                   rerun=tests.failing_alone if gated else None)
         if not manager.available:
             ctx.logger.warning("worktrees_unavailable", repo=str(self._config.repo_root))

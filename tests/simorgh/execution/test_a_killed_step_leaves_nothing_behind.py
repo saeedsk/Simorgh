@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import time
 import unittest
+import uuid
 
 from simorgh.execution.procs import alive, run_child
 
@@ -57,13 +58,83 @@ class AKilledStep(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(done.timed_out)
 
 
-class TheTestRunnerLeavesNoWorkers(unittest.TestCase):
-    def test_it_starts_its_own_session_and_kills_the_group(self):
+class TheTestRunnerLeavesNoWorkers(unittest.IsolatedAsyncioTestCase):
+    """The acceptance of stage 7 item 8, against the tool itself.
+
+    This used to read `tools.py` and assert the words
+    `start_new_session=True` and `_kill_group(exc)` appeared in it,
+    which is a test of a source file rather than of a behaviour --
+    and it passed for the whole time `procs.py` existed and nothing
+    imported it. `run_tests` really does run through `run_child` now,
+    so the thing to assert is that cancelling the step leaves no
+    pytest behind.
+    """
+
+    async def test_cancelling_run_tests_takes_pytest_with_it(self):
+        import subprocess
+        import tempfile
         from pathlib import Path
 
-        source = Path("simorgh/execution/tools.py").read_text()
-        self.assertIn("start_new_session=True", source)
-        self.assertIn("_kill_group(exc)", source)
+        from simorgh.contracts.protocols import ToolContext
+        from simorgh.execution.config import Config
+        from simorgh.execution.tools import RunTestsTool
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            # A suite that will not finish on its own.
+            # A name generated at run time: the child's command line
+            # carries the target, which is how the check below finds it
+            # in `ps` (the temp directory is only the cwd, and `ps` does
+            # not show that). Generated rather than fixed because a
+            # literal marker also matches the shell that happens to be
+            # editing this file -- which it did, once.
+            marker = f"test_outlives_{uuid.uuid4().hex[:8]}"
+            (root / "tests" / f"{marker}.py").write_text(
+                "import time\n\ndef test_slow():\n    time.sleep(30)\n")
+            config = Config(repo_root=root)
+            ctx = ToolContext(action_id="a1", task_id=None, scope={}, constraints={},
+                              data_dir=root, clock=None, logger=None, ledger=None)
+
+            task = asyncio.ensure_future(
+                RunTestsTool(config).run({"target": f"tests/{marker}.py"}, ctx=ctx))
+            # Long enough for the copy and for pytest to be running.
+            for _ in range(200):
+                await asyncio.sleep(0.05)
+                if _pytest_children(marker):
+                    break
+            started = _pytest_children(marker)
+            if not started:
+                self.skipTest("pytest never got far enough to be worth killing on this machine")
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+            deadline = time.monotonic() + 2.0
+            while _pytest_children(marker) and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            self.assertEqual(_pytest_children(marker), [],
+                             "pytest outlived the step that started it")
+            assert subprocess  # the import documents how the check below works
+
+
+def _pytest_children(marker: str) -> list:
+    """Live processes whose command line mentions `marker`.
+
+    The target path is in the child's argv, which is what makes this
+    findable; the temporary directory is only its cwd, and `ps` does
+    not show that.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(["ps", "-eo", "pid,command"], capture_output=True, text=True, timeout=5.0).stdout
+    except Exception:  # noqa: BLE001 -- no `ps` is not a failing assertion
+        return []
+    # `-m pytest`, not just "pytest": the marker also appears in the
+    # command line of whatever shell is running this test, and matching
+    # that made the check fail on its own reflection.
+    return [line for line in out.splitlines() if marker in line and "-m pytest" in line]
 
 
 if __name__ == "__main__":
