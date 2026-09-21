@@ -388,6 +388,39 @@ _FORBIDDEN: tuple[tuple[str, str], ...] = (
 _EMPTY = ("🔊 sim:", "● ", "⏺", "⎿")
 
 
+def printed(*words: str) -> Expectation:
+    """The console said these things back.
+
+    The typed path had no expectation at all until 2026-09-21, and it
+    is the path every bug the creator hit on 2026-09-20 came through:
+    `home` looking up an entity called "on", `home state front`
+    refused with its own answer inside the refusal, `home off family
+    room` asking permission to turn a lamp off. Fifty-one beats in
+    this pack ask Sim directly and not one of them typed a command.
+    """
+    wanted = tuple(w.lower() for w in words if w)
+
+    def _check(record: Record, since: float) -> str:
+        said = "\n".join(p.text for p in record.printed_since(since)).lower()
+        missing = [w for w in wanted if w not in said]
+        if not missing:
+            return ""
+        return f"the console never said {', '.join(repr(m) for m in missing)}"
+    return Expectation(f"printed {', '.join(words)}", _check, stage="9")
+
+
+def printed_nothing_like(*words: str) -> Expectation:
+    """The console did NOT say these -- a traceback, a raw payload, a
+    refusal where an answer belongs."""
+    unwanted = tuple(w.lower() for w in words if w)
+
+    def _check(record: Record, since: float) -> str:
+        said = "\n".join(p.text for p in record.printed_since(since)).lower()
+        found = [w for w in unwanted if w in said]
+        return f"the console said {', '.join(repr(f) for f in found)}" if found else ""
+    return Expectation(f"said nothing like {', '.join(words)}", _check, stage="9")
+
+
 def tui_is_sane(*, width: int = 200) -> Expectation:
     """The terminal grammar (item 9).
 
@@ -512,7 +545,7 @@ def _with_room(config: dict | None, room: str) -> dict:
 
 
 __all__ = ["Beat", "Check", "Expectation", "Scenario", "answered", "asked_a_person", "called",
-           "nobody_was_asked",
+           "nobody_was_asked", "printed", "printed_nothing_like",
            "did_not_call", "did_not_run", "first_audio_under", "identified_as", "play", "play_all", "quiet",
            "nothing_wrote_a_trace", "remembered", "said_something_like", "the_house_did", "the_house_did_nothing",
            "the_prefix_did_not_change", "tui_is_sane",

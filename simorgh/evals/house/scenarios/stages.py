@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from ..script import (
     Beat, Scenario, answered, asked_a_person, did_not_run, identified_as, nobody_was_asked,
-    nothing_wrote_a_trace, quiet, remembered, the_house_did, the_house_did_nothing,
-    tui_is_sane, was_denied,
+    nothing_wrote_a_trace, printed, printed_nothing_like, quiet, remembered, the_house_did,
+    the_house_did_nothing, tui_is_sane, was_denied,
 )
 
 # ---------------------------------------------------------------- stage 0
@@ -385,6 +385,49 @@ THE_TELEVISION_IS_NOT_A_PERSON = Scenario(
     ),
 )
 
+
+#: The creator types at the console (stage 9 items 3 and 11).
+#:
+#: Fifty-one beats in this pack ask Sim directly and, until
+#: 2026-09-21, not one typed a command -- while every bug the creator
+#: hit on 2026-09-20 came through the typed path: `home` looking up
+#: an entity called "on", `home state front` refused by a message
+#: that listed the answer, `home off family room` asking permission
+#: to turn a lamp off.
+#:
+#: Cheap on purpose: no model, no synthesis, no listening loop. These
+#: are the commands a person uses twenty times a day and they should
+#: cost nothing to keep honest.
+THE_CONSOLE_ANSWERS = Scenario(
+    id="stage9/the-console-answers",
+    stage="9",
+    because="every house bug the creator found, he found by typing",
+    beats=(
+        Beat(says="home", expect=(printed_nothing_like("traceback", "nothing in the house matches"),)),
+        Beat(says="home state kitchen",
+             expect=(printed("kitchen"), printed_nothing_like("traceback", "refused"))),
+        Beat(says="light on kitchen", expect=(printed_nothing_like("traceback"),)),
+        Beat(says="people", expect=(printed_nothing_like("traceback"),)),
+    ),
+    expect=(tui_is_sane(),),
+)
+
+#: A command nobody has heard of, and one with a missing argument.
+#: Neither is a crash, and both say what to type instead.
+A_MISTYPED_COMMAND_IS_ANSWERED_KINDLY = Scenario(
+    id="stage9/a-mistyped-command-is-answered-kindly",
+    stage="9",
+    because="a stack trace on the console is Sim failing in public",
+    beats=(
+        Beat(says="hom", expect=(printed_nothing_like("traceback", "keyerror", "none"),)),
+        Beat(says="benchmark clear",
+             expect=(printed("usage"), printed_nothing_like("traceback"))),
+        Beat(says="people wrong",
+             expect=(printed("usage"), printed_nothing_like("traceback"))),
+    ),
+    expect=(tui_is_sane(),),
+)
+
 SCENARIOS = (
     A_CHILD_ASKS_FOR_THE_DOOR,
     A_GUEST_CHANGES_WHO_SIM_TRUSTS,
@@ -400,6 +443,8 @@ SCENARIOS = (
     A_LAMP_IS_NOT_A_DECISION,
     A_SIREN_IS_A_DECISION,
     THE_TELEVISION_IS_NOT_A_PERSON,
+    THE_CONSOLE_ANSWERS,
+    A_MISTYPED_COMMAND_IS_ANSWERED_KINDLY,
 )
 
 __all__ = ["SCENARIOS"] + [s.id.split("/")[-1].replace("-", "_").upper() for s in SCENARIOS]
