@@ -28,3 +28,9 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
+
+[locks.simloader]
+by = "opus-main"
+task = "a broken config file is not a bad image"
+since = "2026-09-21T05:52:24+00:00"
+until = "2026-09-21T13:52:24+00:00"

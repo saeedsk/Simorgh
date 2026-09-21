@@ -841,3 +841,84 @@ class CtrlCGivesSimTimeToStop(unittest.TestCase):
             code = proc.wait(timeout=20)
             self.assertTrue(marker.exists(), "the child was killed before it finished")
             self.assertEqual(code, 0)
+
+
+class ABrokenFileIsNotABadImage(unittest.TestCase):
+    """A rollback cannot fix a file that does not parse.
+
+    Live, 2026-09-20. `~/.simorgh/secrets.toml` had two keys of the
+    shape `vault:home_assistant:url = "..."` -- a colon in a bare TOML
+    key, which is a syntax error. Sim died in one second, the watchdog
+    called it a bad boot, and the loader rolled the checkout back a
+    tag.
+
+    That rollback was pure loss. The code was fine, the file was still
+    broken, and the next `run` would have walked back another tag for
+    exactly the same reason -- undoing good work, one tag at a time,
+    to fix a problem that was never in the repo.
+
+    So the files are parsed BEFORE anything is launched, and a bad one
+    stops the boot without touching git.
+    """
+
+    def _loader(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "simloader_preflight", Path(__file__).resolve().parents[2] / "simloader.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = Path(self.tmp.name) / "data"
+        self.data.mkdir()
+        self.repo = Path(self.tmp.name) / "repo"
+        self.repo.mkdir()
+        self._old = os.environ.get("SIMORGH_RUNTIME_DATA_DIR")
+        os.environ["SIMORGH_RUNTIME_DATA_DIR"] = str(self.data)
+        self.addCleanup(self._restore)
+        (self.data / "simorgh.toml").write_text('[secrets]\nfile = "${data_dir}/secrets.toml"\n')
+
+    def _restore(self):
+        if self._old is None:
+            os.environ.pop("SIMORGH_RUNTIME_DATA_DIR", None)
+        else:
+            os.environ["SIMORGH_RUNTIME_DATA_DIR"] = self._old
+
+    def test_the_exact_file_that_broke_the_boot(self):
+        (self.data / "secrets.toml").write_text(
+            'REOLINK_HOST = "10.0.0.1"\nvault:home_assistant:url = "http://ha"\n')
+        ok, why = self._loader().config_files_parse(self.repo)
+        self.assertFalse(ok)
+        self.assertIn("secrets.toml", why)
+        self.assertIn("not valid TOML", why)
+
+    def test_the_message_says_how_to_fix_it(self):
+        """A parser error alone ("expected '=' at line 9") does not
+        tell somebody with a colon in a key what is wrong."""
+        (self.data / "secrets.toml").write_text('vault:home_assistant:token = "x"\n')
+        _ok, why = self._loader().config_files_parse(self.repo)
+        self.assertIn("colon", why)
+        self.assertIn("HOME_ASSISTANT_TOKEN", why)
+
+    def test_it_never_prints_a_value(self):
+        (self.data / "secrets.toml").write_text('vault:a:b = "super-secret-value-here"\n')
+        _ok, why = self._loader().config_files_parse(self.repo)
+        self.assertNotIn("super-secret-value-here", why)
+
+    def test_a_broken_simorgh_toml_is_caught_too(self):
+        (self.data / "simorgh.toml").write_text("[secrets\nfile = 1\n")
+        ok, why = self._loader().config_files_parse(self.repo)
+        self.assertFalse(ok)
+        self.assertIn("simorgh.toml", why)
+
+    def test_good_files_boot(self):
+        (self.data / "secrets.toml").write_text('HOME_ASSISTANT_TOKEN = "x"\n')
+        self.assertEqual(self._loader().config_files_parse(self.repo), (True, ""))
+
+    def test_no_secrets_file_at_all_is_fine(self):
+        """Env-only deployments have none, and always worked."""
+        self.assertEqual(self._loader().config_files_parse(self.repo), (True, ""))

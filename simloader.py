@@ -1140,6 +1140,17 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
                 return 3
             rollbacks += 1
 
+        # Before anything is launched or rolled back: is the problem
+        # even in the code? A file that does not parse fails every
+        # image equally, so a rollback costs a good tag and fixes
+        # nothing (2026-09-20).
+        files_ok, files_why = config_files_parse(repo)
+        if not files_ok:
+            say(f"not booting: {files_why}", "fail")
+            say("this is a configuration file, not the image -- nothing is being rolled back", "warn")
+            write_note(notes, {"kind": "bad_config", "commit": head(repo), "why": files_why})
+            return 5
+
         rule("starting Sim" if not restarts else f"starting Sim (restart #{restarts})")
         started = time.monotonic()
         returncode = launch_sim(repo, notes, sim_args)
@@ -1176,6 +1187,50 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
 #: kills it. Sim's own watchdog hard-exits at stop_grace_s + 10 (25 s by
 #: default), so this is only the backstop behind it.
 STOP_GRACE_S = 30.0
+
+
+def config_files_parse(repo: Path) -> tuple[bool, str]:
+    """Do `simorgh.toml` and the secrets file it names actually parse?
+
+    A pre-flight, before Sim is launched, because a broken FILE is not
+    a bad IMAGE and rolling back code cannot fix one. On 2026-09-20 a
+    secrets file with two `vault:home_assistant:url`-style keys -- a
+    colon in a bare TOML key -- made every boot die in 1 s, the
+    watchdog called it a bad boot, and the loader rolled the checkout
+    back to the previous tag. The rollback was pure loss: the code was
+    fine, the file was still broken, and a second `run` would have
+    walked back another tag for the same reason.
+
+    Only reports; the caller decides. Never prints a value, only the
+    file, the line and the column -- this is a secrets file.
+    """
+    import tomllib
+
+    candidates = [repo / "simorgh.toml"]
+    data_dir = Path(os.environ.get("SIMORGH_RUNTIME_DATA_DIR") or (Path.home() / ".simorgh"))
+    candidates.append(data_dir / "simorgh.toml")
+    config: dict = {}
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            with path.open("rb") as fh:
+                config = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            return False, f"{path} is not valid TOML: {exc}"
+        break
+
+    named = str((config.get("secrets") or {}).get("file") or "${data_dir}/secrets.toml")
+    secrets = Path(named.replace("${data_dir}", str(data_dir)))
+    if secrets.is_file():
+        try:
+            with secrets.open("rb") as fh:
+                tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            return False, (f"{secrets} is not valid TOML: {exc}. "
+                           f"A key with a colon in it (`vault:x:y = ...`) needs quoting, or the "
+                           f"plain name the code looks up (HOME_ASSISTANT_TOKEN).")
+    return True, ""
 
 
 def launch_sim(repo: Path, notes: Path, sim_args: list[str], *, argv: list[str] | None = None,
