@@ -59,6 +59,8 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `task.lease_heartbeat` | `messages/task.py::TaskLeaseHeartbeat` | worker.py:374 | Every `min(heartbeat_s, lease/3)` while a claimed task runs |
 | `task.started` | `messages/task.py::TaskStarted` | session.py:890 | Start of every attempt (also appended to the ledger) |
 | `task.step` | `messages/task.py::TaskStep` | session.py:918, 1338, 1943 | Every recorded step, thinking announcements, cognition errors |
+
+`task.step` carries `provider` (2026-09-20): which model served the think that step paid for, from `cognition.think.reply`, and only on a step a think contributed to -- attaching the last provider to a pure tool step would say a model served something it did not. Cognition always named it and nothing carried it further, so a benchmark run could not check its own headline: the creator's GAIA run was labelled with one model while six provider changes went past in the log.
 | `task.paused` | `messages/task.py::TaskPaused` | session.py:1917 | Session saw the system paused |
 | `task.completed` / `task.failed` / `task.blocked` | `messages/task.py` | worker.py:454-492 | Terminal outcome; appended to `task:<id>` then published |
 | `turn.completed` | `messages/task.py::TurnCompleted` | worker.py:523 | After every terminal outcome of every kind (Interface/Voice resolve chat by `session_id`; Memory feeds episodic and working memory) |

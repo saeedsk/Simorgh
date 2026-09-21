@@ -36,6 +36,7 @@ Exact subscription list: `_CONSUMES` (`service.py:32-42`). The five `task.*` sub
 | `task.step` | `messages/task.py::TaskStep` | simorgh/benchmark/runner.py | sums `cost_usd` and counts steps per case task |
 | `task.completed` | `messages/task.py::TaskCompleted` | simorgh/benchmark/runner.py | the case's answer (`result_summary`; `floor` means skipped) |
 | `task.failed` | `messages/task.py::TaskFailed` | simorgh/benchmark/runner.py | case outcome with its reason |
+| `task.step` | `messages/task.py::TaskStep` | simorgh/benchmark/runner.py | steps, cost, and `provider` -- which model actually served the think. Collected per run into `RunRecord.providers`; `served_by_others` is the ones that are not the model the run is LABELLED with, and the card says so in red. A pass rate under the wrong model's name is worse than none, because it gets compared against other models' |
 | `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/benchmark/runner.py | NOT terminal (2026-09-20): the answer it had is kept and scored if nothing follows, but the runner keeps listening for `blocked_grace_s` and a `task.completed` within it replaces the blocked answer. A blocked task usually resumes -- the creator's GAIA run scored two cases wrong the moment they blocked, and both then completed, one correctly, into a suite that had stopped listening |
 
 ## Produces

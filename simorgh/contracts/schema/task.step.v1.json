@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/task.step.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "The trajectory Verification and Reflection read.",
+  "description": "The trajectory Verification and Reflection read. `provider` names the model that actually served the think this step paid for -- present only on a step a think contributed to. Added 2026-09-20 because a benchmark run cannot otherwise check its own headline: the creator's GAIA run was labelled with one model while six provider changes went past in the log.",
   "properties": {
     "action_id": {
       "type": [
@@ -35,6 +35,12 @@
         "verify"
       ],
       "type": "string"
+    },
+    "provider": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "step_no": {
       "type": "integer"

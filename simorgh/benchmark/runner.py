@@ -78,6 +78,8 @@ class Runner:
         # from that alone -- so it named the last case finished, or
         # nothing, never the one actually running (observer, 2026-09-10).
         self._on_start = on_start or (lambda **_: None)
+        #: Every model that actually served a think this run.
+        self._served: set[str] = set()
         # SWE-bench checkouts and logs are written relative to this, the
         # same root the file tools resolve their paths against -- a
         # checkout Sim cannot address by the path we give it is a
@@ -288,6 +290,7 @@ class Runner:
             # Read before `watch.stop()`, and after the outcome, so a
             # cancelled or blocked case still reports what it spent.
             cost_usd = watch.cost(task_id)
+            self._served.update(watch.providers(task_id))
             if not answer_text and error:
                 # A case we gave up on used to keep its worker. The
                 # worker takes one task at a time, so case 1 timing out
@@ -408,6 +411,7 @@ class Runner:
         finally:
             if not record.finished_at:
                 record.finished_at = self._now()
+        record.providers = sorted(self._served)
         record.partial = record.partial or len(record.results) < len(suite)
         return record
 
@@ -427,6 +431,7 @@ class _AnswerWatch:
         # nothing was reading it -- so every benchmark run reported a
         # cost of $0.00 for real, billed model calls.
         self._cost: dict[str, float] = {}
+        self._providers: dict[str, set] = {}
         self._outcomes: dict[str, tuple[str, dict]] = {}
         self._waiters: dict[str, asyncio.Future] = {}
         # When each task was first seen running, so the answer clock can
@@ -444,6 +449,14 @@ class _AnswerWatch:
                 self._cost[task_id] = self._cost.get(task_id, 0.0) + float(payload["cost_usd"])
             if payload.get("ok") is not None:
                 self._steps[task_id] = self._steps.get(task_id, 0) + 1
+            if payload.get("provider"):
+                # Which model ACTUALLY served, as against the one on the
+                # run's label. The creator's GAIA run said "as
+                # zai-org/GLM-5.3-Flash" and the log showed six provider
+                # changes, Gemini and the floor among them -- a number
+                # with the wrong model's name on it is more dangerous
+                # than no number, because it gets compared to others.
+                self._providers.setdefault(task_id, set()).add(str(payload["provider"]))
 
         def _finisher(kind: str):
             async def _on(message: Message) -> None:
@@ -492,6 +505,10 @@ class _AnswerWatch:
 
     def cost(self, task_id: str) -> float:
         return round(self._cost.get(task_id, 0.0), 6)
+
+    def providers(self, task_id: str) -> tuple[str, ...]:
+        """Every model that served a think for this case."""
+        return tuple(sorted(self._providers.get(task_id, ())))
 
     def _mark_started(self, task_id: str) -> None:
         if not task_id:

@@ -247,6 +247,22 @@ class RunRecord:
     # really taken 31 seconds, because the round trip through the history
     # summary dropped everything the synthetic results could not carry.
     totals: dict = field(default_factory=dict)
+    #: Which models actually served a think during this run, as
+    #: `task.step` reported them. `model` above is what was ASKED for,
+    #: and the two came apart badly in the creator's GAIA run on
+    #: 2026-09-20: the card said "as zai-org/GLM-5.3-Flash" while the
+    #: log showed six provider changes, Gemini and the floor among
+    #: them. A pass rate attributed to the wrong model is worse than no
+    #: pass rate, because it gets compared against other models'.
+    providers: list[str] = field(default_factory=list)
+
+    @property
+    def served_by_others(self) -> list[str]:
+        """Providers that ran but are not the one this run is labelled
+        with. Empty is the good case and the one to assert on."""
+        wanted = (self.model or "").lower()
+        return sorted(p for p in self.providers
+                      if p and p.lower() not in wanted and wanted not in p.lower())
 
     # -- scoring -------------------------------------------------------
     @property
@@ -304,6 +320,7 @@ class RunRecord:
             "accuracy": round(self.accuracy, 4), "seconds": round(self.seconds, 2),
             "cost_usd": round(self.cost_usd, 6), "partial": self.partial, "note": self.note,
             "blocked": self.blocked, "blocked_but_correct": self.blocked_but_correct,
+            "providers": list(self.providers), "served_by_others": self.served_by_others,
             "by_level": {level: list(pair) for level, pair in self.by_level().items()},
         }
         if with_cases:
@@ -382,6 +399,7 @@ class RunRecord:
         note = "(recorded in summary; per-case detail not stored)"
         blocked = int(payload.get("blocked") or 0)
         blocked_correct = min(int(payload.get("blocked_but_correct") or 0), blocked)
+        self.providers = [str(x) for x in (payload.get("providers") or []) if x]
         blocked_wrong = blocked - blocked_correct
         marked: list[CaseResult] = []
         for result in scored:

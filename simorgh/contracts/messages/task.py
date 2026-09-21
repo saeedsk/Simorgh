@@ -82,7 +82,12 @@ TaskStep = define(t.TASK_STEP, [
     O("confidence", Float),
     O("cost_usd", Float),
     O("tokens", Int),
-], doc="The trajectory Verification and Reflection read.")
+    O("provider", Str),
+], doc="The trajectory Verification and Reflection read. `provider` names the model that "
+       "actually served the think this step paid for -- present only on a step a think "
+       "contributed to. Added 2026-09-20 because a benchmark run cannot otherwise check its "
+       "own headline: the creator's GAIA run was labelled with one model while six provider "
+       "changes went past in the log.")
 TaskLeaseHeartbeat = define(t.TASK_LEASE_HEARTBEAT, [
     F("task_id", Str),
     F("worker_id", Str),

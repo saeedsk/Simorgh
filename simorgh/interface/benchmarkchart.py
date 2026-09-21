@@ -210,6 +210,19 @@ def summary(record: dict, *, width: int = 24, enabled: bool | None = None) -> st
         if kept:
             text += f", {kept} of them right"
         lines.append("  " + style(f"⚠ {text}", "yellow", enabled=on))
+
+    # The number is attributed to the model on the label. When
+    # something else served the thinks, say so louder than the score:
+    # the creator's GAIA run said "as zai-org/GLM-5.3-Flash" while six
+    # provider changes went past in the log, and a pass rate under the
+    # wrong model's name gets compared against other models' and is
+    # worse than no pass rate at all.
+    others = [str(p) for p in (record.get("served_by_others") or []) if p]
+    if others:
+        lines.append("  " + style(
+            f"⚠ not only {record.get('model') or 'the named model'} answered: "
+            f"{', '.join(others)} also served -- this score is not one model's",
+            "red", enabled=on))
     return "\n".join(lines)
 
 

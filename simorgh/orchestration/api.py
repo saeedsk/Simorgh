@@ -52,6 +52,9 @@ class Step:
     confidence: float | None = None
     cost_usd: float = 0.0
     tokens: int = 0
+    #: Which model actually served the think this step paid for.
+    #: Empty on a step no think contributed to.
+    provider: str = ""
     # The Guardian refused the call before the tool ran. Distinct from
     # `ok=False`, which also covers a tool that ran and failed: a denied
     # write wrote nothing, and Verification must not count it as one
@@ -125,6 +128,10 @@ class Session:
     # whose whole job is to be true.
     spent_usd: float = 0.0
     spent_tokens: int = 0
+    #: Which model served the most recent think. Carried onto
+    #: `task.step` so a benchmark can check its own headline against
+    #: what actually ran, rather than against what was asked for.
+    last_provider: str = ""
     messages: list[dict] = field(default_factory=list)  # the running cognition.think transcript
     # Whether this session has already told the model that a marker
     # buried mid-sentence is not a tool call. Once is a correction; a

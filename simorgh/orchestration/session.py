@@ -1435,6 +1435,12 @@ class SessionRunner:
         # `task.step` and, downstream, on a benchmark run.
         session.spent_usd += float(reply.payload.get("cost_usd") or 0.0)
         session.spent_tokens += int(reply.payload.get("tokens") or 0)
+        # Which model actually answered. Cognition has always said so in
+        # the reply and nothing carried it any further, so a benchmark
+        # run could not check its own headline: the creator's GAIA run
+        # on 2026-09-20 was labelled with one model while six provider
+        # changes went past in the log, Gemini and the floor among them.
+        session.last_provider = str(reply.payload.get("provider") or "")
         if reply.payload.get("ok") is False:
             # Live-caught (v2 live trial, 2026-09-06): this used to just
             # return None, and every caller collapsed that into a silent,
@@ -2407,6 +2413,12 @@ class SessionRunner:
             payload["cost_usd"] = step.cost_usd
         if step.tokens:
             payload["tokens"] = step.tokens
+        # Only on a step a think paid for: attaching the last provider
+        # to a pure tool step would say a model served something it did
+        # not.
+        provider = step.provider or (session.last_provider if step.cost_usd else "")
+        if provider:
+            payload["provider"] = provider
         await self._append(session, topics.TASK_STEP, payload)
         await self._publish(session, topics.TASK_STEP, payload)
 
