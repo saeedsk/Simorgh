@@ -17,6 +17,12 @@ task = "Sim's own proposal is not 'a voice I cannot place'"
 since = "2026-09-21T01:34:02+00:00"
 until = "2026-09-21T09:34:02+00:00"
 
+[locks.initiative]
+by = "opus-main"
+task = "stage 10 item 8: something worth telling somebody, sought under a cap"
+since = "2026-09-21T01:51:59+00:00"
+until = "2026-09-21T09:51:59+00:00"
+
 [locks.interface]
 by = "opus-main"
 task = "a long answer was cut off instead of wrapped on the completion line"

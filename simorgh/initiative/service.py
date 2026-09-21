@@ -37,6 +37,8 @@ from .api import (
     CHECK_IN_AGAIN_S,
     COMPOSED,
     COOLDOWN,
+    RESEARCH_MAX_USD,
+    RESEARCH_PER_DAY,
     NOT_NOW_HOLD_S,
     PERSONAL,
     Notice,
@@ -56,10 +58,11 @@ VERSION = "0.2.0"
 _CONSUMES = (
     topics.CAMERA_EVENT, topics.CAMERA_DESCRIBED, topics.PERCEPT_TIME_SCHEDULED, topics.CURIOSITY_SHARE_PROPOSED,
     topics.TURN_COMPLETED,
-    topics.WORLD_WELLBEING_CHANGED, topics.SYSTEM_TICK_SLEEP,
+    topics.WORLD_WELLBEING_CHANGED, topics.SYSTEM_TICK_SLEEP, topics.SYSTEM_TICK_IDLE,
+    topics.TASK_COMPLETED,
 )
 _PRODUCES = (topics.ACTION_PROPOSED, topics.INITIATIVE_OFFERED, topics.INITIATIVE_SUPPRESSED,
-             topics.COGNITION_THINK, topics.WORLD_ENV_QUERY)
+             topics.COGNITION_THINK, topics.WORLD_ENV_QUERY, topics.TASK_CREATE)
 
 #: How long to wait for the model to write a composed line. Unprompted
 #: speech is never urgent enough to hold anything else up.
@@ -87,6 +90,11 @@ class Service:
         self._pushback_window_s = 10 * 60.0
         self._delivered_today = 0
         self._day = 0
+        #: Things Sim went and found out today, and for whom
+        #: (`RESEARCH_PER_DAY`). Reset with `_day`.
+        self._sought_today = 0
+        #: task_id -> the person it was sought for.
+        self._seeking: dict[str, str] = {}
         self.do_not_disturb: set[str] = set()
 
     async def start(self, ctx: Context) -> None:
@@ -99,6 +107,8 @@ class Service:
             await ctx.bus.subscribe(topics.WORLD_WELLBEING_CHANGED, self._on_wellbeing_changed),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
             await ctx.bus.subscribe(topics.MEMORY_FACT_STORED, self._on_fact_stored),
+            await ctx.bus.subscribe(topics.SYSTEM_TICK_IDLE, self._on_idle),
+            await ctx.bus.subscribe(topics.TASK_COMPLETED, self._on_task_completed),
         ]
 
     async def stop(self) -> None:
@@ -135,6 +145,78 @@ class Service:
         kinds = [str(k) for k in (message.payload.get("kinds") or [])]
         kind = "safety_alert" if "person" in kinds and "front" in camera.lower() else "event_fyi"
         await self.offer(Notice(kind=kind, text=f"{camera}: {text}", ref=f"camera:{camera}"))
+
+    async def _on_idle(self, message: Message) -> None:
+        """Nothing is happening, and somebody who said yes is here.
+
+        The other half of `interest_share` (stage 10 item 8). The
+        first half reroutes what Growth happens to find; this one
+        goes and FINDS something, once or twice a day, about what
+        one person in the room actually cares about. A friend who
+        only ever passes on what drifted past them is a feed.
+
+        Three gates, all cheap, all before any money is spent: the
+        day's cap (`RESEARCH_PER_DAY`), somebody present who granted
+        `interest_shares` and has an interest recorded, and the
+        ordinary `interest_share` cooldown for that person -- so the
+        thing Sim found this morning is not chased by another this
+        afternoon.
+
+        What comes back is offered, not said: it goes through
+        `offer()` like everything else, which is what weighs the
+        hour, the room and the channel.
+        """
+        if self._ctx is None or RESEARCH_PER_DAY <= 0:
+            return
+        now = self._ctx.clock.now()
+        day = int(now // 86_400)
+        if day != self._day:
+            self._day, self._delivered_today, self._sought_today = day, 0, 0
+        if self._sought_today >= RESEARCH_PER_DAY or self._seeking:
+            return          # one at a time: a queue of these is a feed again
+        situation = await self._situation()
+        for person in await self._people():
+            if person.name not in situation.people or not person.interests:
+                continue
+            if companion_gate(Notice(kind="interest_share", text="", person=person.name), person):
+                continue
+            since = self._last_by_kind.get(f"interest_share:{person.name}")
+            if since is not None and (now - since) < COOLDOWN.get("interest_share", 0.0):
+                continue
+            await self._seek_for(person, person.interests[0], now)
+            return
+
+    async def _seek_for(self, person, interest: str, now: float) -> None:
+        """One bounded research task about `interest`, for `person`."""
+        ctx = self._ctx
+        task_id = uuid.uuid4().hex[:12]
+        self._seeking[task_id] = person.name
+        self._sought_today += 1
+        # The sourcebook and `web_search` are fine HERE: this is news
+        # about lego robotics, not advice about a person.
+        await ctx.bus.publish(Message.new(topics.TASK_CREATE, source=ctx.bus.source, payload={
+            "kind": "research", "origin": "curiosity",
+            "description": (f"One interesting thing from the last week about {interest}, for {person.name}. "
+                            "One short paragraph in plain words, with the source. "
+                            "If there is nothing new worth telling somebody, say so and stop."),
+            "subject": interest, "max_steps": 6,
+            "idempotency_key": task_id,
+        }))
+
+    async def _on_task_completed(self, message: Message) -> None:
+        """Something Sim went to find out came back. Offer it."""
+        payload = message.payload or {}
+        task_id = str(payload.get("task_id") or "")
+        person = self._seeking.pop(task_id, "")
+        if not person:
+            return
+        text = " ".join(str(payload.get("text") or payload.get("summary") or "").split())
+        if not text:
+            await self._suppress(Notice(kind="interest_share", text="", person=person),
+                                 f"nothing worth telling {person} came back")
+            return
+        await self.offer(Notice(kind="interest_share", text=text, person=person,
+                                ref=f"sought:{task_id}"))
 
     async def _on_turn_completed(self, message: Message) -> None:
         """What the person said after Sim asked how they were.

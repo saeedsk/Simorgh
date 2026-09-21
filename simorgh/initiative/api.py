@@ -210,6 +210,17 @@ _NOT_NOW = re.compile(r"\b(?:not now|not right now|i'?m fine|im fine|i am fine|n
 _STOP_ASKING = re.compile(r"\b(?:stop asking|don'?t ask me|dont ask me|stop checking|"
                           r"never ask me|i don'?t want you asking|stop that)\b", re.I)
 
+#: How many things Sim may go and FIND OUT, per day, to have
+#: something to tell somebody (stage 10 item 8).
+#:
+#: Two, and a nickel each. The cap is the whole safety of this
+#: feature: "Sim looks things up about the family" is charming at two
+#: a day and alarming at fifty, and the difference is a number
+#: somebody chose rather than a budget somebody forgot. Zero turns it
+#: off entirely.
+RESEARCH_PER_DAY: int = 2
+RESEARCH_MAX_USD: float = 0.05
+
 #: How long "not now" holds check-ins for that person.
 NOT_NOW_HOLD_S: float = 24 * 3600.0
 
@@ -363,6 +374,7 @@ def acceptable_line(text: str) -> tuple[str, str]:
 
 
 __all__ = ["ALONE_DISCOUNT", "CHANNELS", "CHANNEL_COST", "CHECK_IN_AGAIN_S", "COMPOSED", "COOLDOWN",
+           "RESEARCH_MAX_USD", "RESEARCH_PER_DAY",
            "NOT_NOW_HOLD_S", "pushback",
            "DAILY_CAP", "Delivery",
            "FORBIDDEN_WORDS", "LINE_MAX_CHARS", "NOTHING", "Notice", "PERSONAL", "PRIVATE", "REACH", "Situation",

@@ -548,3 +548,126 @@ class AnInterestIsAskedForNotAssumed(unittest.IsolatedAsyncioTestCase):
         service, published = self._service(self._person())
         await service._on_fact_stored(self._fact(predicate="lives_in", object="the blue room"))
         self.assertEqual(published, [])
+
+
+class SomethingWorthTelling(unittest.IsolatedAsyncioTestCase):
+    """Stage 10 item 8: Sim goes and finds something out, under a cap.
+
+    The reroute half of `interest_share` passes on whatever Growth
+    happened to turn up. A friend who only ever does that is a feed.
+    This is the other half -- once or twice a day, about what one
+    person in the room actually cares about -- and the cap is its
+    whole safety: "Sim looks things up about the family" is charming
+    at two a day and alarming at fifty.
+    """
+
+    def _service(self, *, people, present, sought=0, last=None):
+        import types
+
+        from simorgh.initiative.api import Situation
+        from simorgh.initiative.service import Service
+
+        service = Service.__new__(Service)
+        published = []
+
+        class _Bus:
+            source = "initiative"
+
+            async def publish(self, message):
+                published.append(message)
+
+        service._ctx = types.SimpleNamespace(bus=_Bus(), clock=types.SimpleNamespace(now=lambda: 100_000.0))
+        service._day = int(100_000.0 // 86_400)
+        service._delivered_today = 0
+        service._sought_today = sought
+        service._seeking = {}
+        service._last_by_kind = dict(last or {})
+        service.published = published
+
+        async def _situation():
+            return Situation(people={name: "kitchen" for name in present})
+
+        async def _people():
+            return list(people)
+
+        service._situation = _situation
+        service._people = _people
+        return service
+
+    def _person(self, name="Aran", role="child", interests=("lego robotics",), permissions=("interest_shares",)):
+        from simorgh.contracts.people import Person
+
+        return Person(person_id=name.lower(), name=name, role=role,
+                      interests=interests, permissions=permissions)
+
+    async def test_it_seeks_for_a_consented_person_who_is_here(self):
+        service = self._service(people=[self._person()], present=["Aran"])
+        await service._on_idle(None)
+        self.assertEqual(len(service.published), 1)
+        payload = service.published[0].payload
+        self.assertEqual(payload["kind"], "research")
+        self.assertIn("lego robotics", payload["description"])
+        self.assertIn("Aran", payload["description"])
+        self.assertEqual(service._sought_today, 1)
+
+    async def test_nobody_in_the_room_means_nothing_is_sought(self):
+        service = self._service(people=[self._person()], present=[])
+        await service._on_idle(None)
+        self.assertEqual(service.published, [])
+
+    async def test_somebody_who_never_said_yes_is_not_researched(self):
+        service = self._service(people=[self._person(permissions=())], present=["Aran"])
+        await service._on_idle(None)
+        self.assertEqual(service.published, [])
+
+    async def test_the_day_s_cap_stops_it(self):
+        from simorgh.initiative.api import RESEARCH_PER_DAY
+
+        service = self._service(people=[self._person()], present=["Aran"], sought=RESEARCH_PER_DAY)
+        await service._on_idle(None)
+        self.assertEqual(service.published, [])
+
+    async def test_the_cooldown_for_that_person_stops_it(self):
+        service = self._service(people=[self._person()], present=["Aran"],
+                                last={"interest_share:Aran": 100_000.0 - 60.0})
+        await service._on_idle(None)
+        self.assertEqual(service.published, [])
+
+    async def test_one_at_a_time(self):
+        service = self._service(people=[self._person()], present=["Aran"])
+        service._seeking = {"t1": "Aran"}
+        await service._on_idle(None)
+        self.assertEqual(service.published, [], "a queue of these is a feed again")
+
+    async def test_what_comes_back_is_offered_not_said(self):
+        from simorgh.contracts.envelope import Message
+        from simorgh.contracts import topics
+
+        service = self._service(people=[self._person()], present=["Aran"])
+        offered = []
+
+        async def _offer(notice, **_kw):
+            offered.append(notice)
+
+        service.offer = _offer
+        service._seeking = {"t1": "Aran"}
+        await service._on_task_completed(Message.new(
+            topics.TASK_COMPLETED, source="orchestration",
+            payload={"task_id": "t1", "status": "completed",
+                     "text": "A school in Denmark built a lego sorter that runs on a phone camera."}))
+        self.assertEqual(len(offered), 1)
+        self.assertEqual(offered[0].kind, "interest_share")
+        self.assertEqual(offered[0].person, "Aran")
+        self.assertIn("lego sorter", offered[0].text)
+
+    async def test_a_task_nobody_sought_is_ignored(self):
+        from simorgh.contracts.envelope import Message
+        from simorgh.contracts import topics
+
+        service = self._service(people=[self._person()], present=["Aran"])
+        offered = []
+        service.offer = lambda notice, **_kw: offered.append(notice)
+        await service._on_task_completed(Message.new(
+            topics.TASK_COMPLETED, source="orchestration",
+            payload={"task_id": "someone-elses", "status": "completed", "text": "hello"}))
+        self.assertEqual(offered, [])
