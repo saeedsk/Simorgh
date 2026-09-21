@@ -310,10 +310,20 @@ class HomeReadingToolTestCase(_ToolCase):
         self.assertTrue(result.ok, result.error)
         self.assertIn("temperature", result.output)
 
-    async def test_state_refuses_an_ambiguous_name_with_the_candidates(self):
+    async def test_state_of_an_ambiguous_name_shows_every_match(self):
+        """Reading is not acting.
+
+        This used to refuse, with the candidates listed inside the
+        refusal -- which is a list, delivered rudely. The creator typed
+        `home state front` on 2026-09-20, matched forty things, and was
+        told no by a message that had already done the work. Ambiguity
+        costs something only when the next step turns one of them off,
+        and `home_call` still refuses there.
+        """
         result = await self._tools()["home_state"].run({"target": "kitchen"}, ctx=_ctx())
-        self.assertFalse(result.ok)
-        self.assertIn("light.kitchen_main", result.error)
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("light.kitchen_main", result.output)
+        self.assertGreater(len(result.metadata["rows"]), 1)
 
     async def test_describe_counts_the_house_and_names_the_services(self):
         result = await self._tools()["home_describe"].run({}, ctx=_ctx())

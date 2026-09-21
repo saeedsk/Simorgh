@@ -151,7 +151,15 @@ class HomeStateTool(_HomeTool):
             entity_ids = registry.resolve(str(args.get("target") or ""))
         except HomeUnavailable as exc:
             return ToolResult.from_exception(exc, f"refused: {exc}")
-        except (Ambiguous, NotFound) as exc:
+        except Ambiguous:
+            # Reading is not acting. `home state front` matching forty
+            # things is a reason to show forty things, not to refuse:
+            # ambiguity only costs something when the next step turns
+            # one of them off. The creator typed exactly this on
+            # 2026-09-20 and got a refusal with a list in it, which is
+            # a list, delivered rudely.
+            entity_ids = [e.entity_id for e in registry.search(str(args.get("target") or ""))]
+        except NotFound as exc:
             return ToolResult.refused(f"refused: {exc}")
 
         entities = [registry.by_id(entity_id) for entity_id in entity_ids]
