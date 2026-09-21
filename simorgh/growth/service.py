@@ -256,7 +256,10 @@ class Service:
         if table is None:
             raise LookupError("no competence table")
         estimate = table.estimate(task_type)
-        return float(estimate["mean"]), int(estimate["samples"])
+        # Rounded: `samples` is an effective count under exponential
+        # forgetting, and truncating loses a whole one at every
+        # boundary (stage 6 item 1).
+        return float(estimate["mean"]), int(round(float(estimate["samples"])))
 
     async def stop(self) -> None:
         for sub in self._subs:

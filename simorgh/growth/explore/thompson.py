@@ -90,7 +90,12 @@ def from_posterior(name: str, posterior, *, kind: str = "area") -> Unknown:
     """An `Unknown` from a `(alpha, beta, samples)` triple -- the shape
     `CompetenceTable.posterior` already returns."""
     alpha, beta, samples = posterior
-    return Unknown(name=name, kind=kind, alpha=float(alpha), beta=float(beta), samples=int(samples))
+    # ROUND, not truncate. Since exponential forgetting landed (stage
+    # 6 item 1) `samples` is an effective count, and five outcomes a
+    # few seconds apart come back as 4.999997 -- which `int()` turns
+    # into four, quietly losing a whole sample at every boundary.
+    return Unknown(name=name, kind=kind, alpha=float(alpha), beta=float(beta),
+                   samples=int(round(float(samples))))
 
 
 def order(unknowns, *, rng: random.Random, temperature: float = 1.0, recent=()) -> list[Unknown]:

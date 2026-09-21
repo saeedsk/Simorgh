@@ -45,11 +45,37 @@ class _Projection:
         self.applied_seq = event.seq
 
 
+#: How long it takes for an outcome to count half as much (stage 6
+#: item 1's "exponential forgetting, half-life config").
+#:
+#: Thirty days, because what Sim was bad at in the spring should not
+#: outvote what it is good at now, and a month is roughly how long a
+#: capability here survives without something changing under it. The
+#: alternative -- never forgetting -- makes the table a monument: a
+#: bad fortnight in a task type keeps routing away from it long after
+#: the bug behind it was fixed, and nothing it does afterwards can
+#: outweigh enough history.
+HALF_LIFE_S = 30.0 * 86_400.0
+
+#: Below this the sums are treated as gone. A table nobody has fed for
+#: a year should read as "no idea" (Beta(1,1)) rather than as a
+#: vanishing fraction of an opinion.
+FORGOTTEN_BELOW = 0.01
+
+
+def _aged(value: float, elapsed_s: float, half_life_s: float) -> float:
+    if value <= 0.0 or elapsed_s <= 0.0 or half_life_s <= 0.0:
+        return value
+    faded = value * (0.5 ** (elapsed_s / half_life_s))
+    return 0.0 if faded < FORGOTTEN_BELOW else faded
+
+
 class CompetenceTable(_Projection):
     stream_prefix = "learn:outcomes"
 
-    def __init__(self) -> None:
+    def __init__(self, *, half_life_s: float = HALF_LIFE_S) -> None:
         super().__init__()
+        self.half_life_s = max(0.0, float(half_life_s))
         self._by_type: dict[str, TaskTypeStats] = {}
         self._confidence_samples: dict[str, list[tuple[float, bool]]] = {}
 
@@ -66,6 +92,7 @@ class CompetenceTable(_Projection):
             duration_s=float(p.get("duration_s", 0.0)),
             strategy=p.get("strategy"),
             stated_confidence=p.get("stated_confidence"),
+            at=float(getattr(event, "ts", 0.0) or 0.0),
         )
 
     def state(self) -> dict:
@@ -73,8 +100,9 @@ class CompetenceTable(_Projection):
             "by_type": {
                 t: {
                     "n": s.n, "successes_w": s.successes_w, "cost_sum": s.cost_sum, "dur_sum": s.dur_sum,
+                    "at": s.at,
                     "calib_bins": {str(k): v for k, v in s.calib_bins.items()},
-                    "strategies": {k: {"n": v.n, "successes_w": v.successes_w, "cost_sum": v.cost_sum}
+                    "strategies": {k: {"n": v.n, "successes_w": v.successes_w, "cost_sum": v.cost_sum, "at": v.at}
                                    for k, v in s.strategies.items()},
                 }
                 for t, s in self._by_type.items()
@@ -85,22 +113,50 @@ class CompetenceTable(_Projection):
     def load(self, state: dict) -> None:
         self._by_type = {}
         for t, d in state.get("by_type", {}).items():
-            stats = TaskTypeStats(n=d["n"], successes_w=d["successes_w"], cost_sum=d["cost_sum"], dur_sum=d["dur_sum"])
+            stats = TaskTypeStats(n=d["n"], successes_w=d["successes_w"], cost_sum=d["cost_sum"],
+                                  dur_sum=d["dur_sum"], at=float(d.get("at", 0.0)))
             stats.calib_bins = {int(k): v for k, v in d.get("calib_bins", {}).items()}
             stats.strategies = {k: StrategyStats(**v) for k, v in d.get("strategies", {}).items()}
             self._by_type[t] = stats
         self._confidence_samples = {t: [tuple(x) for x in v] for t, v in state.get("confidence_samples", {}).items()}
 
     # -- writer ---------------------------------------------------------------
+    def _age(self, stats, at: float) -> None:
+        """Fade what is already there to `at`, before adding to it.
+
+        Aged on write rather than on read: the sums are all this table
+        keeps, so decaying them in place is exact and costs one
+        multiply, where decaying at read time would need every
+        outcome's timestamp kept forever. The cost is that a table
+        nobody has written to does not fade until the next outcome
+        arrives -- which is the right way round, because a stale
+        table's real problem is that nothing is happening, and
+        inventing decay for it would just hide that.
+        """
+        if not at or not stats.at:
+            stats.at = at or stats.at
+            return
+        elapsed = at - stats.at
+        if elapsed <= 0.0:
+            return          # out-of-order replay: never age backwards
+        stats.n = _aged(stats.n, elapsed, self.half_life_s)
+        stats.successes_w = _aged(stats.successes_w, elapsed, self.half_life_s)
+        stats.cost_sum = _aged(stats.cost_sum, elapsed, self.half_life_s)
+        if hasattr(stats, "dur_sum"):
+            stats.dur_sum = _aged(stats.dur_sum, elapsed, self.half_life_s)
+        stats.at = at
+
     def _record(self, *, task_type: str, succeeded: bool, weight: float, cost_usd: float, duration_s: float,
-                strategy: str | None, stated_confidence: float | None) -> None:
+                strategy: str | None, stated_confidence: float | None, at: float = 0.0) -> None:
         stats = self._by_type.setdefault(task_type, TaskTypeStats())
+        self._age(stats, at)
         stats.n += 1
         stats.successes_w += weight if succeeded else 0.0
         stats.cost_sum += cost_usd
         stats.dur_sum += duration_s
         if strategy:
             s = stats.strategies.setdefault(strategy, StrategyStats())
+            self._age(s, at)
             s.n += 1
             s.successes_w += weight if succeeded else 0.0
             s.cost_sum += cost_usd

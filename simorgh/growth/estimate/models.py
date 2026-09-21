@@ -35,9 +35,15 @@ class Outcome:
 
 @dataclass
 class StrategyStats:
-    n: int = 0
+    #: A float, not a count: with exponential forgetting the effective
+    #: number of samples decays between outcomes, so 12 last month is
+    #: worth about 6 this month at a 30-day half-life.
+    n: float = 0.0
     successes_w: float = 0.0
     cost_sum: float = 0.0
+    #: When these sums were last aged to. 0 means "never aged", which
+    #: is how a table written before forgetting existed loads.
+    at: float = 0.0
 
     def rate(self) -> float:
         return (self.successes_w + 1) / (self.n + 2)
@@ -45,10 +51,11 @@ class StrategyStats:
 
 @dataclass
 class TaskTypeStats:
-    n: int = 0
+    n: float = 0.0
     successes_w: float = 0.0
     cost_sum: float = 0.0
     dur_sum: float = 0.0
+    at: float = 0.0
     calib_bins: dict[int, list[int]] = field(default_factory=dict)  # bin -> [n, hits]
     strategies: dict[str, StrategyStats] = field(default_factory=dict)
 

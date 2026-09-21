@@ -136,7 +136,8 @@ class TheAcceptanceCase(unittest.TestCase):
         self.assertAlmostEqual(estimate["alpha"], 5.5, places=3)
         self.assertAlmostEqual(estimate["beta"], 5.0, places=3)
         self.assertAlmostEqual(estimate["mean"], 5.5 / 10.5, places=3)
-        self.assertEqual(estimate["samples"], 12, "five outcomes and seven eval cases")
+        self.assertAlmostEqual(estimate["samples"], 12, places=3,
+                               msg="five outcomes and seven eval cases")
         self.assertEqual(estimate["eval_suite"], "trials")
 
 

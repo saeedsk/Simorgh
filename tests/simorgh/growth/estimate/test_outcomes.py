@@ -230,7 +230,11 @@ class EachTurnOfAReusedSessionIsItsOwnOutcomeTestCase(TestOutcomeRecorder):
         await self._complete("sess-abc")
         stored = await self.ledger.read("learn:outcomes", limit=None)
         self.assertEqual(len(stored), 2, "every turn is an outcome; one key for all of them drops the rest")
-        self.assertEqual(self.competence.samples("chat"), 2)
+        # An EFFECTIVE sample count since exponential forgetting landed
+        # (stage 6 item 1): three seconds apart at a 30-day half-life
+        # is a decay of about 1e-11, which is exactly right and is
+        # not 2.0 on the nose.
+        self.assertAlmostEqual(self.competence.samples("chat"), 2, places=6)
 
     async def test_a_redelivered_completion_is_still_only_one_outcome(self):
         await self._seed_turn("sess-abc", at=100.0, cost=0.000627, took=0.485)

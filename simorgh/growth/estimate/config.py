@@ -14,6 +14,13 @@ from typing import Any, Mapping
 @dataclass(frozen=True)
 class Config:
     explore_bonus: float = 0.15
+    # How long before an outcome counts half as much (stage 6 item 1's
+    # exponential forgetting). What Sim was bad at in the spring must
+    # not outvote what it is good at now: without this, a bad
+    # fortnight keeps routing away from a task type long after the bug
+    # behind it was fixed, and nothing it does afterwards can outweigh
+    # enough history. 0 turns forgetting off.
+    competence_half_life_days: float = 30.0
     min_samples_for_trust: int = 5
     blocked_sample_weight: float = 0.5
     # How much a completion nobody checked is worth, against a verified

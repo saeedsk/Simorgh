@@ -86,7 +86,7 @@ class TheTargetSpace(unittest.TestCase):
                               payload={"task_type": "patch", "succeeded": False, "weight": 1.0,
                                        "cost_usd": 0.0, "duration_s": 1.0}))
         found = unknowns_from(competence=table, task_types=["patch"])
-        self.assertEqual(found[0].samples, 5)
+        self.assertAlmostEqual(found[0].samples, 5, places=6)
         self.assertLess(found[0].mean, 0.5, "five failures is not a flat prior")
 
 

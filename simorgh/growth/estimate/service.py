@@ -19,6 +19,10 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from .competence import CompetenceTable
+
+
+def _half_life_s(config: Config) -> float:
+    return max(0.0, float(getattr(config, "competence_half_life_days", 30.0))) * 86_400.0
 from .config import Config
 from .outcomes import OutcomeRecorder
 
@@ -44,7 +48,7 @@ class Service:
         self._config_from_caller = config
         self._config = config or Config()
         self._ctx: Context | None = None
-        self._competence = CompetenceTable()
+        self._competence = CompetenceTable(half_life_s=_half_life_s(self._config))
         self._subs: list = []
         self._degraded: str | None = None
 
@@ -63,6 +67,11 @@ class Service:
         # constructs the service with one is unaffected.
         if self._config_from_caller is None and ctx.config:
             self._config = Config.from_mapping(dict(ctx.config))
+            # The table was built before the section was read, so its
+            # half-life is the default until now (stage 6 item 1). Set
+            # rather than rebuilt: a rebuild would drop a projection the
+            # ledger may already have folded into.
+            self._competence.half_life_s = _half_life_s(self._config)
         self._outcomes = OutcomeRecorder(
             ledger=ctx.ledger, competence=self._competence, config=self._config,
             clock=ctx.clock.now, publish=self._publish,
