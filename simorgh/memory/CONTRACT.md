@@ -133,6 +133,8 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 
 ## Invariants
 
+Consolidation records what somebody says they care about with the predicate `interest`, from their own words only (stage 10 item 7). It is a fact like any other and is stored like one; it is NOT permission to raise the subject -- Initiative proposes `people add_interest` at tier 3 and the person confirms.
+
 - A record is never mutated or deleted: `forget`, `forget_window` and `prune` append to `memory:tombstones`; a tombstoned ref is never returned by `retrieve` and is not counted by `counts()`.
 - `prune` never re-tombstones an already-forgotten ref, and ranks by the forgetting score -- confidence decayed from the last time the record was *recalled* (not from when it was written), times the contradiction penalty, lifted by `1 + 0.5 * ln(1 + recalls)`. Insertion order is not in it, and neither is anything a writer claimed about importance.
 - `prune` never tombstones a record cited by a live fact's `source_refs`, whatever its score; what it spared is in `MemoryEngine._kept_back`.

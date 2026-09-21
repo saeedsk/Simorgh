@@ -98,6 +98,7 @@ class Service:
             await ctx.bus.subscribe(topics.CURIOSITY_SHARE_PROPOSED, self._on_share_proposed),
             await ctx.bus.subscribe(topics.WORLD_WELLBEING_CHANGED, self._on_wellbeing_changed),
             await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed),
+            await ctx.bus.subscribe(topics.MEMORY_FACT_STORED, self._on_fact_stored),
         ]
 
     async def stop(self) -> None:
@@ -170,6 +171,51 @@ class Service:
                                  f"{person} said not now; holding check-ins with them for a day")
             return
         await self._propose_revoke(person)
+
+    async def _on_fact_stored(self, message: Message) -> None:
+        """Somebody said what they care about. Ask before remembering
+        it as an interest (stage 10 item 7).
+
+        Consolidation records `interest` facts like any other fact,
+        with the sentence that said it. A fact is not a permission:
+        knowing that Aran likes lego robotics and being allowed to
+        bring lego robotics up unprompted are different things, and
+        the second is the person's to grant. So this proposes
+        `people interest add` at tier 3, with the quote in the
+        rationale so whoever confirms it can see what Sim heard --
+        and nothing reaches `Person.interests` without that yes.
+
+        Only for a person Sim knows, only for a fact about
+        themselves, and never twice for the same interest.
+        """
+        payload = message.payload or {}
+        if str(payload.get("predicate") or "").strip().lower() != "interest":
+            return
+        name = str(payload.get("person_scope") or "").strip()
+        interest = str(payload.get("object") or "").strip()
+        if not name or not interest:
+            return
+        person = await self._person(name)
+        if person is None:
+            return          # nobody Sim knows; an interest belongs to a person
+        if any(interest.lower() == held.lower() for held in person.interests):
+            return          # already theirs; asking again is the nuisance
+        quote = ""
+        for ref in (payload.get("source_refs") or []):
+            quote = str(ref)
+            break
+        ctx = self._ctx
+        await ctx.bus.publish(Message.new(topics.ACTION_PROPOSED, source=ctx.bus.source, payload={
+            "action_id": uuid.uuid4().hex,
+            "tool": "people",
+            "args": {"action": "add_interest", "name": person.name, "interest": interest},
+            "scope": {"paths": [], "network": False},
+            "reversibility": "reversible",
+            "rationale": (f"{person.name} said they care about {interest}"
+                          + (f" ({quote})" if quote else "")),
+            "proposed_by": ctx.bus.source,
+            "requester": "", "requester_channel": "initiative",
+        }))
 
     async def _propose_revoke(self, person: str) -> None:
         """Ask for `wellbeing_checkins` to be withdrawn. Tier 3: the

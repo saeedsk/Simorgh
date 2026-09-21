@@ -195,7 +195,16 @@ EXTRACT_INSTRUCTION = (
     "The quote must be copied from the transcript word for word. Record a fact only when the "
     "transcript states it; record nothing you inferred, guessed or would like to be true. A "
     "correction replaces what it corrects: record the corrected value, with the sentence that "
-    "corrected it as the quote. If nothing in the transcript holds, reply with []"
+    "corrected it as the quote. "
+    # Stage 10 item 7. An interest is a fact like any other and is
+    # recorded like one; what it is NOT is permission to bring the
+    # subject up, which is a separate thing a person says yes to.
+    "When somebody says what they care about -- a hobby, a subject they follow, something they "
+    "are working on -- record it with the predicate \"interest\": "
+    '{"subject": "Aran", "predicate": "interest", "object": "lego robotics", "person": "Aran", '
+    '"quote": "..."}. Only from what they said about themselves, never from what somebody else '
+    "said about them. "
+    "If nothing in the transcript holds, reply with []"
 )
 #: How many facts one cycle may record. A window of 20 exchanges that
 #: yields more than this is a model writing an essay, not reading facts.

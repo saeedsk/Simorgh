@@ -469,3 +469,82 @@ class BeingToldToLeaveIt(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pushback("It's been a lot, honestly"), "")
         self.assertEqual(pushback("Work is fine, home is the problem"), "")
+
+
+class AnInterestIsAskedForNotAssumed(unittest.IsolatedAsyncioTestCase):
+    """Stage 10 item 7: knowing what somebody likes, and being allowed
+    to bring it up, are different things.
+
+    Consolidation records `interest` facts like any other fact. That
+    is memory. Putting one on `Person.interests` is what lets Sim
+    start a conversation about it unprompted, and that is the
+    person's to grant: a tier-3 `people add_interest` with the
+    sentence Sim heard in the rationale, so whoever confirms it can
+    see what it is confirming.
+    """
+
+    def _service(self, person):
+        import types
+
+        from simorgh.initiative.service import Service
+
+        service = Service.__new__(Service)
+        published = []
+
+        class _Bus:
+            source = "initiative"
+
+            async def publish(self, message):
+                published.append(message)
+
+        service._ctx = types.SimpleNamespace(bus=_Bus(), clock=types.SimpleNamespace(now=lambda: 0.0))
+        service._published = published
+
+        async def _person(_name):
+            return person
+
+        service._person = _person
+        return service, published
+
+    def _fact(self, **over):
+        from simorgh.contracts.envelope import Message
+        from simorgh.contracts import topics
+
+        payload = {"id": "f1", "subject": "Aran", "predicate": "interest", "object": "lego robotics",
+                   "person_scope": "Aran", "valid_from": 0.0, "confidence": 0.9,
+                   "source_refs": ["I've been really into lego robotics lately"]}
+        payload.update(over)
+        return Message.new(topics.MEMORY_FACT_STORED, source="memory", payload=payload)
+
+    def _person(self, **over):
+        from simorgh.contracts.people import Person
+
+        fields = {"person_id": "aran", "name": "Aran", "role": "child", "interests": ()}
+        fields.update(over)
+        return Person(**fields)
+
+    async def test_it_proposes_rather_than_writing(self):
+        service, published = self._service(self._person())
+        await service._on_fact_stored(self._fact())
+        self.assertEqual(len(published), 1)
+        payload = published[0].payload
+        self.assertEqual(payload["tool"], "people")
+        self.assertEqual(payload["args"], {"action": "add_interest", "name": "Aran", "interest": "lego robotics"})
+        self.assertIn("lego robotics", payload["rationale"])
+        self.assertIn("really into lego robotics", payload["rationale"],
+                      "the quote belongs in the rationale: whoever says yes should see what Sim heard")
+
+    async def test_an_interest_already_held_is_not_proposed_again(self):
+        service, published = self._service(self._person(interests=("lego robotics",)))
+        await service._on_fact_stored(self._fact())
+        self.assertEqual(published, [])
+
+    async def test_a_fact_about_nobody_sim_knows_is_left_alone(self):
+        service, published = self._service(None)
+        await service._on_fact_stored(self._fact())
+        self.assertEqual(published, [])
+
+    async def test_an_ordinary_fact_is_not_an_interest(self):
+        service, published = self._service(self._person())
+        await service._on_fact_stored(self._fact(predicate="lives_in", object="the blue room"))
+        self.assertEqual(published, [])

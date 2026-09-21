@@ -108,7 +108,7 @@ Done 2026-09-20 (item 3, first cut): Initiative classes `check_in` (urgency 0.8,
 - [ ] Item 4: the tool verbs, the CLI, the onboarding step, with the creator's wording.
 - [x] Item 5: the state note for the speaker only -- `context.py::_how_they_seem`, one line in the per-turn note, asked for by name, dropped if slow; a typed turn with no speaker asks for nothing (2026-09-20).
 - [x] Item 6: composition rules and the forbidden-word guard were already in; "not now" (a 24 h hold) and "stop" (a tier-3 `people revoke` the person confirms) landed 2026-09-20, and so did the HOLD -- `session.say` waits up to 8 s for somebody mid-sentence, then speaks anyway.
-- [ ] Items 7-8: interests learnt and confirmed; unprompted conversation sought under a cap.
+- [x] Item 7 (2026-09-20): consolidation records an `interest` predicate from a person's own words, and Initiative proposes `people add_interest` at tier 3 with the quote in the rationale -- nothing reaches `Person.interests` without a yes. [ ] Item 8: unprompted conversation sought under a cap.
 - [ ] Item 9: the corpus named, indexed, cited; the open web excluded from this path.
 - [ ] Item 10: two weeks of shadow mode, the findings entry, the thresholds decided.
 
