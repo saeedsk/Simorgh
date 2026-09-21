@@ -105,6 +105,7 @@ def _pt():
         from prompt_toolkit.history import FileHistory, InMemoryHistory
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.lexers import Lexer
+        from prompt_toolkit.filters import Condition
         from prompt_toolkit.patch_stdout import patch_stdout
         from prompt_toolkit.styles import Style
     except ImportError as exc:  # pragma: no cover -- exercised by `available()`
@@ -113,6 +114,7 @@ def _pt():
         "PromptSession": PromptSession, "Completer": Completer, "Completion": Completion,
         "FileHistory": FileHistory, "InMemoryHistory": InMemoryHistory, "KeyBindings": KeyBindings,
         "Lexer": Lexer, "patch_stdout": patch_stdout, "Style": Style,
+        "Condition": Condition,
     }
 
 
@@ -306,6 +308,14 @@ def _style():
         # compared to full white").
         "sim.prompt": "#bcbcbc",
         "sim.rule": "#3a3a3a",
+        # An approval waiting in the prompt section. The question is
+        # the warning colour the rest of the TUI uses for "a person
+        # is needed"; the line under the cursor is bright and the
+        # rest are the ordinary body grey, so the eye lands on where
+        # it is rather than on the list.
+        "sim.ask": "#d7af5f bold",
+        "sim.ask.on": "#ffffff bold",
+        "sim.ask.off": "#9e9e9e",
         "sim.footer": "#6c6c6c",
         "sim.live": "#d0d0d0",
         # prompt_toolkit reverses the toolbar's colours by default, which
@@ -341,6 +351,7 @@ class Tui:
         history_path: Path | None = None,
         root: Path | None = None,
         double_interrupt_s: float = DOUBLE_INTERRUPT_S,
+        on_answer: Callable[[str, str], None] | None = None,
         now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._on_line = on_line
@@ -359,6 +370,11 @@ class Tui:
         # runs after `run()` returns, whatever caused that) can publish
         # `system.restart` instead of `system.stop`.
         self.stop_reason: str | None = None
+        #: The approval on screen, if any (`picker.Picker`). Answered
+        #: with the arrow keys, space and Enter; `on_answer` is called
+        #: with `(prompt_id, answer)` once it is confirmed.
+        self._picker = None
+        self._on_answer = on_answer
 
     # -- interrupts ---------------------------------------------------------
     def interrupt(self, buffer_was_empty: bool) -> str:
@@ -422,9 +438,82 @@ class Tui:
         base = Path(base).parent if base else Path("workspace")
         return base / "loop-errors.log"
 
+    # -- an approval, answered with the arrow keys (the creator, 2026-09-20) ----------
+    def ask(self, payload: dict) -> None:
+        """Show an approval in the prompt section. `answered` fires
+        with the answer once the person confirms it."""
+        from .picker import Picker
+
+        self._picker = Picker.for_prompt(payload)
+
+    def picking(self) -> bool:
+        from .picker import TYPING
+
+        return self._picker is not None and self._picker.stage != TYPING
+
+    def _picker_rows(self) -> list:
+        """The bullets, as prompt_toolkit fragments, above the input."""
+        picker = self._picker
+        if picker is None:
+            return []
+        rows: list = [("class:sim.ask", f"{picker.heading}\n")]
+        from .picker import TYPING
+
+        if picker.stage == TYPING:
+            return rows
+        for text, under, marked in picker.lines():
+            style = "class:sim.ask.on" if under else "class:sim.ask.off"
+            rows.append((style, f" {'❯' if under else ' '} {'◉' if marked else '○'} • {text}\n"))
+        return rows
+
+    def _typing_an_answer(self, line: str) -> bool:
+        """True when this line was the free-text answer to an
+        approval, and has been consumed as one."""
+        from .picker import TYPING
+
+        if self._picker is None or self._picker.stage != TYPING:
+            return False
+        self._picker.typed(line)
+        if self._picker.done:
+            self._finish_picker()
+        return True
+
+    def _finish_picker(self) -> None:
+        picker = self._picker
+        self._picker = None
+        if picker is not None and picker.done and self._on_answer is not None:
+            self._on_answer(picker.prompt_id, picker.answer)
+
     def _build_session(self):
         pt = _pt()
         bindings = pt["KeyBindings"]()
+
+        # Only while a picker is up: otherwise the arrows are history
+        # and the space bar is a space, which is what they must stay.
+        def _asking() -> bool:
+            return self.picking()
+
+        @bindings.add("up", filter=pt["Condition"](_asking))
+        def _up(event) -> None:
+            self._picker.move(-1)
+
+        @bindings.add("down", filter=pt["Condition"](_asking))
+        def _down(event) -> None:
+            self._picker.move(1)
+
+        @bindings.add("space", filter=pt["Condition"](_asking))
+        def _mark(event) -> None:
+            self._picker.space()
+
+        @bindings.add("escape", filter=pt["Condition"](_asking), eager=True)
+        def _back(event) -> None:
+            self._picker.escape()
+
+        @bindings.add("enter", filter=pt["Condition"](_asking))
+        def _advance(event) -> None:
+            self._picker.enter()
+            if self._picker.done:
+                self._finish_picker()
 
         @bindings.add("c-j")
         @bindings.add("escape", "enter")
@@ -477,7 +566,9 @@ class Tui:
             live = []
         if live and live[-1][1] != "\n":
             live.append(("", "\n"))
-        return live + [("class:sim.rule", "─" * max(10, cols - 1) + "\n"), ("class:sim.prompt", f"{PROMPT_GLYPH} ")]
+        return (live + [("class:sim.rule", "─" * max(10, cols - 1) + "\n")]
+                + self._picker_rows()
+                + [("class:sim.prompt", f"{PROMPT_GLYPH} ")])
 
     def _toolbar(self):
         """The activity panel under the input, behind a rule of its own:
@@ -535,6 +626,13 @@ class Tui:
             while True:
                 line = await queue.get()
                 try:
+                    # "something else" was chosen: this line is the
+                    # answer to the approval, not a command. Typing
+                    # `home off kitchen` at that moment must not turn
+                    # the kitchen light off AND leave the approval
+                    # hanging.
+                    if self._typing_an_answer(line):
+                        continue
                     await self._on_line(line)
                 except asyncio.CancelledError:
                     raise
