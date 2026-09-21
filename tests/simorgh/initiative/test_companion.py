@@ -582,6 +582,7 @@ class SomethingWorthTelling(unittest.IsolatedAsyncioTestCase):
         service._sought_today = sought
         service._seeking = {}
         service._last_by_kind = dict(last or {})
+        service._held, service._dropped = [], 0
         service.published = published
 
         async def _situation():
@@ -671,3 +672,83 @@ class SomethingWorthTelling(unittest.IsolatedAsyncioTestCase):
             topics.TASK_COMPLETED, source="orchestration",
             payload={"task_id": "someone-elses", "status": "completed", "text": "hello"}))
         self.assertEqual(offered, [])
+
+
+class TheDigest(TheService):
+    """Everything too small to interrupt for, once, together.
+
+    `WORTH_IT` has said "it waits for the digest instead" since it was
+    written, and until 2026-09-20 there was no digest: the notices
+    under the bar were published as suppressed and dropped. That is
+    this project's signature bug -- a designed slot with one side
+    implemented and nobody on the other -- and it meant the cheap half
+    of Initiative's whole argument, that small things are worth saying
+    at a better moment, had never once happened.
+    """
+
+    async def _small(self, text, kind="news"):
+        from simorgh.initiative.api import Notice
+
+        return await self.service.offer(Notice(kind=kind, text=text))
+
+    async def test_a_small_thing_is_kept_rather_than_dropped(self):
+        self.assertIsNone(await self._small("the washing finished"))
+        self.assertEqual([t for _k, t in self.service._held], ["the washing finished"])
+        self.assertIn("kept for the digest",
+                      [m["why"] for m in self.bus.of(topics.INITIATIVE_SUPPRESSED)])
+
+    async def test_the_held_things_go_out_together_when_sim_is_idle(self):
+        for text in ("the washing finished", "a car passed the drive"):
+            await self._small(text)
+        self.bus.published.clear()
+        await self.bus.deliver(topics.SYSTEM_TICK_IDLE, {})
+        spoken = [m for m in self.bus.of(topics.ACTION_PROPOSED)]
+        self.assertEqual(len(spoken), 1, self.bus.of(topics.INITIATIVE_SUPPRESSED))
+        body = spoken[0]["args"].get("text") or spoken[0]["args"].get("body")
+        self.assertIn("the washing finished", body)
+        self.assertIn("a car passed the drive", body)
+        self.assertEqual(self.service._held, [], "a delivered digest clears the list")
+
+    async def test_a_digest_that_was_not_delivered_keeps_the_day(self):
+        """The day's cap can stop it like anything else. Losing the
+        day's news to a digest nobody saw would be worse than not
+        batching at all, so the list survives until one goes out."""
+        from simorgh.initiative.api import DAILY_CAP
+
+        await self._small("the washing finished")
+        self.service._delivered_today = DAILY_CAP
+        await self.bus.deliver(topics.SYSTEM_TICK_IDLE, {})
+        self.assertEqual(self.bus.of(topics.ACTION_PROPOSED), [])
+        self.assertEqual([t for _k, t in self.service._held], ["the washing finished"])
+
+    async def test_nothing_is_digested_at_the_wrong_hour_or_to_an_empty_house(self):
+        from simorgh.initiative.api import Situation
+
+        await self._small("the washing finished")
+        for situation in (Situation(quiet_hours=True, people={"Soodeh": "kitchen"}), Situation(people={})):
+            self.situation = situation
+            self.bus.published.clear()
+            await self.bus.deliver(topics.SYSTEM_TICK_IDLE, {})
+            self.assertEqual(self.bus.of(topics.ACTION_PROPOSED), [], str(situation))
+
+    async def test_a_reminder_is_never_saved_up(self):
+        """Late is the same as never, so a reminder that could not be
+        delivered is not quietly turned into tomorrow's news."""
+        from simorgh.initiative.api import Notice
+
+        await self.service.offer(Notice(kind="reminder", text="take the bins out", person="Saeed"))
+        self.assertEqual([t for _k, t in self.service._held], [])
+
+    async def test_the_list_is_bounded_and_says_what_it_dropped(self):
+        from simorgh.initiative.api import DIGEST_MAX
+
+        for i in range(DIGEST_MAX + 3):
+            await self._small(f"thing {i}")
+        self.assertEqual(len(self.service._held), DIGEST_MAX)
+        self.bus.published.clear()
+        await self.bus.deliver(topics.SYSTEM_TICK_IDLE, {})
+        proposals = self.bus.of(topics.ACTION_PROPOSED)
+        self.assertEqual(len(proposals), 1, self.bus.of(topics.INITIATIVE_SUPPRESSED))
+        body = proposals[0]["args"].get("text") or proposals[0]["args"].get("body")
+        self.assertIn("3 smaller things", body)
+        self.assertNotIn("thing 0", body)

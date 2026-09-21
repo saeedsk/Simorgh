@@ -10,8 +10,8 @@ Since stage 10 item 3 it also owns the companion's two reasons to speak first: a
 
 | File | For |
 |---|---|
-| `simorgh/initiative/api.py` | `Notice`, `Situation`, `Delivery` and `decide`: urgency × relevance × weight [× reach] − interruption cost, cooldowns (per person for the personal classes), the daily cap, do-not-disturb; the companion helpers `companion_gate`, `alone`, `matches_interest`, `state_note`, `compose_prompt`, `acceptable_line` |
-| `simorgh/initiative/service.py` | The Subsystem: listens for camera events, reminders, share proposals and wellbeing flips; asks World Model what the house is doing and who a person is; composes the personal classes through Cognition; proposes the delivery |
+| `simorgh/initiative/api.py` | `Notice`, `Situation`, `Delivery` and `decide`: urgency × relevance × weight [× reach] − interruption cost, cooldowns (per person for the personal classes), the daily cap, do-not-disturb; the digest classes `DIGESTIBLE`/`DIGEST_MAX`; the companion helpers `companion_gate`, `alone`, `matches_interest`, `state_note`, `compose_prompt`, `acceptable_line` |
+| `simorgh/initiative/service.py` | The Subsystem: listens for camera events, reminders, share proposals and wellbeing flips; asks World Model what the house is doing and who a person is; composes the personal classes through Cognition; proposes the delivery; holds what was not worth interrupting for (`_hold`) and offers it together on idle (`_digest`) |
 
 ## Consumes
 
@@ -58,7 +58,7 @@ Since stage 10 item 3 it also owns the companion's two reasons to speak first: a
 
 ## Config
 
-None yet: the numbers are constants in `api.py` (`URGENCY`, `CHANNEL_COST`, `REACH`, `ALONE_DISCOUNT`, `WORTH_IT`, `COOLDOWN`, `DAILY_CAP`, `FORBIDDEN_WORDS`, `LINE_MAX_CHARS`) and `service.py` (`COMPOSE_TIMEOUT_S`, `COMPOSE_MAX_TOKENS`, `COMPOSE_MAX_COST_USD`) until the household has told us which of them are wrong; stage 10 item 10's shadow mode is how they will.
+None yet: the numbers are constants in `api.py` (`URGENCY`, `CHANNEL_COST`, `REACH`, `ALONE_DISCOUNT`, `WORTH_IT`, `COOLDOWN`, `DAILY_CAP`, `FORBIDDEN_WORDS`, `LINE_MAX_CHARS`, `DIGESTIBLE`, `DIGEST_MAX`) and `service.py` (`COMPOSE_TIMEOUT_S`, `COMPOSE_MAX_TOKENS`, `COMPOSE_MAX_COST_USD`) until the household has told us which of them are wrong; stage 10 item 10's shadow mode is how they will.
 
 ## Contract tests
 
@@ -67,7 +67,7 @@ None yet: the numbers are constants in `api.py` (`URGENCY`, `CHANNEL_COST`, `REA
 
 ## Planned changes (roadmap)
 
-- Stage 6 item 6, still open: merging `curiosity/sharing.py`, `persona/sharing.py` and the announce step in `execution/vision.py` into this module (they still run today); a HOLD state in the voice turn manager so a proactive utterance waits for the floor; per-person do-not-disturb from the People store rather than a set; the daily digest.
+- Stage 6 item 6, still open: merging `curiosity/sharing.py`, `persona/sharing.py` and the announce step in `execution/vision.py` into this module (they still run today); a HOLD state in the voice turn manager so a proactive utterance waits for the floor; per-person do-not-disturb from the People store rather than a set. The daily digest is done (2026-09-20): a notice of a `DIGESTIBLE` class that `decide` turns down is held rather than dropped, and offered together on `system.tick.idle` as one `digest` notice -- through `offer()`, so the hour, the room, the cap and the cooldown all still apply. `URGENCY["digest"]` is 0.5, above every class it collects and below the speaker's 0.45 + `WORTH_IT`, so a digest can reach the phone or the screen and never the room; a list read aloud is the interruption it exists to avoid, and the arithmetic keeps it out rather than a special case. The held list clears only when a digest is actually offered.
 - Stage 10 item 6: the composition prompt as a protected block with Persona's voice and SOUL's constraints; "not now" as a 24 h per-person hold and "stop" as a proposed `people revoke`; the reply guard widened from a word list to the creator's corpus.
 - Stage 10 item 8: sought interest shares (a bounded research task per consented person per day, under a cap) and follow-through on a person's own mentions as standing intents; Growth sending a `summary` on `curiosity.share.proposed`.
 - Stage 10 item 9: one `kb_ask` over the creator's corpus in the composition step, with its citation in the rationale; a URL outside the corpus in the rationale refused.

@@ -37,6 +37,8 @@ from .api import (
     CHECK_IN_AGAIN_S,
     COMPOSED,
     COOLDOWN,
+    DIGESTIBLE,
+    DIGEST_MAX,
     RESEARCH_MAX_USD,
     RESEARCH_PER_DAY,
     NOT_NOW_HOLD_S,
@@ -96,6 +98,11 @@ class Service:
         #: task_id -> the person it was sought for.
         self._seeking: dict[str, str] = {}
         self.do_not_disturb: set[str] = set()
+        #: What was not worth interrupting for, kept for the digest
+        #: (stage 6 item 6). `(kind, text)`, oldest first, and how many
+        #: fell off the end today.
+        self._held: list[tuple[str, str]] = []
+        self._dropped = 0
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -172,6 +179,10 @@ class Service:
         day = int(now // 86_400)
         if day != self._day:
             self._day, self._delivered_today, self._sought_today = day, 0, 0
+        # Idle with somebody here is also when the day's small things
+        # are worth saying, and this is before the research gates
+        # because a digest costs nothing and a search costs money.
+        await self._digest()
         if self._sought_today >= RESEARCH_PER_DAY or self._seeking:
             return          # one at a time: a queue of these is a feed again
         situation = await self._situation()
@@ -408,7 +419,14 @@ class Service:
         delivery = decide(notice, situation, owner=self._owner, now=now, last_by_kind=self._last_by_kind,
                           delivered_today=self._delivered_today, do_not_disturb=self.do_not_disturb)
         if delivery is None:
-            await self._suppress(notice, "nothing was worth interrupting for this right now")
+            # Not worth interrupting for is not the same as not worth
+            # saying. The small classes are kept and go out together
+            # later, which is what `WORTH_IT` has claimed since it was
+            # written; until today nothing read the held list because
+            # there was no held list.
+            held = self._hold(notice)
+            await self._suppress(notice, "kept for the digest" if held
+                                 else "nothing was worth interrupting for this right now")
             return None
         text = notice.text
         if notice.kind in COMPOSED:
@@ -446,6 +464,42 @@ class Service:
             "requester": "", "requester_channel": "initiative",
         }))
         return delivery
+
+    def _hold(self, notice: Notice) -> bool:
+        """Keep a small notice for the digest. True if it was kept."""
+        if notice.kind not in DIGESTIBLE or not notice.text.strip():
+            return False
+        self._held.append((notice.kind, notice.text.strip()))
+        while len(self._held) > DIGEST_MAX:
+            self._held.pop(0)
+            self._dropped += 1
+        return True
+
+    async def _digest(self) -> None:
+        """Everything too small to interrupt for, once, together.
+
+        Offered like anything else, so the hour, the room, the day's
+        cap and do-not-disturb all still apply -- a digest that
+        ignored them would be the thing it exists to prevent, just
+        with more words. Its own cooldown is 20 hours: about once a
+        day, and never twice in an evening.
+
+        The list is cleared when the digest is OFFERED, not when it is
+        composed: a digest Guardian never delivers must not take the
+        day's news with it.
+        """
+        if not self._held or self._ctx is None:
+            return
+        situation = await self._situation()
+        if not situation.people or situation.quiet_hours:
+            return    # nobody to tell, or the wrong hour to tell them
+        lines = [f"- {text}" for _kind, text in self._held]
+        if self._dropped:
+            lines.append(f"- (and {self._dropped} smaller things)")
+        text = "While you were busy:\n" + "\n".join(lines)
+        delivery = await self.offer(Notice(kind="digest", text=text, ref="digest"), situation=situation)
+        if delivery is not None:
+            self._held, self._dropped = [], 0
 
     async def _suppress(self, notice: Notice, why: str) -> None:
         ctx = self._ctx

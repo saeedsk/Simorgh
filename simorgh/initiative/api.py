@@ -50,6 +50,13 @@ URGENCY: dict[str, float] = {
     "interest_share": 0.55,  # something about what a person cares about
     "growth": 0.15,          # Sim learnt something about itself
     "news": 0.1,             # Sim read something it found interesting
+    # Above every class it collects, and deliberately: a digest is
+    # worth more than any one line in it, or it would not be worth
+    # writing. It still cannot reach the speaker -- 0.5 minus the
+    # room's 0.45 is under `WORTH_IT` -- which is the property that
+    # matters. A list read aloud is the interruption a digest exists
+    # to avoid, so the arithmetic, not a special case, keeps it off.
+    "digest": 0.5,
 }
 
 #: Channels, cheapest interruption first. `speaker` is the room: it
@@ -59,13 +66,27 @@ CHANNELS = ("phone", "screen", "speaker")
 #: How much each channel costs to use, before the hour and the room.
 CHANNEL_COST: dict[str, float] = {"phone": 0.1, "screen": 0.2, "speaker": 0.45}
 
-#: Under this, nothing is delivered: it waits for the digest instead.
+#: Under this, nothing is delivered: it waits for the digest instead
+#: -- which for a year was a sentence in a comment and nothing else.
+#: `Service._hold` is the digest now (stage 6 item 6).
 WORTH_IT = 0.25
+
+#: Classes small enough to be worth saving up rather than dropping.
+#: A reminder is never digestible: late is the same as never. Nor is
+#: anything personal -- "how are you doing" a day late is worse than
+#: not asking.
+DIGESTIBLE: frozenset[str] = frozenset({"growth", "news", "event_fyi"})
+
+#: How many held notices a digest carries before the oldest are
+#: dropped. A digest nobody finishes reading is another way of saying
+#: nothing, and the count of what was dropped goes in the text, so a
+#: quiet day and a busy one do not look the same.
+DIGEST_MAX = 8
 
 #: A class may not interrupt more often than this, in seconds. A
 #: personal class keeps the cooldown per person (`cooldown_key`).
 COOLDOWN: dict[str, float] = {"safety_alert": 0.0, "reminder": 0.0, "event_fyi": 15 * 60.0,
-                              "growth": 6 * 3600.0, "news": 6 * 3600.0,
+                              "growth": 6 * 3600.0, "news": 6 * 3600.0, "digest": 20 * 3600.0,
                               "check_in": 24 * 3600.0, "interest_share": 8 * 3600.0}
 
 #: However interesting the day is, this many unprompted deliveries and no
