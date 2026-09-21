@@ -40,12 +40,14 @@ Started 2026-09-20 (item 11): `stage9/the-house-does-an-ordinary-thing` -- an ow
 
 ## Measurements after
 
-| Number | Target |
-|---|---|
-| Lines in `simorgh/execution/` | under 8,000 |
-| `dispatch.py` lines | under 600 |
-| Household suite coverage (goals completed end to end) | rising per release |
-| Camera announcements about the event, not the scene | > 90% |
+| Number | Target | Measured 2026-09-20 |
+|---|---|---|
+| Lines in `simorgh/execution/` | under 8,000 | **11,093** (was 22,265 before item 1; the remaining overshoot is `vision.py` and the camera watchers, which item 4 moves to `perception/`) |
+| `dispatch.py` lines | under 600 | **2,496** -- item 3 has not started, and `home`/`light`/`people` added to it on 2026-09-20 |
+| Household suite coverage (goals completed end to end) | rising per release | 13 scenarios, 3 of them stage 9 (the ordinary thing, the lamp, the siren) |
+| Camera announcements about the event, not the scene | > 90% | not measured; needs item 8's tracked-object events |
+
+Taken rather than estimated, because two of these move in the wrong direction when nobody looks: `dispatch.py` grew by three command families the same week its target was written, and `execution/` reads as nearly done at 11k when half the remaining overshoot is one file item 4 has not moved yet.
 
 ## Risks and mitigations
 
