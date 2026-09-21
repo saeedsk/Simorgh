@@ -84,6 +84,8 @@ class Runner:
         #: case id -> the task that answered it, so a case scored on a
         #: blocked answer can be revised if that task later finishes.
         self._task_of: dict[str, str] = {}
+        #: case id -> tokens spent answering it.
+        self._tokens_of: dict[str, int] = {}
         # SWE-bench checkouts and logs are written relative to this, the
         # same root the file tools resolve their paths against -- a
         # checkout Sim cannot address by the path we give it is a
@@ -165,6 +167,7 @@ class Runner:
         correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
         return CaseResult(
             case_id=case.id, level=case.level, correct=correct, answer=extracted,
+            question=case.question, tokens=self._tokens_of.get(case.id, 0),
             expected=case.answer, seconds=seconds, steps=steps, cost_usd=cost_usd,
             blocked_by=error, error=error,
         )
@@ -295,6 +298,7 @@ class Runner:
             # Read before `watch.stop()`, and after the outcome, so a
             # cancelled or blocked case still reports what it spent.
             cost_usd = watch.cost(task_id)
+            self._tokens_of[case.id] = watch.tokens(task_id)
             self._served.update(watch.providers(task_id))
             if not answer_text and error:
                 # A case we gave up on used to keep its worker. The
@@ -485,6 +489,7 @@ class _AnswerWatch:
         # nothing was reading it -- so every benchmark run reported a
         # cost of $0.00 for real, billed model calls.
         self._cost: dict[str, float] = {}
+        self._tokens: dict[str, int] = {}
         self._providers: dict[str, set] = {}
         self._outcomes: dict[str, tuple[str, dict]] = {}
         self._waiters: dict[str, asyncio.Future] = {}
@@ -497,6 +502,8 @@ class _AnswerWatch:
         async def _on_step(message: Message) -> None:
             payload = message.payload
             task_id = payload.get("task_id", "")
+            if payload.get("tokens"):
+                self._tokens[task_id] = self._tokens.get(task_id, 0) + int(payload["tokens"])
             if payload.get("cost_usd"):
                 # Counted on EVERY step, including the ones with no `ok`
                 # -- a think that failed was still billed.
@@ -559,6 +566,9 @@ class _AnswerWatch:
 
     def cost(self, task_id: str) -> float:
         return round(self._cost.get(task_id, 0.0), 6)
+
+    def tokens(self, task_id: str) -> int:
+        return int(self._tokens.get(task_id, 0))
 
     def providers(self, task_id: str) -> tuple[str, ...]:
         """Every model that served a think for this case."""

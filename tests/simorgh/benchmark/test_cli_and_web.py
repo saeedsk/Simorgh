@@ -272,9 +272,15 @@ class LoadVerbTestCase(unittest.TestCase):
 
         advertised = {verb for verb, _args, _what in BENCHMARK_VERBS if verb}
         self.assertEqual(advertised,
-                         {"start", "suites", "load", "run", "stop", "history", "show", "clear"})
+                         {"start", "suites", "load", "run", "stop", "history", "show", "clear", "cases"})
+        source = _dispatch_source()
         for verb in advertised:
-            self.assertIn(f'verb == "{verb}"', _dispatch_source(), f"{verb} is advertised but not handled")
+            # `verb == "x"` or `verb in ("x", "y")`: two verbs that
+            # render the same request differently share a branch, and
+            # pinning only the first form would have made adding one
+            # look like an unhandled verb.
+            handled = f'verb == "{verb}"' in source or f'"{verb}"' in source.split("def _benchmark(")[-1]
+            self.assertTrue(handled, f"{verb} is advertised but not handled")
         self.assertIn("benchmark load <suite>", _BENCHMARK_USAGE)
 
 

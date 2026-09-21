@@ -463,7 +463,8 @@ BENCHMARK_VERBS: tuple[tuple[str, str, str], ...] = (
     ("stop", "", "end the run in flight, keeping what it scored"),
     ("history", "[suite]", "accuracy over time, per model"),
     ("clear", "<model|all>", "forget the recorded runs for one model, or for all of them"),
-    ("show", "<run_id>", "one run, case by case"),
+    ("show", "<run_id>", "one run, one line per case: which passed and which did not"),
+    ("cases", "<run_id>", "one run in full: the question, the answer, the true answer, time and tokens"),
 )
 _BENCHMARK_COLUMN = max(len(f"{verb} {args}".strip()) for verb, args, _w in BENCHMARK_VERBS) + 2
 _BENCHMARK_USAGE = "\n".join(
@@ -606,11 +607,15 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
         payload = {"all": True} if target in ("all", "*", "everything") else {"model": target}
         return await _request(bus, topics.BENCHMARK_CLEAR_REQUEST, payload,
                               timeout=15.0, render=benchmarkview.cleared)
-    if verb == "show":
+    if verb in ("show", "cases"):
         if not rest:
-            return Outcome("usage: benchmark show <run_id>")
+            return Outcome(f"usage: benchmark {verb} <run_id>")
+        # `show` is one line per case and answers "which failed";
+        # `cases` is a block per case and answers "and what did it
+        # say, and what did that cost" (the creator, 2026-09-20).
+        render = benchmarkview.cases if verb == "cases" else benchmarkview.detail
         return await _request(bus, topics.BENCHMARK_HISTORY_REQUEST, {"run_id": rest.strip()},
-                              timeout=10.0, render=benchmarkview.detail)
+                              timeout=10.0, render=render)
     if verb == "stop":
         return await _request(bus, topics.BENCHMARK_STOP_REQUEST, {}, timeout=30.0,
                               render=benchmarkview.stopped)

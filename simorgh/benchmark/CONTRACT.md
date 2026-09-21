@@ -11,7 +11,7 @@ Benchmark measures the whole running system against standard suites (GAIA, GAIA 
 | File | For |
 |---|---|
 | `simorgh/benchmark/__init__.py` | empty package marker |
-| `simorgh/benchmark/api.py` | `Case`, `Suite` (levels, sampling), `CaseResult`, `RunRecord` (totals, compact and full payloads) |
+| `simorgh/benchmark/api.py` | `Case`, `Suite` (levels, sampling), `CaseResult`, `RunRecord` (totals, compact and full payloads). `CaseResult` carries `question` and `tokens` as well as the answer (2026-09-20): `benchmark cases <run>` shows what was asked, what Sim said, what was true, and what it cost, because a pass rate alone cannot tell a system that is working from one brute-forcing -- a right answer at 5,000 tokens and one at 84,000 are different results |
 | `simorgh/benchmark/config.py` | frozen `Config` and `from_mapping` for `[benchmark]` |
 | `simorgh/benchmark/datasets.py` | suite `SOURCES`, datasets-server fetch with retries, row -> `Case` parsers, cache, attachment download |
 | `simorgh/benchmark/runner.py` | `Runner`: one task per case, waits for start then outcome, floor retries, SWE-bench checkout/diff/evaluate, cancels abandoned tasks |

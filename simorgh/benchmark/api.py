@@ -202,10 +202,19 @@ class CaseResult:
     case_id: str
     level: str
     correct: bool
+    #: The question as asked, so a per-case view can show what was
+    #: actually put to the model rather than only its id (the creator,
+    #: 2026-09-20: a detail view wants the question, the answer, the
+    #: true answer, the time and the tokens side by side).
+    question: str = ""
     answer: str = ""
     expected: str = ""
     seconds: float = 0.0
     steps: int = 0
+    #: Model tokens this case spent, summed from `task.step`. Carried
+    #: for the same reason as `cost_usd`: a right answer that took
+    #: 80,000 tokens and one that took 5,000 are different results.
+    tokens: int = 0
     # Not scored, but recorded: the article this came from is right that
     # a system can pass by brute force and still be unusable, so the
     # cost of a right answer is part of the result.
@@ -327,6 +336,7 @@ class RunRecord:
             payload["cases"] = [
                 {
                     "case_id": r.case_id, "level": r.level, "correct": r.correct,
+                    "question": r.question[:1000], "tokens": r.tokens,
                     "answer": r.answer[:500], "expected": r.expected[:500],
                     "seconds": round(r.seconds, 2), "steps": r.steps,
                     "cost_usd": round(r.cost_usd, 6), "skipped": r.skipped, "error": r.error[:300],

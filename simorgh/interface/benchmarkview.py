@@ -299,5 +299,58 @@ def detail(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _wrap(text: str, width: int, indent: str) -> list[str]:
+    import textwrap
+
+    return textwrap.wrap(" ".join(str(text or "").split()), width=width,
+                         initial_indent=indent, subsequent_indent=indent) or [f"{indent}--"]
+
+
+def cases(payload: dict, *, width: int = 96) -> str:
+    """One block per case: what was asked, what Sim said, what was
+    true, and what it cost (the creator, 2026-09-20).
+
+    `detail` is one line per case and answers "which ones failed".
+    This answers the next question, which is "and what did it say" --
+    and the one after that, which is whether a right answer took five
+    thousand tokens or eighty thousand. A pass rate alone cannot tell
+    a system that is working from one that is brute-forcing.
+    """
+    records = _records(payload)
+    if not records:
+        return "no such run"
+    record = records[0]
+    body = width - 6
+    out = [summary(record)]
+    for result in record.get("cases") or []:
+        skipped, correct = bool(result.get("skipped")), bool(result.get("correct"))
+        mark = "·" if skipped else ("✓" if correct else "✗")
+        out.append("")
+        out.append(f"  {mark} {str(result.get('case_id', ''))}   level {result.get('level') or '?'}")
+        out.extend(_wrap(result.get("question"), body, "     ask  "))
+        out.extend(_wrap(result.get("answer"), body, "     got  "))
+        # Only when they differ: printing "wanted 17" under "got 17" is
+        # noise on every passing case. Words rather than a tick, because
+        # the pass MARK is a tick and two ticks meaning different things
+        # in one block is unreadable down the left edge -- the first
+        # version did exactly that and fooled its own test.
+        if not correct and not skipped:
+            out.extend(_wrap(result.get("expected"), body, "  wanted  "))
+        tokens = int(result.get("tokens") or 0)
+        spent = float(result.get("cost_usd") or 0.0)
+        facts = [f"{float(result.get('seconds') or 0.0):.0f}s",
+                 f"{int(result.get('steps') or 0)} steps"]
+        if tokens:
+            facts.append(f"{tokens:,} tokens")
+        if spent:
+            facts.append(f"${spent:.4f}")
+        out.append("          " + " · ".join(facts))
+        for label in ("blocked_by", "error"):
+            if result.get(label):
+                out.extend(_wrap(result[label], body, "  stopped ")) 
+                break
+    return "\n".join(out)
+
+
 __all__ = [
-    "cleared","detail", "history", "latest", "loaded", "parse_run", "started", "stopped", "suites"]
+    "cases", "cleared", "detail", "history", "latest", "loaded", "parse_run", "started", "stopped", "suites"]
