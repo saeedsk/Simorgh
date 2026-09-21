@@ -77,7 +77,15 @@ class Service:
             clock=ctx.clock.now, publish=self._publish,
         )
         try:
-            await ctx.ledger.rebuild(self._competence, "learn:outcomes")
+            # `materialize`, not `rebuild`: rebuild READS a snapshot and
+            # never writes one, so `CompetenceTable.snapshot_every = 200`
+            # was declared and never honoured -- the read found nothing
+            # every time and replayed the whole of `learn:outcomes` on
+            # every boot. Harmless while the stream is short, which is
+            # what the plan recorded ("replays whole in milliseconds
+            # today"), and this project has already had one stream reach
+            # 192,332 entries in a day (stage 6 item 1, 2026-09-21).
+            await ctx.ledger.materialize(self._competence, "learn:outcomes")
         except Exception as exc:  # noqa: BLE001 -- a bad rebuild must degrade, never crash start()
             self._degraded = f"competence rebuild failed: {exc!r}"
 

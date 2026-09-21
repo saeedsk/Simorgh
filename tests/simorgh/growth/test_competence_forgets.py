@@ -169,3 +169,50 @@ class AnEffectiveCountIsRoundedNotTruncated(unittest.TestCase):
                               payload={"task_type": "patch", "succeeded": False}))
         self.assertNotEqual(table.samples("patch"), 5)
         self.assertAlmostEqual(table.samples("patch"), 5, places=4)
+
+
+class TheTableIsSnapshotted(unittest.TestCase):
+    """`snapshot_every = 200` was declared and never honoured.
+
+    The service called `ledger.rebuild`, which READS a snapshot and
+    never writes one -- so the read found nothing every boot and
+    replayed the whole of `learn:outcomes` each time. Harmless while
+    the stream is short, which is exactly what the plan recorded
+    ("the stream replays whole in milliseconds today"), and this
+    project has already had one stream reach 192,332 entries in a day.
+    """
+
+    def test_the_service_materialises_rather_than_rebuilds(self):
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[3]
+                  / "simorgh" / "growth" / "estimate" / "service.py").read_text()
+        self.assertIn('materialize(self._competence, "learn:outcomes")', source)
+        self.assertNotIn('rebuild(self._competence, "learn:outcomes")', source)
+
+    def test_materialize_writes_one_once_the_table_has_moved_enough(self):
+        import asyncio
+
+        from simorgh.ledger.projection import materialize
+
+        class _Backend:
+            def __init__(self):
+                self.written = []
+
+            async def read_snapshot(self, _stream):
+                return None
+
+            async def read(self, _stream, **_kw):
+                return []
+
+            async def head(self, _stream):
+                return 0
+
+            async def write_snapshot(self, _stream, _state, seq):
+                self.written.append(seq)
+
+        table = CompetenceTable()
+        table.applied_seq = table.snapshot_every + 50
+        backend = _Backend()
+        asyncio.run(materialize(backend, table, "learn:outcomes"))
+        self.assertEqual(backend.written, [table.snapshot_every + 50])
