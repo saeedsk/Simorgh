@@ -8,18 +8,18 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 
 | Stage | File | Title | Depends on | Status |
 |---|---|---|---|---|
-| 0 | [stage-0-safety-gaps-wires-gate.md](stage-0-safety-gaps-wires-gate.md) | Close the safety gaps, wire what exists, promote the gate | — | in progress (items 1-28, 31 done except V7; 30 partly; 29 open) |
-| 1 | [stage-1-telemetry-out-of-the-decision-log.md](stage-1-telemetry-out-of-the-decision-log.md) | Telemetry out of the decision log | 0 | in progress (items 1-5, 7-9 done; 6 and 10 deferred; 11 open) |
+| 0 | [stage-0-safety-gaps-wires-gate.md](stage-0-safety-gaps-wires-gate.md) | Close the safety gaps, wire what exists, promote the gate | — | in progress (items 1-29, 31 done except V7; 30 needs a paid round) |
+| 1 | [stage-1-telemetry-out-of-the-decision-log.md](stage-1-telemetry-out-of-the-decision-log.md) | Telemetry out of the decision log | 0 | in progress (items 1-5, 7-9, 11 done; 6 and 10 deferred, with the idle-CPU measurement written down) |
 | 2 | [stage-2-native-tool-use.md](stage-2-native-tool-use.md) | Schemas to the model, then native tool use behind a capability flag | 0 | in progress (items 1-9 done; no provider flipped) |
 | 3 | [stage-3-streaming.md](stage-3-streaming.md) | Streaming end to end | 2 | in progress (items 1-4, 8 done; streamed speech on by default 2026-09-19) |
 | 4 | [stage-4-session-stream-context-compaction-evals.md](stage-4-session-stream-context-compaction-evals.md) | Session stream, ContextBuilder, compaction, evals package | 1, 2 | in progress (2026-09-19: items 1-3, 5, 6, 7, 10, 11 done; 4 and 8 in part; 9 open) |
 | 5 | [stage-5-memory-tiers.md](stage-5-memory-tiers.md) | Memory tiers | 4 | in progress (2026-09-19: items 1-7, 9 done; 8 in part) |
-| 6 | [stage-6-self-world-people-tiers-initiative.md](stage-6-self-world-people-tiers-initiative.md) | Self and world projections, People, safety tiers, Initiative | 4, 5 | in progress (2026-09-19: item 7 done; 1-6 in part) |
-| 7 | [stage-7-long-horizon.md](stage-7-long-horizon.md) | Long horizon: sub-agents, plans, waits, checkpoint critic | 4, 6 | in progress (2026-09-19: items 2, 3, 5, 7, 9 done; 1, 4, 6, 8 in part) |
+| 6 | [stage-6-self-world-people-tiers-initiative.md](stage-6-self-world-people-tiers-initiative.md) | Self and world projections, People, safety tiers, Initiative | 4, 5 | in progress (2026-09-20: items 1-5 and 7 done or mostly; 6 done bar the digest; 8 started -- tier 3 without a human is 0) |
+| 7 | [stage-7-long-horizon.md](stage-7-long-horizon.md) | Long horizon: sub-agents, plans, waits, checkpoint critic | 4, 6 | in progress (2026-09-20: items 2, 3, 5, 6, 7, 9 done; 8 done for the test runner; 1 and 4 in part) |
 | 8 | [stage-8-growth-merge-policy-loop.md](stage-8-growth-merge-policy-loop.md) | Growth merge and the policy loop | 4, 6, 7 | in progress (2026-09-19: items 3-4 in part) |
-| 9 | [stage-9-consolidation-and-breadth.md](stage-9-consolidation-and-breadth.md) | Consolidation and breadth (package moves, HA, Frigate, MCP-first) | all | not started |
-| 10 | [stage-10-companion.md](stage-10-companion.md) | Companion: consent, a per-person wellbeing estimate, check-ins and interest shares, the creator's psychology corpus | 6 | in progress (2026-09-20: items 1-3 first cut on a branch; 4-10 open) |
-| 11 | [stage-11-household-simulator.md](stage-11-household-simulator.md) | The household simulator: personas with voices, an audio scene, a script engine, a scenario pack per stage, companion arcs, benchmarks and latency under one roof, an observer that hands over reproductions | 4, 6, 10 | planned (2026-09-20) |
+| 9 | [stage-9-consolidation-and-breadth.md](stage-9-consolidation-and-breadth.md) | Consolidation and breadth (package moves, HA, Frigate, MCP-first) | all | in progress (2026-09-20: item 11 started -- the first breadth scenario; 1 landed earlier; the rest not started) |
+| 10 | [stage-10-companion.md](stage-10-companion.md) | Companion: consent, a per-person wellbeing estimate, check-ins and interest shares, the creator's psychology corpus | 6 | in progress (2026-09-20: items 1-3, 5, 6, 7, 8 done; 4 needs the creator's wording, 9 the corpus, 10 two weeks of shadow mode) |
+| 11 | [stage-11-household-simulator.md](stage-11-household-simulator.md) | The household simulator: personas with voices, an audio scene, a script engine, a scenario pack per stage, companion arcs, benchmarks and latency under one roof, an observer that hands over reproductions | 4, 6, 10 | **done** (2026-09-20: all twelve items; the pack is in the bless and has found five real bugs) |
 
 **The first month, if nothing else** (evaluation section 12): stage 0 in full, then stage 2 (native tools) and stage 3 (streaming), which are the two changes the family will feel.
 
