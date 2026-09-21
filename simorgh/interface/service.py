@@ -638,6 +638,7 @@ class Service:
             live_text=self._live_text,
             history_path=self._history_path(),
             root=Path.cwd(),
+            on_answer=self._answer_from_picker,
         )
         try:
             await self._tui.run()
@@ -1362,8 +1363,17 @@ class Service:
         options = p.get("options", [])
         default = p.get("default") or (options[0] if options else "")
         self._pending_prompts[prompt_id] = p
-        banner = render_mod.prompt_banner(p.get("question", ""), options, enabled=self._color)
-        self._out(f"{banner}\nreply here, or waits {p.get('timeout_s', 0):.0f}s then defaults to {default!r}")
+        picker = getattr(self._tui, "ask", None) if self._tui is not None else None
+        if picker is not None:
+            # The bullets go in the prompt section and the keys answer
+            # them. The banner still goes to the transcript, because
+            # scrolling back should show what was asked, not only that
+            # something was.
+            self._out(render_mod.prompt_banner(p.get("question", ""), options, enabled=self._color))
+            picker(p)
+        else:
+            banner = render_mod.prompt_banner(p.get("question", ""), options, enabled=self._color)
+            self._out(f"{banner}\nreply here, or waits {p.get('timeout_s', 0):.0f}s then defaults to {default!r}")
 
         async def _watchdog() -> None:
             await self._ctx.clock.sleep(p.get("timeout_s", 0) or 0)  # injected Clock, not raw asyncio.sleep -- FakeClock-testable
@@ -1371,6 +1381,15 @@ class Service:
                 await self._resolve_prompt(prompt_id, default, note="(timed out)")
 
         self._prompt_timeouts[prompt_id] = asyncio.ensure_future(_watchdog())
+
+    def _answer_from_picker(self, prompt_id: str, answer: str) -> None:
+        """The TUI's approval picker was confirmed (the creator,
+        2026-09-20). Synchronous, because it is called from a key
+        binding: the publish is scheduled, never awaited under the
+        terminal's raw mode."""
+        if not prompt_id:
+            return
+        asyncio.ensure_future(self._resolve_prompt(prompt_id, answer, note="(picked)"))
 
     async def _resolve_prompt(self, prompt_id: str, answer: str, *, note: str = "") -> None:
         self._pending_prompts.pop(prompt_id, None)
