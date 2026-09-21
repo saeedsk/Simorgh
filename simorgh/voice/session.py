@@ -1157,7 +1157,23 @@ class VoiceSession:
         # for the run matcher and each landing after `last_said` moved on.
         recents = list(self._pipeline.recent_said) or [self._pipeline.last_said]
         in_exchange_now = 0.0 <= self._now() - self._sim_spoke_at <= self._config.exchange_window_s
-        if recents and (echoes_recent(text, recents) if in_exchange_now
+        # ...or Sim is speaking RIGHT NOW. The two halves of a reply are
+        # written down at different moments: `recent_said` and
+        # `speaking` before the audio goes out, `_sim_spoke_at` and
+        # `last_said` only once it has finished. An echo arriving
+        # mid-sentence therefore found `recent_said` already holding the
+        # reply and `_sim_spoke_at` still on the PREVIOUS turn -- so
+        # `in_exchange_now` was false and the check fell to
+        # `is_echo(text, last_said)` against the reply before this one,
+        # which of course did not match.
+        #
+        # Live, 2026-09-21: "Doing well, Saeed - quiet afternoon, all
+        # systems steady. How are you?" came back through the
+        # microphone as "Doing well, Saeed Khwai." and was recorded as
+        # the creator's turn. `echoes_recent` catches that string
+        # against that reply; it was never asked.
+        if recents and (echoes_recent(text, recents)
+                        if (in_exchange_now or self._pipeline.speaking)
                         else (self._pipeline.last_said and is_echo(text, self._pipeline.last_said))):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
