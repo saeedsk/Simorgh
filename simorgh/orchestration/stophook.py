@@ -98,14 +98,34 @@ _PROMISED_BEHAVIOUR = re.compile(
     r"|\b(?:i'?ve|i have)\s+(?:noted|stored|saved|recorded|written)\b", re.IGNORECASE)
 
 
+#: Tools that actually put a commit somewhere. Reading a file is not
+#: one of them, and that distinction is the whole rule.
+COMMITTING_TOOLS = frozenset({"git_commit", "worktree_land", "apply_skill"})
+
+
 def claimed_to_commit(text: str, session) -> str:
-    """Words saying work was committed, when no tool ran -- or "".
+    """Words saying work was committed, when nothing committed it -- or "".
 
     Live 2026-09-15: "The file is committed and callable the same way as
     my other skills", said in the same turn the runner recorded
     "finished with uncommitted changes". Nothing had been committed, and
-    the claim was contradicted by Sim's own bookkeeping."""
-    if not text or any(step.tool for step in session.steps):
+    the claim was contradicted by Sim's own bookkeeping.
+
+    The guard was `any(step.tool ...)` -- it bailed out if ANY tool had
+    run all session. A trial on 2026-09-21 ran two `search_code` calls,
+    made no edit, and ended "The task is finished. To summarise what
+    was done and committed:". Two searches bought it silence on a claim
+    about a commit that never existed. What matters is whether a tool
+    that COMMITS ran and worked, which is a much smaller set than "any
+    tool at all".
+    """
+    if not text:
+        return ""
+    # `getattr`, because a step that never recorded an outcome is
+    # not a failed one -- and older harnesses build steps without
+    # the field at all.
+    if any(step.tool in COMMITTING_TOOLS and getattr(step, "ok", None) is not False
+           for step in session.steps):
         return ""
     match = _COMMIT_CLAIM.search(text)
     return match.group(0).strip() if match else ""
