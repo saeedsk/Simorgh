@@ -219,6 +219,45 @@ def to_someone_else(text: str, *, names: tuple[str, ...] = ()) -> str:
     return ""
 
 
+#: Asking for something only Sim does.
+#:
+#: The gap this closes, live on 2026-09-20: the creator's daughter
+#: sang in the kitchen, and a moment later he said "tell me a story
+#: from the Arabian Nights book". `_bystander` sits out anything that
+#: is not a question and does not name Sim when another known voice
+#: has just spoken -- so his request was filed as talk between the two
+#: of them and got nothing. Typed, the same words worked.
+#:
+#: Widening "is this for me" is how this project has hurt itself
+#: before ("try a bit harder next time, honey" got answered), so this
+#: is not "any imperative". It is a request for something SIM does:
+#: set a timer, turn a light on, remind me, play something, read me
+#: something, tell me a story. A parent says none of those to a child
+#: in the middle of a conversation with one -- and the vocative rule
+#: still wins, so "read Aran a story" stays out of it.
+_FOR_SIM = re.compile(
+    r"\b(?:set|start|stop|cancel)\s+(?:a|an|the)?\s*(?:timer|alarm|reminder|stopwatch)\b"
+    r"|\bremind\s+(?:me|us)\b"
+    r"|\b(?:turn|switch|dim|put)\s+(?:on|off|up|down)?\s*(?:the\s+)?[\w\s]{0,20}"
+    r"\b(?:light|lights|lamp|heating|kettle|fan|tv|music)\b"
+    r"|\b(?:play|pause|skip)\s+(?:some\s+|the\s+)?(?:music|song|playlist|radio|next)\b"
+    r"|\b(?:tell|read|recite)\s+(?:me|us)\b"
+    r"|\bwhat(?:'s| is)\s+(?:on\s+)?(?:my|the)\s+(?:calendar|diary|schedule|agenda)\b"
+    r"|\badd\s+[\w\s]{1,30}\bto\s+the\s+(?:list|shopping|calendar)\b", re.I)
+
+
+def asks_for_something_sim_does(text: str, *, names: tuple[str, ...] = ()) -> bool:
+    """Whether these words ask for something only Sim does.
+
+    Never when the sentence names somebody else: "read Aran a story"
+    is a parent organising a household, not a request to Sim.
+    """
+    text = (text or "").strip()
+    if not text or to_someone_else(text, names=names):
+        return False
+    return bool(_FOR_SIM.search(text))
+
+
 #: What the model answers when the words were not for it.
 QUIET = "QUIET"
 _QUIET = re.compile(r"^\W*quiet\W*$", re.I)
@@ -278,4 +317,4 @@ class Backchannel:
 
 
 __all__ = ["Backchannel", "EMPATHY", "GREETING", "HEARD", "HUM", "LOOKING", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
-           "classify", "is_quiet", "strip_lead", "to_someone_else"]
+           "asks_for_something_sim_does", "classify", "is_quiet", "strip_lead", "to_someone_else"]

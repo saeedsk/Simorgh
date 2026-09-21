@@ -31,7 +31,8 @@ from simorgh.contracts import topics
 
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import (
-    GREETING, Backchannel, addressed, classify, is_quiet, strip_lead, to_someone_else,
+    GREETING, Backchannel, addressed, asks_for_something_sim_does, classify, is_quiet,
+    strip_lead, to_someone_else,
 )
 from .commands import MUTE, OFF, RESTART, STOP, opens_with_stop, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
@@ -1388,6 +1389,12 @@ class VoiceSession:
         # belongs to the person it answered -- somebody else's statement in
         # that window is them talking to that person, not to Sim.
         if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0) or _looks_like_question(text):
+            return False
+        # Asking for something only Sim does. The creator, 2026-09-20: his
+        # daughter sang in the kitchen, he said "tell me a story from the
+        # Arabian Nights book" a moment later, and this rule filed it as the
+        # two of them talking. Nobody asks a five-year-old to set a timer.
+        if asks_for_something_sim_does(text, names=self._household_names()):
             return False
         in_window = 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s
         if in_window and me == (self._last_asked_speaker or me):
