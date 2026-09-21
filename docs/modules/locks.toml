@@ -5,35 +5,11 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.benchmark]
-by = "opus-main"
-task = "benchmark clear: forget the history for one model or all"
-since = "2026-09-21T00:50:25+00:00"
-until = "2026-09-21T08:50:25+00:00"
-
-[locks.contracts]
-by = "opus-main"
-task = "benchmark.clear request/reply"
-since = "2026-09-21T00:50:25+00:00"
-until = "2026-09-21T08:50:25+00:00"
-
 [locks.domains]
 by = "progress-bars"
 task = "a library's progress bar reached the creator's screen"
 since = "2026-09-21T01:01:28+00:00"
 until = "2026-09-21T09:01:28+00:00"
-
-[locks.execution]
-by = "opus-main"
-task = "stage 7 item 8: procs.py exists and nothing imports it"
-since = "2026-09-21T00:44:51+00:00"
-until = "2026-09-21T08:44:51+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "the benchmark clear verb"
-since = "2026-09-21T00:50:25+00:00"
-until = "2026-09-21T08:50:25+00:00"
 
 [locks.memory]
 by = "progress-bars"
