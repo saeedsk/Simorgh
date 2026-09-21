@@ -156,6 +156,8 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 
 ## Invariants
 
+`people` shows who Sim knows, what they said yes to and what they care about, and is asymmetric on purpose: reading is a `world.env.query`, every CHANGE goes through the `people` TOOL, which is tier 3 and stops for a person. Writing to the store from the terminal would be a back door around the one gate that makes consent mean anything. A person with no permissions renders as `said yes to: nothing` rather than a blank, because nothing is the default a fresh install starts from and an empty space reads as an oversight (stage 10 item 4).
+
 `home` and `light` are sugar over the four `home_*` tools and nothing else: every verb becomes one tool call through `_run_tool`, so it is an `action.proposed` Guardian sees, exactly like the model's own call. `home on|off` uses `homeassistant.turn_on|off` rather than a domain-specific service, because whether Home Assistant filed the kettle under `switch` or `light` is the entity's business and not the typist's. `light` is deliberately redundant with `home` (the creator, 2026-09-20): `light on kitchen` and `light kitchen on` both work, a trailing number is brightness, and a bare name is a QUESTION answered with `home_state` -- guessing a toggle there would be the worst possible reading of `light kitchen`.
 
 `panel.tree_end` wraps a long detail under the completion line instead of cutting it: the detail is usually Sim's own answer, and a four-sentence reply came out as one truncated line ending `as she li…` (live, 2026-09-20). A short detail still sits inline, where it reads best. Every physical line is fitted to the terminal.

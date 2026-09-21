@@ -33,6 +33,7 @@ from pathlib import Path
 
 from simorgh.bus.client import BusClient
 from simorgh.contracts import topics
+from simorgh.contracts.people import PERMISSIONS
 from simorgh.contracts.toolargs import (
     MARKER_SPLIT_FIRST_LINE,
     args_from_text,
@@ -379,6 +380,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "tool":
         return await _tool_command(args, bus=bus, ledger=ledger, session_id=session_id)
+
+    if name == "people":
+        return await _people(args, bus=bus, ledger=ledger, session_id=session_id)
 
     if name == "home":
         return await _home(args, bus=bus, ledger=ledger, session_id=session_id)
@@ -1022,6 +1026,75 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     if close:
         return Outcome(f"tv: unknown verb {verb!r} -- did you mean `tv {close[0]}`?")
     return Outcome(f"tv: unknown verb {verb!r} -- {usage}")
+
+
+#: `people` -- who Sim knows, what they said yes to, what they care
+#: about (stage 10 item 4). Reading is a World Model query; every
+#: CHANGE goes through the `people` tool, which is tier 3, so a
+#: person confirms it. That asymmetry is the whole design: consent is
+#: something a household gives, never something Sim records because
+#: somebody typed it convincingly.
+PEOPLE_VERBS: tuple[tuple[str, str, str], ...] = (
+    ("", "", "everybody Sim knows: role, what they said yes to, what they care about"),
+    ("<name>", "", "one person in detail"),
+    ("grant", "<name> <permission>", "record that somebody said yes (wellbeing_checkins, interest_shares)"),
+    ("revoke", "<name> <permission>", "withdraw it -- and drop what was kept under it"),
+    ("interest", "add|remove <name> <topic>", "what they care about, for interest shares"),
+    ("role", "<name> <owner|adult|child|guest>", "what their role may ask for"),
+    ("link", "<name> <identity>", "tie a handle or voice to a person: telegram:x, voice:y"),
+    ("unlink", "<identity>", "that handle is nobody's again"),
+)
+_PEOPLE_COLUMN = max(len(f"{verb} {args}".strip()) for verb, args, _w in PEOPLE_VERBS) + 2
+_PEOPLE_USAGE = "\n".join(f"  people {f'{verb} {args}'.strip():<{_PEOPLE_COLUMN}}{what}"
+                          for verb, args, what in PEOPLE_VERBS)
+
+
+async def _people(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`people ...`: who Sim knows and what they agreed to."""
+    from . import peopleview
+
+    words = (args or "").strip().split()
+    verb = words[0].lower() if words else ""
+    rest = words[1:]
+
+    async def _change(action: str, payload: dict) -> Outcome:
+        # Through the TOOL, not through `world.people.update`: the tool
+        # is tier 3, so Guardian stops and asks. Writing to the store
+        # from here would be a back door around the one gate that makes
+        # consent mean anything.
+        return await _run_tool(bus=bus, ledger=ledger, tool="people",
+                               raw=json.dumps({"action": action, **payload}),
+                               session_id=session_id, timeout=120.0)
+
+    if verb in ("", "list", "all"):
+        return await _request(bus, topics.WORLD_ENV_QUERY, {"what": "people", "args": {}},
+                              timeout=10.0, render=peopleview.everybody)
+    if verb in ("grant", "revoke"):
+        if len(rest) != 2:
+            return Outcome(f"usage: people {verb} <name> <permission>\n"
+                           f"  permissions: {', '.join(PERMISSIONS)}")
+        return await _change(verb, {"name": rest[0], "permission": rest[1].lower()})
+    if verb in ("interest", "interests"):
+        if len(rest) < 3 or rest[0].lower() not in ("add", "remove"):
+            return Outcome("usage: people interest add|remove <name> <topic>")
+        return await _change(f"{rest[0].lower()}_interest", {"name": rest[1], "interest": " ".join(rest[2:])})
+    if verb == "role":
+        if len(rest) != 2:
+            return Outcome("usage: people role <name> <owner|adult|child|guest>")
+        return await _change("set_role", {"name": rest[0], "role": rest[1].lower()})
+    if verb == "link":
+        if len(rest) != 2:
+            return Outcome("usage: people link <name> <identity>   (telegram:x, whatsapp:+1..., voice:y)")
+        return await _change("link", {"name": rest[0], "identity": rest[1]})
+    if verb == "unlink":
+        if len(rest) != 1:
+            return Outcome("usage: people unlink <identity>")
+        return await _change("unlink", {"identity": rest[0]})
+    if verb in ("help", "?"):
+        return Outcome(_PEOPLE_USAGE)
+    # Anything else is a name: one person in detail.
+    return await _request(bus, topics.WORLD_ENV_QUERY, {"what": "people", "args": {"name": " ".join(words)}},
+                          timeout=10.0, render=peopleview.one)
 
 
 #: A word that means "on" and a word that means "off", as people type

@@ -133,3 +133,90 @@ class TheShortWay(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhoSimKnows(unittest.TestCase):
+    """`people` (stage 10 item 4): who Sim knows, what they said yes
+    to, and what they care about.
+
+    The asymmetry is the design and these tests pin it: READING is a
+    World Model query, and every CHANGE goes through the `people`
+    tool, which is tier 3. Writing to the store from the terminal
+    would be a back door around the one gate that makes consent mean
+    anything -- a household gives consent, Sim never records it
+    because somebody typed it convincingly.
+    """
+
+    def _people(self, line: str):
+        asked = {}
+
+        async def _requested(bus, topic, payload, *, timeout=0.0, render=None):
+            asked.update({"topic": topic, "payload": payload})
+            from simorgh.interface.dispatch import Outcome
+
+            return Outcome("(read)")
+
+        async def _explode(*, bus, ledger, tool, raw, session_id, timeout=0.0, action_id=None):
+            raise _Ran(tool, raw)
+
+        with mock.patch.object(dispatch, "_request", _requested), \
+             mock.patch.object(dispatch, "_run_tool", _explode):
+            try:
+                text = asyncio.run(dispatch._people(line, bus=None, ledger=None, session_id="t")).text  # noqa: SLF001
+            except _Ran as ran:
+                return {"tool": ran.tool, "payload": ran.payload}
+        return {"read": asked, "text": text}
+
+    def test_listing_is_a_read_not_a_tool_call(self):
+        out = self._people("")
+        self.assertEqual(out["read"]["payload"]["what"], "people")
+
+    def test_a_bare_name_asks_about_that_person(self):
+        out = self._people("Mara")
+        self.assertEqual(out["read"]["payload"]["args"]["name"], "Mara")
+
+    def test_a_grant_goes_through_the_tier_three_tool(self):
+        out = self._people("grant Mara wellbeing_checkins")
+        self.assertEqual(out["tool"], "people")
+        self.assertEqual(out["payload"], {"action": "grant", "name": "Mara",
+                                          "permission": "wellbeing_checkins"})
+
+    def test_a_revoke_does_too(self):
+        self.assertEqual(self._people("revoke Mara interest_shares")["payload"]["action"], "revoke")
+
+    def test_an_interest_is_added_by_asking(self):
+        out = self._people("interest add Aran lego robotics")
+        self.assertEqual(out["payload"], {"action": "add_interest", "name": "Aran",
+                                          "interest": "lego robotics"})
+
+    def test_a_grant_without_a_permission_lists_the_permissions(self):
+        text = self._people("grant Mara")["text"]
+        self.assertIn("wellbeing_checkins", text)
+        self.assertIn("interest_shares", text)
+
+
+class NobodyIsShownAsABlank(unittest.TestCase):
+    """A person with no permissions says so in words.
+
+    An empty space reads as an oversight, and the whole point is that
+    nothing is the default: a fresh install grants nobody anything.
+    """
+
+    def test_a_person_who_said_yes_to_nothing_says_so(self):
+        from simorgh.interface import peopleview
+
+        text = peopleview.one({"person": {"name": "Otto", "role": "child"}})
+        self.assertIn("said yes to: nothing", text)
+        self.assertIn("cares about: nothing recorded", text)
+
+    def test_a_permission_is_explained_in_a_persons_words(self):
+        from simorgh.interface import peopleview
+
+        text = peopleview.one({"person": {"name": "Mara", "role": "owner",
+                                          "permissions": ["wellbeing_checkins"]}})
+        self.assertIn("quieter than usual", text)
+
+    def test_nobody_at_all_says_what_to_do_next(self):
+        from simorgh.interface import peopleview
+
+        self.assertIn("people link", peopleview.everybody({"people": []}))
