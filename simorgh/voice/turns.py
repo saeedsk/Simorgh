@@ -38,6 +38,12 @@ STATES = (IDLE, LISTENING, USER_SPEAKING, THINKING, AGENT_SPEAKING, INTERRUPTED,
 _SENTENCE_END = (".", "!", "?", "؟", "۔")
 
 
+#: How many overtaken-but-unanswered turns to keep owed. A room
+#: with two children in it produces several in a row while a slow
+#: provider is thinking; beyond a handful the oldest answer is
+#: stale enough that saying it would be worse than silence.
+OWED_KEPT = 4
+
 @dataclass(frozen=True)
 class Policy:
     end_of_turn_silence_ms: int = 700
@@ -98,7 +104,16 @@ class TurnManager:
     # a 15 s answer was dropped because the creator spoke meanwhile, the
     # next answer was dropped the same way, and Sim was blamed for
     # silence. Once the newer turn is answered the older one is stale.
-    _superseded: int = 0
+    #: Turns asked, not yet answered, and overtaken by a newer one --
+    #: oldest first. A LIST, because it was a single slot and a second
+    #: interruption overwrote the first: the original answer then
+    #: matched neither `_asked_turn` nor `_superseded` and was dropped
+    #: silently. Live 2026-09-21, the twins talking over a 9.1 s
+    #: failover to Gemini -- "You're not sim." was answered "I really
+    #: am Sim! Who else would be right here chatting with you?" and
+    #: the creator heard nothing at all, because two utterances had
+    #: arrived while the model was thinking.
+    _superseded: list = field(default_factory=list)
     _late_playing: bool = False
     transitions: list[tuple[str, str, str]] = field(default_factory=list)
 
@@ -209,7 +224,8 @@ class TurnManager:
             self._go(THINKING if self._asked_turn else LISTENING, "heard nothing")
             return []
         if self._asked_turn and self._asked_turn != self.turn_id:
-            self._superseded = self._asked_turn
+            self._superseded.append(self._asked_turn)
+            del self._superseded[:-OWED_KEPT]
         self._asked_turn = self.turn_id
         self._go(THINKING, "final transcript")
         return [Action(Actions.ASK, turn_id=self.turn_id, text=text)]
@@ -218,7 +234,7 @@ class TurnManager:
         """The turn just asked was the same question again (voice/repeat.py):
         it is not asked, and the earlier turn's answer is owed as before."""
         if turn_id == self._asked_turn and self._superseded:
-            self._asked_turn, self._superseded = self._superseded, 0
+            self._asked_turn = self._superseded.pop()
 
     @property
     def asked_turn(self) -> int:
@@ -231,10 +247,10 @@ class TurnManager:
         turn right now (the caller asks again once that settles);
         dropped if a later turn has really been asked."""
         if turn_id != self._asked_turn:
-            if turn_id and turn_id == self._superseded and self.state == THINKING:
+            if turn_id and turn_id in self._superseded and self.state == THINKING:
                 # Asked, then superseded, answered first: said now, late;
                 # the newer turn's answer follows.
-                self._superseded = 0
+                self._superseded.remove(turn_id)
                 self._late_playing = True
                 self.response_id += 1
                 self.speaking_response = self.response_id
@@ -248,7 +264,7 @@ class TurnManager:
         if self.state != THINKING:
             return [Action(Actions.DROP_REPLY, turn_id=turn_id, reason=f"the session is {self.state}")]
         self._asked_turn = 0
-        self._superseded = 0
+        self._superseded.clear()
         self.response_id += 1
         self.speaking_response = self.response_id
         return [Action(Actions.SPEAK, turn_id=turn_id, response_id=self.response_id)]
