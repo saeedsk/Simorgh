@@ -380,6 +380,12 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "tool":
         return await _tool_command(args, bus=bus, ledger=ledger, session_id=session_id)
 
+    if name == "home":
+        return await _home(args, bus=bus, ledger=ledger, session_id=session_id)
+
+    if name in ("light", "lights"):
+        return await _light(args, bus=bus, ledger=ledger, session_id=session_id)
+
     if name == "config":
         return await _config_command(ledger, args)
 
@@ -1016,6 +1022,151 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
     if close:
         return Outcome(f"tv: unknown verb {verb!r} -- did you mean `tv {close[0]}`?")
     return Outcome(f"tv: unknown verb {verb!r} -- {usage}")
+
+
+#: A word that means "on" and a word that means "off", as people type
+#: them. `1`/`0` because a tired hand reaches for them, `yes`/`no`
+#: because somebody will.
+_ON_WORDS = frozenset({"on", "1", "yes", "true", "up"})
+_OFF_WORDS = frozenset({"off", "0", "no", "false", "down"})
+
+#: `home` and `light` are two doors into the same four tools. The
+#: creator asked for both (2026-09-20): a full family for the house,
+#: and a short one for the thing anybody actually types twenty times a
+#: day. `light on kitchen` is three words; the `tool home_call` form
+#: underneath it is a service name and a line of JSON, which is the
+#: right interface for a model and the wrong one for a person standing
+#: in a dark kitchen.
+HOME_VERBS: tuple[tuple[str, str, str], ...] = (
+    ("", "", "what the house is doing: what is on, who is where, what is stale"),
+    ("find", "<words>", "what matches: \"kitchen\", \"anything with a battery\""),
+    ("state", "<thing>", "one thing, as it is right now"),
+    ("on", "<thing>", "turn it on"),
+    ("off", "<thing>", "turn it off"),
+    ("dim", "<thing> <0-100>", "set a light's brightness"),
+    ("toggle", "<thing>", "the other way from whatever it is now"),
+    ("scene", "<name>", "run a scene"),
+    ("call", "<service> <thing> [json]", "any service at all, for what the words above do not cover"),
+    ("undo", "<thing>", "put back what the last call changed"),
+)
+_HOME_COLUMN = max(len(f"{verb} {args}".strip()) for verb, args, _w in HOME_VERBS) + 2
+_HOME_USAGE = "\n".join(f"  home {f'{verb} {args}'.strip():<{_HOME_COLUMN}}{what}"
+                        for verb, args, what in HOME_VERBS)
+
+
+def _switched(target: str, on: bool) -> tuple[str, dict]:
+    """The service for turning `target` on or off.
+
+    `homeassistant.turn_on` rather than `light.turn_on`: the domain is
+    the entity's business, not the typist's, and a person saying "turn
+    the kettle on" should not have to know whether Home Assistant
+    filed it under `switch` or `light`. `home_call` resolves the name
+    and refuses an ambiguous one rather than guessing.
+    """
+    return f"homeassistant.turn_{'on' if on else 'off'}", {"target": target}
+
+
+async def _home(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`home ...`: the house, in the words a person would use.
+
+    Every verb here is one `home_*` tool call, so it goes through
+    `action.proposed` and Guardian exactly as the model's own call
+    does -- a lamp passes unattended, a lock or a camera's recording
+    stops and asks. The CLI is another caller in front of the gate,
+    never a way round it.
+    """
+    words = (args or "").strip().split()
+    verb = words[0].lower() if words else ""
+    rest = " ".join(words[1:]).strip()
+
+    async def _run(tool: str, payload: dict, timeout: float = 60.0) -> Outcome:
+        return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload),
+                               session_id=session_id, timeout=timeout)
+
+    if verb in ("", "state") and not rest:
+        # A bare `home` is "what is going on", which is the situation
+        # the World Model already keeps -- not a dump of every entity.
+        return await _run("home_state", {"target": "on"})
+    if verb in ("find", "search", "what", "ls", "list"):
+        return await _run("home_find", {"query": rest}) if rest else Outcome(_HOME_USAGE)
+    if verb == "state":
+        return await _run("home_state", {"target": rest})
+    if verb in _ON_WORDS | _OFF_WORDS and not rest:
+        return Outcome(_HOME_USAGE)
+    if verb in ("on", "off"):
+        if not rest:
+            return Outcome("usage: home on <thing>   (home find <words> lists what matches)")
+        service, payload = _switched(rest, verb == "on")
+        return await _run("home_call", {"service": service, **payload})
+    if verb in ("dim", "brightness", "level"):
+        parts = rest.rsplit(" ", 1)
+        if len(parts) != 2 or not parts[1].rstrip("%").isdigit():
+            return Outcome("usage: home dim <thing> <0-100>")
+        return await _run("home_call", {"service": "light.turn_on", "target": parts[0],
+                                        "brightness_pct": int(parts[1].rstrip("%"))})
+    if verb == "toggle":
+        if not rest:
+            return Outcome("usage: home toggle <thing>")
+        return await _run("home_call", {"service": "homeassistant.toggle", "target": rest})
+    if verb == "scene":
+        if not rest:
+            return Outcome("usage: home scene <name>")
+        return await _run("home_call", {"service": "scene.turn_on", "target": rest})
+    if verb in ("call", "service"):
+        parts = rest.split(" ", 1)
+        if len(parts) < 2:
+            return Outcome('usage: home call <service> <thing> [{"extra": "options"}]')
+        service, tail = parts[0], parts[1].strip()
+        extra: dict = {}
+        if tail.startswith("{"):
+            try:
+                extra, tail = json.loads(tail), ""
+            except ValueError:
+                return Outcome("that JSON did not parse")
+        elif " {" in tail:
+            target, _, raw = tail.partition(" {")
+            try:
+                extra, tail = json.loads("{" + raw), target.strip()
+            except ValueError:
+                return Outcome("that JSON did not parse")
+        return await _run("home_call", {"service": service, **({"target": tail} if tail else {}), **extra})
+    if verb == "undo":
+        return await _run("home_undo", {"entity": rest}) if rest else Outcome("usage: home undo <thing>")
+    if verb in ("describe", "explain"):
+        return await _run("home_describe", {"query": rest or "the house"})
+    return Outcome(_HOME_USAGE)
+
+
+async def _light(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`light ...`: the short way to the thing people do most.
+
+    Deliberately redundant with `home` (the creator asked for both):
+    turning a light on is the single most common thing anybody wants
+    from a house, and it should cost three words. `light kitchen on`
+    and `light on kitchen` both work, because both are what people
+    type and arguing with them is not a feature.
+    """
+    words = (args or "").strip().split()
+    if not words:
+        return await _home("find light", bus=bus, ledger=ledger, session_id=session_id)
+
+    head, tail = words[0].lower(), words[-1].lower()
+    # `light on kitchen` and `light kitchen on` are the same sentence.
+    if head in _ON_WORDS or head in _OFF_WORDS:
+        state, target = head, " ".join(words[1:])
+    elif tail in _ON_WORDS or tail in _OFF_WORDS:
+        state, target = tail, " ".join(words[:-1])
+    elif tail.rstrip("%").isdigit():
+        return await _home(f"dim {' '.join(words[:-1])} {tail}", bus=bus, ledger=ledger, session_id=session_id)
+    elif head in ("list", "all"):
+        return await _home("find light", bus=bus, ledger=ledger, session_id=session_id)
+    else:
+        return await _home(f"state {' '.join(words)}", bus=bus, ledger=ledger, session_id=session_id)
+
+    if not target:
+        return Outcome("usage: light on <name> | light <name> off | light <name> 40 | light list")
+    return await _home(f"{'on' if state in _ON_WORDS else 'off'} {target}",
+                       bus=bus, ledger=ledger, session_id=session_id)
 
 
 async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:

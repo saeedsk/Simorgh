@@ -16,3 +16,9 @@ by = "opus-main"
 task = "stage 2: the native-vs-markers measurement, through the BFCL harness"
 since = "2026-09-21T02:55:04+00:00"
 until = "2026-09-21T10:55:04+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "a home command family, and light as the short way in"
+since = "2026-09-21T03:46:37+00:00"
+until = "2026-09-21T11:46:37+00:00"
