@@ -64,6 +64,10 @@ class Beat:
     distance: float | None = None   # metres from the microphone
     room: str = ""                  # the scene's noise, if this beat changes it
     tv: str = ""                    # what the television is saying, if it is on
+    #: The television talking with NOBODY in the room. `tv` above
+    #: lays the set under a person who is really speaking; this is
+    #: the set alone, which is the case that went wrong live.
+    television: str = ""
     overlap_with: str = ""          # another persona talking at the same time
     after: float = 0.0              # seconds to let pass before this beat
     #: Ask Sim directly instead of making a sound in the room. Faster
@@ -450,6 +454,8 @@ async def play(scenario: Scenario, director) -> list[Outcome]:
                 mark = await director.propose(**beat.proposes)
             elif beat.device:
                 mark = await director.device(**beat.device)
+            elif beat.television:
+                mark = await director.from_the_television(beat.television)
             elif beat.who:
                 # Into the room by default. `say` asks Sim and so can
                 # never show what Sim ignores -- four `quiet`

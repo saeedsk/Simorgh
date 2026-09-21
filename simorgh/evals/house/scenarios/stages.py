@@ -350,6 +350,33 @@ A_SIREN_IS_A_DECISION = Scenario(
     ),
 )
 
+
+#: The television is not a person (stage 11 item 3's third guarantee).
+#:
+#: Live, 2026-09-20: a YouTube documentary was playing while the
+#: creator worked. Whisper transcribed the narration, the speaker book
+#: placed it as HIM at 0.37 against a 0.30 threshold, and Sim answered
+#: "They try to flee, but running isn't an emperor's strong point" as
+#: though he had said it -- then built a theory about which story he
+#: was telling, across several turns, until he typed "it is a youtuibe
+#: audio not me".
+#:
+#: The mixer for this existed and had no way to fire alone: `tv=` lays
+#: the set UNDER a person who is really speaking, so the one case that
+#: matters -- the only voice in the room is the television -- had
+#: never been played.
+THE_TELEVISION_IS_NOT_A_PERSON = Scenario(
+    id="stage11/the-television-is-not-a-person",
+    stage="11",
+    because="a documentary played in the room was answered as the creator, for several turns",
+    beats=(
+        Beat(television="But one challenge stops them in their tracks."),
+        Beat(television="They try to flee, but running isn't an emperor's strong point."),
+        Beat(television="They form a defensive circle and prepare to stand their ground.",
+             expect=(quiet(),)),
+    ),
+)
+
 SCENARIOS = (
     A_CHILD_ASKS_FOR_THE_DOOR,
     A_GUEST_CHANGES_WHO_SIM_TRUSTS,
@@ -364,6 +391,7 @@ SCENARIOS = (
     THE_HOUSE_DOES_AN_ORDINARY_THING,
     A_LAMP_IS_NOT_A_DECISION,
     A_SIREN_IS_A_DECISION,
+    THE_TELEVISION_IS_NOT_A_PERSON,
 )
 
 __all__ = ["SCENARIOS"] + [s.id.split("/")[-1].replace("-", "_").upper() for s in SCENARIOS]

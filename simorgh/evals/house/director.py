@@ -166,6 +166,42 @@ class Director:
             self.scene.last_said = await self._voice_of(None, said[-1].text)
         return mark
 
+    async def from_the_television(self, text: str, *, wait: bool = True) -> float:
+        """The television says something and nobody is in the room.
+
+        Stage 11 item 3's third named guarantee -- "the TV never gets
+        an answer" -- which had the mixer for it and no way to fire it
+        alone: `into_the_room(..., tv=...)` lays the television UNDER
+        a person who is really speaking, so it never tested the case
+        where the only voice is the set.
+
+        The creator hit it live on 2026-09-20. A YouTube documentary
+        was playing; whisper transcribed the narration, the speaker
+        book placed it as him at 0.37 against a 0.30 threshold, and
+        Sim answered "They try to flee, but running isn't an
+        emperor's strong point" as though he had said it -- then built
+        a theory about which story he was telling. He had to type "it
+        is a youtuibe audio not me".
+
+        Deliberately a real voice through the real scene: the bug is
+        in the listening path's decisions, and handing it a synthetic
+        marker would skip the ones that went wrong.
+        """
+        from .people import by_name
+        from .scene import silence
+
+        await self._ready_to_listen()
+        mark = self.now()
+        voice = await self._voice_of(by_name("Devin"), text)
+        self.scene.playing = voice
+        heard = self.scene.hear(silence(0.25), distance=self.scene.distance)
+        self.sandbox.recogniser.queue(text)
+        self.sandbox.microphone.feed(heard)
+        if wait:
+            await self.wait_for("turn.completed", since=mark, timeout=self.listen_timeout_s)
+            await self.settle(since=mark, quiet_for=0.6)
+        return mark
+
     async def _ready_to_listen(self, *, timeout: float = 20.0) -> bool:
         """Wait for the session to be back on the microphone."""
         from simorgh.voice.turns import LISTENING
