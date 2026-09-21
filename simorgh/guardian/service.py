@@ -21,6 +21,7 @@ from .api import BudgetStatus, DecisionContext, Proposal
 from .charter import load_charter
 from .config import Config
 from .pipeline import Pipeline
+from .tiers import tier_of
 from .posture import Posture
 from .registry import ToolRegistry
 from .tokens import TokenIssuer
@@ -677,8 +678,18 @@ class Service:
             ))
             return
         telemetry = getattr(self._ctx, "telemetry", None) or NULL_TELEMETRY
+        # The TIER goes on the span, not only the layer (stage 6 item 5).
+        # Reading the decision log a month later should show what
+        # Guardian thought at the time; without this, answering "how
+        # many tier-3 actions ran without a human" meant re-deriving
+        # every tool's tier from today's `contracts/tiers.py` and
+        # hoping the table had not moved since (2026-09-20, stage 6
+        # item 8's findings). A number you have to recompute from
+        # current code is not a record of what happened.
+        tier, why = tier_of(proposal, getattr(ctx, "tool", None))
         async with telemetry.span("guardian.decide", trace_id=message.trace_id, parent_id=message.id,
-                                  attrs={"tool": proposal.tool, "mode": self._config.mode}) as span:
+                                  attrs={"tool": proposal.tool, "mode": self._config.mode,
+                                         "tier": tier, "tier_why": why}) as span:
             verdict = await self._pipeline.decide(proposal, ctx)
             span.set("verdict", verdict.kind)
             span.set("layer", verdict.layer)

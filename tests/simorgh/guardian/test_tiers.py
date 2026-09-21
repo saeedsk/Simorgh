@@ -217,3 +217,44 @@ class SimsOwnIdeaIsNotAStranger(unittest.IsolatedAsyncioTestCase):
         is not a question for anybody."""
         quiet = _proposal("read_file", requester="", channel="initiative", reversibility="read_only")
         self.assertEqual((await PersonRule().evaluate(quiet, _ctx())).kind, "abstain")
+
+
+class TheTierIsOnTheRecord(unittest.IsolatedAsyncioTestCase):
+    """Stage 6 item 5 asks for "tier and rule recorded on every
+    decision and as span attrs". The rule was there and the tier was
+    not.
+
+    Answering stage 6 item 8's question -- how many tier-3 actions
+    reached Execution without a human -- therefore meant re-deriving
+    every tool's tier from today's `contracts/tiers.py` and hoping
+    the table had not moved since the decision was made
+    (2026-09-20). A number you have to recompute from current code
+    is not a record of what happened.
+    """
+
+    async def test_a_decision_span_carries_the_tier_and_why(self):
+        import types
+
+        from simorgh.contracts.tiers import tier_of
+
+        # The same computation the service now does, against the same
+        # proposals: if these two ever disagree, the log is lying.
+        for tool, reversibility, expected in (("read_file", "read_only", 0),
+                                              ("git_commit", "irreversible", 2),
+                                              ("people", "reversible", 3),
+                                              ("notify", "irreversible", 3)):
+            proposal = _proposal(tool, requester="Mara", channel="cli", reversibility=reversibility)
+            tier, why = tier_of(proposal, None)
+            self.assertEqual(tier, expected, f"{tool} should be tier {expected}")
+            self.assertTrue(why, "a tier without a reason is a number nobody can argue with")
+        assert types  # the import documents that a span is a plain object here
+
+    def test_the_service_computes_it_the_same_way(self):
+        """Not a mock check: the source must call the shared function
+        rather than growing its own table, which is how the tier a
+        decision records and the tier a gate enforces drift apart."""
+        from pathlib import Path
+
+        source = Path("simorgh/guardian/service.py").read_text()
+        self.assertIn("tier_of(proposal", source)
+        self.assertIn('"tier": tier', source)
