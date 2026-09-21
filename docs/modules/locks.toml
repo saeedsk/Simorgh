@@ -16,9 +16,3 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
-
-[locks.kernel]
-by = "opus-main"
-task = "an advertised secret is readable"
-since = "2026-09-21T07:17:39+00:00"
-until = "2026-09-21T15:17:39+00:00"
