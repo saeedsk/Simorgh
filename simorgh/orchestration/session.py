@@ -538,6 +538,39 @@ def chat_outside_workspace_refusal(session: Session, tool: str, args: dict) -> s
             "is verified before its change lands. Do not edit it from chat.")
 
 
+#: A refusal that means "the text you matched against is not what is
+#: in the file". The cheap fix is the read you already have.
+_STALE_SEARCH = "SEARCH text is not in"
+RECALL_TOOL = pressure_mod.RECALL_TOOL
+
+
+def recall_hint(session: Session, error: str) -> str:
+    """Point a failed SEARCH at the read it was written from.
+
+    When compaction sets a tool result aside it leaves a stub naming
+    the ref, and `recall_result` brings the whole thing back for
+    nothing. A trial on 2026-09-20 never used it: it read a 638-line
+    file six times, had those reads set aside at 93% of the window,
+    wrote a SEARCH block from a read it could no longer see, and was
+    told by the refusal to READ_FILE the region again -- good advice
+    in general and the expensive half of the answer here, in a
+    session that then ran out of steps.
+
+    Only on that one refusal, and only when there is something to
+    recall. A hint on every failure is noise, and noise in a tool
+    result is read past.
+    """
+    if _STALE_SEARCH not in str(error or ""):
+        return ""
+    refs = [(ref, tool) for ref, tool in (getattr(session, "set_aside", None) or []) if ref]
+    if not refs:
+        return ""
+    named = "; ".join(f"{tool} -> {ref}" for ref, tool in refs[-3:])
+    return (f"Note: {len(refs)} earlier tool result(s) were set aside to save context, and your "
+            f"SEARCH text may be from one of them. {RECALL_TOOL.upper()} brings one back in full "
+            f"and costs nothing to re-run: {named}")
+
+
 def commit_of_unwritten_refusal(session: Session, tool: str, args: dict) -> str:
     """Why this session may not commit this path, or "" when it may.
 
@@ -1883,8 +1916,10 @@ class SessionRunner:
         if self._ledger is not None:
             async def put(data: bytes) -> str:
                 return await self._ledger.put_blob(data, content_type="text/plain")
-            session.messages, stubbed = await pressure_mod.stub_old_results(
+            session.messages, made = await pressure_mod.stub_old_results(
                 session.messages, keep_recent=max(1, self._keep_recent_steps), put=put)
+            session.set_aside.extend(made)
+            stubbed = len(made)
         if stubbed:
             step = Step(session.next_step_no(), "gather",
                         f"context at {measured:.0%}: {stubbed} older tool result(s) set aside "
@@ -2219,6 +2254,9 @@ class SessionRunner:
                 # model to guess. The same silence sat behind every failed
                 # `run_tests` and `git_commit` in the earlier trials.
                 full = f"{error}\n\n{full}".strip() if full else error
+                hint = recall_hint(session, error)
+                if hint:
+                    full = f"{full}\n\n{hint}"
             if call.get("tool") == "run_tests":
                 # The one fact verification's `FullSuiteRanCheck` needs
                 # and nothing else records: what TARGET this call ran.

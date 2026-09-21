@@ -82,15 +82,24 @@ class PressureModule(unittest.TestCase):
             messages += [{"role": "assistant", "content": "READ_FILE: x"},
                          {"role": "user", "content": f"Result of read_file:\n{i}{BIG}"}]
         messages.append({"role": "tool", "tool_call_id": "c", "name": "search_code", "content": BIG})
-        out, n = await pressure.stub_old_results(messages, keep_recent=1, put=put)
-        self.assertEqual(n, 4)
+        out, made = await pressure.stub_old_results(messages, keep_recent=1, put=put)
+        # `(ref, tool)` per result set aside, not a count: knowing a
+        # result exists is not the same as being able to name it, and
+        # a refused SEARCH block is told which refs it can recall
+        # (`session.recall_hint`, 2026-09-20).
+        self.assertEqual(len(made), 4)
+        self.assertEqual([ref for ref, _tool in made], ["blob:0", "blob:1", "blob:2", "blob:3"])
+        # The marker dialect writes the tool into the result TEXT
+        # ("Result of read_file:"), not a `name` field, and that is
+        # the dialect every trial that showed this mattered ran in.
+        self.assertEqual({tool for _ref, tool in made}, {"read_file"})
         self.assertEqual(out[-1]["content"], BIG)
         self.assertTrue(out[2]["content"].startswith(pressure.STUB_MARK))
         self.assertIn("blob:0", out[2]["content"])
         self.assertEqual(store["blob:0"].decode(), messages[2]["content"])
         self.assertEqual(messages[2]["content"][:10], "Result of ")  # the input is not mutated
-        again, n2 = await pressure.stub_old_results(out, keep_recent=1, put=put)
-        self.assertEqual(n2, 0)
+        again, made2 = await pressure.stub_old_results(out, keep_recent=1, put=put)
+        self.assertEqual(made2, [])
 
 
 class LongTaskStaysUnderTheWindow(unittest.TestCase):

@@ -147,6 +147,10 @@ class Session:
     #: already issued the RUN_TESTS call and am waiting on its result"
     #: while verification failed it for never running the tests.
     markers_corrected: int = 0
+    #: `(ref, tool)` for every tool result compaction has set aside,
+    #: so a refusal can name the cheap way back to one instead of
+    #: telling the model to read the whole file again.
+    set_aside: list = field(default_factory=list)
     # Once per session: a reply that said the TV was playing something
     # when no tool had run was sent back (live 2026-09-13).
     claim_corrected: bool = False
