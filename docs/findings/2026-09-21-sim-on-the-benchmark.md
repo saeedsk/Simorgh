@@ -83,7 +83,36 @@ Two things follow, neither done:
   it having done real work; neither could get past it before the
   budget ended.
 
+## Run 4 — after two fixes, it failed earlier
+
+Two `search_code` calls, no edit at all, and "The task is finished.
+To summarise what was done and committed:" at step 5. Verification
+refused it three times: "this task's product is a change to a file
+and no file was changed".
+
+Neither fix was exercised — the marker correction fired once and was
+not needed again, and nothing was ever set aside because the session
+never grew. It did expose a third thing: `claimed_to_commit` bailed
+out because two searches counted as "a tool ran", so the commit
+claim passed unchallenged.
+
+**Four runs, four different failure paths.** That variance is the
+result. Nothing here has been shown to make the task succeed — only
+that three specific ways of failing are now closed. Claiming more
+from one run each would be the 15x native win again.
+
 ## What was fixed
 
-`MARKER_CORRECTIONS`, above — evidenced, tested, landed. The other
-two causes are recorded and not guessed at.
+Three things, each with a trace behind it and a test:
+
+1. `MARKER_CORRECTIONS = 3` — a second stray marker gets a
+   correction, and later ones say nothing is pending.
+2. `session.recall_hint` — a SEARCH block refused because the file
+   does not match is told which set-aside reads it can recall, rather
+   than being sent to re-read the whole file.
+3. `claimed_to_commit` asks whether a COMMITTING tool ran, not
+   whether any tool ran.
+
+Not fixed, and the real wall: a two-file change to a 638-line module
+does not fit this context budget. Both runs that got anywhere edited
+`config.py` (87 lines) and failed on `runner.py` (638).
