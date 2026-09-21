@@ -113,6 +113,52 @@ Note the asymmetry, because it has caught people before: a plain
 fallback reads `os.environ`, not the store, so the file only ever answers to the
 `vault:`-prefixed names.
 
+## mDNS discovery cannot be switched on for the container, and what to do instead
+
+Asked directly (the creator, 2026-09-20): how do you enable discovery of the Lutron
+bridge over mDNS for Home Assistant in Docker?
+
+You cannot, on this machine, and it is worth being plain about why rather
+than leaving somebody to hunt for the flag.
+
+Discovery works by listening for multicast on the local network --
+`224.0.0.251:5353` for mDNS, `239.255.255.250:1900` for SSDP. A container on
+Docker Desktop for Mac is not on the local network. It is inside a Linux VM
+whose networking, on this install, is gvisor: a **user-space TCP/IP stack**
+(`NetworkType: gvisor` in Docker's own settings) that translates outbound
+connections and has no L2 path to the Mac's Wi-Fi interface at all. LAN
+multicast never reaches it, so there is nothing for Home Assistant to hear.
+
+The two things people reach for do not help here:
+
+- **`--network host`.** Docker Desktop has had a host-networking beta since
+  4.34 and this install has it off (`HostNetworkingEnabled: false`, version
+  4.88.0). Turning it on would join the container to the **VM's** network
+  namespace, which is still the gvisor stack behind the Mac -- not the Mac's
+  own LAN. It solves the problem it is named for on Linux and not on macOS.
+- **`macvlan`.** It needs L2 access to the physical interface to give the
+  container its own MAC on the LAN. The VM has none. And the house is on
+  Wi-Fi, where a station cannot carry extra MAC addresses at all -- macvlan
+  over Wi-Fi is a dead end even on Linux.
+
+**For the Lutron bridge, none of this costs anything.** Discovery would only
+have saved typing an address that is already known: `192.168.50.108`
+(`Lutron-047d94d9.local`, `cc:33:31:1e:7c:b1`, LEAP listening on 8081,
+`SYSTYPE=SmartBridge`, firmware 08.28.11f000). Add the Caseta integration by
+hand with that address and press the button on the back of the bridge when it
+asks; the pairing is identical either way. Pin the address as a DHCP
+reservation on the ZenWiFi first, the way the NVR at `.42` already is --
+manual configuration plus a moving address is a thing that works until the
+router reboots.
+
+**If discovery matters generally**, that is the day to move to HA OS in a UTM
+VM with a *bridged* network adapter, which is the escape hatch this document
+already recommends keeping open: the VM becomes a real device on the LAN with
+its own address, so mDNS and SSDP work, and add-ons come with it. Test the
+bridge over Wi-Fi before committing to it -- `vmnet` bridged mode is reliable
+over Ethernet and mixed over Wi-Fi -- and restore an HA backup into it rather
+than starting again.
+
 ## `tools/ha.py`
 
 `status` walks the chain in order and names the first link that is broken --
