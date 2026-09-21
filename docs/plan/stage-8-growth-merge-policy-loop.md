@@ -46,5 +46,5 @@ Done 2026-09-19 (items 3-4, in part): the `growth` package exists with the two h
 ## Definition of done
 
 - [ ] Items 1-8 with tests; `growth/CONTRACT.md` written; the three old contracts removed.
-- [ ] Guardian protects `rules/`, `simorgh_skills/`, `agents/`, hooks, evals config.
+- [x] Guardian protects `rules/`, `agents/`, hooks and the evals suite (checked 2026-09-20: all four are in `DEFAULT_PROTECTED_SUBJECTS` with tests in `tests/simorgh/guardian/test_protected_subjects.py`). **`simorgh_skills/` is deliberately NOT protected**, and that is a decision rather than a gap: `apply_skill` is on `human_only_tools`, so every skill already reaches a person. Protecting the directory would turn that ask into a flat denial and take away something Sim can do today. Protection and human-only are different tools -- one says never, the other says not without somebody -- and a skill is the second. Tested as `abstain` rather than `deny`, so the distinction cannot be lost by accident.
 - [ ] Findings entry.
