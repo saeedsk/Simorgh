@@ -7,9 +7,9 @@
 
 [locks.contracts]
 by = "opus-main"
-task = "a real house arrived and its switches turn off recording"
-since = "2026-09-21T03:34:17+00:00"
-until = "2026-09-21T11:34:17+00:00"
+task = "homeassistant.turn_on made every lamp ask"
+since = "2026-09-21T04:02:38+00:00"
+until = "2026-09-21T12:02:38+00:00"
 
 [locks.evals]
 by = "opus-main"
@@ -19,6 +19,6 @@ until = "2026-09-21T10:55:04+00:00"
 
 [locks.interface]
 by = "opus-main"
-task = "a home command family, and light as the short way in"
-since = "2026-09-21T03:46:37+00:00"
-until = "2026-09-21T11:46:37+00:00"
+task = "a bare home asked the house for a thing called on"
+since = "2026-09-21T04:02:57+00:00"
+until = "2026-09-21T12:02:57+00:00"

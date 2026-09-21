@@ -672,3 +672,38 @@ class WhatTheHouseSeesAndRemembersNeedsAPersonTestCase(unittest.TestCase):
         self.assertEqual(self._class("light.kitchen_kitchen_table", "light.turn_on"), "unattended")
         self.assertEqual(self._class("switch.front_window_infrared_lights_in_night_mode"), "unattended")
         self.assertEqual(self._class("switch.front_door_in_home_chime"), "unattended")
+
+
+class AGateThatFiresOnLampsIsAGatePeopleClickThroughTestCase(unittest.TestCase):
+    """`homeassistant.turn_on` is the domain-agnostic service: "turn
+    this on, whatever kind of thing it is". Read literally,
+    `homeassistant` is an unrecognised domain, and this policy is
+    deliberately pessimistic about those -- so the `home on kitchen`
+    shortcut made every lamp in the house stop and ask for approval
+    (live, 2026-09-20, the first evening the creator had a real
+    house).
+
+    Worse than inconvenient. A gate that fires on lamps is a gate
+    people learn to click through, and then it is there for the front
+    door too.
+    """
+
+    def _class(self, service, entity):
+        from simorgh.contracts.home.policy import classify_call
+
+        return classify_call(service, entity)
+
+    def test_a_lamp_through_the_generic_service_is_still_a_lamp(self):
+        self.assertEqual(self._class("homeassistant.turn_off", "light.family_room_family_room"), "unattended")
+        self.assertEqual(self._class("homeassistant.turn_on", "switch.kettle"), "unattended")
+        self.assertEqual(self._class("homeassistant.toggle", "light.pool_pool"), "unattended")
+
+    def test_the_things_that_should_ask_still_ask(self):
+        self.assertEqual(self._class("homeassistant.turn_on", "lock.front_door"), "human")
+        self.assertEqual(self._class("homeassistant.turn_off", "switch.office_record"), "human")
+        self.assertEqual(self._class("homeassistant.turn_off", "switch.front_motion_detection"), "human")
+
+    def test_an_unrecognised_domain_is_still_pessimistic(self):
+        """Resolving `homeassistant` from the entity must not become a
+        general habit of trusting whatever the entity says."""
+        self.assertEqual(self._class("frobnicate.engage", "frobnicator.main"), "human")

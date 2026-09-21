@@ -1156,13 +1156,24 @@ async def _home(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: 
         return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload),
                                session_id=session_id, timeout=timeout)
 
-    if verb in ("", "state") and not rest:
-        # A bare `home` is "what is going on", which is the situation
-        # the World Model already keeps -- not a dump of every entity.
-        return await _run("home_state", {"target": "on"})
+    if verb in ("", "state", "?") and not rest:
+        # A bare `home` is "what is going on", and that is the World
+        # Model's `home` facet -- entities that are fresh, who is
+        # where, what is stale. The first version asked `home_state`
+        # for a thing called "on" and got, correctly, "nothing in the
+        # house matches 'on'; nearest: zone.home" (live, 2026-09-20,
+        # the first time the creator typed it).
+        from . import homeview
+
+        if verb == "?":
+            return Outcome(_HOME_USAGE)
+        return await _request(bus, topics.WORLD_ENV_QUERY, {"what": "home", "args": {}},
+                              timeout=10.0, render=homeview.situation)
     if verb in ("find", "search", "what", "ls", "list"):
         return await _run("home_find", {"query": rest}) if rest else Outcome(_HOME_USAGE)
     if verb == "state":
+        if rest in ("?", "help"):
+            return Outcome(_HOME_USAGE)
         return await _run("home_state", {"target": rest})
     if verb in _ON_WORDS | _OFF_WORDS and not rest:
         return Outcome(_HOME_USAGE)

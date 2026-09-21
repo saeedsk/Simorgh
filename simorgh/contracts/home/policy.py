@@ -100,6 +100,16 @@ def classify_call(service: str, entity_id: str, *, device_class: str = "",
     service = (service or "").strip().lower()
     entity_id = (entity_id or "").strip().lower()
     domain = service.split(".", 1)[0] if "." in service else entity_id.split(".", 1)[0]
+    # `homeassistant.turn_on` is the domain-agnostic service: it means
+    # "turn this on, whatever kind of thing it is", and the kind is the
+    # ENTITY's. Read literally, `homeassistant` is an unrecognised
+    # domain and this function is pessimistic about those -- so the
+    # `home on kitchen` shortcut added on 2026-09-20 made every lamp in
+    # the house stop and ask for approval. That is worse than
+    # inconvenient: a gate that fires on lamps is a gate people learn
+    # to click through, and then it is there for the front door too.
+    if domain in ("homeassistant", "") and "." in entity_id:
+        domain = entity_id.split(".", 1)[0]
     data = data or {}
 
     if service in ALWAYS_HUMAN_SERVICES or service in {s.lower() for s in always_human}:

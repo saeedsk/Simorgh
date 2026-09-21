@@ -76,10 +76,21 @@ class TheHouseFamily(unittest.TestCase):
         self.assertEqual(_call("home find battery")[0], "home_find")
         self.assertEqual(_call("home state light.pool_pool")[0], "home_state")
 
-    def test_a_bare_home_asks_what_is_on(self):
-        tool, args = _call("home")
-        self.assertEqual(tool, "home_state")
-        self.assertEqual(args["target"], "on")
+    def test_a_bare_home_asks_the_world_model_not_home_assistant(self):
+        """The first version asked `home_state` for a thing called
+        "on" and was answered, correctly, "nothing in the house
+        matches \'on\'; nearest: zone.home" -- live, the first time the
+        creator typed it. What somebody means by `home` is the
+        situation Sim already keeps, not an entity lookup."""
+        asked = {}
+
+        async def _requested(bus, topic, payload, *, timeout=0.0, render=None):
+            asked.update(payload)
+            return dispatch.Outcome("(read)")
+
+        with mock.patch.object(dispatch, "_request", _requested):
+            asyncio.run(dispatch._home("", bus=None, ledger=None, session_id="t"))  # noqa: SLF001
+        self.assertEqual(asked.get("what"), "home")
 
     def test_call_is_the_escape_hatch_and_takes_json(self):
         tool, args = _call('home call fan.set_percentage office {"percentage": 60}')
