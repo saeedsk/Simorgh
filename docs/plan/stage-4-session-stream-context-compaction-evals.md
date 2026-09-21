@@ -34,6 +34,20 @@ Item 7 done 2026-09-19: `agents/{chat,voice_chat,patch,research,plan,skill}.md`,
 6. **Budgets in tokens, USD, wall-clock.** *Lock `orchestration`.* `Budget` gains `max_tokens`, `max_usd`, `max_wall_s`; the step cap becomes a sanity bound; "step budget exhausted" becomes "budget exhausted: <which>". Acceptance: benchmark harness reports which budget ended a case.
 7. **Agent definitions as files.** *Lock `orchestration`, `guardian`.* `agents/<name>.md` with frontmatter (tools allowlist with globs, model_tier, max_turns, max_tokens, max_cost_usd, max_wall_s, max_parallel_tools, verify, isolation, compaction thresholds, hooks, channels) and the scaffold as body; `profiles.py` + `scaffolds.py` become the loader; `agents/` joins Guardian's protected subjects. CHAT becomes read-only plus `start_task`; writing tools move to task agents (S10, L6). Acceptance: the six current profiles round-trip through files; a chat turn cannot `apply_source_patch`.
 8. **One Stop hook, one trajectory check.** *Lock `orchestration`, `verification`.* A generic Stop hook: "final text claims an effect and this turn has no successful mutating ToolResult" bounces once naming the tools that could do it; Verification's trajectory check over the session stream replaces `claimed_to_commit`, `claimed_tv_act`, `promised_behaviour` on native paths (each police function deleted there when its span counter reads zero for a bless cycle). Acceptance: the police tests move to the hook.
+Measured 2026-09-20 (item 8's retirement question). The Stop hook names its rule on every bounce as an `orchestration.stop_hook` span, and the plan says a specific police rule goes when its counter reads zero for a bless cycle. Over the whole recorded window (`~/.simorgh/telemetry.sqlite`, 1,823 Guardian decisions' worth of activity):
+
+| rule | bounces |
+|---|---|
+| `promise` | 2 |
+| `pronunciation` | 1 |
+| `tv` | 1 |
+| `commit` | 0 |
+| `effect` (the generic one) | 0 |
+
+**Nothing is retired on this, and the reason is the interesting part.** `commit` reads zero because almost no code tasks ran in the window, not because the rule is unnecessary -- deleting a guard because the thing it guards did not happen this week is how a guard disappears the fortnight before it was needed. And `effect` reading zero is the specific rules doing their job: they are checked first, so the generic one only ever fires on a claim none of them named. A zero there is evidence the net is *behind* something, not that it is idle.
+
+What would actually justify retiring `commit`: a bless cycle with real patch work in it and still no bounce. Written down here so the next agent measures that rather than re-deriving the table.
+
 9. **`simorgh/evals/`.** *Lock `benchmark`, `tools`, `simloader`.* Merge `benchmark/`, `tools/trial.py`, `tools/trial_suite.py`, `tools/observer_kit.py`, `tools/bench_instance.py`; suites: household (the recall scenario; lights/TV/reminders/mail/camera against fake devices), conversation, tool-use (BFCL), research (GAIA), code (SWE-bench Verified slice), long-task (60 turns; kill -9 and resume), voice (50 recorded turns); ≥3 repeats and a bootstrap CI; floor-answered cases skipped; a replay tier with a `FixtureProvider` keyed by session turn seq and tool_use id; `simloader.py bless` runs the suite by default with a post-handoff watch counting SLO breaches. Acceptance: `python -m simorgh.evals run household --repeats 3` prints a table; the loader's decision log records the eval result.
 10. **Lease protocol behind a flag.** *Lock `orchestration`.* (L9) With `workers=1` on the memory bus, claims and heartbeats are skipped; the code stays for `local-multi`. Acceptance: task streams stop carrying lease events in single mode.
 11. **Findings entry.** Done 2026-09-19: `docs/findings/2026-09-19-stage-4-live-fixes-and-stage-5-recall.md` (the trial rounds, the stable prefix's cache hit, compaction, the agents as files, the Stop hook, and the live voice session's fixes).
