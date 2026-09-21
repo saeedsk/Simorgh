@@ -4,21 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.contracts]
-by = "opus-main"
-task = "the live-session registry both sides need"
-since = "2026-09-21T02:37:57+00:00"
-until = "2026-09-21T10:37:57+00:00"
-
-[locks.domains]
-by = "opus-main"
-task = "a webrtc keepalive is not a new action, 640 an hour"
-since = "2026-09-21T02:35:15+00:00"
-until = "2026-09-21T10:35:15+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "the dashboard's keepalive flood"
-since = "2026-09-21T02:35:15+00:00"
-until = "2026-09-21T10:35:15+00:00"
