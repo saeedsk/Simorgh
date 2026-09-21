@@ -219,6 +219,75 @@ def to_someone_else(text: str, *, names: tuple[str, ...] = ()) -> str:
     return ""
 
 
+#: Ordinary words a household name can be one letter away from.
+#: Rewriting one of these would be worse than the misspelling.
+_REAL_WORDS = frozenset({
+    "are", "air", "era", "ira", "iris", "irish", "aran", "aria", "arab", "iran", "sudden",
+    "so", "sod", "soda", "are", "our", "ours", "aaron", "karen", "ivan", "irma", "aida",
+})
+
+
+def _one_letter_apart(heard: str, name: str) -> bool:
+    """Whether `heard` is `name` with one letter added, dropped or
+    swapped -- and at three letters, added or dropped only.
+
+    The length rule is the whole safety of this. A substitution in a
+    three-letter name turns Ida into Ira and Ron into Ram: at that
+    length every name is one letter from every other, and respelling
+    one person as another is worse than any misspelling. An INSERTION
+    is different -- it is what a recogniser does to a short name it
+    does not know, and "Aira" is not somebody else.
+    """
+    if heard == name:
+        return True
+    if abs(len(heard) - len(name)) > 1:
+        return False
+    if len(heard) == len(name):
+        return len(name) >= 4 and sum(a != b for a, b in zip(heard, name)) == 1
+    longer, shorter = (heard, name) if len(heard) > len(name) else (name, heard)
+    for i in range(len(longer)):
+        if longer[:i] + longer[i + 1:] == shorter:
+            return True
+    return False
+
+
+def spell_household_names(text: str, names: tuple[str, ...] = ()) -> str:
+    """Give a household name back its own spelling.
+
+    Whisper writes short unusual names the way they sound: the
+    creator's daughter Ira came back as "Aira", and he corrected Sim
+    out loud -- "Ira and not Aira" (2026-09-20). One misspelling then
+    costs three things at once: the vocative rule stops recognising
+    her name, the memory stores a person who does not exist, and the
+    screen shows the wrong name to the person who chose it.
+
+    Narrow on purpose, because rewriting what somebody actually said
+    is the rudest thing in this file. A word is respelled only when
+    it is one letter from a name of somebody who lives here (and at
+    three letters, one letter ADDED or DROPPED -- never swapped, or
+    Ida becomes Ira), and the heard word is not an ordinary English
+    word -- so "Aaron" stays Aaron, "iris" the flower is left to
+    context, and "era" is never a person.
+    """
+    names = tuple(n for n in names if n and len(n) >= 3)
+    if not text or not names:
+        return text
+
+    def swap(match: "re.Match[str]") -> str:
+        word = match.group(0)
+        low = word.lower()
+        if low in _REAL_WORDS:
+            return word
+        for name in names:
+            if low == name.lower():
+                return word
+            if _one_letter_apart(low, name.lower()):
+                return name if word[:1].isupper() or word.isupper() else name.lower()
+        return word
+
+    return re.sub(r"\b[A-Za-z]{3,}\b", swap, text)
+
+
 #: Asking for something only Sim does.
 #:
 #: The gap this closes, live on 2026-09-20: the creator's daughter
@@ -317,4 +386,4 @@ class Backchannel:
 
 
 __all__ = ["Backchannel", "EMPATHY", "GREETING", "HEARD", "HUM", "LOOKING", "POOLS", "QUESTION", "QUIET", "REQUEST", "STILL", "addressed",
-           "asks_for_something_sim_does", "classify", "is_quiet", "strip_lead", "to_someone_else"]
+           "asks_for_something_sim_does", "classify", "is_quiet", "spell_household_names", "strip_lead", "to_someone_else"]

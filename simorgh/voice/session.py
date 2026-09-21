@@ -32,7 +32,7 @@ from simorgh.contracts import topics
 from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import (
     GREETING, Backchannel, addressed, asks_for_something_sim_does, classify, is_quiet,
-    strip_lead, to_someone_else,
+    spell_household_names, strip_lead, to_someone_else,
 )
 from .commands import MUTE, OFF, RESTART, STOP, opens_with_stop, spoken_command
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
@@ -1079,6 +1079,11 @@ class VoiceSession:
             names = speakers_in(segments)
             speaker = names[-1] if names else speaker     # the last voice is the one Sim answers
             text = lines(segments)
+        # Give a household name its own spelling before anything reads
+        # this turn: the screen, the memory, the vocative rule and the
+        # model all see the same person. The creator, out loud on
+        # 2026-09-20, correcting Sim: "Ira and not Aira".
+        text = spell_household_names(text, self._household_names())
         self.last_identification = identification
         if speaker:
             self.last_speaker = speaker

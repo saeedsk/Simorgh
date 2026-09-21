@@ -63,3 +63,48 @@ class NotANameTestCase(unittest.TestCase):
         self.assertEqual(name_in("my name is Aran"), "Aran")
         self.assertEqual(name_in("Iris."), "Iris")
         self.assertEqual(name_in("I'm Soodeh"), "Soodeh")
+
+
+class AHouseholdNameKeepsItsSpelling(unittest.TestCase):
+    """The creator, out loud on 2026-09-20, correcting Sim: "Ira and
+    not Aira."
+
+    Whisper writes a short unusual name the way it sounds, and one
+    misspelling costs three things at once -- the vocative rule stops
+    recognising her, the memory stores a person who does not exist,
+    and the screen shows the wrong name to the person who chose it.
+
+    Rewriting what somebody actually said is the rudest thing this
+    module does, so the rule is narrow: one letter from a name of
+    somebody who lives here, added or dropped only at three letters,
+    and never an ordinary English word.
+    """
+
+    NAMES = ("Ira", "Iris", "Aran", "Soodeh", "Saeed")
+
+    def _spell(self, text):
+        from simorgh.voice.backchannel import spell_household_names
+
+        return spell_household_names(text, self.NAMES)
+
+    def test_the_name_the_creator_corrected(self):
+        self.assertEqual(self._spell("Aira, put your shoes on"), "Ira, put your shoes on")
+
+    def test_somebody_else_is_never_renamed_into_the_family(self):
+        """A substitution in a three-letter name turns one person into
+        another, which is worse than any misspelling."""
+        for text in ("Ida called me", "I met Aaron yesterday", "tell Iran about it"):
+            self.assertEqual(self._spell(text), text)
+
+    def test_ordinary_words_are_left_alone(self):
+        for text in ("a new era began", "the air is cold", "Irish coffee", "the iris is open"):
+            self.assertEqual(self._spell(text), text)
+
+    def test_a_correct_spelling_survives_untouched(self):
+        self.assertEqual(self._spell("Ira is singing and Aran is asleep"),
+                         "Ira is singing and Aran is asleep")
+
+    def test_no_names_means_no_rewriting(self):
+        from simorgh.voice.backchannel import spell_household_names
+
+        self.assertEqual(spell_household_names("Aira, put your shoes on", ()), "Aira, put your shoes on")

@@ -11,12 +11,6 @@ task = "homeassistant.turn_on made every lamp ask"
 since = "2026-09-21T04:02:38+00:00"
 until = "2026-09-21T12:02:38+00:00"
 
-[locks.domains]
-by = "opus-main"
-task = "a read-only query lists its matches instead of refusing"
-since = "2026-09-21T04:21:04+00:00"
-until = "2026-09-21T12:21:04+00:00"
-
 [locks.evals]
 by = "opus-main"
 task = "stage 2: the native-vs-markers measurement, through the BFCL harness"
@@ -28,3 +22,9 @@ by = "opus-main"
 task = "a bare home asked the house for a thing called on"
 since = "2026-09-21T04:02:57+00:00"
 until = "2026-09-21T12:02:57+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "a household name keeps its own spelling"
+since = "2026-09-21T04:23:20+00:00"
+until = "2026-09-21T12:23:20+00:00"
