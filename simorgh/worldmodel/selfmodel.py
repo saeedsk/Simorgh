@@ -60,7 +60,13 @@ class SelfModel:
     competence: dict = field(default_factory=dict)
     #: Per tool, from `action.result`: how often it works and how long
     #: it takes (stage 6 item 1). Keyed by tool name.
-    tools: dict = field(default_factory=dict)
+    #:
+    #: NOT `capabilities["tools"]`, which is the registry -- which
+    #: tools EXIST -- and is rescanned at every boot. This is how
+    #: they BEHAVE, which is history and cannot be rescanned. The
+    #: two were briefly both called `tools` and the fold test caught
+    #: it: one of them must never be replayed and the other must.
+    tool_stats: dict = field(default_factory=dict)
     limitations: list = field(default_factory=list)
     change_history: list = field(default_factory=list)
     goals: dict = field(default_factory=lambda: {"active_projects": [], "pending_tasks": 0, "recent_focus_areas": []})
@@ -75,7 +81,7 @@ class SelfModel:
                 "directives": list(self.identity.directives), "summary": self.identity.summary,
             },
             "capabilities": self.capabilities, "competence": self.competence,
-            "tools": self.tools,
+            "tool_stats": self.tool_stats,
             "limitations": self.limitations, "change_history": self.change_history,
             "goals": self.goals, "continuity": self.continuity, "open_questions": self.open_questions,
         }
@@ -99,7 +105,7 @@ class SelfModel:
                 identity=identity,
                 capabilities=dict(data.get("capabilities", {})),
                 competence=dict(data.get("competence", {})),
-                tools=dict(data.get("tools", {})),
+                tool_stats=dict(data.get("tool_stats", {})),
                 limitations=list(data.get("limitations", [])),
                 change_history=list(data.get("change_history", [])),
                 goals=dict(data.get("goals", {})),
@@ -128,7 +134,7 @@ class SelfModel:
                 identity=identity,
                 capabilities=dict(data.get("capabilities", {})),
                 competence=dict(data.get("competence", {})),
-                tools=dict(data.get("tools", {})),
+                tool_stats=dict(data.get("tool_stats", {})),
                 limitations=list(data.get("limitations", [])),
                 change_history=list(data.get("change_history", [])),
                 goals=dict(data.get("goals", {})),
@@ -239,7 +245,7 @@ def observe_tool(model: SelfModel, *, tool: str, ok: bool, duration_ms: float,
     name = str(tool or "").strip()
     if not name:
         return model
-    table = dict(model.tools)
+    table = dict(model.tool_stats)
     entry = dict(table.get(name, {}))
     runs = int(entry.get("runs", 0)) + 1
     good = int(entry.get("ok", 0)) + (1 if ok else 0)
@@ -255,7 +261,7 @@ def observe_tool(model: SelfModel, *, tool: str, ok: bool, duration_ms: float,
         "p95_ms": round(_quantile(ordered, 0.95), 1),
     })
     table[name] = entry
-    return replace(model, tools=table, updated_at=updated_at)
+    return replace(model, tool_stats=table, updated_at=updated_at)
 
 
 def slow_or_unreliable(model: SelfModel, *, min_runs: int = 5, p_ok_below: float = 0.8,
@@ -267,7 +273,7 @@ def slow_or_unreliable(model: SelfModel, *, min_runs: int = 5, p_ok_below: float
     reported as 0% forever.
     """
     out = []
-    for name, entry in sorted(model.tools.items()):
+    for name, entry in sorted(model.tool_stats.items()):
         runs = int(entry.get("runs", 0))
         if runs < min_runs:
             continue
@@ -396,6 +402,38 @@ def update_goals(
 #: docstring has said "not yet a fold of a durable stream" since it was
 #: written, and every mutator below was left a pure function so that
 #: sentence could one day be deleted (stage 6 item 1).
+def restore_tools(model: SelfModel, table: dict, *, updated_at: float) -> SelfModel:
+    """Put a persisted tool table back (stage 6 item 1).
+
+    The aggregates only. `recent_ms` is deliberately not carried
+    across a restart: it is a buffer for computing quantiles, the
+    quantiles themselves ARE carried, and persisting 64 floats per
+    tool for every tool in the registry would put a kilobyte of
+    sample noise into the self stream on every snapshot for a number
+    nobody reads to three decimal places.
+
+    The cost is honest and small: after a restart the quantiles are
+    the ones last measured and stay there until 64 fresh calls have
+    replaced them, which is a few minutes of ordinary use.
+    """
+    keep = ("runs", "ok", "p_ok", "p50_ms", "p95_ms")
+    out = dict(model.tool_stats)
+    for name, entry in (table or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        kept = {k: entry[k] for k in keep if k in entry}
+        if kept:
+            out[str(name)] = {**out.get(str(name), {}), **kept, "recent_ms": []}
+    return replace(model, tool_stats=out, updated_at=updated_at)
+
+
+def tools_snapshot(model: SelfModel) -> dict:
+    """What `restore_tools` takes: the aggregates, without the buffer."""
+    keep = ("runs", "ok", "p_ok", "p50_ms", "p95_ms")
+    return {name: {k: entry[k] for k in keep if k in entry}
+            for name, entry in model.tool_stats.items()}
+
+
 REPLAYABLE: dict = {
     "competence": lambda m, a, now: update_competence(
         m, str(a["task_type"]), updated_at=now, success_rate=a.get("success_rate"),
@@ -409,6 +447,7 @@ REPLAYABLE: dict = {
         commit=a.get("commit"), tests=a.get("tests"), summary=str(a.get("summary") or "")),
     "mitigate": lambda m, a, now: mitigate_limitations(m, subject=str(a["subject"]), updated_at=now),
     "skill": lambda m, a, now: add_skill(m, name=str(a["name"]), tests=int(a.get("tests") or 0), updated_at=now),
+    "tool_stats": lambda m, a, now: restore_tools(m, dict(a.get("tool_stats") or {}), updated_at=now),
 }
 
 
@@ -427,7 +466,7 @@ def render_summary(model: SelfModel, budget_tokens: int) -> tuple[str, int]:
     matching this project's other rough token-budgeting (no tokenizer
     dependency in the core).
     """
-    order = ("identity", "substrate", "competence", "tools", "limitations", "goals", "capabilities",
+    order = ("identity", "substrate", "competence", "tool_stats", "limitations", "goals", "capabilities",
              "change_history", "continuity", "open_questions")
     lines: list[str] = []
     dropped: list[str] = []
@@ -490,7 +529,7 @@ def _render_section(model: SelfModel, section: str) -> str | None:
             return "Competence: not yet tracked (no learn.competence.updated seen this session)."
         rows = sorted(model.competence.items(), key=lambda kv: kv[1].get("samples", 0), reverse=True)[:5]
         return "Competence: " + "; ".join(_competence_row(k, v) for k, v in rows)
-    if section == "tools":
+    if section == "tool_stats":
         # Only the ones worth saying something about. A list of every
         # tool at 99% would be a wall of text the model reads past,
         # and this section exists so that "web_fetch fails a third of

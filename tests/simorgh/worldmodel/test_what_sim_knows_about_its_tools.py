@@ -27,7 +27,7 @@ class CountingCalls(unittest.TestCase):
         model = _model()
         for i in range(10):
             model = observe_tool(model, tool="web_fetch", ok=(i % 2 == 0), duration_ms=100, updated_at=1.0)
-        entry = model.tools["web_fetch"]
+        entry = model.tool_stats["web_fetch"]
         self.assertEqual((entry["runs"], entry["ok"], entry["p_ok"]), (10, 5, 0.5))
 
     def test_a_refused_call_counts(self):
@@ -35,15 +35,15 @@ class CountingCalls(unittest.TestCase):
         differently. Counting only the calls that ran would make the
         number flattering rather than useful."""
         model = observe_tool(_model(), tool="run_shell", ok=False, duration_ms=1, updated_at=1.0)
-        self.assertEqual(model.tools["run_shell"]["p_ok"], 0.0)
+        self.assertEqual(model.tool_stats["run_shell"]["p_ok"], 0.0)
 
     def test_a_nameless_tool_is_not_a_tool(self):
-        self.assertEqual(observe_tool(_model(), tool="", ok=True, duration_ms=1, updated_at=1.0).tools, {})
+        self.assertEqual(observe_tool(_model(), tool="", ok=True, duration_ms=1, updated_at=1.0).tool_stats, {})
 
     def test_tools_are_kept_apart(self):
         model = observe_tool(_model(), tool="a", ok=True, duration_ms=1, updated_at=1.0)
         model = observe_tool(model, tool="b", ok=False, duration_ms=1, updated_at=1.0)
-        self.assertEqual(sorted(model.tools), ["a", "b"])
+        self.assertEqual(sorted(model.tool_stats), ["a", "b"])
 
 
 class HowLongItTakes(unittest.TestCase):
@@ -51,7 +51,7 @@ class HowLongItTakes(unittest.TestCase):
         model = _model()
         for ms in range(1, 101):
             model = observe_tool(model, tool="t", ok=True, duration_ms=float(ms), updated_at=1.0)
-        entry = model.tools["t"]
+        entry = model.tool_stats["t"]
         self.assertGreater(entry["p95_ms"], entry["p50_ms"])
 
     def test_the_sample_list_is_bounded(self):
@@ -61,14 +61,14 @@ class HowLongItTakes(unittest.TestCase):
         model = _model()
         for i in range(TOOL_SAMPLES * 3):
             model = observe_tool(model, tool="t", ok=True, duration_ms=float(i + 1), updated_at=1.0)
-        self.assertEqual(len(model.tools["t"]["recent_ms"]), TOOL_SAMPLES)
+        self.assertEqual(len(model.tool_stats["t"]["recent_ms"]), TOOL_SAMPLES)
 
     def test_a_zero_duration_is_not_a_measurement(self):
         """Some results carry no duration at all; averaging zeros in
         would say every tool is instant."""
         model = observe_tool(_model(), tool="t", ok=True, duration_ms=0.0, updated_at=1.0)
-        self.assertEqual(model.tools["t"]["recent_ms"], [])
-        self.assertEqual(model.tools["t"]["runs"], 1, "the call still happened")
+        self.assertEqual(model.tool_stats["t"]["recent_ms"], [])
+        self.assertEqual(model.tool_stats["t"]["runs"], 1, "the call still happened")
 
 
 class WhichOnesAreWorthSaying(unittest.TestCase):
@@ -123,12 +123,12 @@ class ItSurvivesARestart(unittest.TestCase):
     def test_the_table_round_trips(self):
         model = observe_tool(_model(), tool="web_fetch", ok=True, duration_ms=120, updated_at=1.0)
         back = SelfModel.from_dict(model.to_dict())
-        self.assertEqual(back.tools["web_fetch"]["runs"], 1)
+        self.assertEqual(back.tool_stats["web_fetch"]["runs"], 1)
 
     def test_an_old_snapshot_with_no_tools_key_still_loads(self):
         data = _model().to_dict()
         data.pop("tools", None)
-        self.assertEqual(SelfModel.from_dict(data).tools, {})
+        self.assertEqual(SelfModel.from_dict(data).tool_stats, {})
 
 
 if __name__ == "__main__":

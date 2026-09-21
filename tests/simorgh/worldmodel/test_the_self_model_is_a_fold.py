@@ -56,7 +56,12 @@ class EveryRecordedChangeReplays(unittest.TestCase):
         self.assertIs(replay(model, "something_from_the_future", {"x": 1}, now=1.0), model)
 
     def test_the_replayable_set_is_history_and_not_a_derived_view(self):
-        self.assertEqual(sorted(REPLAYABLE), ["change", "competence", "limitation", "mitigate", "skill"])
+        self.assertEqual(sorted(REPLAYABLE),
+                         ["change", "competence", "limitation", "mitigate", "skill", "tool_stats"])
+        # `tool_stats` is how tools BEHAVE -- measured, history, not
+        # rescannable. `tools` below is the registry, which tools
+        # EXIST, and is announced afresh at every boot. The two were
+        # briefly both called `tools` and this line is what caught it.
         for derived in ("capabilities", "goals", "tools", "areas", "restarts"):
             self.assertNotIn(derived, REPLAYABLE,
                              f"{derived} is re-derived at every boot; replaying it would resurrect stale facts")

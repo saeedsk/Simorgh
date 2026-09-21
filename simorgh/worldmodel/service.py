@@ -36,6 +36,7 @@ from .selfmodel import (
     compute_gaps,
     mitigate_limitations,
     observe_tool,
+    tools_snapshot,
     render_full_markdown,
     render_summary,
     replay,
@@ -46,6 +47,12 @@ from .selfmodel import (
 #: the next boot can fold it back (stage 6 item 1). `self:` is this
 #: subsystem's own prefix in `contracts/streamnames.py`.
 SELF_CHANGES = "self:changes"
+
+#: How many `action.result`s between tool-table snapshots. One
+#: event per tool call would be a stream that grows as fast as
+#: Sim works, which is the shape that produced 192,332 trace
+#: streams in a day (stage 1).
+TOOL_SNAPSHOT_EVERY = 50
 
 NAME = "worldmodel"
 VERSION = "0.1.0"
@@ -82,6 +89,8 @@ class Service:
         self._restarts = 0
         self._model = None
         self._started_at = 0.0
+        #: Results folded since the tool table was last written down.
+        self._tool_writes = 0
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -267,6 +276,16 @@ class Service:
                 self._model, tool=tool, ok=bool(payload.get("ok")),
                 duration_ms=float(payload.get("duration_ms") or 0.0),
                 updated_at=self._ctx.clock.now())
+            # A snapshot every so often, not an event per call: one
+            # `self:changes` entry per tool call is how this project
+            # filled a disk with trace streams once already. The
+            # aggregates are monotonic, so a snapshot lost to a crash
+            # costs at most the calls since the last one.
+            self._tool_writes += 1
+            if self._tool_writes >= TOOL_SNAPSHOT_EVERY:
+                self._tool_writes = 0
+                await self._record("tool_stats", {"tool_stats": tools_snapshot(self._model)},
+                                   section="tool_stats", reason="action.result")
         if not payload.get("ok") or tool not in ("home_call", "home_undo"):
             return
         metadata = payload.get("metadata") or {}
