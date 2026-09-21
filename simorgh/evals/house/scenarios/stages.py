@@ -365,18 +365,43 @@ A_SIREN_IS_A_DECISION = Scenario(
 #: the set UNDER a person who is really speaking, so the one case that
 #: matters -- the only voice in the room is the television -- had
 #: never been played.
+#:
+#: What this DOES and does not prove, read off the record rather than
+#: assumed (2026-09-21, after two wrong guesses about it):
+#:
+#:   beat 2  quiet -- "someone and Mara are talking to each other"
+#:   beat 4  quiet -- "a voice Sim cannot place, not naming Sim"
+#:
+#: The set's voice arrives UNPLACED here, and two independent rules
+#: refuse it. That is the guarantee worth guarding and this scenario
+#: guards it -- but it is NOT the creator's failure. His television
+#: was placed as HIM at 0.37 against a threshold of 0.30, so neither
+#: rule applied: `_unplaced` only fires on a voice with no name, and
+#: `_bystander` needs somebody else to be talking. Reproducing that
+#: needs a profile weak enough for narration to cross its threshold,
+#: which is a property of his speaker book and not of this pack.
 THE_TELEVISION_IS_NOT_A_PERSON = Scenario(
     id="stage11/the-television-is-not-a-person",
     stage="11",
     because="a documentary played in the room was answered as the creator, for several turns",
     beats=(
-        # EVERY beat, not just the last. With the expectation only on
-        # the third this passed three runs in a row on 2026-09-21
-        # while the bug was untouched: beat 1 is answered, `_quiet_on`
-        # is stamped, and `_continuation` then covers beats 2 and 3 --
-        # so the scenario went green on the rule that fires AFTER the
-        # mistake. The live failure was Sim answering the FIRST line
-        # of narration it heard.
+        # Somebody real speaks first. Two reasons, and the second one
+        # is the whole scenario: it puts a person in the room, and it
+        # makes the runner enrol the household -- and `_unplaced`, the
+        # rule that refuses a voice Sim cannot place, is DISABLED
+        # while the speaker book is empty ("nobody is enrolled, so
+        # nobody can ever be placed: the rule would silence the whole
+        # house"). Without this beat the scenario tested a house where
+        # nobody has a voice on file, which is not the creator's, and
+        # demanded a guarantee that configuration cannot give.
+        Beat(who="Mara", says="Sim, what is the time?"),
+        # EVERY beat from here, not just the last. With the
+        # expectation only on the third this passed three runs in a
+        # row on 2026-09-21 while the bug was untouched: beat 1 is
+        # answered, `_quiet_on` is stamped, and `_continuation` covers
+        # the rest -- so it went green on the rule that fires AFTER
+        # the mistake. The live failure was Sim answering the FIRST
+        # line of narration it heard.
         Beat(television="But one challenge stops them in their tracks.", expect=(quiet(),)),
         Beat(television="They try to flee, but running isn't an emperor's strong point.",
              expect=(quiet(),)),

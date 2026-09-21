@@ -74,19 +74,41 @@ a person who is really speaking, so the case that matters had never
 been played. `Director.from_the_television` and a `television=` beat
 do that now.
 
-**The scenario is red, deliberately**, and is not in the bless
-subset.
+**Corrected twice on 2026-09-21, and the corrections are the useful
+part.**
 
-Corrected 2026-09-21: the first version put its expectation on the
-LAST beat only, and passed three runs in a row with the bug
-untouched. Beat 1 is answered, `_quiet_on` is stamped, and
-`_continuation` covers beats 2 and 3 -- so the scenario went green on
-the rule that fires *after* the mistake. It asserts every beat now
-and fails 1/3, which is the shape of the live failure: Sim answered
-the FIRST line of narration it heard.
+*First*, the expectation sat on the last beat only, and it passed
+three runs in a row with nothing about the bug changed: beat 1 is
+answered, `_quiet_on` is stamped, and `_continuation` covers the
+rest, so it went green on the rule that fires *after* the mistake.
+Every beat is asserted now.
 
-A scenario that can pass without the bug being fixed is worse than no
-scenario, because it reports the bug gone. It reproduces the live failure on demand, which is what turns
+*Second*, and worse: with nobody enrolled, `_unplaced` is disabled on
+purpose -- "nobody is enrolled, so nobody can ever be placed: the
+rule would silence the whole house". The scenario was therefore
+testing a house where no one has a voice on file, which is not this
+one, and demanding a guarantee that configuration cannot give. A
+persona now speaks first, which puts the household in the speaker
+book, and it passes 3/3.
+
+**So it does not reproduce the creator's failure, and the earlier
+claim here that it did was wrong.** Read off the record:
+
+```
+beat 2  quiet -- "someone and Mara are talking to each other"
+beat 4  quiet -- "a voice Sim cannot place, not naming Sim"
+```
+
+The set's voice arrives UNPLACED and two independent rules refuse it.
+That is a real guarantee and this now guards it. The creator's
+television was placed as HIM at 0.37, so neither rule could apply:
+`_unplaced` only fires on a voice with no name, and `_bystander`
+needs somebody else talking. Reproducing his case needs a profile
+weak enough for narration to cross its threshold -- a property of his
+speaker book, not of this pack, and the repair is still re-enrolment.
+
+I guessed at the mechanism twice and was wrong twice. The third
+attempt read the `quiet` reasons Sim had been recording all along. It reproduces the live failure on demand, which is what turns
 this from an anecdote into something a fix can be measured against.
 It goes green when the profile is repaired, or when a rule change is
 justified by evidence that does not exist yet.
