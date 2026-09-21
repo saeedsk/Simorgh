@@ -11,6 +11,7 @@ import uuid
 from dataclasses import asdict, replace
 
 from simorgh.contracts import topics
+from simorgh.contracts.text.answer import final_answer
 from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.protocols import Context, Health
 from simorgh.contracts.registry import error_reply_payload
@@ -676,7 +677,16 @@ class Service:
         rule landed)."""
         if not reason.startswith(VERIFICATION_REASON):
             return False
-        stripped = " ".join(answer.split())
+        # The ANSWER, not the prose around it. Comparing whole summaries
+        # is what let the creator's GAIA run, 2026-09-20, spend ten
+        # minutes and six attempts on one case: every attempt concluded
+        # `FINAL ANSWER: 2` and wrote a completely different paragraph of
+        # reasoning above it, so six identical answers looked like six
+        # different ones and the guard never fired. One of those attempts
+        # had found a third species and answered 3; the loop talked it
+        # back down. A retry that reaches the same conclusion will be
+        # refused by the same reviewer for the same reason.
+        stripped = " ".join(final_answer(answer).split()).casefold()
         if not stripped:
             # An outcome with no answer says nothing about repetition,
             # and must not erase what the last real one said.

@@ -5,11 +5,17 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.benchmark]
+by = "opus-main"
+task = "the retry loop compares answers, not prose"
+since = "2026-09-21T06:34:50+00:00"
+until = "2026-09-21T14:34:50+00:00"
+
 [locks.contracts]
 by = "opus-main"
-task = "a reminder knows whose it is"
-since = "2026-09-21T05:42:01+00:00"
-until = "2026-09-21T13:42:01+00:00"
+task = "the retry loop compares answers, not prose"
+since = "2026-09-21T06:34:50+00:00"
+until = "2026-09-21T14:34:50+00:00"
 
 [locks.domains]
 by = "opus-main"
@@ -29,8 +35,8 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
-[locks.orchestration]
+[locks.planning]
 by = "opus-main"
-task = "a task commits only what it wrote"
-since = "2026-09-21T06:24:26+00:00"
-until = "2026-09-21T14:24:26+00:00"
+task = "the retry loop compares answers, not prose"
+since = "2026-09-21T06:34:50+00:00"
+until = "2026-09-21T14:34:50+00:00"

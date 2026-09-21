@@ -44,7 +44,7 @@ Authority: the handler table in `service.py:157-183`. `Service.consumes` (`servi
 | `task.paused` | `messages/task.py::TaskPaused` | simorgh/planning/service.py | park the task as `paused` |
 | `task.completed` | `messages/task.py::TaskCompleted` | simorgh/planning/service.py | mark completed, propagate to dependents, maybe finish the project; for a plan-mode project, read the plan artifact instead |
 | `task.failed` | `messages/task.py::TaskFailed` | simorgh/planning/service.py | terminal: fail and block the downstream closure; otherwise retry-or-block |
-| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/planning/service.py | a worker's blocked outcome (own echoes ignored): retry-or-block |
+| `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/planning/service.py | a worker's blocked outcome (own echoes ignored): retry-or-block. `_made_no_progress` ends a task terminally when a retry reaches the ANSWER the last attempt was already blocked for -- `contracts.text.answer.final_answer`, not the whole summary. Only for a block that judged the answer (`VERIFICATION_REASON`): one for running out of steps carries its answer forward by design |
 | `task.cancel` | `messages/task.py::TaskCancel` | simorgh/planning/service.py | requeue (preemption), remember for the worker, or end the task |
 | `task.clear.request` | `messages/task.py::TaskClearRequest` | simorgh/planning/service.py | cancel running tasks, forget every record, snapshot; reply if asked |
 | `plan.reviewed` | `messages/plan.py::PlanReviewed` | simorgh/planning/service.py | approval matrix: approve, ask a human, replan (bounded) or reject |

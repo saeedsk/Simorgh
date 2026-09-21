@@ -28,7 +28,9 @@ import json
 import re
 import string
 
-FINAL_ANSWER_PREFIX = "FINAL ANSWER:"
+# The one definition lives in contracts: Planning needs it too and
+# may not import this package (2026-09-20).
+from simorgh.contracts.text.answer import FINAL_ANSWER_PREFIX, final_answer  # noqa: F401
 # The instruction handed to the answering system. Verbatim in spirit
 # from the GAIA prompt: the format is part of the benchmark, and a
 # system that answers correctly in the wrong shape scores zero on the
@@ -44,23 +46,6 @@ ANSWER_FORMAT = (
 
 _ARTICLES = {"a", "an", "the"}
 _NUMBER = re.compile(r"^[-+]?\d{1,3}(,\d{3})*(\.\d+)?$|^[-+]?\d*\.?\d+$")
-
-
-def final_answer(text: str) -> str:
-    """The answer out of a prose reply.
-
-    The last `FINAL ANSWER:` line wins -- a model that restates the
-    format instruction before answering would otherwise have its own
-    example scored. With no such line, the last non-empty line is used:
-    a right answer stated plainly should not score zero because of a
-    missing prefix, though the prompt does ask for one."""
-    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    for line in reversed(lines):
-        upper = line.upper()
-        if FINAL_ANSWER_PREFIX in upper:
-            index = upper.rindex(FINAL_ANSWER_PREFIX) + len(FINAL_ANSWER_PREFIX)
-            return line[index:].strip().strip("*` ")
-    return lines[-1].strip().strip("*` ") if lines else ""
 
 
 def _is_number(text: str) -> bool:

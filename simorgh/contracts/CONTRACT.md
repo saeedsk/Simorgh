@@ -63,6 +63,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/tidy.py` | fixing typos and mishearings in a line before it is answered |
 | `simorgh/contracts/timewindow.py` | `"22:00-07:00"` quiet-hours parsing |
 | `simorgh/contracts/tone.py` | the `[tone]` tag at the head of a spoken reply: split, strip, names |
+| `simorgh/contracts/text/answer.py` | `FINAL_ANSWER_PREFIX`, `final_answer`: the answer out of a prose reply. Here because the scaffold asks for that marker and three packages read it -- benchmark's scorer, the worker's narration, Planning's no-progress guard -- and none may import the others. It lived in `benchmark/scoring.py` alone, so Planning compared whole prose instead, and a GAIA case answering `FINAL ANSWER: 2` six times under six different paragraphs retried until its ten-minute case timeout (2026-09-20) |
 | `simorgh/contracts/toolargs.py` | marker-text to tool-argument tables shared by the model path and the CLI `tool` command |
 | `simorgh/contracts/topics.py` | `CATALOG`, domains, subsystems, pattern `matches`, reply naming, `SUBSCRIBE_ONLY_BY`, `PUBLISH_ONLY_BY`, `PUBLISH_PAYLOAD_CONSTRAINTS` |
 | `simorgh/contracts/validation.py` | a stdlib JSON Schema (draft 2020-12 subset) validator |
