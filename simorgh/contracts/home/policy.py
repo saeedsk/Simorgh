@@ -61,6 +61,32 @@ CLIMATE_HARD_LIMITS: tuple[float, float] = (10.0, 32.0)
 #: system", whatever its domain says.
 _SECURITY_WORDS = ("alarm", "siren", "security", "lock", "gate", "garage", "door_strike")
 
+#: What the house SEES and REMEMBERS about the people in it. A person
+#: decides these, in both directions.
+#:
+#: Found the night a real house arrived (2026-09-20). Home Assistant
+#: exposed 67 switches and 60 of them were `unattended`; nineteen were
+#: these -- `switch.office_record`, `switch.office_privacy_mask`,
+#: `switch.front_motion_detection`, `switch.pool_record_audio` and the
+#: rest. Auto-approved, Sim could turn off recording on every camera,
+#: drop the privacy mask in an office, disable motion detection, or
+#: turn ON audio recording in seven rooms, and none of it would reach
+#: anybody.
+#:
+#: Both directions matter and that is why this is its own list rather
+#: than an extension of the security one. Turning recording OFF
+#: removes the evidence a household keeps; turning audio recording ON
+#: starts listening to rooms nobody agreed to. The first is what a
+#: system covering its tracks looks like and the second is
+#: surveillance; a household should be asked about either.
+#:
+#: Matched on the entity id because Home Assistant gives these no
+#: device class at all -- there is nothing else to match on. That is
+#: crude and will occasionally catch something innocent, which is the
+#: right way round for this function: its own docstring says an
+#: unrecognised thing is `human`, not `reversible`.
+_WATCHING_WORDS = ("record", "privacy", "motion_detection", "surveillance")
+
 
 def classify_call(service: str, entity_id: str, *, device_class: str = "",
                   data: dict | None = None, alarm_state: str = "",
@@ -84,6 +110,8 @@ def classify_call(service: str, entity_id: str, *, device_class: str = "",
         return "human"
 
     if any(word in entity_id for word in _SECURITY_WORDS):
+        return "human"
+    if any(word in entity_id for word in _WATCHING_WORDS):
         return "human"
     if device_class in ("garage", "door", "gate", "lock"):
         return "human"

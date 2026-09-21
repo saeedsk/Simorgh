@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.contracts]
+by = "opus-main"
+task = "a real house arrived and its switches turn off recording"
+since = "2026-09-21T03:34:17+00:00"
+until = "2026-09-21T11:34:17+00:00"
+
 [locks.evals]
 by = "opus-main"
 task = "stage 2: the native-vs-markers measurement, through the BFCL harness"

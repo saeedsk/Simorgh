@@ -8,6 +8,8 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 
 ## Files
 
+`home/policy.py::classify_call` has a second word list since 2026-09-20: `_WATCHING_WORDS` (`record`, `privacy`, `motion_detection`, `surveillance`) classes a call `human` the way `_SECURITY_WORDS` does. It is separate because the reason is different -- these decide what the house sees and remembers about the people in it, and both directions need asking: off removes the evidence a household keeps, on starts listening to rooms nobody agreed to. Matched on the entity id because Home Assistant gives these switches no device class at all.
+
 | File | For |
 |---|---|
 | `simorgh/contracts/__init__.py` | imports `messages` to fill the registry; re-exports envelope and catalogue names |

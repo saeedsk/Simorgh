@@ -624,3 +624,51 @@ class ALiveViewIsApprovedOnceNotEveryTwentySecondsTestCase(unittest.IsolatedAsyn
 
     def test_an_unknown_session_is_stale_rather_than_an_error(self):
         self.assertTrue(self.live.stale("never-opened", now=1.0))
+
+
+class WhatTheHouseSeesAndRemembersNeedsAPersonTestCase(unittest.TestCase):
+    """Found the night a real house arrived (2026-09-20).
+
+    Home Assistant exposed 67 switches and 60 of them classified
+    `unattended`. Nineteen were the camera and NVR controls: record,
+    record_audio, privacy_mask, motion_detection. Auto-approved, Sim
+    could have turned off recording on every camera, dropped the
+    privacy mask in an office, disabled motion detection, or started
+    recording audio in seven rooms, and none of it would have reached
+    anybody.
+
+    Both directions are the point. Off removes the evidence a
+    household keeps -- which is what a system covering its tracks
+    looks like -- and on starts listening to rooms nobody agreed to.
+    """
+
+    def _class(self, entity_id, service="switch.turn_off"):
+        from simorgh.contracts.home.policy import classify_call
+
+        return classify_call(service, entity_id)
+
+    def test_recording_in_either_direction_asks(self):
+        for entity in ("switch.office_record", "switch.nvr_record", "switch.pool_record_audio"):
+            self.assertEqual(self._class(entity), "human", entity)
+            self.assertEqual(self._class(entity, "switch.turn_on"), "human", f"{entity} (on)")
+
+    def test_a_privacy_mask_asks(self):
+        self.assertEqual(self._class("switch.office_privacy_mask"), "human")
+
+    def test_motion_detection_asks(self):
+        """Switching it off is switching off the thing that notices."""
+        for entity in ("switch.front_motion_detection", "switch.garden_motion_detection"):
+            self.assertEqual(self._class(entity), "human", entity)
+
+    def test_a_siren_was_already_covered(self):
+        """`siren` is in the older security list; this test is here so
+        that a tidy-up of either list cannot quietly drop it."""
+        self.assertEqual(self._class("switch.pool_siren_on_event"), "human")
+
+    def test_an_ordinary_light_is_still_ordinary(self):
+        """The cost of being pessimistic has to stay paid by the right
+        things: a household whose lamps need approval is a household
+        that turns the gate off."""
+        self.assertEqual(self._class("light.kitchen_kitchen_table", "light.turn_on"), "unattended")
+        self.assertEqual(self._class("switch.front_window_infrared_lights_in_night_mode"), "unattended")
+        self.assertEqual(self._class("switch.front_door_in_home_chime"), "unattended")
