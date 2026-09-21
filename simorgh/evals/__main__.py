@@ -32,6 +32,10 @@ def main(argv: list[str]) -> int:
     runp.add_argument("--repeats", type=int, default=1)
     runp.add_argument("--json", action="store_true")
     runp.add_argument("--paid", action="store_true", help="allow a suite that calls a real model")
+    runp.add_argument("--cases", type=int, default=0,
+                      help="how many benchmark cases to score (default 5); more is a narrower interval")
+    runp.add_argument("--dialect", default="", choices=["", "markers", "native"],
+                      help="force the tool dialect for a benchmark suite (stage 2's native-vs-markers question)")
     runp.add_argument("--record", default="", metavar="DATA_DIR", help="append the report to DATA_DIR/evals.jsonl")
     runp.add_argument("--verbose", action="store_true", help="let the suite narrate to stdout")
     sub.add_parser("list", help="the suites, and which cost money")
@@ -153,6 +157,10 @@ def main(argv: list[str]) -> int:
         import os
 
         os.environ["SIMORGH_EVALS_PAID"] = "1"
+    if getattr(args, "dialect", ""):
+        os.environ["SIMORGH_EVALS_DIALECT"] = args.dialect
+    if getattr(args, "cases", 0):
+        os.environ["SIMORGH_EVALS_CASES"] = str(args.cases)
     if args.suite in PAID and not args.paid:
         print(f"{args.suite} calls a real model and costs money; pass --paid to run it", file=sys.stderr)
         return 2

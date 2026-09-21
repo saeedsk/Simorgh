@@ -4,3 +4,9 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.evals]
+by = "opus-main"
+task = "stage 2: the native-vs-markers measurement, through the BFCL harness"
+since = "2026-09-21T02:55:04+00:00"
+until = "2026-09-21T10:55:04+00:00"

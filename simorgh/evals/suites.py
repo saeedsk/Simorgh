@@ -126,7 +126,11 @@ def _benchmark_suite(suite: str, level: str = "") -> Runner:
         # `__main__` has already refused a paid suite without the flag.
         import os  # noqa: PLC0415
 
-        return await score(suite, level=level, paid=bool(os.environ.get("SIMORGH_EVALS_PAID")))
+        from .house.bench import DEFAULT_LIMIT  # noqa: PLC0415
+
+        return await score(suite, level=level, paid=bool(os.environ.get("SIMORGH_EVALS_PAID")),
+                           dialect=os.environ.get("SIMORGH_EVALS_DIALECT", ""),
+                           limit=int(os.environ.get("SIMORGH_EVALS_CASES") or DEFAULT_LIMIT))
 
     return runner
 

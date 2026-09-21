@@ -48,7 +48,7 @@ PAID_PROVIDERS: tuple[str, ...] = ("together", "gemini", "claude_code_cli")
 
 async def score(suite: str, *, limit: int = DEFAULT_LIMIT, level: str = "",
                 model: str = "", config: dict | None = None, paid: bool = False,
-                spend_cap_usd: float = SPEND_CAP_USD) -> list[Outcome]:
+                dialect: str = "", spend_cap_usd: float = SPEND_CAP_USD) -> list[Outcome]:
     """Run `suite`'s cases through a sandboxed Sim and score them.
 
     Without `paid` the sandbox keeps its floor provider, every case
@@ -82,9 +82,16 @@ async def score(suite: str, *, limit: int = DEFAULT_LIMIT, level: str = "",
         # which reads as "nothing ran" rather than "nothing could".
         import os
 
-        config = {**(config or {}),
-                  "cognition": {"provider_order": list(PAID_PROVIDERS),
-                                "max_spend_usd": float(spend_cap_usd)}}
+        cognition = {"provider_order": list(PAID_PROVIDERS), "max_spend_usd": float(spend_cap_usd)}
+        if dialect:
+            # Stage 2's open question, and the reason this argument
+            # exists: markers scored 6/7 against native's 6/7 in a
+            # trial round, and a tie is not a win, so nothing was
+            # flipped. A tool-use benchmark is the harness that was
+            # missing -- the same cases, the same model, one setting
+            # apart (stage 2's definition of done).
+            cognition["providers"] = {name: {"tool_dialect": dialect} for name in PAID_PROVIDERS}
+        config = {**(config or {}), "cognition": cognition}
         secrets = dict(os.environ)
     async with Sandbox(config=config, spend_cap_usd=spend_cap_usd, secrets=secrets) as sandbox:
         runner = Runner(sandbox.kernel.bus, repo_root=sandbox.data_dir)
