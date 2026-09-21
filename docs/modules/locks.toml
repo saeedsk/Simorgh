@@ -4,27 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.benchmark]
-by = "opus-main"
-task = "a blocked case is not a finished one"
-since = "2026-09-21T05:05:58+00:00"
-until = "2026-09-21T13:05:58+00:00"
-
-[locks.contracts]
-by = "opus-main"
-task = "task.step provider"
-since = "2026-09-21T05:19:52+00:00"
-until = "2026-09-21T13:19:52+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "the card names what actually served"
-since = "2026-09-21T05:19:52+00:00"
-until = "2026-09-21T13:19:52+00:00"
-
-[locks.orchestration]
-by = "opus-main"
-task = "task.step names the provider"
-since = "2026-09-21T05:19:52+00:00"
-until = "2026-09-21T13:19:52+00:00"
