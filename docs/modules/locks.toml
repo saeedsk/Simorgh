@@ -4,33 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.contracts]
-by = "opus-main"
-task = "memory.fact.stored has a subscriber now"
-since = "2026-09-21T01:37:36+00:00"
-until = "2026-09-21T09:37:36+00:00"
-
-[locks.guardian]
-by = "opus-main"
-task = "Sim's own proposal is not 'a voice I cannot place'"
-since = "2026-09-21T01:34:02+00:00"
-until = "2026-09-21T09:34:02+00:00"
-
-[locks.initiative]
-by = "opus-main"
-task = "stage 10 item 8: something worth telling somebody, sought under a cap"
-since = "2026-09-21T01:51:59+00:00"
-until = "2026-09-21T09:51:59+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "a long answer was cut off instead of wrapped on the completion line"
-since = "2026-09-21T01:32:45+00:00"
-until = "2026-09-21T09:32:45+00:00"
-
-[locks.ledger]
-by = "opus-main"
-task = "a boot test asserted ok when the disk is what is low"
-since = "2026-09-21T01:58:48+00:00"
-until = "2026-09-21T09:58:48+00:00"
