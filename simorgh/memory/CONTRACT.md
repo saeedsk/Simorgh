@@ -128,6 +128,7 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 - `simorgh.memory.config.Config`: imported by `kernel/configcheck.py:220`.
 - `simorgh.memory.store.MemoryEngine`, `stream_for`: imported by `tools/bench_recall.py` (dev tool only).
 - Nothing in `simorgh/contracts` is memory-owned; the conversation key the window is fed under is `contracts/settings.py::conversation_key`, shared with Orchestration.
+- `simorgh.memory.embedders.hush_model_progress()` and `QuietEncoder`: turn the model libraries' progress bars off before loading `sentence-transformers`, and keep them off around `encode`. `hush_model_progress` sets `HF_HUB_DISABLE_PROGRESS_BARS=1` in `os.environ` when it is blank (a deliberate `0` is left alone) and calls the two `disable_progress_bar` functions; it is a library switch, not a redirect, so no error or traceback is swallowed.
 - Module-level state: `embed.embed_text` has an `lru_cache(maxsize=4096)` (process-wide, pure function, harmless). No mutable singletons. Per-instance state that is lost at restart: `WorkingMemory._sessions` and the recall index (rebuilt from the Ledger on `warm()`).
 
 ## Invariants
@@ -140,6 +141,7 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 - Every stored chat turn is also added to `WorkingMemory` under `conversation_key(channel, speaker)`, and Orchestration reads it back under the same key (pinned from the other side by `tests/simorgh/orchestration/test_the_memory_block_remembers_recent_turns.py`).
 - A spoken turn is tagged `person:<speaker>` for every named voice, and the tone tag is stripped from Sim's reply before storing.
 - Retrieve never shortlists or samples: every live record of every requested kind is scored; `score = similarity * confidence_now + recency_weight / (1 + age_days)`; vectors from different embedders are never compared (`store.py:363`).
+- No library's progress bar reaches the terminal: the local model is wrapped in `QuietEncoder`, which passes `show_progress_bar=False` (the wrapper exists because every injected fake encoder implements `encode(text)` alone), and `hush_model_progress()` runs before the import. Reported live 2026-09-20 -- `Batches: 100%|...| 1/1` in the middle of the TUI, and `Loading weights: 100%|...| 103/103` at boot -- and already forbidden by `evals/house/script.py::tui_is_sane`.
 - The indexed recall returns the same ranking, bit for bit, as the dense path (`embed.py::sparse_embed_text` docstring).
 - Content longer than the inline limit is kept (blob plus preview); a partially recovered item carries a truncation notice as a prefix.
 - Consolidation never stores a distillation from a floor or failed reply, never stores `NOTHING`, and drops a distillation that names anything `untraceable` in its window.
@@ -159,6 +161,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/memory/test_long_content.py` -- long content survives via a blob, with the truncation notice on partial recovery.
 - `tests/simorgh/memory/test_recall_scaling.py` -- the index does no repeated reads or embeddings and returns the identical ranking.
 - `tests/simorgh/memory/test_first_consolidation.py` -- a pass runs shortly after start, not only on the sleep tick.
+- `tests/simorgh/memory/test_embedders.py` -- provider choice, the hashing fallback, and that no progress bar can reach the screen (`ProgressBarsStayOffTheScreenTestCase`).
 
 ## Known issues (2026-09-18 evaluation)
 

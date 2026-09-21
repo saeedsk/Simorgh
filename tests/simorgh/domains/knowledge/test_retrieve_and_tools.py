@@ -7,6 +7,7 @@ actually finds the passage that answers it."""
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -84,6 +85,43 @@ class EmbedTestCase(unittest.TestCase):
         self.assertEqual(provider, "hashing")
         self.assertTrue(vector)
         self.assertIn("failed", embedder.degraded)
+
+    def test_the_model_is_asked_not_to_draw_a_progress_bar(self):
+        """A `Batches: 100%|...| 1/1` bar from sentence-transformers
+        reached the creator's terminal on 2026-09-20, in the middle of
+        the TUI. The switch is the library's own keyword, set where
+        the real model is built -- the stubs above keep `encode(text)`.
+        """
+        import sys
+        import types
+
+        class _Recording:
+            def __init__(self):
+                self.calls = []
+
+            def encode(self, text, show_progress_bar=None):
+                self.calls.append(show_progress_bar)
+                return [1.0, 2.0, 3.0]
+
+        model = _Recording()
+        module = types.ModuleType("sentence_transformers")
+        module.SentenceTransformer = lambda name: model
+        saved = sys.modules.get("sentence_transformers")
+        sys.modules["sentence_transformers"] = module
+        try:
+            with unittest.mock.patch("simorgh.domains.knowledge.embed.local_model_available",
+                                     lambda: True):
+                embedder = Embedder("local")
+            provider, _vector = embedder.embed("anything")
+        finally:
+            if saved is None:
+                sys.modules.pop("sentence_transformers", None)
+            else:
+                sys.modules["sentence_transformers"] = saved
+
+        self.assertEqual(provider, "local")
+        self.assertEqual(model.calls, [False])
+        self.assertEqual(os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS"), "1")
 
 
 class _IndexedCorpus(unittest.IsolatedAsyncioTestCase):

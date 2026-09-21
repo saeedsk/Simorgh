@@ -245,7 +245,68 @@ class Speaker(Protocol):
         ...
 
 
-__all__ = ["Audio", "AudioChunk", "CHANNELS", "Microphone", "PlaybackState", "Recogniser", "SAMPLE_RATE",
+#: Environment that turns off the model libraries' progress bars. An
+#: engine loading a model draws `Loading weights: 100%|...| 103/103`
+#: and `Batches: 100%|...` on stderr, and for a subprocess engine
+#: sometimes on stdout, which is this protocol's own channel
+#: (`tts/subproc.py`). The TUI is Sim's voice, not pip's, and
+#: `evals/house/script.py::tui_is_sane` fails a scene that shows a bar.
+#: These are the libraries' own switches -- nothing is redirected, so a
+#: real traceback still arrives.
+QUIET_MODEL_ENV = {
+    "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+    "TQDM_DISABLE": "1",
+}
+
+
+def quiet_model_flags(env) -> bool:
+    """Set each flag in `env` that nobody has decided for, and say
+    whether the bars are wanted off. An EMPTY value counts as unset:
+    huggingface_hub reads "" as an explicit 0 and then warns that it
+    cannot turn the bars off. A deliberate "0" is left alone, because
+    somebody debugging a download wants to see it.
+    """
+    wanted = True
+    for name, value in QUIET_MODEL_ENV.items():
+        current = (env.get(name) or "").strip()
+        if not current:
+            env[name] = value
+        elif current.lower() in ("0", "false", "off", "no"):
+            wanted = False
+    return wanted
+
+
+def hush_model_progress(env=None) -> None:
+    """Keep a model library's progress bar off the creator's screen.
+
+    Call it before importing or loading a model in THIS process. It
+    sets the flags the libraries read at import and, for one already
+    imported, says it again through their API.
+    """
+    import os
+
+    env = os.environ if env is None else env
+    if not quiet_model_flags(env):
+        # Somebody exported a 0 to watch a download. Saying it again
+        # through the API would only make huggingface_hub warn, out
+        # loud, that it cannot -- one more line on the screen.
+        return
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+    except ImportError:  # pragma: no cover -- optional dependency
+        pass
+    else:
+        disable_progress_bars()
+    try:
+        from transformers.utils.logging import disable_progress_bar
+    except ImportError:  # pragma: no cover -- optional dependency
+        pass
+    else:
+        disable_progress_bar()
+
+
+__all__ = ["Audio", "AudioChunk", "CHANNELS", "Microphone", "PlaybackState", "QUIET_MODEL_ENV",
+           "Recogniser", "SAMPLE_RATE",
            "SAMPLE_WIDTH", "Speaker", "SpeechToTextProvider", "Synthesiser", "TextToSpeechProvider",
            "TranscriptEvent", "TtsRequest", "Utterance", "VadEvent", "VoiceActivityDetector", "VoiceState",
-           "VoiceTurn"]
+           "VoiceTurn", "hush_model_progress", "quiet_model_flags"]

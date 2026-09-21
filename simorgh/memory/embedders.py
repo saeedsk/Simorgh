@@ -63,6 +63,9 @@ from .embed import EMBED_DIM, embed_text
 
 HASHING = "hashing"
 
+#: The flag huggingface_hub and transformers read for their tqdm bars.
+PROGRESS_FLAG = "HF_HUB_DISABLE_PROGRESS_BARS"
+
 OPENAI_URL = "https://api.openai.com/v1/embeddings"
 VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
 GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
@@ -214,6 +217,78 @@ def _embed_gemini(text, env, opener, timeout):
 _REMOTE = {"openai": _embed_openai, "voyage": _embed_voyage, "gemini": _embed_gemini}
 
 
+def want_quiet_models(env) -> bool:
+    """Whether the progress bars should be off, setting the flag if it
+    is unset. An EMPTY value counts as unset: huggingface_hub reads ""
+    as an explicit 0 and then warns that it cannot turn the bars off.
+    A deliberate off-switch is honoured and reported as False."""
+    value = (env.get(PROGRESS_FLAG) or "").strip()
+    if not value:
+        env[PROGRESS_FLAG] = "1"
+        return True
+    return value.lower() not in ("0", "false", "off", "no")
+
+
+def hush_model_progress() -> None:
+    """Turn off the model libraries' progress bars, at the source.
+
+    Reported live by the creator, 2026-09-20, in the middle of the TUI:
+
+        Batches: 100%|███████████████| 1/1 [00:00<00:00,  7.13it/s]
+
+    and, at boot, `Loading weights: 100%|...| 103/103`. Neither is
+    Sim's: the first is `sentence-transformers` drawing a bar around
+    `encode`, the second is `transformers` loading `all-MiniLM-L6-v2`
+    through the Hugging Face hub. The TUI is Sim's voice and pip's
+    output is not, which is why `evals/house/script.py::tui_is_sane`
+    already fails a scenario that shows one.
+
+    These are the libraries' own switches -- an env var they read and
+    the two `disable_progress_bar` functions -- not a redirect of
+    stdout or stderr. Nothing a real error or traceback travels on is
+    touched: swallowing one of those would be far worse than a bar.
+    """
+    # `HF_HUB_DISABLE_PROGRESS_BARS` is read by `huggingface_hub` and,
+    # through it, by `transformers`, at the moment either is first
+    # imported. Only set it when nobody has said otherwise: an operator
+    # debugging a download exports a 0 and gets the bars back, and then
+    # nothing below runs either -- calling `disable_progress_bars()`
+    # against an explicit 0 makes huggingface_hub warn, out loud, that
+    # it cannot, which is one more line on the screen.
+    if not want_quiet_models(os.environ):
+        return
+    # The env var is sampled once, at import, so for a library already
+    # imported say it again through its own API.
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+    except ImportError:  # pragma: no cover -- optional dependency
+        pass
+    else:
+        disable_progress_bars()
+    try:
+        from transformers.utils.logging import disable_progress_bar
+    except ImportError:  # pragma: no cover -- optional dependency
+        pass
+    else:
+        disable_progress_bar()
+
+
+class QuietEncoder:
+    """A `SentenceTransformer` with its progress bar off.
+
+    The flag cannot simply be passed at the call site: an injected
+    encoder (the fakes every memory test uses) takes `encode(text)` and
+    nothing else. So the flag belongs where the real model is built,
+    and every caller keeps the one-argument shape.
+    """
+
+    def __init__(self, model) -> None:
+        self.model = model
+
+    def encode(self, text):
+        return self.model.encode(text, show_progress_bar=False)
+
+
 class Embedder:
     """One embedder, chosen once, with hashing underneath it.
 
@@ -321,6 +396,7 @@ class Embedder:
 
     def _encode_local(self, text: str):
         if self._encoder is None:
+            hush_model_progress()
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:  # pragma: no cover -- optional dependency
@@ -328,7 +404,7 @@ class Embedder:
                     "the `sentence-transformers` package is not installed "
                     "(pip install sentence-transformers)"
                 ) from exc
-            self._encoder = SentenceTransformer(_row("local")[2])
+            self._encoder = QuietEncoder(SentenceTransformer(_row("local")[2]))
         return self._encoder.encode(text)
 
 
@@ -353,6 +429,7 @@ def comparable(stored_provider: str, current_provider: str) -> bool:
 
 
 __all__ = [
-    "Embedder", "EmbeddingUnavailable", "HASHING", "PROVIDERS",
-    "available_providers", "choose_provider", "comparable", "dimension_of", "key_for",
+    "Embedder", "EmbeddingUnavailable", "HASHING", "PROVIDERS", "QuietEncoder",
+    "available_providers", "choose_provider", "comparable", "dimension_of",
+    "hush_model_progress", "key_for", "want_quiet_models",
 ]

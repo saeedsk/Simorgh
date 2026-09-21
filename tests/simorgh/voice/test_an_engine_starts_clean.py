@@ -94,6 +94,69 @@ class WhatTheEngineStillNeedsTestCase(unittest.TestCase):
         self.assertIn("PATH", engine_env(None))
 
 
+class NoProgressBarReachesTheTerminalTestCase(unittest.TestCase):
+    """An engine loads a model, and the model libraries draw a bar:
+
+        Loading weights: 100%|█████████| 103/103 [00:00<00:00, 28it/s]
+
+    Reported live 2026-09-20. For a subprocess engine the damage is
+    worse than noise -- stdout is this protocol's own channel -- and a
+    bar in the stderr tail is what an engine's failure gets reported
+    with. `evals/house/script.py::tui_is_sane` fails a scene that shows
+    one.
+    """
+
+    def test_the_hub_and_tqdm_bars_are_off_in_the_child(self):
+        env = engine_env()
+        self.assertEqual(env.get("HF_HUB_DISABLE_PROGRESS_BARS"), "1")
+        self.assertEqual(env.get("TQDM_DISABLE"), "1")
+
+    def test_an_empty_value_in_the_parent_counts_as_unset(self):
+        """huggingface_hub reads "" as an explicit 0 and then warns, out
+        loud, that it cannot turn the bars off."""
+        with _Env(HF_HUB_DISABLE_PROGRESS_BARS=""):
+            self.assertEqual(engine_env().get("HF_HUB_DISABLE_PROGRESS_BARS"), "1")
+
+    def test_a_deliberate_zero_is_left_alone(self):
+        """Somebody debugging a download wants to see it."""
+        with _Env(HF_HUB_DISABLE_PROGRESS_BARS="0"):
+            self.assertEqual(engine_env().get("HF_HUB_DISABLE_PROGRESS_BARS"), "0")
+
+    def test_the_parent_environment_is_not_touched(self):
+        before = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+        engine_env()
+        self.assertEqual(os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS"), before)
+
+    def test_an_engine_may_still_override_it(self):
+        self.assertEqual(engine_env({"TQDM_DISABLE": "0"}).get("TQDM_DISABLE"), "0")
+
+
+class ARecogniserLoadedInThisProcessIsQuietTooTestCase(unittest.TestCase):
+    """faster-whisper pulls its model through the Hugging Face hub in
+    Sim's OWN process -- there is no pipe to catch the download bar, so
+    the flags have to be set before the import."""
+
+    def test_the_flags_are_set_before_the_model_loads(self):
+        from simorgh.voice.api import hush_model_progress
+
+        env: dict[str, str] = {}
+        hush_model_progress(env)
+        self.assertEqual(env.get("HF_HUB_DISABLE_PROGRESS_BARS"), "1")
+        self.assertEqual(env.get("TQDM_DISABLE"), "1")
+
+    def test_the_recogniser_calls_it_before_importing_its_package(self):
+        """Read from the code, because the import is the thing being
+        ordered: the call has to come first or the library samples the
+        flags before they are set."""
+        import inspect
+
+        from simorgh.voice.stt.faster_whisper import FasterWhisperRecogniser
+
+        source = inspect.getsource(FasterWhisperRecogniser.__init__)
+        self.assertLess(source.index("hush_model_progress()"),
+                        source.index("from faster_whisper import"))
+
+
 class TheEngineThatNeedsItDeclaresItTestCase(unittest.TestCase):
     def test_miso_asks_for_the_mps_fallback(self):
         """Without it: NotImplementedError on aten::unfold_backward and

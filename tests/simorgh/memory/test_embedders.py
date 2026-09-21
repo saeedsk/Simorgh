@@ -10,6 +10,9 @@ quietly make recall worse instead of better.
 from __future__ import annotations
 
 import json
+import os
+import sys
+import types
 import unittest
 
 from simorgh.memory.embed import EMBED_DIM, cosine_similarity, embed_text
@@ -17,10 +20,12 @@ from simorgh.memory.embedders import (
     HASHING,
     Embedder,
     EmbeddingUnavailable,
+    QuietEncoder,
     available_providers,
     choose_provider,
     comparable,
     dimension_of,
+    hush_model_progress,
 )
 
 NO_LOCAL = {"local_check": lambda: False}
@@ -295,6 +300,122 @@ class MixedProviderRecallTestCase(unittest.IsolatedAsyncioTestCase):
                 # 1.0000000000000002 for an exact match, which is
                 # floating point, not an unbounded score.
                 self.assertLessEqual(engine._similarity(pair, content), 1.0 + 1e-9)
+
+
+class _RecordingModel:
+    """A stand-in with `SentenceTransformer.encode`'s real signature:
+    `show_progress_bar=None` means "decide for me", and the library
+    decides to draw one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def encode(self, text, show_progress_bar=None, **kwargs):
+        self.calls.append(show_progress_bar)
+        rows = text if isinstance(text, list) else [text]
+        return [[0.1] * 384 for _ in rows] if isinstance(text, list) else [0.1] * 384
+
+
+class ProgressBarsStayOffTheScreenTestCase(unittest.TestCase):
+    """Reported live by the creator, 2026-09-20, in the middle of the TUI:
+
+        Batches: 100%|█████████████| 1/1 [00:00<00:00,  7.13it/s]
+
+    That is `sentence-transformers` drawing a bar around `encode`, and
+    at boot `transformers` drew `Loading weights: 100%|...| 103/103`
+    while the model loaded. The TUI is Sim's voice; a library's
+    progress bar is not, which is why `evals/house/script.py` already
+    fails a scene that shows one.
+    """
+
+    def setUp(self):
+        self.model = _RecordingModel()
+        module = types.ModuleType("sentence_transformers")
+        module.SentenceTransformer = lambda name: self.model
+        self._saved = sys.modules.get("sentence_transformers")
+        sys.modules["sentence_transformers"] = module
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        if self._saved is None:
+            sys.modules.pop("sentence_transformers", None)
+        else:
+            sys.modules["sentence_transformers"] = self._saved
+
+    def test_one_encode_asks_the_library_not_to_draw_a_bar(self):
+        embedder = Embedder("local", env={}, local_check=lambda: True)
+        embedder.warm()
+        embedder.embed("hello")
+        self.assertTrue(self.model.calls)
+        self.assertTrue(all(call is False for call in self.model.calls),
+                        f"show_progress_bar reached the model as {self.model.calls}")
+
+    def test_a_batch_does_too(self):
+        """The reported bar said `1/1` -- it is the BATCH path, the
+        backfill after warm-up, that draws `Batches:`."""
+        embedder = Embedder("local", env={}, local_check=lambda: True)
+        embedder.warm()
+        self.model.calls.clear()
+        rows = embedder.embed_many(["one", "two"])
+        self.assertEqual([provider for provider, _ in rows], ["local", "local"])
+        self.assertEqual(self.model.calls, [False])
+
+    def test_loading_the_model_turns_the_hub_bars_off_first(self):
+        """`Loading weights: 100%|...| 103/103` comes from
+        `transformers`, not from `encode`; its switch is the
+        environment flag both it and the hub read at import."""
+        saved = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+        self.addCleanup(lambda: os.environ.__setitem__("HF_HUB_DISABLE_PROGRESS_BARS", saved)
+                        if saved is not None else os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None))
+        os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
+
+        Embedder("local", env={}, local_check=lambda: True).warm()
+
+        self.assertEqual(os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS"), "1")
+
+    def test_an_empty_flag_counts_as_unset(self):
+        """`HF_HUB_DISABLE_PROGRESS_BARS=` is read by huggingface_hub as
+        an explicit 0, and it then warns that it cannot turn the bars
+        off -- one more line on the creator's screen. `setdefault` would
+        have left it there."""
+        saved = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+        self.addCleanup(lambda: os.environ.__setitem__("HF_HUB_DISABLE_PROGRESS_BARS", saved)
+                        if saved is not None else os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None))
+        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = ""
+
+        hush_model_progress()
+
+        self.assertEqual(os.environ["HF_HUB_DISABLE_PROGRESS_BARS"], "1")
+
+    def test_a_deliberate_choice_is_left_alone(self):
+        saved = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+        self.addCleanup(lambda: os.environ.__setitem__("HF_HUB_DISABLE_PROGRESS_BARS", saved)
+                        if saved is not None else os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None))
+        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
+
+        hush_model_progress()
+
+        self.assertEqual(os.environ["HF_HUB_DISABLE_PROGRESS_BARS"], "0")
+
+    def test_an_injected_encoder_still_takes_one_argument(self):
+        """The flag lives in the wrapper, not at the call site: every
+        fake in this suite implements `encode(text)` and nothing else,
+        and a keyword passed there would break all of them."""
+        embedder = Embedder("local", env={}, encoder=_FakeEncoder(), local_check=lambda: True)
+        provider, vector = embedder.embed("hello")
+        self.assertEqual(provider, "local")
+        self.assertEqual(len(vector), 384)
+
+    def test_the_wrapper_does_not_hide_a_real_failure(self):
+        """A progress bar is a nuisance; a swallowed error is a bug.
+        `QuietEncoder` passes the exception straight out."""
+
+        class _Broken:
+            def encode(self, text, show_progress_bar=None):
+                raise RuntimeError("the model is gone")
+
+        with self.assertRaises(RuntimeError):
+            QuietEncoder(_Broken()).encode("hello")
 
 
 if __name__ == "__main__":  # pragma: no cover

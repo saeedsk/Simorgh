@@ -28,6 +28,10 @@ Each domain still has its own `CONTRACT.md` describing its tools, config and str
 
 `simorgh.contracts` only (plus guarded third-party libraries), like every other package -- pinned by `tests/simorgh/test_module_boundaries.py`. Two things the domains needed from Execution moved into contracts so this holds: `contracts/pathnames.py::looks_like_credential_path` and the document converters `contracts/text/{pdftext,doctext,htmltext}`. Execution imports them from there too; the old `simorgh.execution.{pdftext,doctext,htmltext}` paths are shims for one bless cycle.
 
+## No library output on the creator's screen
+
+A domain that loads a model loads it in Sim's own process, where a library's progress bar goes straight into the TUI (`evals/house/script.py::tui_is_sane` fails a scene that shows one). `knowledge/embed.py::hush_model_progress()` runs before `sentence-transformers` is imported and `QuietEncoder` passes `show_progress_bar=False` around `encode`. Both are the libraries' own switches: nothing redirects stdout or stderr, so a real error still arrives. Pinned by `tests/simorgh/domains/knowledge/test_retrieve_and_tools.py::EmbedTestCase::test_the_model_is_asked_not_to_draw_a_progress_bar`.
+
 ## Manifests
 
 The domains publish (`ui.tv.state`, `ui.dash.*`, `world.camera.event`, `system.schedule.add`, ...) under Execution's Context, so those topics stay in **Execution's** `produces` and the manifest tests count `simorgh/domains/` as Execution's code (`_ALSO_RUNS_AS` in `tests/simorgh/test_manifests_match_the_code.py`, `_ALSO` in `tests/simorgh/execution/test_produces_manifest.py`).

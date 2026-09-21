@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 
-from ..api import Audio, Utterance
+from ..api import Audio, Utterance, hush_model_progress
 
 
 class FasterWhisperRecogniser:
     name = "faster_whisper"
 
     def __init__(self, config, *, repo_root=None) -> None:
+        # Before the import: faster-whisper pulls the model through the
+        # Hugging Face hub, which draws a download bar on stderr -- in
+        # the middle of the TUI, the first time a model is fetched.
+        hush_model_progress()
         try:
             from faster_whisper import WhisperModel  # type: ignore
         except ImportError as exc:

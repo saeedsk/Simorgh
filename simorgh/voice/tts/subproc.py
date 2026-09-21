@@ -37,7 +37,7 @@ import time
 import wave
 from pathlib import Path
 
-from ..api import Audio
+from ..api import Audio, quiet_model_flags
 
 SERVERS_DIR = Path(__file__).resolve().parent / "servers"
 DEFAULT_VENV_DIR = "workspace/voice/venvs"
@@ -68,10 +68,13 @@ def engine_env(extra: dict | None = None) -> dict:
 
     The parent's, minus the debug allocators (which an engine never
     wants and which print on the way out), plus unbuffered output so a
-    handshake is not lost in a pipe buffer.
+    handshake is not lost in a pipe buffer, plus the flags that keep a
+    model library's progress bar out of the JSON-lines protocol and
+    out of the stderr tail an engine's failure is reported with.
     """
     env = {k: v for k, v in os.environ.items() if k not in _DEBUG_ALLOCATORS}
     env["PYTHONUNBUFFERED"] = "1"
+    quiet_model_flags(env)
     env.update(extra or {})
     return env
 

@@ -36,6 +36,9 @@ import re
 HASHING = "hashing"
 LOCAL = "local"
 
+#: The flag huggingface_hub and transformers read for their tqdm bars.
+PROGRESS_FLAG = "HF_HUB_DISABLE_PROGRESS_BARS"
+
 #: Small enough to scan quickly, large enough that collisions between
 #: unrelated words are rare at a personal corpus's vocabulary size.
 HASHING_DIM = 512
@@ -56,6 +59,61 @@ def local_model_available() -> bool:
     import importlib.util
 
     return importlib.util.find_spec("sentence_transformers") is not None
+
+
+def hush_model_progress() -> None:
+    """Turn off the model libraries' progress bars, at the source.
+
+    `sentence-transformers` draws `Batches: 100%|...| 1/1` around every
+    `encode`, and `transformers` draws `Loading weights: 100%|...|
+    103/103` while it loads the model. Both go to the terminal, in the
+    middle of the TUI, which is Sim's voice and not pip's
+    (`evals/house/script.py::tui_is_sane` fails a scenario that shows
+    one). These are the libraries' own switches, not a redirect of
+    stdout or stderr: no real error is swallowed.
+
+    The same function lives in `memory/embedders.py`, for the reason
+    stated at the top of this module -- a subsystem may not import
+    another's internals.
+    """
+    import os
+
+    # An empty value counts as unset: huggingface_hub reads "" as an
+    # explicit 0 and warns it cannot turn the bars off. A deliberate 0
+    # is honoured, and then the API calls are skipped too -- against an
+    # explicit 0 `disable_progress_bars()` warns, out loud, that it
+    # cannot, which is one more line on the screen.
+    value = (os.environ.get(PROGRESS_FLAG) or "").strip()
+    if not value:
+        os.environ[PROGRESS_FLAG] = "1"
+    elif value.lower() in ("0", "false", "off", "no"):
+        return
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+    except ImportError:  # pragma: no cover -- optional dependency
+        pass
+    else:
+        disable_progress_bars()
+    try:
+        from transformers.utils.logging import disable_progress_bar
+    except ImportError:  # pragma: no cover -- optional dependency
+        pass
+    else:
+        disable_progress_bar()
+
+
+class QuietEncoder:
+    """A `SentenceTransformer` with its progress bar off.
+
+    A wrapper rather than a keyword at the call site, because the fake
+    encoders the tests inject take `encode(text)` and nothing else.
+    """
+
+    def __init__(self, model) -> None:
+        self.model = model
+
+    def encode(self, text):
+        return self.model.encode(text, show_progress_bar=False)
 
 
 def hashing_vector(text: str, dim: int = HASHING_DIM) -> list[float]:
@@ -161,13 +219,15 @@ class Embedder:
 
     def _ensure_model(self):
         if self._model is None:
+            hush_model_progress()
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:  # pragma: no cover -- optional dependency
                 raise RuntimeError("sentence-transformers is not installed") from exc
-            self._model = SentenceTransformer(LOCAL_MODEL)
+            self._model = QuietEncoder(SentenceTransformer(LOCAL_MODEL))
         return self._model
 
 
 __all__ = ["Embedder", "HASHING", "HASHING_DIM", "LOCAL", "LOCAL_DIM", "LOCAL_MODEL",
-           "cosine", "hashing_vector", "local_model_available", "normalise", "tokenize"]
+           "QuietEncoder", "cosine", "hashing_vector", "hush_model_progress",
+           "local_model_available", "normalise", "tokenize"]
