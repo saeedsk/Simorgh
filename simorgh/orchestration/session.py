@@ -116,6 +116,13 @@ ACTION_TIMEOUT_S = 30.0
 # a tool call still pending. Planning matches it by prefix to re-offer
 # the task soon (`planning/service.py::CONTINUATION_REASON`, same text;
 # the packages may not import each other).
+#: How many times a session is told that a mid-sentence marker did
+#: not run. More than one, because a later stray marker is usually
+#: a different tool and a real request; not unbounded, because a
+#: model that cannot write a marker on its own line after three
+#: tries is not going to on the fourth.
+MARKER_CORRECTIONS = 3
+
 CONTINUATION_REASON = "step budget exhausted"
 #: An attempt that spent its tokens, dollars or time (stage 4 item 6).
 BUDGET_REASON = "budget exhausted"
@@ -1234,10 +1241,20 @@ class SessionRunner:
                 await self._record_step(session, step)
                 return Outcome("blocked", reason=f"{CONTINUATION_REASON} before the task was finished")
             stray = unhonoured_marker(text, offered_tools(session.profile.tools))
-            if stray and not is_last and not session.marker_corrected:
-                # Once per session: if it does it again, that is an
-                # answer about a tool and not a request for one.
-                session.marker_corrected = True
+            if stray and not is_last and session.markers_corrected < MARKER_CORRECTIONS:
+                # A few times per session, not once. The cap was one,
+                # on the reasoning that a repeat is "an answer about a
+                # tool and not a request for one" -- true of the same
+                # marker twice running, and wrong for a different tool
+                # ten steps later. A trial on 2026-09-20 paid for it:
+                # the first stray marker was corrected, the model then
+                # wrote a proper one and made a real edit, and its
+                # RUN_TESTS marker afterwards was mid-sentence too.
+                # Nothing was said, nothing ran, and it spent its last
+                # three rounds insisting it was "waiting on its result"
+                # while verification failed it for never running tests.
+                session.markers_corrected += 1
+                again = session.markers_corrected > 1
                 step = Step(step_no, "act", f"a {stray} marker mid-sentence was not run", ok=False)
                 session.record(step)
                 await self._record_step(session, step)
@@ -1247,6 +1264,9 @@ class SessionRunner:
                     f"line, and a marker is only a tool call when it starts its own line. Write it "
                     f"again on a line of its own if you still want it -- or, if you are finished, "
                     f"give your final answer with no marker in it at all."
+                    + (" Nothing is pending and no result is coming back to you: a marker that did "
+                       "not start its own line was never a call, so there is nothing to wait for."
+                       if again else "")
                 )})
                 continue
             echo = _transcript_echo(text)

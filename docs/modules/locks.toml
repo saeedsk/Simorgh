@@ -16,3 +16,9 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "a stray marker is corrected more than once"
+since = "2026-09-21T13:40:02+00:00"
+until = "2026-09-21T21:40:02+00:00"

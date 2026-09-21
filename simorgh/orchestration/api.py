@@ -137,7 +137,16 @@ class Session:
     # buried mid-sentence is not a tool call. Once is a correction; a
     # second time would mean the reply really is prose about a tool, and
     # correcting it again would loop.
-    marker_corrected: bool = False
+    #: How many times this session has been told a marker mid-sentence
+    #: did not run. Was a bool -- one correction per session, ever --
+    #: and a trial on 2026-09-20 showed what that costs: the first
+    #: stray marker was corrected, the model wrote a proper one and
+    #: made a real edit, and then its RUN_TESTS marker came out
+    #: mid-sentence too. No correction was given, the call silently did
+    #: not happen, and the model spent its last three rounds saying "I
+    #: already issued the RUN_TESTS call and am waiting on its result"
+    #: while verification failed it for never running the tests.
+    markers_corrected: int = 0
     # Once per session: a reply that said the TV was playing something
     # when no tool had run was sent back (live 2026-09-13).
     claim_corrected: bool = False
