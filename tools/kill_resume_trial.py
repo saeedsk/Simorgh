@@ -95,6 +95,39 @@ _MUTATING = frozenset({"write_file", "create_file", "apply_source_patch", "repla
                        "worktree_land", "apply_skill"})
 
 
+def _trees(lab: str) -> list[str]:
+    """The lab's checkout and every worktree under it.
+
+    A code task does its work in a worktree (`execution/worktree.py`)
+    and only `worktree_land` moves the lab's own HEAD, so counting
+    commits in the lab root alone sees nothing a task committed and
+    everything it landed. The first real run of this drill reported
+    `git_commit_steps_ok: 1, commits: 0` and it took reading three
+    files to be sure that was the landing gate doing its job rather
+    than a tool claiming an effect it never had (2026-09-20). Worse
+    than confusing: a commit REPEATED inside a worktree after a
+    resume -- precisely what this drill exists to catch -- would not
+    have been counted at all.
+    """
+    out = [lab]
+    # Resolved, because `git worktree list` prints the main checkout
+    # too and on macOS it comes back as /private/var where the lab is
+    # /var -- the same directory under two names, counted twice, and
+    # every commit in it counted twice with it.
+    seen = {os.path.realpath(lab)}
+    listing = subprocess.run(["git", "-C", lab, "worktree", "list", "--porcelain"],
+                             capture_output=True, text=True)
+    for line in listing.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        path = line[len("worktree "):].strip()
+        real = os.path.realpath(path) if path else ""
+        if real and real not in seen and os.path.isdir(path):
+            seen.add(real)
+            out.append(path)
+    return out
+
+
 def _git(repo: str, *args: str) -> str:
     done = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
     return done.stdout.strip()
@@ -196,8 +229,18 @@ def run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: boo
                               and (s.get("tool"), str(s.get("summary", ""))[:80]) in before]
     commits_ok = sum(1 for s in steps if s.get("tool") == "git_commit" and s.get("ok"))
     commits = int(_git(lab, "rev-list", "--count", "HEAD") or 0) - base_commits
-    subjects = _git(lab, "log", "--format=%s", f"-{max(commits, 1)}").splitlines() if commits else []
+    # Subjects from the lab AND every worktree: a task commits in its
+    # worktree and only landing moves the lab's HEAD, so a repeated
+    # commit would otherwise be invisible here.
+    trees = _trees(lab)
+    subjects: list[str] = []
+    for tree in trees:
+        count = int(_git(tree, "rev-list", "--count", "HEAD") or 0) - (base_commits if tree == lab else 0)
+        if count > 0:
+            subjects.extend(_git(tree, "log", "--format=%s", f"-{count}").splitlines())
     report["commits"] = commits
+    report["worktrees"] = len(trees) - 1
+    report["commits_in_worktrees"] = max(0, len(subjects) - commits)
     report["git_commit_steps_ok"] = commits_ok
     report["duplicate_commit_subjects"] = len(subjects) - len(set(subjects))
     report["ok"] = (final == "completed" and not report["redone_steps"]

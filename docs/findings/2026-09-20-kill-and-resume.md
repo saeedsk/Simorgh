@@ -56,17 +56,34 @@ Whether it is the same cause is not established: GAIA questions have
 no test suite to run, so at most the "max revisions" loop is shared,
 not the reason for entering it.
 
-## One thing that does not add up
+## The thing that did not add up, and what it was
 
 `git_commit_steps_ok: 1` with `commits: 0`. A `git_commit` step
-returned ok and the lab's history grew by nothing. That may be
-honest — the commit could have landed in a worktree the landing gate
-rejected, which is a real and correct outcome — or it may be a tool
-reporting success for an effect that did not happen, which is the
-honesty rule this project wrote down after 2026-09-08. **Not
-diagnosed.** It needs the lab kept (`--keep`) and the worktree
-looked at, and guessing between those two is exactly what the
-"measure before naming a cause" rule is for.
+returned ok and the lab's history grew by nothing.
+
+**Resolved by reading, not guessing.** `GitCommitTool` returns `ok`
+only after `git commit` exits zero, and carries the new HEAD in its
+metadata — it cannot report a commit it did not make. A code task
+works in a git worktree (`execution/worktree.py`), commits there, and
+only `worktree_land` moves the lab's own HEAD. This task never
+landed, because verification kept refusing it. So the commit exists,
+in the worktree, and the lab root correctly shows none. No honesty
+violation.
+
+**The drill was wrong, though, and in the direction that matters.**
+It counted `rev-list HEAD` in the lab root alone. The whole point of
+the drill is to catch an irreversible action REPEATED after a resume,
+and a commit repeated inside a worktree — which is where a code task
+makes every commit it makes — was not being counted at all. Fixed
+the same evening: `_trees()` walks the lab and every worktree, and
+duplicate subjects are looked for across all of them. The report
+gained `worktrees` and `commits_in_worktrees` so the two places are
+never conflated again.
+
+One trap in that fix, with its own test: `git worktree list` prints
+the main checkout too, and on macOS under its resolved path — the
+lab is `/var/...`, the listing says `/private/var/...`. Comparing the
+strings counts one directory twice, and every commit in it twice.
 
 ## What this changes
 
@@ -75,6 +92,6 @@ looked at, and guessing between those two is exactly what the
   with evidence, for the first time.
 - The item is not closed: the trial-suite (3 repeats) and GAIA slice
   it also asks for have not been run.
-- Two things worth their own work, neither started: the verifier
-  asking for a whole-suite run on a docstring change, and the
-  committed-but-no-commit discrepancy above.
+- One thing worth its own work, not started: the verifier asking for
+  a whole-suite run on a docstring change, then failing the change
+  because the lab's suite does not pass.
