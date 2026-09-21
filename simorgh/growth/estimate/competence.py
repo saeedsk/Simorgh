@@ -62,6 +62,10 @@ HALF_LIFE_S = 30.0 * 86_400.0
 #: vanishing fraction of an opinion.
 FORGOTTEN_BELOW = 0.01
 
+#: How many (confidence, outcome) pairs to keep per task type for
+#: `calibration()`. The ECE bins keep the long view in ten integers.
+CONFIDENCE_SAMPLES_KEPT = 500
+
 
 def _aged(value: float, elapsed_s: float, half_life_s: float) -> float:
     if value <= 0.0 or elapsed_s <= 0.0 or half_life_s <= 0.0:
@@ -165,7 +169,15 @@ class CompetenceTable(_Projection):
             bin_ = stats.calib_bins.setdefault(bucket, [0, 0])
             bin_[0] += 1
             bin_[1] += 1 if succeeded else 0
-            self._confidence_samples.setdefault(task_type, []).append((float(stated_confidence), succeeded))
+            kept = self._confidence_samples.setdefault(task_type, [])
+            kept.append((float(stated_confidence), succeeded))
+            if len(kept) > CONFIDENCE_SAMPLES_KEPT:
+                # Bounded, because this list is persisted in `state()`
+                # and nothing ever dropped from it: a year of turns
+                # would put a megabyte of floats in every snapshot for
+                # a number the last few hundred already answer. The
+                # ECE bins are ten integers and carry the long view.
+                del kept[:-CONFIDENCE_SAMPLES_KEPT]
 
     # -- reader -----------------------------------------------------------------
     def get(self, task_type: str) -> TaskTypeStats | None:
@@ -181,6 +193,38 @@ class CompetenceTable(_Projection):
             return 0.5
         gap = sum(abs(conf - (1.0 if hit else 0.0)) for conf, hit in samples) / len(samples)
         return max(0.0, 1.0 - gap)
+
+    def expected_calibration_error(self, task_type: str) -> float | None:
+        """How far Sim's stated confidence is from what happens, binned
+        (stage 6 item 1). `None` when nothing has been recorded.
+
+        The standard ECE: outcomes are bucketed by the confidence Sim
+        claimed, each bucket compares its claimed confidence against
+        what actually happened, and the buckets are averaged weighted
+        by how many outcomes are in them. 0 is perfect; 0.3 means Sim
+        is routinely a third out.
+
+        `calibration()` above is a different number and stays: the
+        mean absolute gap per outcome, which punishes confident
+        mistakes harder. ECE is the one that answers "when Sim says
+        80%, does it happen 80% of the time" -- and the bins it needs
+        have been recorded and persisted since the table was written,
+        and read by nothing at all until today.
+        """
+        stats = self._by_type.get(task_type)
+        if stats is None or not stats.calib_bins:
+            return None
+        total = sum(n for n, _hits in stats.calib_bins.values())
+        if total <= 0:
+            return None
+        error = 0.0
+        for bucket, (n, hits) in stats.calib_bins.items():
+            if n <= 0:
+                continue
+            claimed = (int(bucket) + 0.5) / 10.0    # the bucket's midpoint
+            happened = hits / n
+            error += (n / total) * abs(claimed - happened)
+        return round(error, 4)
 
     def samples(self, task_type: str) -> int:
         stats = self._by_type.get(task_type)
@@ -260,6 +304,9 @@ class CompetenceTable(_Projection):
         calibration = self.calibration(task_type)
         if calibration is not None:
             out["calibration"] = calibration
+        ece = self.expected_calibration_error(task_type)
+        if ece is not None:
+            out["ece"] = ece
         return out
 
     def suggest(self, task_type: str, *, explore_bonus: float, min_samples_for_trust: int) -> list[StrategyScore]:
