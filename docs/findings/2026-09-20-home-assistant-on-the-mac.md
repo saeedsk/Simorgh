@@ -1,5 +1,16 @@
 # Home Assistant on the MacBook Pro, 2026-09-20
 
+> **Superseded as the plan, kept as the fallback.** On 2026-09-20 the creator
+> decided to move to Home Assistant OS in a UTM VM with a bridged network
+> adapter, for the two things the container cannot have on macOS: mDNS/SSDP
+> discovery and Supervisor add-ons. See
+> [2026-09-20-home-assistant-os-in-utm.md](2026-09-20-home-assistant-os-in-utm.md)
+> — which also **corrects the last section of this document**: bridging over
+> Wi-Fi is far less certain than the closing paragraph here implies, and this
+> house has no Ethernet. The container below is running today, `tools/ha.py`
+> drives it, and it stays as the fallback if the bridge does not hold. Nothing
+> here is withdrawn; the three-option analysis still stands.
+
 Sim has had a complete Home Assistant integration since before the rebirth --
 `simorgh/contracts/home/client.py` (REST, stdlib, no dependency),
 `simorgh/domains/home/tools.py` (`home_find`, `home_state`, `home_describe`,

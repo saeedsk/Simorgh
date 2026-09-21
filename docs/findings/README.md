@@ -6,6 +6,7 @@ Design documents live in `docs/plans/`; benchmark analyses in `docs/benchmark-an
 
 | Date | File | Covers |
 |---|---|---|
+| 2026-09-20 | [2026-09-20-home-assistant-os-in-utm.md](2026-09-20-home-assistant-os-in-utm.md) | The move to HA OS in a UTM VM: why bridging over Wi-Fi is not the sure thing the Docker note called it, the evidence either way, the install and migration steps, the disk cost, and `tools/haos.py` |
 | 2026-09-20 | [2026-09-20-home-assistant-on-the-mac.md](2026-09-20-home-assistant-on-the-mac.md) | How to run Home Assistant on this MacBook: container vs venv vs VM, why the container wins here, where the URL and token go so Sim's `home_*` tools see them, and `tools/ha.py` |
 | 2026-09-19 | [2026-09-19-contract-writing.md](2026-09-19-contract-writing.md) | What writing the 19 CONTRACT.md files found: ~45 uncatalogued problems, 16 fixed the same night, the rest indexed by risk |
 | 2026-09-19 | [2026-09-19-stage-0.md](2026-09-19-stage-0.md) | The cleanup and the rebirth: v1 and the old docs removed, test tiers and module locks, stage 0 items 1-16 with before/after numbers (suite 16:40 -> 1:34) |
