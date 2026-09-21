@@ -5,20 +5,8 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.contracts]
+[locks.evals]
 by = "opus-main"
-task = "initiative.marked_wrong"
-since = "2026-09-21T04:40:19+00:00"
-until = "2026-09-21T12:40:19+00:00"
-
-[locks.initiative]
-by = "opus-main"
-task = "stage 10 item 10: shadow mode and the wrong verb"
-since = "2026-09-21T04:40:18+00:00"
-until = "2026-09-21T12:40:18+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "people wrong <ref>"
-since = "2026-09-21T04:40:19+00:00"
-until = "2026-09-21T12:40:19+00:00"
+task = "stage 11 item 11: tools/house.py"
+since = "2026-09-21T04:47:05+00:00"
+until = "2026-09-21T12:47:05+00:00"
