@@ -249,6 +249,11 @@ class AwsBackend:
                 if self._dead_hook is not None:
                     await self._dead_hook(d, "max_deliveries", repr(exc))
         finally:
+            # Completed either way: drop the explicit-ack/nack record so
+            # `_explicit` does not grow unboundedly across the process
+            # lifetime. On the retry path SQS re-receive yields a fresh
+            # receipt handle (new delivery_id), so this entry is stale.
+            self._explicit.pop(d.delivery_id, None)
             if self._active.get(d.message.id) is d:
                 del self._active[d.message.id]
 
