@@ -19,6 +19,8 @@ Nothing about the tools changed: same names, same schemas, same `action.proposed
 | `simorgh/domains/pim/` | calendar and mail, read-only; `cal_list`, `mail_*`, `remind` |
 | `simorgh/domains/security/` | posture, findings, self-check; `sec_*` |
 | `simorgh/domains/home/` | Home Assistant `home_*`; Reolink `cam_*` (`cameras.py`); Ring `ring_*` (`ring.py`). `home_call` and `home_undo` report `after` in their metadata -- what each entity is NOW, not only that it moved -- because the World Model folds it into `world:home` (stage 6 item 3, 2026-09-20): Sim turning the kitchen light on used to leave Sim not knowing the light was on |
+
+Home Assistant's URL and token are read from the secret store under EITHER `vault:home_assistant:url`/`token` (the documented names) or the plain `HOME_ASSISTANT_URL`/`HOME_ASSISTANT_TOKEN`, and then from the environment; the vault name wins if both are set. Until 2026-09-20 only the vault name was asked of the store and the plain name fell through to the environment alone, so a token written into `secrets.toml` the way `REOLINK_*` and `RING_*` are written was silently ignored and Sim said Home Assistant was not configured.
 | `simorgh/domains/energy/` | `energy_*` |
 | `simorgh/domains/media/` | players, Cast, the TV, the dashboard, the Mac's Music app |
 

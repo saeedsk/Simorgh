@@ -63,10 +63,25 @@ class _HomeTool:
             dry_run=bool(getattr(self._config, "home_dry_run", False)))
 
     def _lookup(self, env_name: str, vault_name: str) -> str:
-        if self._secrets is not None:
+        """The setting, from the secret store under either name, else
+        the environment.
+
+        Both names, since 2026-09-20. This asked the store for
+        `vault:home_assistant:token` and then fell back to the
+        ENVIRONMENT -- so `HOME_ASSISTANT_TOKEN = "..."` written into
+        `secrets.toml`, which is exactly what somebody does after
+        setting Home Assistant up, was silently ignored, while
+        `REOLINK_*` and `RING_*` in the same file work (they ask the
+        store for the bare name). The failure is the worst shape there
+        is: the token is right there, correctly spelled, and Sim says
+        Home Assistant is not configured.
+        """
+        for name in (vault_name, env_name):
+            if self._secrets is None or not name:
+                continue
             try:
-                value = self._secrets.get(vault_name)
-            except Exception:  # noqa: BLE001
+                value = self._secrets.get(name)
+            except Exception:  # noqa: BLE001 -- a store that will not answer is an unset secret
                 value = None
             if value:
                 return str(value)

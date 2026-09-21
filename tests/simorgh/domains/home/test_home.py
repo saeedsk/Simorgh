@@ -529,3 +529,57 @@ class UndoNeedsEvidenceNotTheAbsenceOfContradictionTestCase(unittest.IsolatedAsy
             ctx=_ctx())
         self.assertTrue(result.ok)
         self.assertEqual(result.metadata["restored"], 1)
+
+
+class TheTokenIsFoundUnderEitherNameTestCase(unittest.TestCase):
+    """What somebody actually writes in `secrets.toml` after setting
+    Home Assistant up.
+
+    `_lookup` asked the secret store for `vault:home_assistant:token`
+    and then fell back to the ENVIRONMENT -- not to the store -- so a
+    plain `HOME_ASSISTANT_TOKEN` key in that file was silently
+    ignored, while `REOLINK_*` and `RING_*` in the same file work.
+    The failure shape is the bad one: the token is right there,
+    correctly spelled, and Sim answers that Home Assistant is not
+    configured.
+    """
+
+    class _Store:
+        def __init__(self, **values):
+            self._values = values
+
+        def get(self, name):
+            return self._values.get(name)
+
+    def _url_and_token(self, store=None, env=None):
+        from simorgh.domains.home.tools import HomeStateTool
+
+        tool = HomeStateTool(Config(), secrets=store, env=env or {})
+        return tool._lookup("HOME_ASSISTANT_URL", "vault:home_assistant:url"), \
+            tool._lookup("HOME_ASSISTANT_TOKEN", "vault:home_assistant:token")
+
+    def test_the_vault_name_works(self):
+        store = self._Store(**{"vault:home_assistant:url": "http://ha:8123",
+                               "vault:home_assistant:token": "tok"})
+        self.assertEqual(self._url_and_token(store), ("http://ha:8123", "tok"))
+
+    def test_the_plain_name_in_the_store_works_too(self):
+        store = self._Store(HOME_ASSISTANT_URL="http://ha:8123", HOME_ASSISTANT_TOKEN="tok")
+        self.assertEqual(self._url_and_token(store), ("http://ha:8123", "tok"))
+
+    def test_the_vault_name_wins_when_both_are_set(self):
+        """One of them is the deliberate one; `vault:` is the name the
+        documentation gives, so it is the one that decides."""
+        store = self._Store(**{"vault:home_assistant:token": "from-vault",
+                               "HOME_ASSISTANT_TOKEN": "from-plain"})
+        self.assertEqual(self._url_and_token(store)[1], "from-vault")
+
+    def test_the_environment_still_works_with_no_store(self):
+        self.assertEqual(self._url_and_token(None, {"HOME_ASSISTANT_TOKEN": "tok"})[1], "tok")
+
+    def test_a_store_that_raises_is_an_unset_secret_not_a_crash(self):
+        class _Broken:
+            def get(self, name):
+                raise RuntimeError("the vault is locked")
+
+        self.assertEqual(self._url_and_token(_Broken(), {"HOME_ASSISTANT_TOKEN": "tok"})[1], "tok")
