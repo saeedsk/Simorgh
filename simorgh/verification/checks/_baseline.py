@@ -278,8 +278,26 @@ RERUN_TIMEOUT_S = 60.0
 
 # What `RunTestsTool` leaves out of its isolated copy, for the same
 # reason: nothing a test reads, and most of the bytes.
-_COPY_IGNORE = ("__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
-                "papers", "scratchpad", ".simorgh", "results")
+#: What an isolated pytest run does NOT need a copy of.
+#:
+#: `workspace` is the important one and it was missing until
+#: 2026-09-20: it holds the voice models and their virtual
+#: environments (6.4 GB), the camera clips, the cast media and the
+#: SWE-bench checkouts -- 8.2 GB on the creator's machine, copied in
+#: full for every isolated test run. Three leaked copies from one
+#: evening of Sim running its own tests came to 22 GB, on a laptop
+#: that was down to 3.5% free; deleting them gave back 24. No test
+#: reads any of it: a test that needs a voice model asks the model
+#: directory, which is outside the repo.
+#:
+#: This is the third time the same shape has been found (the observer
+#: kit's `copytree` fallback, 2026-09-14; the trial labs, this
+#: morning). A copy of a repo is cheap exactly until somebody puts a
+#: few gigabytes of models in it.
+_COPY_IGNORE = (
+    "__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
+    "papers", "scratchpad", ".simorgh", "workspace", "results",
+)
 
 
 def still_failing_here(root: Path, nodeids: tuple[str, ...]) -> frozenset[str] | None:

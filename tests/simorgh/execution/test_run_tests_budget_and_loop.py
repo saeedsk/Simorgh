@@ -90,3 +90,47 @@ class TheServiceHonoursTheToolsBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnIsolatedRunDoesNotCopyTheWorkspace(unittest.TestCase):
+    """8.2 GB of voice models, camera clips and cast media, copied for
+    every isolated test run.
+
+    Three leaked copies from one evening of Sim running its own tests
+    came to 22 GB on a laptop that was down to 3.5% free; deleting
+    them gave back 24 GB (2026-09-20). No test reads any of it -- a
+    test that needs a voice model asks the model directory, which is
+    outside the repo.
+
+    The third time this shape has been found: the observer kit's
+    copytree fallback (2026-09-14), the trial labs (this morning),
+    and this. A copy of a repo is cheap exactly until somebody puts a
+    few gigabytes of models in it.
+    """
+
+    def test_the_workspace_is_ignored_by_both_copiers(self):
+        from simorgh.execution.tools import _ISOLATED_COPY_IGNORE
+        from simorgh.verification.checks._baseline import _COPY_IGNORE
+
+        for name, patterns in (("run_tests", _ISOLATED_COPY_IGNORE), ("verification", _COPY_IGNORE)):
+            self.assertIn("workspace", patterns, f"{name} still copies the workspace")
+
+    def test_an_isolated_copy_leaves_the_workspace_behind(self):
+        """The behaviour, not the constant: a repo with a fat
+        `workspace/` is staged without it."""
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        from simorgh.execution.tools import _ISOLATED_COPY_IGNORE
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            (root / "tests").mkdir(parents=True)
+            (root / "tests" / "test_x.py").write_text("def test_x():\n    assert True\n")
+            (root / "workspace" / "voice" / "models").mkdir(parents=True)
+            (root / "workspace" / "voice" / "models" / "big.bin").write_bytes(b"0" * 4096)
+            dest = Path(tmp) / "copy"
+            shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
+            self.assertTrue((dest / "tests" / "test_x.py").exists(), "the tests must come")
+            self.assertFalse((dest / "workspace").exists(), "the workspace must not")
