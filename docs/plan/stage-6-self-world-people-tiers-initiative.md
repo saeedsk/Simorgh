@@ -16,7 +16,9 @@ Read `worldmodel/selfmodel.py`, `worldmodel/service.py` (`_apply`), `learning/co
 
 ## Action items
 
-Done 2026-09-19 (item 4, in part): `contracts/people.py` and the `people` facet -- one `Person` per household member with their identities across channels, a role, and one memory namespace; seeded from the household, stored as `people.json`, resolved by identity with `unknown` as the default. Still open in item 4: resolution at every channel edge (the channels still use `channels.person_for`), the `people_*` tools through Guardian, and folding in the speaker book, the allow-lists and `persona/user_model.py`.
+Done 2026-09-19 (item 4, in part): `contracts/people.py` and the `people` facet -- one `Person` per household member with their identities across channels, a role, and one memory namespace; seeded from the household, stored as `people.json`, resolved by identity with `unknown` as the default. Found 2026-09-20 while wiring the reminder's person: the `reminder` class had never reached a person, because `remind` did not ask whose it was, the schedule did not carry it, `percept.time.scheduled` had no such field, and `_on_schedule_fired` had been reading one since the day it was written. Four unjoined links; fixed, with the tool taking `person` as an argument. The fuller fix -- the actual requester threaded through `ToolContext`, so a reminder asked for by voice belongs to the voice that asked -- belongs to this item's "resolution at every channel edge" and is not done.
+
+Still open in item 4: resolution at every channel edge (the channels still use `channels.person_for`), the `people_*` tools through Guardian, and folding in the speaker book, the allow-lists and `persona/user_model.py`.
 
 Done 2026-09-19 (item 7): `world.home.situation_changed` is published when a situation fact flips (only on a change), and Orchestration appends it to every open task session as a user turn. A chat turn is left alone.
 
