@@ -16,9 +16,3 @@ by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
-
-[locks.orchestration]
-by = "opus-main"
-task = "a search does not excuse a commit claim"
-since = "2026-09-21T14:05:12+00:00"
-until = "2026-09-21T22:05:12+00:00"
