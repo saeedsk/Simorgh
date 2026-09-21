@@ -194,6 +194,44 @@ class CompetenceTable(_Projection):
         gap = sum(abs(conf - (1.0 if hit else 0.0)) for conf, hit in samples) / len(samples)
         return max(0.0, 1.0 - gap)
 
+    def provider_quality(self, provider: str, *, purpose: str = "") -> tuple[float, float, float]:
+        """`(alpha, beta, samples)` for a provider, across every task
+        type it has served (stage 6 item 1's per-provider quality).
+
+        The data was already here and only askable one task type at a
+        time: strategies are keyed `provider:purpose[:edit_mode]`
+        (`models.Strategy.key`), so "how good is together at drafting"
+        was a question the table could answer and had no way to be
+        asked. This rolls the same counts up across types.
+
+        Beta(1,1) -- "no idea" -- when that provider has served
+        nothing, which is the honest answer for one just configured
+        and must not read as half the time.
+        """
+        want = f"{provider}:{purpose}" if purpose else f"{provider}:"
+        alpha, beta, samples = 1.0, 1.0, 0.0
+        for stats in self._by_type.values():
+            for key, per in stats.strategies.items():
+                if key != want and not key.startswith(f"{want}:" if purpose else want):
+                    continue
+                alpha += per.successes_w
+                beta += max(0.0, per.n - per.successes_w)
+                samples += per.n
+        return alpha, beta, samples
+
+    def providers(self) -> list[tuple[str, float, float]]:
+        """`(provider, mean, samples)` for every provider seen, worst
+        first -- the order somebody reading this wants, because the
+        useful question is which one to stop using."""
+        names = {key.split(":", 1)[0] for stats in self._by_type.values() for key in stats.strategies}
+        out = []
+        for name in sorted(n for n in names if n):
+            alpha, beta, samples = self.provider_quality(name)
+            if samples <= 0:
+                continue
+            out.append((name, round(alpha / (alpha + beta), 4), samples))
+        return sorted(out, key=lambda row: row[1])
+
     def expected_calibration_error(self, task_type: str) -> float | None:
         """How far Sim's stated confidence is from what happens, binned
         (stage 6 item 1). `None` when nothing has been recorded.
