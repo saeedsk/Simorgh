@@ -300,7 +300,16 @@ class RemindTool(_PimTool):
     args_schema = {
         "type": "object", "required": ["when", "text"],
         "properties": {"when": {"type": "string"}, "text": {"type": "string"},
-                       "every": {"type": "boolean"}},
+                       "every": {"type": "boolean"},
+                       # Whose reminder it is. Initiative routes the
+                       # `reminder` class "to its person wherever they
+                       # are" (stage 6 item 6) and it has never been
+                       # able to: it reads `person` off the fired
+                       # event, the event never carried one, and
+                       # neither did the schedule or this tool. So
+                       # every reminder in the house was a household
+                       # announcement. Empty still means the household.
+                       "person": {"type": "string"}},
     }
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
@@ -333,11 +342,15 @@ class RemindTool(_PimTool):
             "at": None if recurring else (ctx.clock.now() if ctx.clock else now.timestamp()) + delay,
             "every_seconds": delay if recurring else None,
         }
+        person = " ".join(str(args.get("person") or "").split())
+        if person:
+            payload["person"] = person
         await ctx.bus.publish(Message.new(topics.SYSTEM_SCHEDULE_ADD, source="execution",
                                           payload=payload))
         when = (f"every {_human(delay)}" if recurring
                 else f"{fires_at:%a %d %b at %H:%M} (in {_human(delay)})")
-        return ToolResult(ok=True, output=f"reminder set for {when}: {text}  ({schedule_id})",
+        whose = f" for {person}" if person else ""
+        return ToolResult(ok=True, output=f"reminder{whose} set for {when}: {text}  ({schedule_id})",
                           side_effects=(f"schedule {schedule_id} added",),
                           metadata={"schedule_id": schedule_id, "at": payload["at"],
                                     "every_seconds": payload["every_seconds"],

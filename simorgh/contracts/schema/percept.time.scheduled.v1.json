@@ -2,10 +2,16 @@
   "$id": "https://simorgh.local/schema/percept.time.scheduled.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Payload of `percept.time.scheduled` (catalog v1).",
+  "description": "A durable timer went off. `person` is whose reminder it is, from the schedule's own payload, and empty means the household. Initiative has read it since it was written and nothing put one there until 2026-09-20, so the `reminder` class -- specified to reach \"its person wherever they are\" -- could only ever be announced to the room.",
   "properties": {
     "label": {
       "type": "string"
+    },
+    "person": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "schedule_id": {
       "type": "string"

@@ -270,9 +270,21 @@ class Scheduler:
             stream=SCHEDULE_STREAM, type="schedule.fired", ts=now, trace_id=str(uuid.uuid4()), causation_id=None,
             payload={"schedule_id": sched.schedule_id, "next_fire_at": next_fire_at},
         ))
+        fired = {"schedule_id": sched.schedule_id, "label": sched.label}
+        # Whose reminder it is, when the schedule was told. Initiative
+        # has read `person` off this event since it was written and
+        # nothing ever put one there, so the `reminder` class -- the
+        # one specified to go "to its person wherever they are" --
+        # could only ever be announced to the household. `requested_by`
+        # is NOT the answer: it is the subsystem that asked, so
+        # forwarding it would name "execution" as a member of the
+        # family.
+        whose = str((sched.payload or {}).get("person") or "").strip()
+        if whose:
+            fired["person"] = whose
         await self._bus.publish(Message.new(
             topics.PERCEPT_TIME_SCHEDULED, source=self._source,
-            payload={"schedule_id": sched.schedule_id, "label": sched.label}, clock=self._clock.now,
+            payload=fired, clock=self._clock.now,
         ))
         if next_fire_at is not None and not sched.cancelled:
             sched.fire_at = next_fire_at

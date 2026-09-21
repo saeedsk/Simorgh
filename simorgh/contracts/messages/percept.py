@@ -46,4 +46,8 @@ PerceptWebFetched = define(t.PERCEPT_WEB_FETCHED, [
 PerceptTimeScheduled = define(t.PERCEPT_TIME_SCHEDULED, [
     F("schedule_id", Str),
     F("label", Str),
-])
+    O("person", Str),
+], doc="A durable timer went off. `person` is whose reminder it is, from the schedule's own "
+       "payload, and empty means the household. Initiative has read it since it was written "
+       "and nothing put one there until 2026-09-20, so the `reminder` class -- specified to "
+       "reach \"its person wherever they are\" -- could only ever be announced to the room.")

@@ -58,7 +58,7 @@ The Kernel is the composition root and the process's owner: it loads `simorgh.to
 | `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/kernel/scheduler.py | every second, also while paused |
 | `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/kernel/scheduler.py | while running, when no percept for `idle_threshold_s`, at most every `idle_tick_cooldown_s` |
 | `system.tick.sleep` | `messages/system.py::SystemTickSleep` | simorgh/kernel/scheduler.py | every `sleep_every_s` (6 h) while running; the first one 6 h after boot |
-| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | simorgh/kernel/scheduler.py:279 | a durable schedule fires |
+| `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | simorgh/kernel/scheduler.py | a durable schedule fires; carries `person` from the schedule's own payload when it has one (2026-09-20), so Initiative can route a reminder to whose it is. NOT `requested_by`, which is the subsystem that asked and would have named "execution" as a member of the family |
 | `system.schedule.added` | `messages/system.py::SystemScheduleAdded` | simorgh/kernel/scheduler.py | a valid `system.schedule.add` was recorded |
 | `system.health` | `messages/system.py::SystemHealth` | simorgh/kernel/service.py:464, 538 | a supervised service's status changed (health ticker), or a safety-critical service went down and the system paused |
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/kernel/metrics.py (`ProcessMetricsPublisher`) | every `metrics_every_s`: process memory/CPU/threads |
