@@ -15,6 +15,7 @@ step cap, and the run is recorded whether it finishes or is interrupted.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import shutil
 import time
 from pathlib import Path
@@ -80,6 +81,9 @@ class Runner:
         self._on_start = on_start or (lambda **_: None)
         #: Every model that actually served a think this run.
         self._served: set[str] = set()
+        #: case id -> the task that answered it, so a case scored on a
+        #: blocked answer can be revised if that task later finishes.
+        self._task_of: dict[str, str] = {}
         # SWE-bench checkouts and logs are written relative to this, the
         # same root the file tools resolve their paths against -- a
         # checkout Sim cannot address by the path we give it is a
@@ -270,6 +274,7 @@ class Runner:
                     ))
                     return "", 0, 0.0, (f"{_UNASKED} not started within "
                                         f"{self._config.case_claim_timeout_s:.0f}s -- the queue never reached it")
+                self._task_of[case.id] = task_id
                 answer_text, steps, error = await watch.wait(task_id, self._config.case_timeout_s)
             except asyncio.CancelledError:
                 # `benchmark stop` (or a shutdown) cancelled the RUN, and
@@ -389,6 +394,17 @@ class Runner:
         if record is None:
             record = RunRecord(suite=suite.name, suite_version=suite.version, model=model, note=note)
         record.started_at = self._now()
+        # A second, run-length watch. The per-case one is stopped when
+        # its case is, and a blocked task usually finishes LATER than
+        # that -- in the creator's GAIA run, roughly as long as the
+        # next case took, because the retry needs the worker that case
+        # is holding. `blocked_grace_s` cannot bridge that without
+        # making every genuinely-stuck case wait the same amount, so
+        # the answer is not to wait at all: score the blocked answer,
+        # carry on, and revise the case if the real one turns up before
+        # the run ends.
+        late = _AnswerWatch(self._bus)
+        await late.start()
         try:
             for index, case in enumerate(suite.cases, start=1):
                 self._on_start(index=index, total=len(suite), case=case)
@@ -411,9 +427,47 @@ class Runner:
         finally:
             if not record.finished_at:
                 record.finished_at = self._now()
+            self._revise_blocked(record, late)
+            await late.stop()
         record.providers = sorted(self._served)
         record.partial = record.partial or len(record.results) < len(suite)
         return record
+
+    def _revise_blocked(self, record: RunRecord, late: "_AnswerWatch") -> None:
+        """Re-score any case that was scored on a blocked answer and
+        whose task has since finished.
+
+        The creator's GAIA run, 2026-09-20: case 2 was scored `wrong`
+        the moment it blocked, and the same task completed with the
+        RIGHT answer about as long afterwards as the next case took --
+        the retry needs the worker that case is holding. Waiting for
+        it would tax every genuinely-stuck case by the same amount, so
+        nothing waits: the blocked answer is scored, the run carries
+        on, and this puts the real answer in at the end.
+
+        Only ever replaces a result that was recorded as blocked, and
+        only with a terminal outcome. A case nothing more was heard
+        about keeps exactly what it had.
+        """
+        for index, result in enumerate(record.results):
+            if not result.blocked_by:
+                continue
+            task_id = self._task_of.get(result.case_id)
+            if not task_id:
+                continue
+            outcome = late._outcomes.get(task_id)  # noqa: SLF001 -- same module
+            if not outcome or outcome[0] not in TERMINAL:
+                continue
+            text = str((outcome[1] or {}).get("result_summary") or "")
+            if not text:
+                continue
+            correct, extracted = score_case(text, result.expected, mode="")
+            if correct == result.correct and extracted == result.answer:
+                continue
+            record.results[index] = replace(
+                result, correct=correct, answer=extracted,
+                blocked_by=f"{result.blocked_by}; finished afterwards and was re-scored",
+            )
 
 
 class _AnswerWatch:
