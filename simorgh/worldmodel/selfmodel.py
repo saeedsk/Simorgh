@@ -13,14 +13,20 @@ and `memory.store` -- there is no message type a producer could put
 them on without a contracts change; see this package's README for the
 one-line addition that would close it).
 
-Simplification, honestly noted rather than hidden: mutations here are
-in-memory only for this session, not yet a fold of a durable `self:model`
-Ledger stream across restarts (spec section 4's "the Self Model is
-exactly the fold of this stream"). Every mutator below is a pure
-function of `(SelfModel, event fields) -> SelfModel`, so wiring a real
-replay-on-boot later is additive, not a redesign -- the same trade this
-module's previous build session made for the sections it left as
-placeholders entirely.
+Since 2026-09-20 the history half IS a fold (stage 6 item 1). Every
+mutator here was left a pure function of `(SelfModel, fields) ->
+SelfModel` against the day somebody wired the replay, and that is
+what `REPLAYABLE` and `replay()` below are: `service.py` writes each
+applied change to `self:changes` and folds the stream back at boot,
+so competence, limitations, the patches landed and the skills
+acquired survive a restart. They did not before -- Sim woke up every
+morning having forgotten what it had learnt it was bad at.
+
+What is deliberately NOT replayed is the derived half: capabilities
+and goals. The tool registry announces itself at every boot and the
+task store is read, so replaying those would recompute what is
+already known, and worse, could resurrect a tool that has since gone.
+A fold is for what happened; a rescan is for what is.
 """
 
 from __future__ import annotations
@@ -294,6 +300,42 @@ def update_goals(
         focus = ([*focus, area])[-5:]
     goals.update(_pending=pending, pending_tasks=len(pending), active_projects=projects, recent_focus_areas=focus)
     return replace(model, goals=goals, updated_at=updated_at)
+
+
+#: The mutations that are HISTORY rather than a derived view, by name,
+#: as `(model, args, now) -> model`.
+#:
+#: The difference decides what is worth replaying at boot. Capabilities
+#: and goals are re-derived from the world every time Sim starts -- the
+#: tool registry announces itself, the task store is read -- so
+#: replaying them would be recomputing what is already known. What
+#: somebody learnt about Sim's competence, what it found it could not
+#: do, the patches it landed and the skills it acquired are things that
+#: HAPPENED, and a restart used to lose all of them: the module
+#: docstring has said "not yet a fold of a durable stream" since it was
+#: written, and every mutator below was left a pure function so that
+#: sentence could one day be deleted (stage 6 item 1).
+REPLAYABLE: dict = {
+    "competence": lambda m, a, now: update_competence(
+        m, str(a["task_type"]), updated_at=now, success_rate=a.get("success_rate"),
+        samples=a.get("samples"), calibration=a.get("calibration"),
+        stated_confidence=a.get("stated_confidence"), empirical_accuracy=a.get("empirical_accuracy")),
+    "limitation": lambda m, a, now: add_limitation(
+        m, text=str(a["text"]), evidence=list(a.get("evidence") or ()),
+        since=float(a.get("since") or now), updated_at=now),
+    "change": lambda m, a, now: add_change(
+        m, ts=float(a.get("ts") or now), kind=str(a["kind"]), updated_at=now, subject=str(a.get("subject") or ""),
+        commit=a.get("commit"), tests=a.get("tests"), summary=str(a.get("summary") or "")),
+    "mitigate": lambda m, a, now: mitigate_limitations(m, subject=str(a["subject"]), updated_at=now),
+    "skill": lambda m, a, now: add_skill(m, name=str(a["name"]), tests=int(a.get("tests") or 0), updated_at=now),
+}
+
+
+def replay(model: SelfModel, rule: str, args: dict, *, now: float) -> SelfModel:
+    """One recorded change, applied. An unknown rule is ignored rather
+    than fatal: an old stream written by a newer Sim must still load."""
+    mutate = REPLAYABLE.get(rule)
+    return model if mutate is None else mutate(model, dict(args or {}), now)
 
 
 def render_summary(model: SelfModel, budget_tokens: int) -> tuple[str, int]:

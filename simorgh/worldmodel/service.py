@@ -12,7 +12,7 @@ import time
 from dataclasses import replace
 
 from simorgh.contracts import topics
-from simorgh.contracts.envelope import Message
+from simorgh.contracts.envelope import Event, Message
 from simorgh.contracts.people import may_check_in
 from simorgh.contracts.protocols import Context, Health
 from simorgh.contracts.registry import error_reply_payload
@@ -37,8 +37,14 @@ from .selfmodel import (
     mitigate_limitations,
     render_full_markdown,
     render_summary,
+    replay,
     update_competence,
 )
+
+#: Where a change to what Sim knows about ITSELF is written down, so
+#: the next boot can fold it back (stage 6 item 1). `self:` is this
+#: subsystem's own prefix in `contracts/streamnames.py`.
+SELF_CHANGES = "self:changes"
 
 NAME = "worldmodel"
 VERSION = "0.1.0"
@@ -128,6 +134,8 @@ class Service:
             soul_path=self.config.resolved_soul_path(), clock_now=self._started_at,
             areas=self._capability_map.areas(), continuity={"restarts": self._restarts},
         )
+        # And then what has happened to it since (stage 6 item 1).
+        await self._replay_self(ctx)
         try:
             (ctx.data_dir / "self").mkdir(parents=True, exist_ok=True)
             (ctx.data_dir / "self" / "SELF.md").write_text(render_full_markdown(self._model))
@@ -198,10 +206,8 @@ class Service:
             f"commits did not survive the gate; do not repeat it without a test that covers it."
         )
         now = ctx.clock.now()
-        await self._apply(
-            lambda m, _now: add_limitation(m, text=text, evidence=[], since=now, updated_at=now),
-            section="limitations", reason="loader.rollback",
-        )
+        await self._record("limitation", {"text": text, "evidence": [], "since": now},
+                           section="limitations", reason="loader.rollback")
         try:
             seen.write_text(stamp)
         except OSError:
@@ -540,21 +546,19 @@ class Service:
 
     async def _on_competence_updated(self, message: Message) -> None:
         p = message.payload
-        await self._apply(
-            lambda m, now: update_competence(
-                m, p["task_type"], updated_at=now, success_rate=p.get("success_rate"),
-                samples=p.get("samples"), calibration=p.get("calibration"),
-            ),
+        await self._record(
+            "competence",
+            {"task_type": p["task_type"], "success_rate": p.get("success_rate"),
+             "samples": p.get("samples"), "calibration": p.get("calibration")},
             section="competence", reason=f"learn.competence.updated: {p['task_type']}",
         )
 
     async def _on_calibration_updated(self, message: Message) -> None:
         p = message.payload
-        await self._apply(
-            lambda m, now: update_competence(
-                m, p["task_type"], updated_at=now,
-                stated_confidence=p.get("stated_confidence"), empirical_accuracy=p.get("empirical_accuracy"),
-            ),
+        await self._record(
+            "competence",
+            {"task_type": p["task_type"], "stated_confidence": p.get("stated_confidence"),
+             "empirical_accuracy": p.get("empirical_accuracy")},
             section="competence", reason=f"reflect.calibration.updated: {p['task_type']}",
         )
 
@@ -562,38 +566,38 @@ class Service:
         p = message.payload
         if p.get("kind") != "limitation":
             return  # restart/change/success/failure are handled by their real producers directly
-        await self._apply(
-            lambda m, now: add_limitation(m, text=p["detail"], evidence=[p["ref"]] if p.get("ref") else [], since=now, updated_at=now),
+        await self._record(
+            "limitation", {"text": p["detail"], "evidence": [p["ref"]] if p.get("ref") else []},
             section="limitations", reason="self.observation{kind:limitation}",
         )
 
     async def _on_self_patch_applied(self, message: Message) -> None:
         p = message.payload
-        def _mutate(m, now):
-            m = add_change(
-                m, ts=now, kind="self_patch", updated_at=now, subject=p["subject"], commit=p.get("commit"),
-                tests=p.get("tests"), summary=p.get("reason") or f"self-patch applied: {p['subject']}",
-            )
-            return mitigate_limitations(m, subject=p["subject"], updated_at=now)
-        await self._apply(_mutate, section="change_history", reason=f"learn.self_patch.applied: {p['subject']}")
+        await self._record(
+            "change", {"kind": "self_patch", "subject": p["subject"], "commit": p.get("commit"),
+                       "tests": p.get("tests"),
+                       "summary": p.get("reason") or f"self-patch applied: {p['subject']}"},
+            section="change_history", reason=f"learn.self_patch.applied: {p['subject']}")
+        await self._record(
+            "mitigate", {"subject": p["subject"]},
+            section="limitations", reason=f"learn.self_patch.applied: {p['subject']}")
 
     async def _on_self_patch_reverted(self, message: Message) -> None:
         p = message.payload
-        await self._apply(
-            lambda m, now: add_change(
-                m, ts=now, kind="self_patch_reverted", updated_at=now, subject=p["subject"], commit=p.get("commit"),
-                summary=p.get("reason") or f"self-patch reverted: {p['subject']}",
-            ),
+        await self._record(
+            "change", {"kind": "self_patch_reverted", "subject": p["subject"], "commit": p.get("commit"),
+                       "summary": p.get("reason") or f"self-patch reverted: {p['subject']}"},
             section="change_history", reason=f"learn.self_patch.reverted: {p['subject']}",
         )
 
     async def _on_skill_acquired(self, message: Message) -> None:
         p = message.payload
-        def _mutate(m, now):
-            m = add_skill(m, name=p["name"], tests=p.get("tests", 0), updated_at=now)
-            return add_change(m, ts=now, kind="skill_acquired", updated_at=now, subject=p["name"],
-                               summary=f"skill acquired: {p['name']} ({p.get('tests', 0)} tests)")
-        await self._apply(_mutate, section="capabilities", reason=f"learn.skill.acquired: {p['name']}")
+        await self._record("skill", {"name": p["name"], "tests": p.get("tests", 0)},
+                           section="capabilities", reason=f"learn.skill.acquired: {p['name']}")
+        await self._record(
+            "change", {"kind": "skill_acquired", "subject": p["name"],
+                       "summary": f"skill acquired: {p['name']} ({p.get('tests', 0)} tests)"},
+            section="change_history", reason=f"learn.skill.acquired: {p['name']}")
 
     async def _on_system_started(self, message: Message) -> None:
         self._restarts += 1
@@ -635,6 +639,63 @@ class Service:
         )
 
     # -- helpers --------------------------------------------------------------------------------
+
+    async def _record(self, rule: str, args: dict, *, section: str, reason: str) -> None:
+        """A change to what Sim knows about ITSELF: applied, and written
+        down so the next boot has it too.
+
+        `_apply` is for the sections re-derived at every start (the
+        tools that registered, the tasks in the queue). This is for the
+        ones that are history -- competence, limitations, the patches
+        landed, the skills acquired -- which a restart used to drop on
+        the floor. `SELF_CHANGES` is the stream and `selfmodel.replay`
+        the fold; the module docstring promised this and left every
+        mutator a pure function so it could be added without a
+        redesign (stage 6 item 1).
+
+        The event is written only when the mutation actually changed
+        something, so a fuzzy-duplicate limitation does not grow the
+        stream.
+        """
+        assert self._ctx is not None and self._model is not None
+        before = self._model
+        await self._apply(lambda m, now: replay(m, rule, args, now=now), section=section, reason=reason)
+        if self._model is before:
+            return
+        event = Event(stream=SELF_CHANGES, type=rule, ts=self._ctx.clock.now(),
+                      trace_id=SELF_CHANGES, causation_id=None,
+                      payload={"rule": rule, "args": dict(args), "section": section, "reason": reason})
+        try:
+            await self._ctx.ledger.append(SELF_CHANGES, event)
+        except Exception as exc:  # noqa: BLE001 -- a model that cannot be written down is still a model
+            self._ctx.logger.warning("worldmodel.self_change_unwritten", rule=rule, error=repr(exc))
+
+    async def _replay_self(self, ctx: Context) -> None:
+        """Fold `self:changes` onto the static model at boot.
+
+        Everything else in this package rebuilds its view from the log
+        already; the Self Model was the one that said it did and did
+        not. A bad stream degrades to the static model rather than
+        failing the boot -- Sim starting without its history is worse
+        than Sim not starting only in the second case.
+        """
+        try:
+            events = await ctx.ledger.read(SELF_CHANGES)
+        except Exception as exc:  # noqa: BLE001
+            ctx.logger.warning("worldmodel.self_replay_failed", error=repr(exc))
+            return
+        model, applied = self._model, 0
+        for event in events:
+            payload = event.payload or {}
+            rule = str(payload.get("rule") or event.type or "")
+            after = replay(model, rule, dict(payload.get("args") or {}), now=float(event.ts or 0.0))
+            if after is not model:
+                applied += 1
+            model = after
+        if applied:
+            self._model = replace(model, version=self._model.version + applied)
+        ctx.logger.info("worldmodel.self_replayed", events=len(events), applied=applied,
+                        version=self._model.version)
 
     async def _apply(self, mutate, *, section: str, reason: str) -> None:
         """Applies one mutator, and if it actually changed the model,

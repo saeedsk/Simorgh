@@ -34,3 +34,9 @@ by = "opus-main"
 task = "stage 11 item 11: house-fast in the bless"
 since = "2026-09-20T19:42:55+00:00"
 until = "2026-09-21T03:42:55+00:00"
+
+[locks.worldmodel]
+by = "opus-main"
+task = "stage 6 item 1: the self model is a fold of its own stream"
+since = "2026-09-20T23:54:26+00:00"
+until = "2026-09-21T07:54:26+00:00"
