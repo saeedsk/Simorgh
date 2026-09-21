@@ -429,7 +429,10 @@ async function ringLive(tile,video,set){ // Ring live view: WebRTC with Ring's s
   if(!r.ok||!body.sdp)throw new Error(body.error||"no answer from Ring");
   await pc.setRemoteDescription({type:"answer",sdp:body.sdp});
   const session=body.session;pc._session=session;pc._camera=tile.name;
-  pc._keep=setInterval(()=>{fetch(q("/api/dash/ring/live"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({camera:tile.name,action:"keepalive",session})}).catch(()=>{});},20000);
+  // No keep-alive from here any more: Sim holds the Ring session open while this page keeps polling
+  // /api/dash/streams (every ten seconds, which it does anyway). One keep-alive per camera every twenty
+  // seconds was a gated action each -- 640 in the worst measured hour, one ledger stream apiece (2026-09-20).
+  pc._keep=null;
   pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState)){clearInterval(pc._keep);const cap=video.parentElement&&video.parentElement.querySelector(".tag");if(cap)cap.textContent="ring · reconnecting";setTimeout(()=>{if(set.rtc.includes(pc)){set.rtc=set.rtc.filter(x=>x!==pc);ringLive(tile,video,set).catch(()=>{});}},15000);}};}
 function closeLive(which){ // "strip", "grid", or nothing for both
   Object.keys(PLAYERS).filter(k=>!which||k===which).forEach(k=>{const set=PLAYERS[k];

@@ -42,6 +42,7 @@ from pathlib import Path
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
+from simorgh.contracts.home import live
 from simorgh.contracts.protocols import ToolContext, ToolResult, ToolUnconfigured
 
 SECRET_TOKEN, SECRET_USER = "RING_TOKEN", "RING_USERNAME"
@@ -692,8 +693,10 @@ class RingLiveTool(_RingTool):
     """Ring live view for the dashboard. Ring's live video is WebRTC: the
     browser on the TV negotiates a peer connection with Ring's servers,
     and Sim carries only the signalling -- the browser's SDP offer in,
-    Ring's answer out, a keep-alive while it plays, a close. Each step is
-    a tool call, so Guardian sees who is opening a live view of the house."""
+    Ring's answer out, and a close. Opening and closing are tool calls,
+    so Guardian sees who opened a live view of the house and when it
+    ended; the keep-alives in between are this process's own business
+    (`KEEPALIVE_EVERY_S`)."""
 
     name = "ring_live"
     description = ("Live view of a Ring camera for the dashboard's page (WebRTC signalling): `action` offer with the "
@@ -701,6 +704,11 @@ class RingLiveTool(_RingTool):
     args_schema = {"type": "object", "required": ["camera"],
                    "properties": {"camera": {"type": "string"}, "action": {"type": "string", "enum": ["offer", "keepalive", "close"]},
                                   "sdp": {"type": "string"}, "session": {"type": "string"}}}
+
+    def _start_keepalive(self, cloud, cam, session: str) -> None:
+        """Hold this session open while the dashboard is up."""
+        live.opened(session, camera=cam.name, now=time.monotonic())
+        _keepalive_loop(cloud, cam.id, session)
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         action = str(args.get("action") or "offer").strip().lower()
@@ -717,21 +725,55 @@ class RingLiveTool(_RingTool):
                 answer = await cloud.webrtc_offer(cam.id, sdp)
                 if not answer:
                     return ToolResult.transient(f"refused: Ring gave no answer for {cam.name}")
+                self._start_keepalive(cloud, cam, session)
                 return ToolResult(ok=True, output=json.dumps({"sdp": answer, "session": session, "camera": cam.name}),
                                   side_effects=(f"ring_live:{cam.safe}",), metadata={"camera": cam.name, "session": session})
             session = str(args.get("session") or "").strip()
             if not session:
                 return ToolResult.refused("refused: `session` is needed")
             if action == "keepalive":
+                # Kept for anything that still asks (an older page, a
+                # script), but the loop below is what actually holds
+                # the session open now.
+                if session in live.SESSIONS:
+                    live.SESSIONS[session]["watched_at"] = time.monotonic()
                 await cloud.webrtc_keepalive(cam.id, session)
                 return ToolResult(ok=True, output=json.dumps({"ok": True}), metadata={"camera": cam.name, "session": session})
             if action == "close":
+                live.closed(session)
                 await cloud.webrtc_close(cam.id, session)
                 return ToolResult(ok=True, output=json.dumps({"ok": True}), side_effects=(f"ring_live:{cam.safe}:close",),
                                   metadata={"camera": cam.name, "session": session})
             return ToolResult.refused("refused: `action` is offer, keepalive or close")
         except Exception as exc:  # noqa: BLE001
             return ToolResult.from_exception(exc, f"refused: {exc.__class__.__name__}: {exc}", default="transient")
+
+
+def _keepalive_loop(cloud, cam_id: str, session: str) -> None:
+    """Refresh one Ring session until nobody is watching."""
+    import asyncio
+
+    async def _loop() -> None:
+        while True:
+            await asyncio.sleep(live.KEEPALIVE_EVERY_S)
+            if session not in live.SESSIONS:
+                return
+            if live.stale(session, now=time.monotonic()):
+                # The page is gone without a `close`. Let Ring's own
+                # session lapse rather than holding a camera open for
+                # a browser that is not there.
+                live.closed(session)
+                return
+            try:
+                await cloud.webrtc_keepalive(cam_id, session)
+            except Exception:  # noqa: BLE001 -- a failed refresh ends the session, not the process
+                live.closed(session)
+                return
+
+    task = asyncio.ensure_future(_loop())
+    state = live.SESSIONS.get(session)
+    if state is not None:
+        state["task"] = task
 
 
 def _sdp_session(sdp: str) -> str:

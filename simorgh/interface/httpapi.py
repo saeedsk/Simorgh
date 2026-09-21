@@ -493,6 +493,16 @@ class HttpApi:
             else:
                 body = {"now": self._now(), "streams": self._feeds.streams(), "cameras": self._feeds.cameras(),
                         "ring_cameras": self._feeds.ring_cameras(), "asked": self._cameras_live_last}
+            # The page is up, so any Ring session it opened is still
+            # being watched. This poll already happens every ten
+            # seconds for the strip's own sake, so liveness costs no
+            # extra request and still comes from the browser rather
+            # than from an assumption -- and the per-camera keep-alive
+            # that used to be a gated action every twenty seconds is
+            # gone (`domains/home/ring.py::KEEPALIVE_EVERY_S`).
+            from simorgh.contracts.home import live
+
+            live.watching(time.monotonic())
             return 200, json.dumps(body, default=str).encode("utf-8"), "application/json"
 
         self.register_route("GET", "/api/dash/streams", _streams, auth=True)

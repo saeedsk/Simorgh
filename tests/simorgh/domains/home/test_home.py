@@ -583,3 +583,44 @@ class TheTokenIsFoundUnderEitherNameTestCase(unittest.TestCase):
                 raise RuntimeError("the vault is locked")
 
         self.assertEqual(self._url_and_token(_Broken(), {"HOME_ASSISTANT_TOKEN": "tok"})[1], "tok")
+
+
+class ALiveViewIsApprovedOnceNotEveryTwentySecondsTestCase(unittest.IsolatedAsyncioTestCase):
+    """The dashboard sent a keep-alive per camera every twenty seconds,
+    each one a gated action: 640 approvals in the worst measured hour,
+    one ledger stream apiece, against a stage 1 target of ten
+    (2026-09-20).
+
+    A keep-alive is not a new capability -- the session id was minted
+    by an approved `offer`, and keeping an open stream open is that
+    approval continuing. So the process refreshes it while somebody is
+    watching, and the page says "still watching" through the poll it
+    already makes.
+    """
+
+    def setUp(self):
+        from simorgh.contracts.home import live
+
+        live.SESSIONS.clear()
+        self.live = live
+
+    def test_a_session_is_remembered_when_it_opens_and_forgotten_when_it_closes(self):
+        self.live.opened("s1", camera="Front Door", now=100.0)
+        self.assertEqual(self.live.SESSIONS["s1"]["camera"], "Front Door")
+        self.assertEqual((self.live.closed("s1") or {}).get("camera"), "Front Door")
+        self.assertEqual(self.live.SESSIONS, {})
+
+    def test_the_pages_poll_is_what_keeps_it_alive(self):
+        self.live.opened("s1", camera="Front Door", now=100.0)
+        self.assertTrue(self.live.stale("s1", now=100.0 + self.live.WATCHING_TIMEOUT_S + 1))
+        self.live.watching(now=100.0 + self.live.WATCHING_TIMEOUT_S)
+        self.assertFalse(self.live.stale("s1", now=100.0 + self.live.WATCHING_TIMEOUT_S + 1))
+
+    def test_a_browser_that_vanished_does_not_hold_a_camera_open(self):
+        """The risk of moving the keep-alive off the page: a tab closed
+        without a `close` must not keep Ring streaming for ever."""
+        self.live.opened("s1", camera="Front Door", now=100.0)
+        self.assertTrue(self.live.stale("s1", now=100.0 + self.live.WATCHING_TIMEOUT_S + 0.1))
+
+    def test_an_unknown_session_is_stale_rather_than_an_error(self):
+        self.assertTrue(self.live.stale("never-opened", now=1.0))
