@@ -81,7 +81,14 @@ VM = VM_NAMES[0]
 #: such name, because there is no device.
 MDNS_NAME = os.environ.get("SIMORGH_HAOS_MDNS", "homeassistant.local")
 
-PORT = int(os.environ.get("SIMORGH_HA_PORT", "8123"))
+#: Where Home Assistant might be listening, in the order worth
+#: trying. 8123 is the documented default and 80 is what the
+#: creator's own VM turned out to serve on (2026-09-20) -- this tool
+#: reported "core: not up yet" at a Home Assistant that had been
+#: answering on port 80 for some minutes, which is the most annoying
+#: kind of wrong: confident, specific and false.
+PORTS = tuple(int(p) for p in os.environ.get("SIMORGH_HA_PORTS", "8123,80").split(",") if p.strip())
+PORT = PORTS[0]
 
 SECRETS_FILE = Path(os.environ.get("SIMORGH_SECRETS_FILE", "~/.simorgh/secrets.toml")).expanduser()
 VAULT_URL_KEY = "vault:home_assistant:url"
@@ -257,18 +264,28 @@ def utmctl_ip(binary: str) -> str | None:
 OBSERVER_PORT = 4357
 
 
-def core_answering(address: str) -> tuple[bool, str]:
-    """Whether Home Assistant Core is up on `address` yet, and how it
-    looks if not.
+def _url(address: str, port: int) -> str:
+    """`http://host` for port 80, `http://host:port` otherwise -- the
+    shape a person would type, and the shape Sim should be given."""
+    return f"http://{address}" if port == 80 else f"http://{address}:{port}"
 
-    Core opens 8123 only once it has started; before that HA OS answers
-    on the observer port alone. Reporting "connection refused" for a
-    machine that is midway through its first install is true and
-    useless, so the two are told apart.
+
+def core_answering(address: str) -> tuple[int | None, str]:
+    """`(port, why)`: where Home Assistant Core is answering, or None.
+
+    Core opens its port only once it has started; before that HA OS
+    answers on the observer alone. Reporting "connection refused" for
+    a machine midway through its first install is true and useless,
+    so the two are told apart.
+
+    Every port in `PORTS`, not just 8123. The creator's VM serves on
+    80, and this tool spent an evening saying "core: not up yet"
+    about a Home Assistant that was answering fine -- confident,
+    specific and false, which is worse than saying nothing.
     """
     import socket
 
-    for port, what in ((PORT, "core"), (OBSERVER_PORT, "observer")):
+    for port in (*PORTS, OBSERVER_PORT):
         sock = socket.socket()
         sock.settimeout(2.0)
         try:
@@ -277,11 +294,12 @@ def core_answering(address: str) -> tuple[bool, str]:
             continue
         finally:
             sock.close()
-        if what == "core":
-            return True, f"answering on {PORT}"
-        return False, (f"not up yet -- the HA OS observer is answering on {OBSERVER_PORT}, "
-                       "which means Home Assistant is still starting")
-    return False, f"nothing answers on {PORT} or {OBSERVER_PORT}; the VM may still be booting"
+        if port == OBSERVER_PORT:
+            return None, (f"not up yet -- the HA OS observer is answering on {OBSERVER_PORT}, "
+                          "which means Home Assistant is still starting")
+        return port, f"answering on {port}"
+    ports = ", ".join(str(p) for p in (*PORTS, OBSERVER_PORT))
+    return None, f"nothing answers on {ports}; the VM may still be booting"
 
 
 def find_address() -> tuple[str | None, str]:
@@ -293,7 +311,7 @@ def find_address() -> tuple[str | None, str]:
         return url, f"configured URL (from {where})"
     address = resolve_mdns(MDNS_NAME)
     if address:
-        return f"http://{address}:{PORT}", f"mDNS: {MDNS_NAME} resolves to {address}"
+        return _url(address, core_answering(address)[0] or PORT), f"mDNS: {MDNS_NAME} resolves to {address}"
     binary = utmctl_bin()
     if binary:
         address = utmctl_ip(binary)
@@ -380,11 +398,11 @@ def cmd_status(_args) -> int:
         print("  not on the LAN. Check the VM's network mode is Bridged on en0, and")
         print("  HA's own Settings -> System -> Network. See the findings doc.")
         return 1
-    address = f"http://{on_lan}:{PORT}"
+    core_port, core_why = core_answering(on_lan)
+    address = _url(on_lan, core_port or PORT)
     print(f"address: {address} (mDNS: {MDNS_NAME})")
-    core_up, core_why = core_answering(on_lan)
     print(f"core: {core_why}")
-    if not core_up:
+    if core_port is None:
         print(f"  watch it come up at http://{MDNS_NAME}:{OBSERVER_PORT} (the HA OS observer)")
 
     url, has_token, where = configured()
