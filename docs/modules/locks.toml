@@ -4,3 +4,9 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.growth]
+by = "opus-main"
+task = "finish Sim's backlog-expiry change with injected time"
+since = "2026-09-21T02:17:44+00:00"
+until = "2026-09-21T10:17:44+00:00"

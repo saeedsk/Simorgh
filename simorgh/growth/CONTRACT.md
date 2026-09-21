@@ -88,6 +88,8 @@ Not built yet: the drafting step (a lesson phrased by the skill-writer agent) an
 
 ## Invariants
 
+`BacklogCounter.count(now=)` is the backlog Curiosity gates exploration on: open tasks, minus ones blocked until a time that has not arrived. A retry time that HAS arrived puts its task back in the count -- before 2026-09-20 one block with any future retry discounted a task for ever, so a queue of them read as empty and Curiosity explored on top of it. `now` is always passed in; `effective_count` remains as a wall-clock shim for callers without one.
+
 1. A cluster needs `MIN_MEMBERS` (3) failures **and** a share above the baseline for other task types: "patch tasks fail" is not a lesson, and neither is a failure mode every kind of work has equally.
 2. A cluster whose cause nobody recorded is not a pattern; it is dropped rather than phrased.
 3. `adopt` refuses without a measurement (`evaluated_on > 0`), refuses a result below the stored baseline, and refuses a policy that fixed none of the failures it came from — a change that makes nothing worse and nothing better is not an improvement.

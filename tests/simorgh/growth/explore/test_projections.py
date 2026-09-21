@@ -1,3 +1,4 @@
+import time
 import unittest
 
 from simorgh.growth.explore.projections import ActiveProject, AreaStaleness, BacklogCounter, RecentCandidates
@@ -27,14 +28,35 @@ class BacklogCounterTest(unittest.TestCase):
         c = BacklogCounter()
         c.on_created("t1")
         c.on_blocked("t1", retry_after=100.0, now=10.0)
-        self.assertEqual(c.effective_count, 0)
+        self.assertEqual(c.count(now=10.0), 0)
         self.assertEqual(c.raw_count, 1)
 
     def test_blocked_with_past_retry_still_counts(self):
         c = BacklogCounter()
         c.on_created("t1")
         c.on_blocked("t1", retry_after=5.0, now=10.0)
-        self.assertEqual(c.effective_count, 1)
+        self.assertEqual(c.count(now=10.0), 1)
+
+    def test_a_retry_time_that_arrives_puts_the_task_back_in_the_count(self):
+        """Sim's own change, 2026-09-20, and it was right: a task
+        blocked until 14:00 is not backlog at 13:00 and IS backlog at
+        14:01. Before it, one block with any future retry discounted a
+        task for ever, so a queue of them read as empty and Curiosity
+        explored on top of it."""
+        c = BacklogCounter()
+        c.on_created("t1")
+        c.on_blocked("t1", retry_after=100.0, now=10.0)
+        self.assertEqual(c.count(now=99.0), 0)
+        self.assertEqual(c.count(now=101.0), 1)
+
+    def test_the_count_never_reads_the_wall_clock(self):
+        """The bug in that change: `time.time()` inside the count made
+        every future retry look expired the instant a test asked,
+        because a test's `now=10.0` is forty years behind the wall."""
+        c = BacklogCounter()
+        c.on_created("t1")
+        c.on_blocked("t1", retry_after=2_000_000_000.0, now=10.0)
+        self.assertEqual(c.count(now=10.0), 0, "a retry in 2033 is not expired today")
 
     def test_blocked_without_retry_after_counts(self):
         c = BacklogCounter()

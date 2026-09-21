@@ -23,29 +23,59 @@ class BacklogCounter:
 
     def __init__(self) -> None:
         self._open: set[str] = set()
-        self._blocked_with_future_retry: set[str] = set()
+        self._blocked_with_future_retry: dict[str, float] = {}
 
     def on_created(self, task_id: str) -> None:
         self._open.add(task_id)
 
     def on_completed(self, task_id: str) -> None:
         self._open.discard(task_id)
-        self._blocked_with_future_retry.discard(task_id)
+        self._blocked_with_future_retry.pop(task_id, None)
 
     def on_failed(self, task_id: str, *, terminal: bool) -> None:
         if terminal:
             self._open.discard(task_id)
-        self._blocked_with_future_retry.discard(task_id)
+        self._blocked_with_future_retry.pop(task_id, None)
 
     def on_blocked(self, task_id: str, *, retry_after: float | None, now: float) -> None:
         if retry_after is not None and retry_after > now:
-            self._blocked_with_future_retry.add(task_id)
+            self._blocked_with_future_retry[task_id] = retry_after
         else:
-            self._blocked_with_future_retry.discard(task_id)
+            self._blocked_with_future_retry.pop(task_id, None)
+
+    def count(self, *, now: float) -> int:
+        """Unfinished tasks, not counting ones blocked until later.
+
+        `now` is passed in, never read from the wall clock. The whole
+        class already works that way -- `on_blocked` takes the caller's
+        `now` -- and the reason is the one in
+        `contracts/protocols.py::Clock`: a test that cannot control
+        time cannot test a deadline. Sim itself wrote the
+        retry-expiry below and reached for `time.time()` inside it
+        (2026-09-20), which made every future retry look expired the
+        instant a test asked, because a test's `now=10.0` is forty
+        years behind the wall.
+
+        A retry time that has passed puts its task back in the count:
+        it is waiting to run again, so it IS backlog. That part is
+        Sim's idea and it is right -- before it, a task blocked once
+        with any future retry was discounted for ever, and a backlog
+        of them read as empty.
+        """
+        for task_id in [t for t, at in self._blocked_with_future_retry.items() if at <= now]:
+            del self._blocked_with_future_retry[task_id]
+        return len(self._open - set(self._blocked_with_future_retry))
 
     @property
     def effective_count(self) -> int:
-        return len(self._open - self._blocked_with_future_retry)
+        """`count` at the wall clock, for callers that have no clock.
+
+        Kept because the two call sites in `explore/service.py` are
+        mid-tick and have a real `now` of their own to pass; this is
+        the compatibility shim until they do. New code should call
+        `count(now=...)`.
+        """
+        return self.count(now=time.time())
 
     @property
     def raw_count(self) -> int:

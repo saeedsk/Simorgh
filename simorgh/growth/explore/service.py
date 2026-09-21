@@ -420,7 +420,7 @@ class Service:
             # inventing work of its own.
             await self._record_tick(skipped_reason="autonomy_paused")
             return []
-        if not force and self._backlog.effective_count > 0:
+        if not force and self._backlog.count(now=self._now()) > 0:
             await self._record_tick(skipped_reason="backlog_nonempty")
             return []
         # The Kernel's idle tick is a ~3s heartbeat (`idle_tick_cooldown_s`),
@@ -592,7 +592,7 @@ class Service:
         scores: dict | None = None, project: str | None = None, cognition_attempted: bool | None = None,
     ) -> None:
         payload = {
-            "ts": self._now(), "backlog": self._backlog.effective_count,
+            "ts": self._now(), "backlog": self._backlog.count(now=self._now()),
             "picked": picked or [], "proposed": proposed or [],
         }
         if skipped_reason is not None:
