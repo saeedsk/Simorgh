@@ -64,7 +64,7 @@ def _patched_build_factories(*, providers):
         )
         factories["cognition"] = lambda: CognitionService(
             config=CognitionConfig(
-                provider_order=("together", "gemini", "floor"), assembly_request_timeout=0.05,
+                provider_order=("together", "gemini", "floor"), assembly_request_timeout=2.0,
             ),
             providers=providers,
         )

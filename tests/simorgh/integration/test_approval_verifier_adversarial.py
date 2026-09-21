@@ -189,9 +189,23 @@ class TestExpiryBoundary(_AdversarialTestCase):
         # tool actually gets to run: pause the system right after
         # proposing so `_on_approved` is the one that fetches `now`
         # late.
-        await asyncio.sleep(0.3)
-        result = [m for m in collector.events if m.payload.get("action_id") == "exp-1" and m.type == topics.ACTION_RESULT]
-        denied = [m for m in collector.events if m.payload.get("action_id") == "exp-1" and m.type == topics.ACTION_DENIED]
+        def _of(kind):
+            return [m for m in collector.events
+                    if m.payload.get("action_id") == "exp-1" and m.type == kind]
+
+        # Wait for an ANSWER, not for a fixed number of milliseconds. A
+        # flat `sleep(0.3)` is a bet that a loaded twelve-core run gets
+        # through boot, approval and execution in 300 ms, and under
+        # `-n auto` it sometimes does not: the assertion then read
+        # "neither ran nor was denied", which is a slow machine rather
+        # than a broken gate (2026-09-20). The property below does not
+        # depend on timing at all, so neither should the wait.
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while asyncio.get_running_loop().time() < deadline:
+            if _of(topics.ACTION_RESULT) or _of(topics.ACTION_DENIED):
+                break
+            await asyncio.sleep(0.02)
+        result, denied = _of(topics.ACTION_RESULT), _of(topics.ACTION_DENIED)
         # Either outcome is correct: a same-loop-tick success (execution
         # beat the clock) or a clean denial for "expired". What must
         # never happen is BOTH -- an action denied as expired and also

@@ -81,7 +81,7 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
             "simorgh.kernel.service.build_factories",
             new=_patched_build_factories(
                 cognition_config=config or CognitionConfig(
-                    provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+                    provider_order=("fake_llm", "floor"), assembly_request_timeout=2.0,
                 ),
                 cognition_providers=providers if providers is not None else [_FakeProvider()],
             ),
@@ -104,7 +104,7 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
         # sees the caller's *raw* messages, not the assembler's already-
         # flattened block) didn't regress the earlier layers.
         config = CognitionConfig(
-            provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05, tool_result_max_tokens=50,
+            provider_order=("fake_llm", "floor"), assembly_request_timeout=2.0, tool_result_max_tokens=50,
         )
         await self._boot(config=config)
         big_tool_result = {"role": "tool", "name": "search", "content": " ".join(f"w{i}" for i in range(500))}
@@ -119,7 +119,7 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
         # Roadmap 4.2's "reference substitution" layer: identical tool
         # results collapse to one reference instead of staying duplicated.
         config = CognitionConfig(
-            provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05, microcompact_trigger_fraction=0.0,
+            provider_order=("fake_llm", "floor"), assembly_request_timeout=2.0, microcompact_trigger_fraction=0.0,
         )
         await self._boot(config=config)
         dup = " ".join(f"w{i}" for i in range(50))
@@ -206,7 +206,7 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
         # over the request's own max_cost_usd is refused before any
         # money is spent, distinct from "no real provider available."
         config = CognitionConfig(
-            provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+            provider_order=("fake_llm", "floor"), assembly_request_timeout=2.0,
             providers={"fake_llm": ProviderConfig(price_in=1_000_000.0, price_out=1_000_000.0)},
         )
         await self._boot(config=config)
@@ -249,7 +249,15 @@ class TestCognitionCompactionPipelineBoot(unittest.IsolatedAsyncioTestCase):
         # is called with -- not just accounted for in a token count.
         fake = _FakeProvider(text="ok")
         config = CognitionConfig(
-            provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+            # Two seconds, not fifty milliseconds. This test is about a
+            # protected block surviving compaction, and the 0.05 it had
+            # was an assembly budget that a loaded twelve-core full-suite
+            # run genuinely misses -- so the block was dropped for want
+            # of time and the assertion failed, once in about three
+            # whole-suite runs (2026-09-20). A flaky test in the bless
+            # gate is worse than no test: it teaches everybody to re-run
+            # until green, which is how a real failure gets through.
+            provider_order=("fake_llm", "floor"), assembly_request_timeout=2.0,
             collapse_keep_full_segments=1, snip_keep_last_segments=100,
         )
         await self._boot(config=config, providers=[fake])

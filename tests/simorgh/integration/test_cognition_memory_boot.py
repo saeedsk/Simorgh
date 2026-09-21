@@ -51,7 +51,7 @@ def _patched_build_factories(*, cognition_providers):
     def _build(*, bus_client, ledger_client, run_repl=False, execution_config=None, guardian_config=None):
         factories = real(bus_client=bus_client, ledger_client=ledger_client, run_repl=run_repl, guardian_config=guardian_config)
         factories["cognition"] = lambda: CognitionService(
-            config=CognitionConfig(provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05),
+            config=CognitionConfig(provider_order=("fake_llm", "floor"), assembly_request_timeout=2.0),
             providers=cognition_providers,
         )
         factories["memory"] = lambda: MemoryService()
