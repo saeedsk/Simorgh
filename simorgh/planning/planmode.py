@@ -49,16 +49,30 @@ class PlanState:
     prompt_asked_at: float | None = None
 
 
-def approval_decision(verdict: str, risk: str, auto_approve_max_risk: str) -> str:
+def approval_decision(verdict: str, risk: str, auto_approve_max_risk: str,
+                      *, posterior: float | None = None, samples: int = 0,
+                      weak_below: float = 0.0, min_samples: int = 8) -> str:
     """Returns one of `"auto_approve"`, `"ask_human"`, `"replan"`, `"reject"`
     -- the section 5.4 policy table, `insufficient_evidence` folded into
     the same bounded-replan path as `revise` (a first pass simply hasn't
-    used up a revision yet, it isn't a distinct branch)."""
+    used up a revision yet, it isn't a distinct branch).
+
+    `posterior` is the Beta mean for this kind of work, from the Self
+    Model (stage 6 item 2). A plan Sim is measurably bad at does not
+    auto-approve however low its risk looks: risk is what the plan
+    SAYS about itself, and the posterior is what actually happened
+    the last N times Sim tried this. Only with real evidence behind
+    it -- `min_samples` -- because `Beta(1,1)` has a mean of 0.5 and
+    means "nothing recorded yet", and treating that as bad would send
+    every new kind of work to a person.
+    """
     if verdict == "reject":
         return "reject"
     if verdict in ("revise", "insufficient_evidence"):
         return "replan"
     if verdict == "approve":
+        if weak_below > 0.0 and posterior is not None and samples >= min_samples and posterior < weak_below:
+            return "ask_human"
         if _RISK_ORDER[risk] <= _RISK_ORDER[auto_approve_max_risk]:
             return "auto_approve"
         return "ask_human"

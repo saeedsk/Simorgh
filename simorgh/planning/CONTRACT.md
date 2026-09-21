@@ -63,6 +63,7 @@ Requests it makes: `cognition.think` (`purpose="decompose"` on replan, `purpose=
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
+| `self.estimate.request` | service.py `_how_good_is_sim_at_this` | the Beta posterior for this plan's task type, asked before Plan Mode decides. Risk is what a plan says about itself; the posterior is what happened the last N times Sim tried this kind of work, and a low-risk plan for work Sim fails three times in five now reaches a person (`ask_human_below_posterior` 0.45 over `ask_human_min_samples` 8, matching Orchestration's own escalation rule). No answer, a slow answer or too few samples all mean "no opinion" and the risk table decides alone -- `Beta(1,1)` means nothing is recorded yet (stage 6 item 2, 2026-09-20) |
 | `task.created` | `messages/task.py::TaskCreated` | simorgh/planning/service.py | every new task, including each project child |
 | `task.create.reply` | `messages/task.py::TaskCreateReply` | simorgh/planning/service.py | reply to a `task.create` request: id, or `deferred`, or `deduplicated_against`, plus `held` |
 | `task.available` | `messages/task.py::TaskAvailable` | simorgh/planning/scheduler.py | top 5 ready tasks, each once per `{id}:{updated_at}` generation, not while paused |
@@ -80,7 +81,7 @@ Requests it makes: `cognition.think` (`purpose="decompose"` on replan, `purpose=
 | `plan.approved` | `messages/plan.py::PlanApproved` | simorgh/planning/service.py | children created, the project task completed |
 | `project.completed` | `messages/plan.py::ProjectCompleted` | simorgh/planning/service.py | once per project, when the child rollup is completed |
 | `project.failed` | `messages/plan.py::ProjectFailed` | simorgh/planning/service.py | once per project, when the child rollup is failed |
-| `ui.prompt` | `messages/ui.py::UiPrompt` | simorgh/planning/service.py | a plan above `auto_approve_max_risk` needs a human yes/no |
+| `ui.prompt` | `messages/ui.py::UiPrompt` | simorgh/planning/service.py | a plan above `auto_approve_max_risk` needs a human yes/no -- and so does one for work Sim is measurably bad at, whatever its risk says (`ask_human_below_posterior`) |
 | `ui.notice` | `messages/ui.py::UiNotice` | simorgh/planning/service.py | duplicates, empty plans, rejections, approval timeouts |
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/planning/service.py | every 30 s: backlog and counts by status |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/planning/bridge.py | request, for replan and re-grounding |
@@ -113,6 +114,8 @@ Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus
 | `source_roots` | `('simorgh/',)` | yes |
 | `max_plan_revisions` | `2` | yes |
 | `auto_approve_max_risk` | `'medium'` | yes |
+| `ask_human_below_posterior` | `0.45` | yes |
+| `ask_human_min_samples` | `8` | yes |
 | `human_approval_timeout_seconds` | `3600.0` | yes |
 | `regrounding_age_seconds` | `21600.0` | yes |
 | `reground_after_sibling_failure` | `True` | yes |

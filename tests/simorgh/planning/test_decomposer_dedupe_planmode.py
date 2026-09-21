@@ -152,3 +152,48 @@ class TestComputeDiff(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatSimIsActuallyGoodAt(unittest.TestCase):
+    """Stage 6 item 2: the posterior gates auto-approval.
+
+    Risk is what a plan says about itself. The posterior is what
+    happened the last N times Sim tried this kind of work. A low-risk
+    plan for something Sim fails three times in five should reach a
+    person, and until now nothing in Plan Mode could see that.
+    """
+
+    def _decide(self, **kw):
+        from simorgh.planning.planmode import approval_decision
+
+        return approval_decision("approve", kw.pop("risk", "low"), "medium",
+                                 weak_below=0.45, min_samples=8, **kw)
+
+    def test_a_low_risk_plan_for_work_sim_is_bad_at_asks_a_person(self):
+        self.assertEqual(self._decide(posterior=0.3, samples=12), "ask_human")
+
+    def test_the_same_plan_where_sim_is_good_auto_approves(self):
+        self.assertEqual(self._decide(posterior=0.8, samples=12), "auto_approve")
+
+    def test_nothing_recorded_yet_is_not_evidence_of_being_bad(self):
+        """`Beta(1,1)` has a mean of 0.5. Treating that as weak would send
+        every new kind of work to a person on its first try."""
+        self.assertEqual(self._decide(posterior=0.5, samples=0), "auto_approve")
+        self.assertEqual(self._decide(posterior=0.2, samples=3), "auto_approve")
+
+    def test_no_estimate_at_all_leaves_the_risk_table_alone(self):
+        self.assertEqual(self._decide(posterior=None, samples=0), "auto_approve")
+        self.assertEqual(self._decide(posterior=None, samples=0, risk="high"), "ask_human")
+
+    def test_the_gate_can_be_switched_off(self):
+        from simorgh.planning.planmode import approval_decision
+
+        self.assertEqual(approval_decision("approve", "low", "medium", posterior=0.1, samples=50,
+                                           weak_below=0.0), "auto_approve")
+
+    def test_a_rejected_or_revised_verdict_is_untouched_by_it(self):
+        from simorgh.planning.planmode import approval_decision
+
+        for verdict, expected in (("reject", "reject"), ("revise", "replan")):
+            self.assertEqual(approval_decision(verdict, "low", "medium", posterior=0.1, samples=50,
+                                               weak_below=0.45), expected)

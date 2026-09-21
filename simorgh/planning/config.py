@@ -34,6 +34,15 @@ class Config:
     source_roots: tuple[str, ...] = ("simorgh/",)
     max_plan_revisions: int = 2
     auto_approve_max_risk: str = "medium"
+    # A plan for work Sim is measurably bad at asks a person, whatever
+    # its risk says (stage 6 item 2). The numbers match Orchestration's
+    # own escalation rule (`escalate_below_posterior`/`_min_samples`):
+    # one threshold for "Sim is weak here", read from one place -- the
+    # Beta posterior over this task type in the Self Model. 0 turns it
+    # off. `Beta(1,1)` means nothing is recorded yet, which is why the
+    # sample floor is not optional.
+    ask_human_below_posterior: float = 0.45
+    ask_human_min_samples: int = 8
     human_approval_timeout_seconds: float = 3600.0
     regrounding_age_seconds: float = 21600.0
     reground_after_sibling_failure: bool = True

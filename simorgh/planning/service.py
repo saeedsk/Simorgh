@@ -5,6 +5,7 @@ propagation. Layer 2 (registry.py).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from dataclasses import asdict, replace
@@ -92,6 +93,7 @@ class Service:
         topics.TASK_CLEAR_REQUEST,
     )
     produces: tuple[str, ...] = (
+        topics.SELF_ESTIMATE_REQUEST,
         topics.TASK_CREATE_REPLY,
         topics.TASK_CREATED,
         topics.TASK_AVAILABLE,
@@ -1242,6 +1244,37 @@ class Service:
             },
         ))
 
+    async def _how_good_is_sim_at_this(self, state) -> tuple[float | None, int]:
+        """The Beta posterior for this kind of work, or `(None, 0)`.
+
+        Risk is what a plan says about itself; the posterior is what
+        actually happened the last N times Sim tried this kind of
+        thing (stage 6 item 2). A plan that looks low-risk for work
+        Sim fails three times in five should reach a person, and
+        nothing here could see that before.
+
+        Never an escalation by itself: no answer, a slow answer or too
+        few samples all mean "no opinion", and the risk table decides
+        alone -- `Beta(1,1)` has a mean of 0.5 and means nothing is
+        recorded yet, so treating it as bad would send every new kind
+        of work to a person on its first try.
+        """
+        task = await self._store.get(state.task_id) if self._store is not None else None
+        if task is None:
+            return None, 0
+        subject = getattr(task, "subject", "") or ""
+        kind = getattr(task, "kind", "") or "unknown"
+        task_type = f"{kind}:{_area(subject)}" if subject else kind
+        try:
+            reply = await asyncio.wait_for(
+                self._ctx.bus.request(Message.new(
+                    topics.SELF_ESTIMATE_REQUEST, source=self._ctx.source,
+                    payload={"task_type": task_type}), timeout=0.25), timeout=0.3)
+        except Exception:  # noqa: BLE001 -- no estimate is not an escalation
+            return None, 0
+        payload = reply.payload or {}
+        return float(payload.get("mean") or 0.0), int(payload.get("samples") or 0)
+
     async def _on_plan_reviewed(self, message: Message) -> None:
         p = message.payload
         state = self._plans.get(p["plan_id"])
@@ -1249,7 +1282,12 @@ class Service:
             return
         if state.status in planmode.RESOLVED_STATUSES:
             return  # duplicate/late `plan.reviewed` for a plan already decided -- a no-op (spec section 8)
-        decision = planmode.approval_decision(p["verdict"], state.risk, self.config.auto_approve_max_risk)
+        posterior, samples = await self._how_good_is_sim_at_this(state)
+        decision = planmode.approval_decision(
+            p["verdict"], state.risk, self.config.auto_approve_max_risk,
+            posterior=posterior, samples=samples,
+            weak_below=float(self.config.ask_human_below_posterior),
+            min_samples=int(self.config.ask_human_min_samples))
         if decision == "reject":
             state.status = planmode.REJECTED
             await self._store.transition(state.task_id, FAILED, note="plan rejected")
@@ -1498,3 +1536,15 @@ def _task_payload(task: Task) -> dict:
 
 
 __all__ = ["Service", "NAME", "VERSION"]
+
+
+def _area(subject: str) -> str:
+    """`simorgh/memory/store.py` -> `simorgh/memory`.
+
+    The same rule `growth/estimate/outcomes.py` uses to name a task
+    type, because a posterior asked for under a different name is a
+    posterior that is always `Beta(1,1)` -- which reads as "no
+    evidence" and would quietly turn this gate off.
+    """
+    parts = subject.split("/")
+    return "/".join(parts[:2]) if len(parts) > 1 else subject
