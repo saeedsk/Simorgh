@@ -209,6 +209,8 @@ The four `aec*` keys affect only the legacy `Pipeline` capture path; the live `V
 
 ## Invariants
 
+A reply is cut at `max_spoken_sentences` (3) and says there is more on screen -- UNLESS the person asked to be told something: `planner.narration_wanted` reads their own words ("tell me a story", "read me", "recite") and raises the cap to `NARRATION_SENTENCES` (40), halving the between-sentence pause as it goes. Three sentences is right for "what is the weather" and wrong for a story, and pointing a person at a screen is not a way of telling one (the creator, 2026-09-20, asking for the Arabian Nights). What was cut is kept on the session, so "go on" reads the REST rather than asking the model again -- which would give a different continuation and lose the thread.
+
 1. A spoken turn reaches Sim only as `percept.text.received` with `channel == "voice"`; Voice never publishes `cognition.think` or `action.proposed`.
 2. A reply is matched to its ask by `session_id` on `turn.completed` (or `task_id` on `task.failed|blocked`); a reply whose `channel` is not `cli` is never spoken by `speak_replies`, and nothing is spoken after `voice off` (`service.py:696-726`).
 3. Voice never publishes `system.pause|stop|resume|restart|reload` (`PUBLISH_ONLY_BY`, `contracts/topics.py:293-303`); a spoken restart is `ui.command.request{"line": "restart"}` and only for a recognised voice under the loader (`session.py` `_restart`).

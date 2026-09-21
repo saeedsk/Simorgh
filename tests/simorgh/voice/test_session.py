@@ -1077,3 +1077,65 @@ class AnUnpromptedLineWaitsForTheFloor(unittest.IsolatedAsyncioTestCase):
         started = asyncio.get_running_loop().time()
         self.assertTrue(await session._wait_for_the_floor())  # noqa: SLF001
         self.assertLess(asyncio.get_running_loop().time() - started, 0.05)
+
+
+class AStoryIsToldNotSummarised(unittest.TestCase):
+    """The creator asked for a story from the Arabian Nights and got
+    one line, then "there's more on screen" (2026-09-20).
+
+    Three sentences is the right length for "what is the weather" and
+    the wrong length for a story. Pointing a person at a screen is not
+    a way of telling somebody a story; it is a way of declining to.
+    """
+
+    def _plan(self, said: str, reply_sentences: int = 12, cap: int = 3):
+        from simorgh.voice.planner import Context, SpokenResponsePlanner
+
+        planner = SpokenResponsePlanner(max_sentences=cap, connectors=False)
+        reply = " ".join(f"Sentence number {i} of the tale." for i in range(1, reply_sentences + 1))
+        return planner, planner.plan(reply, Context(user_text=said))
+
+    def _spoken(self, plan) -> str:
+        return " ".join(chunk.text for chunk in plan.chunks)
+
+    def test_an_ordinary_question_is_still_answered_briefly(self):
+        _planner, plan = self._plan("what is the weather")
+        self.assertIn("more on screen", self._spoken(plan))
+
+    def test_a_story_is_read_out(self):
+        _planner, plan = self._plan("tell me a story from the Arabian Nights")
+        spoken = self._spoken(plan)
+        self.assertNotIn("more on screen", spoken)
+        self.assertIn("Sentence number 12", spoken, "the last line of the tale was never said")
+
+    def test_the_narration_cap_is_not_unlimited(self):
+        """A model that decides to recite the whole Arabian Nights
+        still hits a wall; a person can say "go on"."""
+        from simorgh.voice.planner import NARRATION_SENTENCES
+
+        _planner, plan = self._plan("tell me a story", reply_sentences=NARRATION_SENTENCES + 10)
+        self.assertIn("more on screen", self._spoken(plan))
+
+    def test_reading_aloud_does_not_limp(self):
+        """A quarter of a second after every sentence is a reading
+        voice with a limp."""
+        _brief_planner, brief = self._plan("what is the weather")
+        _story_planner, story = self._plan("tell me a story")
+        self.assertLess(story.chunks[0].pause_ms, brief.chunks[0].pause_ms)
+
+    def test_what_was_cut_is_remembered_for_go_on(self):
+        planner, _plan = self._plan("what is the weather")
+        self.assertIn("Sentence number 4", planner.unspoken)
+        self.assertNotIn("Sentence number 1 ", planner.unspoken)
+
+    def test_nothing_is_remembered_when_nothing_was_cut(self):
+        planner, _plan = self._plan("tell me a story")
+        self.assertEqual(planner.unspoken, "")
+
+    def test_go_on_is_recognised_and_go_to_the_shop_is_not(self):
+        from simorgh.voice.planner import asked_to_continue
+
+        for yes in ("go on", "keep going", "continue", "read the rest", "carry on"):
+            self.assertTrue(asked_to_continue(yes), yes)
+        for no in ("go to the shop", "continue the washing machine", "", "what is on"):
+            self.assertFalse(asked_to_continue(no), no)

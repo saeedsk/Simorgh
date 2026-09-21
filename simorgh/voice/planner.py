@@ -412,7 +412,7 @@ def _split_long(sentence: str, limit: int) -> list[str]:
 
 
 def chunk(text: str, *, max_chars: int = MAX_CHUNK_CHARS, min_chars: int = MIN_CHUNK_CHARS,
-          first_chars: int = FIRST_CHUNK_CHARS) -> list[Chunk]:
+          first_chars: int = FIRST_CHUNK_CHARS, narrating: bool = False) -> list[Chunk]:
     """Speakable chunks at semantic boundaries: sentences, then clauses
     for a long sentence. Short fragments merge forward so prosody is not
     choppy; the first chunk is kept short when a boundary allows, so
@@ -439,6 +439,10 @@ def chunk(text: str, *, max_chars: int = MAX_CHUNK_CHARS, min_chars: int = MIN_C
     for index, (unit_text, ends) in enumerate(merged):
         last = index == len(merged) - 1
         pause = 0 if last else (SENTENCE_PAUSE_MS if ends else CLAUSE_PAUSE_MS)
+        if narrating:
+            # Reading aloud, not answering. A quarter-second after every
+            # sentence is a limp; a reader pauses about half that.
+            pause = pause // 2
         out.append(Chunk(text=unit_text, language=language_of(unit_text), pause_ms=pause))
     return out
 
@@ -520,7 +524,51 @@ _COMMON_STARTS = frozenset((
 
 # -- the plan -------------------------------------------------------------------------------------
 
-MORE_ON_SCREEN = {ENGLISH: "There's more on screen if you want it.", FARSI: "بقیه‌اش روی صفحه هست، اگر خواستی."}
+MORE_ON_SCREEN = {ENGLISH: "There's more on screen -- say go on and I'll read the rest.",
+                  FARSI: "بقیه‌اش روی صفحه هست؛ بگو ادامه بده تا بخوانم."}
+
+#: Somebody asking to be TOLD something, at length: a story, a poem, a
+#: chapter, an explanation they want in their ears rather than on a
+#: screen.
+#:
+#: Three sentences is the right length for "what is the weather" and
+#: the wrong length for "tell me a story from the Arabian Nights",
+#: which is what the creator asked for on 2026-09-20 and got one line
+#: of, followed by "there's more on screen". Pointing a person at a
+#: screen is not a way to tell somebody a story; it is a way to
+#: decline to.
+_NARRATION = re.compile(
+    r"\b(?:tell|read|recite|sing|narrate)\b[^.?!]{0,30}\b(?:me|us|him|her|them)\b"
+    r"|\b(?:tell|read)\s+(?:me\s+)?(?:a|an|the)\s+(?:story|tale|poem|chapter|passage|joke|book)\b"
+    r"|\bstory\s+(?:from|about|of)\b"
+    r"|\bread\s+(?:it|this|that|the\s+\w+)\s+(?:out|aloud|to\s+me)\b"
+    r"|\b(?:in\s+full|at\s+length|the\s+whole\s+thing)\b", re.I)
+
+#: And asking for the rest of what was cut.
+#: The whole turn, not a phrase inside one. "Continue the washing
+#: machine" is a chore, not a request to read on -- matching a bare
+#: verb anywhere in the sentence caught it (caught by its own test).
+_GO_ON = re.compile(
+    r"^\s*(?:go on|keep going|carry on|continue|and then\?*|finish it|don'?t stop|more please|"
+    r"(?:read|tell)\s+(?:me\s+)?the\s+rest|the\s+rest(?:\s+please)?)"
+    r"(?:\s+(?:please|reading|with\s+(?:it|the\s+\w+)|the\s+(?:story|tale|chapter)))?"
+    r"\s*[.!?]*\s*$", re.I)
+
+#: How many sentences a narration may run to. Not unlimited: a model
+#: that decides to recite the whole of the Arabian Nights should still
+#: hit a wall, and a person can say "go on" again.
+NARRATION_SENTENCES = 40
+
+
+def narration_wanted(user_text: str) -> bool:
+    """Whether the person asked to be TOLD something rather than
+    answered."""
+    return bool(_NARRATION.search(user_text or ""))
+
+
+def asked_to_continue(user_text: str) -> bool:
+    """"Go on" -- read me the part you cut."""
+    return bool(_GO_ON.match(user_text or ""))
 NOTHING_TO_SAY = {ENGLISH: "I have nothing to say to that.", FARSI: "چیزی برای گفتن ندارم."}
 
 
@@ -537,6 +585,8 @@ class SpokenResponsePlanner:
         self._connectors = connectors
         self._max_chars = max_chars
         self._first_chars = first_chars
+        #: What the last plan did NOT say, so "go on" can read it.
+        self.unspoken = ""
 
     def pronounced(self, text: str) -> str:
         """Names replaced by the way the household says them, whole words
@@ -566,16 +616,27 @@ class SpokenResponsePlanner:
             return SpokenPlan(chunks=(Chunk(NOTHING_TO_SAY[language], language),), language=language)
         kept = sentences(clean)
         omitted_list = list(omitted)
-        if not context.urgent and len(kept) > self._max_sentences:
-            clean = " ".join(kept[:self._max_sentences]) + " " + MORE_ON_SCREEN[language]
+        # A story is told, not summarised. When the person asked to be
+        # TOLD something, the cap is the narration one and the extra
+        # pause between sentences goes: a quarter of a second after
+        # every line is a reading voice with a limp (the creator,
+        # 2026-09-20: "slow and pauses between sentences were not
+        # pleasant").
+        limit = NARRATION_SENTENCES if narration_wanted(context.user_text) else self._max_sentences
+        if not context.urgent and len(kept) > limit:
+            clean = " ".join(kept[:limit]) + " " + MORE_ON_SCREEN[language]
             omitted_list.append("more")
+            self.unspoken = " ".join(kept[limit:])
+        else:
+            self.unspoken = ''
         connector = ""
         if self._connectors:
             kind = choose_connector(clean, context)
             if kind:
                 connector = CONNECTORS[kind][language if language in CONNECTORS[kind] else ENGLISH]
                 clean = f"{connector} {_lowered_lead(clean, language)}"
-        chunks = chunk(clean, max_chars=self._max_chars, first_chars=self._first_chars)
+        chunks = chunk(clean, max_chars=self._max_chars, first_chars=self._first_chars,
+                       narrating=narration_wanted(context.user_text))
         return SpokenPlan(chunks=tuple(chunks), connector=connector, omitted=tuple(dict.fromkeys(omitted_list)),
                           language=language)
 

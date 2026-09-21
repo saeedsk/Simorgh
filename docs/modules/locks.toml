@@ -22,3 +22,9 @@ by = "opus-main"
 task = "a bare home asked the house for a thing called on"
 since = "2026-09-21T04:02:57+00:00"
 until = "2026-09-21T12:02:57+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "a story cut off after three sentences"
+since = "2026-09-21T04:08:59+00:00"
+until = "2026-09-21T12:08:59+00:00"

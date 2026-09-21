@@ -38,7 +38,7 @@ from .delivery import REGISTERS, Delivery, register_for_backchannel, register_fo
 from .config import Config
 from .lang import language_of
 from .pipeline import NOT_SURE, Pipeline, echoes_recent, is_echo
-from .planner import CONNECTORS, Context, SpokenResponsePlanner
+from .planner import CONNECTORS, Context, SpokenResponsePlanner, asked_to_continue
 from .playback import StreamingPlayer
 from .stt.streaming import IncrementalRecogniser
 from .tts.streaming import StreamingSynthesiser
@@ -329,6 +329,8 @@ class VoiceSession:
                                        stall_timeout_s=self._config.tts_stall_timeout_s)
         self._planner = SpokenResponsePlanner(max_sentences=config.max_spoken_sentences, connectors=config.connectors,
                                               pronunciations=lambda: self._speakers.pronunciations() if self._speakers else {})
+        #: What the last reply did not say aloud, so "go on" can.
+        self._unspoken = ""
         self.turns = TurnManager(Policy(
             end_of_turn_silence_ms=config.endpoint_silence_ms, min_speech_ms=config.min_speech_ms,
             max_turn_ms=config.max_turn_ms, semantic_silence_factor=config.semantic_silence_factor,
@@ -2129,7 +2131,16 @@ class VoiceSession:
             await self._speak_live(turn_id, speak, live, first, clock, context)
             return
         tone, reply = split_tone(reply)
+        # "Go on" reads the part the last reply cut, rather than
+        # asking the model to produce it again -- which would give a
+        # different continuation and lose the thread of the story
+        # (the creator, 2026-09-20: Sim read one line of the Arabian
+        # Nights and pointed at the screen).
+        if asked_to_continue(context.user_text) and self._unspoken:
+            reply, self._unspoken = self._unspoken, ""
+            context = replace(context, user_text="read me the rest")
         plan = self._planner.plan(reply, context)
+        self._unspoken = self._planner.unspoken
         if plan.connector:
             self._turns_since_connector = 0
             self._previous_connector = next((k for k, v in CONNECTORS.items() if plan.connector in v.values()), "")
