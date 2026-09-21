@@ -4,15 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.domains]
-by = "opus-main"
-task = "a home assistant token in secrets.toml was silently ignored"
-since = "2026-09-21T01:11:51+00:00"
-until = "2026-09-21T09:11:51+00:00"
-
-[locks.evals]
-by = "opus-main"
-task = "stage 9 item 11: a breadth scenario now that the fake house is wired"
-since = "2026-09-21T01:05:27+00:00"
-until = "2026-09-21T09:05:27+00:00"
