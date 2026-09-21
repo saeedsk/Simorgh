@@ -68,10 +68,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-#: The VM's name in UTM. The install guide tells the creator to name it
-#: exactly this; overridable so a second VM (a restore test, say) can be
-#: driven by the same commands.
-VM = os.environ.get("SIMORGH_HAOS_VM", "Home Assistant")
+#: The VM's name in UTM. The install guide suggests "Home Assistant",
+#: but UTM's own default for a new machine is "Virtual Machine" and
+#: that is what the creator's install ended up called (2026-09-20), so
+#: both are tried in order before giving up. Overridable, so a second
+#: VM -- a restore test, say -- can be driven by the same commands.
+VM_NAMES = tuple(n for n in (os.environ.get("SIMORGH_HAOS_VM"), "Home Assistant", "Virtual Machine") if n)
+VM = VM_NAMES[0]
 
 #: HA OS announces itself over mDNS under this name. This is the
 #: load-bearing consequence of bridging: on the Docker path there is no
@@ -135,19 +138,29 @@ def vm_state(binary: str) -> str | None:
     `utmctl list` exists because the status subcommand's spelling has
     changed across UTM versions and a listing has not.
     """
-    code, out, _ = run([binary, "status", VM], timeout=15.0)
-    if code == 0 and out:
-        return out.splitlines()[-1].strip().lower()
+    for name in VM_NAMES:
+        code, out, _ = run([binary, "status", name], timeout=15.0)
+        if code == 0 and out:
+            return out.splitlines()[-1].strip().lower()
 
     code, out, _ = run([binary, "list"], timeout=15.0)
     if code != 0 or not out:
         return None
     # Columns are UUID, Status, Name; the name may contain spaces, so
     # split off the first two fields and keep the rest as the name.
+    listed = {}
     for line in out.splitlines()[1:]:
         parts = line.split(None, 2)
-        if len(parts) == 3 and parts[2].strip() == VM:
-            return parts[1].strip().lower()
+        if len(parts) == 3:
+            listed[parts[2].strip()] = parts[1].strip().lower()
+    for name in VM_NAMES:
+        if name in listed:
+            return listed[name]
+    # One VM and none of the names matched: it is almost certainly that
+    # one, and saying "does not exist" about the only machine on the
+    # host would be pedantry rather than accuracy.
+    if len(listed) == 1:
+        return next(iter(listed.values()))
     return None
 
 
@@ -237,6 +250,40 @@ def utmctl_ip(binary: str) -> str | None:
     return None
 
 
+#: HA OS serves a small status page here while Core is still starting.
+#: It is the difference between "the VM is broken" and "the VM is
+#: installing Home Assistant", which on a first boot is several minutes
+#: and on a tight disk is longer.
+OBSERVER_PORT = 4357
+
+
+def core_answering(address: str) -> tuple[bool, str]:
+    """Whether Home Assistant Core is up on `address` yet, and how it
+    looks if not.
+
+    Core opens 8123 only once it has started; before that HA OS answers
+    on the observer port alone. Reporting "connection refused" for a
+    machine that is midway through its first install is true and
+    useless, so the two are told apart.
+    """
+    import socket
+
+    for port, what in ((PORT, "core"), (OBSERVER_PORT, "observer")):
+        sock = socket.socket()
+        sock.settimeout(2.0)
+        try:
+            sock.connect((address, port))
+        except Exception:  # noqa: BLE001 -- a closed port is an answer
+            continue
+        finally:
+            sock.close()
+        if what == "core":
+            return True, f"answering on {PORT}"
+        return False, (f"not up yet -- the HA OS observer is answering on {OBSERVER_PORT}, "
+                       "which means Home Assistant is still starting")
+    return False, f"nothing answers on {PORT} or {OBSERVER_PORT}; the VM may still be booting"
+
+
 def find_address() -> tuple[str | None, str]:
     """`(address_or_url, how)`. The configured URL wins when there is
     one, because that is the address Sim will use and the only one whose
@@ -320,18 +367,36 @@ def cmd_status(_args) -> int:
         print("  fix: `python3 tools/haos.py up`")
         return 1
 
-    address, how = find_address()
-    if address is None:
-        print(f"address: unknown -- {how}")
+    # The VM's OWN address first, and separately from whatever Sim is
+    # configured to talk to. On the night of the move those are two
+    # different machines -- the VM booting on the LAN, the Docker
+    # container still answering on localhost -- and a status line that
+    # reported the configured URL as "the VM" would have said
+    # everything was fine while Core was still installing (2026-09-20).
+    on_lan = resolve_mdns(MDNS_NAME)
+    if on_lan is None:
+        print(f"address: unknown -- {MDNS_NAME} does not resolve")
         print("  this is what a bridge that did not take looks like: the VM runs but is")
-        print("  not on 192.168.50.0/24. Check the VM's network mode is Bridged on en0,")
-        print("  and HA's own Settings -> System -> Network. See the findings doc.")
+        print("  not on the LAN. Check the VM's network mode is Bridged on en0, and")
+        print("  HA's own Settings -> System -> Network. See the findings doc.")
         return 1
-    print(f"address: {address} ({how})")
+    address = f"http://{on_lan}:{PORT}"
+    print(f"address: {address} (mDNS: {MDNS_NAME})")
+    core_up, core_why = core_answering(on_lan)
+    print(f"core: {core_why}")
+    if not core_up:
+        print(f"  watch it come up at http://{MDNS_NAME}:{OBSERVER_PORT} (the HA OS observer)")
 
     url, has_token, where = configured()
     if url:
         print(f"config: url set, token {'set' if has_token else 'MISSING'} (from {where})")
+        # The one that catches somebody out on the night of the move:
+        # Sim is still pointed at the container, the container still
+        # answers, and every check passes while the VM sits unused.
+        if on_lan not in url and "homeassistant" not in url:
+            print(f"  NOTE: Sim is configured for {url}, which is NOT this VM.")
+            print(f"        Point it at http://{on_lan}:{PORT} (or http://{MDNS_NAME}:{PORT})")
+            print("        once the VM has its data -- and pin the address on the router first.")
     else:
         print(f"config: nothing for Sim yet (looked in {SECRETS_FILE} and the environment)")
         print("  note: a credential kept only in the encrypted vault is not visible here")

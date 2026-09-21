@@ -1,5 +1,29 @@
 # Home Assistant OS in a UTM VM, 2026-09-20
 
+## Bridged over Wi-Fi WORKS here (measured 2026-09-20, after this was written)
+
+This document opened by warning that bridging over Wi-Fi was unproven on
+macOS 26 and that the move might not deliver discovery. The creator did the
+install the same evening, and the bridge took:
+
+    homeassistant.local -> 192.168.50.208
+    192.168.50.208 at 46:4f:96:a4:c9:30 on en0      (its own MAC in the host's ARP table)
+    ping: 2 of 2, 1.0 ms average
+
+That is a real device on the LAN with its own address and its own mDNS
+name, on `Mac15,7` / macOS 26.5.2 / UTM 4.7.5 / Wi-Fi `en0` into an ASUS
+ZenWiFi Pro ET12. The caution below was right to insist on evidence and
+wrong about the outcome; both halves are left in place, because the
+research said "unproven", not "broken", and the difference matters when the
+next person reads this.
+
+What is still unproven is the thing the move was FOR: whether Home
+Assistant, from inside that VM, discovers other devices by mDNS. Core was
+still installing at the time of writing. The decisive test is unchanged --
+does the Lutron bridge at 192.168.50.108 appear by itself under Settings ->
+Devices -> Discovered.
+
+
 The creator's decision, verbatim: *"let's move HA OS in a UTM VM with a bridged
 adapter"* — off the Docker container recommended in
 [2026-09-20-home-assistant-on-the-mac.md](2026-09-20-home-assistant-on-the-mac.md),
