@@ -29,8 +29,8 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
-[locks.tools]
+[locks.verification]
 by = "opus-main"
-task = "the kill drill counts commits in worktrees"
-since = "2026-09-21T05:57:07+00:00"
-until = "2026-09-21T13:57:07+00:00"
+task = "the suite check says why it had no opinion"
+since = "2026-09-21T05:58:41+00:00"
+until = "2026-09-21T13:58:41+00:00"

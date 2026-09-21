@@ -167,7 +167,8 @@ def _current_tree(req: VerifyRequest, base_ref: str) -> Path | None:
     return _baseline._repo_for(base_ref)
 
 
-async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+async def _attribution(req: VerifyRequest, steps: list[dict],
+                       why: dict | None = None) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
     """`(introduced, owned, flaky)` for a red whole-suite run, or None.
 
     `introduced` are the tests that pass at the session's base revision
@@ -179,9 +180,19 @@ async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str
     before this existed. See `_baseline` for the full list of unknowns
     that resolve here, and why every one of them errs towards blaming
     the change.
+
+    `why` collects WHICH unknown it was. Without it the fallback reads
+    "the whole suite was run and it FAILED", which is true and useless:
+    in a repo whose suite is already red that is an impossible bar, and
+    there is no way to tell from the outside whether attribution was
+    never tried or tried and gave up. The kill-and-resume drill spent
+    23 steps against that message on 2026-09-20 and reading four files
+    was the only way to narrow it down.
     """
+    note = why if why is not None else {}
     base_ref = req.subject.get("base_ref")
     if not isinstance(base_ref, str) or not base_ref:
+        note["no_attribution"] = "the session recorded no base_ref to compare against"
         return None
     written = written_paths(req)
     if not written:
@@ -189,9 +200,11 @@ async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str
         # the excuse to a task that was supposed to fix the very test
         # still failing -- and an excuse granted blind is exactly the
         # false pass this whole check exists to prevent.
+        note["no_attribution"] = "no written paths recorded for this task"
         return None
     nodeids = _whole_suite_failure_ids(steps)
     if not nodeids:
+        note["no_attribution"] = "the suite output named no failing tests that could be parsed"
         return None
     # Blocking git + pytest work; this coroutine runs inside the
     # verification service's own loop, and holding it for a baseline run
@@ -199,6 +212,7 @@ async def _attribution(req: VerifyRequest, steps: list[dict]) -> tuple[tuple[str
     verdict = await asyncio.to_thread(
         _baseline.attribute, base_ref, nodeids, current=_current_tree(req, base_ref))
     if verdict is None:
+        note["no_attribution"] = f"the suite could not be re-run at {base_ref[:12]} to compare"
         return None
     new, flaky = verdict
     # A test that passed on the quiet re-run is not failing; an
@@ -438,7 +452,8 @@ class FullSuiteRanCheck:
             # happen next was the revision budget burning down with a
             # correct, committed change in the tree (two observers,
             # 2026-09-09 and 2026-09-10).
-            verdict = await _attribution(req, steps)
+            why_none: dict = {}
+            verdict = await _attribution(req, steps, why_none)
             if verdict is not None:
                 introduced, owned, flaky = verdict
                 evidence = {"introduced": list(introduced), "already_failing_and_owned": list(owned),
@@ -469,11 +484,14 @@ class FullSuiteRanCheck:
                     status="failed", detail=detail, evidence=evidence,
                     feedback=Feedback(mechanical_errors=(detail,), revise_hint=hint, retryable=True),
                 )
+            because = why_none.get("no_attribution") or ""
             detail = ("the whole suite was run and it FAILED -- the change is not checked until "
-                      "the suite passes")
+                      "the suite passes" + (f" (could not tell whose failures they are: {because})"
+                                            if because else ""))
             hint = ("the whole suite already ran and did not pass. Read the failures in that "
                     "run_tests output and fix them; running the same target again will not "
                     "change the answer")
+            evidence = {**evidence, **why_none}
         elif ran_something:
             detail = ("run_tests was called on a narrower target than the whole suite -- "
                       "this change was never checked against anything it might have broken elsewhere")
