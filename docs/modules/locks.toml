@@ -77,6 +77,12 @@ task = "growth merge leftovers"
 since = "2026-09-22T10:50:29+00:00"
 until = "2026-09-22T18:50:29+00:00"
 
+[locks.verification]
+by = "opus-main"
+task = "isolated copies keep workspace/ (the verifier blamed every change)"
+since = "2026-09-22T11:43:17+00:00"
+until = "2026-09-22T19:43:17+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "voice calibrate: the reusable calibration set"

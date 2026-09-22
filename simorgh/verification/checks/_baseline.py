@@ -328,8 +328,26 @@ RERUN_TIMEOUT_S = 60.0
 #: few gigabytes of models in it.
 _COPY_IGNORE = (
     "__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
-    "papers", "scratchpad", ".simorgh", "workspace", "results",
+    "papers", "scratchpad", ".simorgh", "results", ".claude",
 )
+
+
+def _copy_ignore(root):
+    """`_COPY_IGNORE`, keeping `workspace/` and its tracked README but
+    none of its contents. The base run is a `git archive`, which HAS
+    `workspace/README.md`; a changed-tree copy with no `workspace/` at
+    all made the two tests that need the directory pass at base and fail
+    here, so every change was blamed for them (2026-09-20 to 09-22: every
+    patch task that ran the whole suite was blocked). The two copies
+    must agree on what exists."""
+    plain = shutil.ignore_patterns(*_COPY_IGNORE)
+    workspace = (Path(root) / "workspace").resolve()
+
+    def ignore(src, names):
+        if Path(src).resolve() == workspace:
+            return {n for n in names if n != "README.md"}
+        return plain(src, names)
+    return ignore
 
 
 def still_failing_here(root: Path, nodeids: tuple[str, ...]) -> frozenset[str] | None:
@@ -352,7 +370,7 @@ def still_failing_here(root: Path, nodeids: tuple[str, ...]) -> frozenset[str] |
     with tempfile.TemporaryDirectory(prefix="simorgh-rerun-") as workdir:
         dest = Path(workdir) / "repo"
         try:
-            shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_COPY_IGNORE))
+            shutil.copytree(root, dest, ignore=_copy_ignore(root))
         except OSError:
             return None
         try:

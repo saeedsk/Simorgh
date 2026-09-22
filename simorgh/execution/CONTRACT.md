@@ -26,6 +26,7 @@ Since 2026-09-20 `run_tests` runs the suite through `procs.run_child`: its own p
 | `simorgh/execution/shell.py` | `run_shell` (on by default) and its refusal table, including credential reads |
 | `simorgh/execution/script.py` | `run_script`: Python with the repo importable and network on |
 | `simorgh/execution/policyadopt.py` | `policy_adopt` (stage 8 item 5): appends an adopted lesson to `rules/<task_type>.md` and commits that one file; refuses any other path. Proposed by growth, never offered to a session; Guardian asks a person first (`ask_subjects`) |
+| `simorgh/execution/tools.py::isolated_copy_ignore` | the `copytree` ignore for `run_tests`' isolated run and the landing gate's `failing_alone`: keeps `workspace/` and its tracked README, drops its contents, `.git`, `.claude`, `papers`, caches (a repo copy is ~87 MB). Must agree with Verification's base run on what exists (2026-09-22) |
 | `simorgh/execution/container.py` | `run_container`: a command in a Docker image with a scratch mount; `docker run` is a `procs.run_child` process group, and a cancel or timeout also sends `docker kill <name>` (a container outlives its client) |
 | `simorgh/execution/remote.py` | `run_remote`: a command over SSH (off unless `remote = true`) |
 | `simorgh/execution/writewatch.py` | discovers what a shell/script command wrote, for `session.wrote` |

@@ -108,21 +108,36 @@ class AnIsolatedRunDoesNotCopyTheWorkspace(unittest.TestCase):
     few gigabytes of models in it.
     """
 
-    def test_the_workspace_is_ignored_by_both_copiers(self):
-        from simorgh.execution.tools import _ISOLATED_COPY_IGNORE
-        from simorgh.verification.checks._baseline import _COPY_IGNORE
+    # Its CONTENTS, not the directory: dropping `workspace/` itself
+    # (2026-09-20) made the copies disagree with the verifier's base run
+    # (a `git archive`, which has `workspace/README.md`), and two tests
+    # that need the directory blamed every change until 2026-09-22.
 
-        for name, patterns in (("run_tests", _ISOLATED_COPY_IGNORE), ("verification", _COPY_IGNORE)):
-            self.assertIn("workspace", patterns, f"{name} still copies the workspace")
-
-    def test_an_isolated_copy_leaves_the_workspace_behind(self):
-        """The behaviour, not the constant: a repo with a fat
-        `workspace/` is staged without it."""
+    def test_the_workspace_contents_are_ignored_by_both_copiers(self):
         import shutil
         import tempfile
         from pathlib import Path
 
-        from simorgh.execution.tools import _ISOLATED_COPY_IGNORE
+        from simorgh.execution.tools import isolated_copy_ignore
+        from simorgh.verification.checks._baseline import _copy_ignore
+
+        for name, ignore in (("run_tests", isolated_copy_ignore), ("verification", _copy_ignore)):
+            with self.subTest(copier=name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "repo"
+                (root / "workspace" / "voice" / "models").mkdir(parents=True)
+                (root / "workspace" / "voice" / "models" / "big.bin").write_bytes(b"0" * 4096)
+                dest = Path(tmp) / "copy"
+                shutil.copytree(root, dest, ignore=ignore(root))
+                self.assertFalse((dest / "workspace" / "voice").exists(), f"{name} still copies the workspace")
+
+    def test_an_isolated_copy_leaves_the_workspace_behind(self):
+        """The behaviour: a repo with a fat `workspace/` is staged with
+        the directory (and its README) and none of the weight."""
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        from simorgh.execution.tools import isolated_copy_ignore
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "repo"
@@ -131,6 +146,7 @@ class AnIsolatedRunDoesNotCopyTheWorkspace(unittest.TestCase):
             (root / "workspace" / "voice" / "models").mkdir(parents=True)
             (root / "workspace" / "voice" / "models" / "big.bin").write_bytes(b"0" * 4096)
             dest = Path(tmp) / "copy"
-            shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
+            shutil.copytree(root, dest, ignore=isolated_copy_ignore(root))
             self.assertTrue((dest / "tests" / "test_x.py").exists(), "the tests must come")
-            self.assertFalse((dest / "workspace").exists(), "the workspace must not")
+            self.assertTrue((dest / "workspace").is_dir(), "the directory must come")
+            self.assertFalse((dest / "workspace" / "voice").exists(), "the weight must not")

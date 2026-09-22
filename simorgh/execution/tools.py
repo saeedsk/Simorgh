@@ -1251,8 +1251,33 @@ def _checkout_patch(checkout: Path, base: str, *, timeout: float = 120.0) -> tup
 #: few gigabytes of models in it.
 _ISOLATED_COPY_IGNORE = (
     "__pycache__", "*.pyc", ".git", ".simdata", "*.egg-info", ".pytest_cache",
-    "papers", "scratchpad", ".simorgh", "workspace",
+    "papers", "scratchpad", ".simorgh",
+    # Agent worktrees and session scratch (1.1 GB on 2026-09-22); no test
+    # reads them, and a copy of a copy of the repo is how disks fill.
+    ".claude",
 )
+
+def isolated_copy_ignore(root):
+    """The `copytree` ignore for an isolated copy of the repo at `root`.
+
+    `workspace/` itself is KEPT, with its tracked `README.md`; only its
+    contents (voice models, clips, checkouts -- gigabytes) are skipped.
+    Dropping the whole directory (2026-09-20) made every change look
+    guilty: the verifier's base run is a `git archive`, which HAS
+    `workspace/README.md`, while the changed tree's copy had no
+    `workspace/` at all, so the two tests that need the directory passed
+    at base and failed "because of" whatever the task changed. Every
+    patch task that ran the whole suite was blocked on it until
+    2026-09-22 (trial round 4/7; found by reading a kept lab's verdicts).
+    """
+    plain = shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE)
+    workspace = (Path(root) / "workspace").resolve()
+
+    def ignore(src, names):
+        if Path(src).resolve() == workspace:
+            return {n for n in names if n != "README.md"}
+        return plain(src, names)
+    return ignore
 
 
 def _loader_verdict(repo_root: Path, output: str) -> tuple[bool, str, int] | None:
@@ -1406,7 +1431,7 @@ class RunTestsTool:
         with tempfile.TemporaryDirectory(prefix="simorgh-rerun-") as workdir:
             dest = Path(workdir) / "repo"
             try:
-                shutil.copytree(root, dest, ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
+                shutil.copytree(root, dest, ignore=isolated_copy_ignore(root))
             except OSError:
                 return None
             try:
@@ -1452,7 +1477,7 @@ class RunTestsTool:
                 # `simorgh/ledger` package and its tests.
                 await asyncio.to_thread(
                     shutil.copytree, root, dest,
-                    ignore=shutil.ignore_patterns(*_ISOLATED_COPY_IGNORE))
+                    ignore=isolated_copy_ignore(root))
             except OSError as exc:
                 return ToolResult(ok=False, error=f"could not stage an isolated copy: {exc!r}")
             if not (dest / target).exists():

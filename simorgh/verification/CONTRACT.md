@@ -119,6 +119,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/verification/test_rigor.py` -- `select_rigor` and the forced override.
 - `tests/simorgh/verification/test_parsing.py` -- a non-answer parses as `None`, never "no".
 - `tests/simorgh/verification/test_did_anything.py` -- a change task with no successful write fails.
+- `tests/simorgh/verification/test_both_copies_agree_on_workspace.py` -- the quiet re-run's copy and Execution's isolated copy keep `workspace/` and its tracked README (the base run's `git archive` has them); dropping the directory made two tests fail "because of" every change and blocked every patch task that ran the whole suite, 2026-09-20 to 09-22.
 - `tests/simorgh/verification/test_acceptance_reaches_the_verdict.py` -- a plan node's acceptance criteria (verify subject `acceptance`) lead the checklist as required items; one answered no fails the verdict (stage 7 item 4).
 - `tests/simorgh/verification/test_a_retry_is_judged_on_the_whole_task.py` -- a retry (`complete_log=False`) passes when an earlier attempt wrote and fails when none ever did.
 - `tests/simorgh/verification/test_full_suite_ran.py` -- the whole-suite requirement on a code change.
