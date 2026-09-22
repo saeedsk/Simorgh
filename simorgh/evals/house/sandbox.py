@@ -78,7 +78,7 @@ class Sandbox:
 
     def __init__(self, *, config: dict | None = None, data_dir: str | Path | None = None,
                  keep: bool = False, spend_cap_usd: float = 0.0,
-                 secrets: dict | None = None) -> None:
+                 secrets: dict | None = None, recogniser=None) -> None:
         """`secrets` is empty by default and that is the isolation: a
         sandbox with no keys cannot reach anything that needs one,
         whatever a config says. A scored benchmark run (`house/bench.py`,
@@ -86,6 +86,10 @@ class Sandbox:
         cannot be called cannot be measured -- and that is the only
         thing that ever should."""
         self._extra = dict(config or {})
+        # A REAL recogniser in place of the scripted one (tools/voice_replay.py):
+        # the calibration set measures whisper on the creator's voice, so
+        # replaying it must go through whisper, not a script.
+        self._recogniser = recogniser
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._given_dir = Path(data_dir) if data_dir else None
         self._keep = keep
@@ -118,7 +122,7 @@ class Sandbox:
                         {"runtime": {"data_dir": str(self.data_dir)},
                          "voice": {"speakers_dir": str(self.data_dir / "speakers")}},
                         self._extra)
-        with _voice_fakes(self._voice_fakes):
+        with _voice_fakes(self._voice_fakes, recogniser=self._recogniser):
             self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore(self._secrets),
                                  clock=self.clock)
             await self.kernel.boot()
@@ -256,7 +260,7 @@ def _record_speech(synthesiser, record: Record) -> None:
 
 
 @contextlib.contextmanager
-def _voice_fakes(into: dict):
+def _voice_fakes(into: dict, *, recogniser=None):
     """Boot the Kernel with a voice Service holding fake engines.
 
     The Kernel builds its own factories (`kernel/registry.py`), and it
@@ -287,7 +291,7 @@ def _voice_fakes(into: dict):
                 # (2026-09-20). 30 ms is one frame.
                 into["microphone"] = FakeMicrophone(frame_delay=FRAME_SECONDS)
                 into["speaker"] = FakeSpeaker()
-                into["recogniser"] = ScriptedRecogniser()
+                into["recogniser"] = recogniser if recogniser is not None else ScriptedRecogniser()
                 into["synthesiser"] = FakeSynthesiser()
                 return VoiceService(microphone=into["microphone"], speaker=into["speaker"],
                                     recogniser=into["recogniser"], synthesiser=into["synthesiser"])
