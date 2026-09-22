@@ -17,6 +17,12 @@ task = "voice.control.request gains a calibrate action"
 since = "2026-09-22T12:12:10+00:00"
 until = "2026-09-22T20:12:10+00:00"
 
+[locks.docs]
+by = "opus-main"
+task = "findings: native vs markers on Gemini"
+since = "2026-09-22T12:57:31+00:00"
+until = "2026-09-22T20:57:31+00:00"
+
 [locks.domains]
 by = "opus-main"
 task = "Gemini native: an array with no items refused every call"
