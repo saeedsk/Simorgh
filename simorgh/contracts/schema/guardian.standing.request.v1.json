@@ -1,0 +1,26 @@
+{
+  "$id": "https://simorgh.local/schema/guardian.standing.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "list: every standing approval; revoke: drop the one whose `key` is given, or all with key=\"all\".",
+  "properties": {
+    "action": {
+      "enum": [
+        "list",
+        "revoke"
+      ],
+      "type": "string"
+    },
+    "key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "title": "guardian.standing.request",
+  "type": "object"
+}

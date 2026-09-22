@@ -342,6 +342,10 @@ GUARDIAN_REVIEW_REPLY = "guardian.review.reply"
 GUARDIAN_POSTURE_CHANGED = "guardian.posture.changed"
 GUARDIAN_POSTURE_REQUEST = "guardian.posture.request"
 GUARDIAN_POSTURE_REPLY = "guardian.posture.reply"
+# Standing approvals: "always" to an escalation approves that KIND of
+# action from then on; this lists and revokes them (2026-09-22).
+GUARDIAN_STANDING_REQUEST = "guardian.standing.request"
+GUARDIAN_STANDING_REPLY = "guardian.standing.reply"
 RESEARCH_FINDING_RECORDED = "research.finding.recorded"
 
 # --- voice (docs/plans/voice-design.md) -------------------------------------

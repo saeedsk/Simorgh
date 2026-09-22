@@ -225,7 +225,7 @@ class TestNeedsHumanIsActuallyAnswerable(unittest.IsolatedAsyncioTestCase):
         prompt = await _wait_for(collector.events, "human-1", topics.UI_PROMPT)
         self.assertIsNotNone(prompt, "action.needs_human never produced an answerable ui.prompt")
         self.assertEqual(prompt.payload["prompt_id"], "human-1")
-        self.assertEqual(prompt.payload["options"], ["yes", "no"])
+        self.assertEqual(prompt.payload["options"][:2], ["yes", "no"])
 
     async def test_a_real_yes_answer_approves_it_and_the_tool_actually_runs(self):
         kernel = await self._boot()
@@ -244,6 +244,40 @@ class TestNeedsHumanIsActuallyAnswerable(unittest.IsolatedAsyncioTestCase):
         result = await _wait_for(collector.events, "human-2", topics.ACTION_RESULT)
         self.assertIsNotNone(result, "no action.result after a real 'yes' answer")
         self.assertTrue(result.payload["ok"], result.payload)
+
+    async def test_always_approves_it_and_the_next_one_of_its_kind_without_asking(self):
+        """The creator, 2026-09-22: "give an option to approve once for
+        all similar cases"."""
+        kernel = await self._boot()
+        collector = _Collector(kernel.bus)
+        await collector.start()
+        args = {"proposal": "name: ddg_search\ncommand: npx\nreason: test"}
+
+        await kernel.bus.publish(_proposal("always-1", tool="propose_mcp_server", args=args,
+                                           reversibility="irreversible"))
+        prompt = await _wait_for(collector.events, "always-1", topics.UI_PROMPT)
+        self.assertIsNotNone(prompt)
+        self.assertIn("always", prompt.payload["options"])
+        await kernel.bus.publish(Message.new(
+            topics.UI_PROMPT_ANSWERED, source="test", payload={"prompt_id": "always-1", "answer": "always"}))
+        self.assertIsNotNone(await _wait_for(collector.events, "always-1", topics.ACTION_RESULT))
+
+        await kernel.bus.publish(_proposal("always-2", tool="propose_mcp_server",
+                                           args={"proposal": "name: other\ncommand: npx\nreason: test"},
+                                           reversibility="irreversible"))
+        result = await _wait_for(collector.events, "always-2", topics.ACTION_RESULT)
+        self.assertIsNotNone(result, "the second one of the same kind was not approved")
+        self.assertIsNone(next((m for m in collector.events if m.type == topics.UI_PROMPT
+                                and m.payload.get("prompt_id") == "always-2"), None), "it asked again")
+
+        listed = await kernel.bus.request(Message.new(
+            topics.GUARDIAN_STANDING_REQUEST, source="test", payload={"action": "list"}), timeout=3.0)
+        self.assertEqual([s["tool"] for s in listed.payload["standing"]], ["propose_mcp_server"])
+        await kernel.bus.request(Message.new(
+            topics.GUARDIAN_STANDING_REQUEST, source="test", payload={"action": "revoke", "key": "all"}), timeout=3.0)
+        await kernel.bus.publish(_proposal("always-3", tool="propose_mcp_server", args=args,
+                                           reversibility="irreversible"))
+        self.assertIsNotNone(await _wait_for(collector.events, "always-3", topics.UI_PROMPT), "revoked, so it asks again")
 
     async def test_a_real_no_answer_denies_it(self):
         kernel = await self._boot()

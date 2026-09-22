@@ -233,3 +233,4 @@ Lock it first (`python tools/modlock.py claim interface --by <you> --task "..."`
 - A voice turn's reply is printed at `turn.completed` (channel `voice`), while it is still being spoken; the later `voice.spoken` adds only an interruption note. It used to appear only when playback ended.
 
 - Consumes `session.delta` (stage 3 item 3): the newest reply being written shows as up to four lines above the prompt (`_streaming_rows`), cleared by `reset` and by `turn.completed`; the transcript still gets the finished answer whole.
+- `approvals` / `approvals revoke <n>|all` (2026-09-22) send `guardian.standing.request` and render the reply; a pending approval prompt now also accepts `always` / `a` when Guardian offers it.

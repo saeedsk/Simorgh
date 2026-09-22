@@ -21,6 +21,7 @@ from dataclasses import dataclass
 #: command does not exist.
 COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("status", "", "health, vitals, posture and git in one panel"),
+    ("approvals", "[revoke <n>|all]", "what you have said \"always\" to, and taking it back"),
     ("domains", "[name]", "documents, mail, the house, energy, media, security: on? working?"),
     ("tool", "[name] [args]", "list every tool, or run one -- Guardian gates it as usual"),
     ("alerts", "[all]", "what the monitors have raised, and what is waiting for the digest"),
@@ -90,7 +91,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
     ("Voice, screen and cameras", ("voice", "pronounce", "tv", "next", "cameras", "ring")),
-    ("Control", ("auto", "schedule", "mcp", "skills", "pause", "resume")),
+    ("Control", ("auto", "approvals", "schedule", "mcp", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
 SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {

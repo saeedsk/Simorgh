@@ -241,6 +241,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "status":
         return Outcome(await _status_panel(bus, vitals))
 
+    if name == "approvals":
+        return Outcome(await _approvals(bus, command.args))
+
     if name == "help":
         if args.strip().lower() == "all":
             return Outcome(render_mod.help_panel(enabled=render_mod.color_enabled(),
@@ -708,6 +711,35 @@ async def _panel_piece(bus: BusClient, type_: str, payload: dict, *, timeout: fl
         err = reply.payload.get("error", {})
         return f"{label}: error ({err.get('code', 'unknown')})"
     return render(reply.payload)
+
+
+async def _approvals(bus: BusClient, rest: str) -> str:
+    """`approvals` lists what "always" has approved; `approvals revoke <n>`
+    (the number from the list) or `approvals revoke all` takes it back."""
+    words = (rest or "").split()
+    listed = await _payload_of(bus, topics.GUARDIAN_STANDING_REQUEST, {"action": "list"})
+    if listed is None:
+        return "approvals: Guardian did not answer"
+    standing = list(listed.get("standing") or [])
+    if words[:1] == ["revoke"]:
+        which = words[1] if len(words) > 1 else ""
+        if which == "all":
+            key = "all"
+        elif which.isdigit() and 1 <= int(which) <= len(standing):
+            key = standing[int(which) - 1]["key"]
+        else:
+            return "usage: approvals revoke <number from `approvals`> | approvals revoke all"
+        done = await _payload_of(bus, topics.GUARDIAN_STANDING_REQUEST, {"action": "revoke", "key": key})
+        n = int((done or {}).get("revoked") or 0)
+        return f"approvals: took back {n}; those will ask again" if n else "approvals: nothing to take back"
+    if not standing:
+        return ("approvals: none. When Guardian asks, answering \"always\" (or `a`) approves that kind of "
+                "action from then on.")
+    lines = ["approvals -- said \"always\" to (`approvals revoke <n>` takes one back):"]
+    for n, s in enumerate(standing, 1):
+        who = s.get("requester") or "Sim's own idea"
+        lines.append(f"  {n}. {s.get('tool')} asked by {who} ({s.get('layer')}), used {s.get('uses', 0)} time(s)")
+    return "\n".join(lines)
 
 
 async def _payload_of(bus: BusClient, type_: str, payload: dict, *, timeout: float = 3.0):

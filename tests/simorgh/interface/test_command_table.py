@@ -208,7 +208,7 @@ class HelpPanelTestCase(unittest.TestCase):
             self.assertIn(f"  {name}", text, name)
         self.assertNotIn("tv charts", text)
         self.assertIn("help tv:", text)
-        self.assertLess(len(text.splitlines()), 50)
+        self.assertLess(len(text.splitlines()), 52)   # 50 with `approvals` (2026-09-22)
 
     def test_every_section_names_only_real_commands(self):
         from simorgh.interface.parser import SECTIONS, SUBCOMMANDS

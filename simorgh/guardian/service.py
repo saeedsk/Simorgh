@@ -129,6 +129,7 @@ class Service:
         topics.COGNITION_PROVIDER_STATUS,
         topics.SYSTEM_RESUME,
         topics.GUARDIAN_POSTURE_REQUEST,
+        topics.GUARDIAN_STANDING_REQUEST,
         topics.UI_PROMPT_ANSWERED,
         # The tool registry the rules read (stage 2 item 7): class,
         # read-only flag and argument schema, as Execution registered them.
@@ -136,6 +137,7 @@ class Service:
     )
     produces = (
         topics.ACTION_APPROVED,
+        topics.GUARDIAN_STANDING_REPLY,
         topics.GUARDIAN_REVIEW_REPLY,
         topics.ACTION_DENIED,
         topics.ACTION_NEEDS_HUMAN,
@@ -194,6 +196,7 @@ class Service:
         # (2026-09-20: the drill caught it when a subsystem's boot got
         # heavier and the race widened).
         self._decided: dict[str, tuple[str, bool, float]] = {}
+        self._standing: dict[str, dict] = {}
         #: Action ids whose decision is running right now (held by
         #: `_on_proposed`'s `finally`). What tells an in-flight
         #: decision from a dead one; `claimed_at` above is kept for the
@@ -237,6 +240,8 @@ class Service:
         self._subs.append(await ctx.bus.subscribe(topics.COGNITION_PROVIDER_STATUS, self._on_provider_status))
         self._subs.append(await ctx.bus.subscribe(topics.SYSTEM_RESUME, self._on_resume))
         self._subs.append(await ctx.bus.subscribe(topics.GUARDIAN_POSTURE_REQUEST, self._on_posture_request))
+        self._subs.append(await ctx.bus.subscribe(topics.GUARDIAN_STANDING_REQUEST, self._on_standing_request))
+        await self._load_standing()
         self._subs.append(await ctx.bus.subscribe(topics.UI_PROMPT_ANSWERED, self._on_prompt_answered))
 
     async def stop(self) -> None:
@@ -475,6 +480,11 @@ class Service:
 
         proposal = received.payload["proposal"]
         answer = p.get("answer", "no")
+        if answer == "always":
+            escalated = next((e for e in events if e.type == "escalated"), None)
+            if escalated is not None and escalated.payload.get("may_stand"):
+                await self._grant_standing(escalated.payload["key"], proposal, escalated.payload.get("layer", ""))
+            answer = "yes"
         if answer != "yes":
             await self._ctx.ledger.append(stream, self._event(stream, "answered", {"answer": answer, "outcome": "denied"}))
             await self._ctx.bus.publish(message.caused(
@@ -498,6 +508,48 @@ class Service:
              "approval_token": token, "mode_at_approval": self._config.mode},
             source="guardian",
         ))
+
+    # -- standing approvals ----------------------------------------------
+
+    async def _load_standing(self) -> None:
+        """Fold `guardian:standing` into the live table; a missing or
+        unreadable stream is no standing approvals, never an error."""
+        self._standing = {}
+        try:
+            events = await self._ctx.ledger.read(STANDING_STREAM)
+        except Exception:  # noqa: BLE001
+            return
+        for event in events:
+            key = str((event.payload or {}).get("key") or "")
+            if event.type == "granted" and key:
+                self._standing[key] = dict(event.payload)
+            elif event.type == "revoked":
+                if key == "all":
+                    self._standing.clear()
+                else:
+                    self._standing.pop(key, None)
+
+    async def _grant_standing(self, key: str, proposal: dict, layer: str) -> None:
+        entry = {"key": key, "tool": str(proposal.get("tool") or ""),
+                 "requester": str(proposal.get("requester") or proposal.get("requester_channel") or ""),
+                 "layer": layer, "approved_at": self._ctx.clock.now(), "uses": 0}
+        self._standing[key] = entry
+        await self._ctx.ledger.append(STANDING_STREAM, self._event(STANDING_STREAM, "granted", entry))
+
+    async def _on_standing_request(self, message: Message) -> None:
+        """`guardian.standing.request{list|revoke}` -> `.reply`."""
+        p = message.payload or {}
+        revoked = 0
+        if p.get("action") == "revoke":
+            key = str(p.get("key") or "")
+            gone = list(self._standing) if key == "all" else [key] if key in self._standing else []
+            for k in gone:
+                self._standing.pop(k, None)
+            revoked = len(gone)
+            if gone:
+                await self._ctx.ledger.append(STANDING_STREAM, self._event(STANDING_STREAM, "revoked", {"key": key}))
+        await self._ctx.bus.reply(message, type=topics.GUARDIAN_STANDING_REPLY, payload={
+            "standing": [dict(v) for v in self._standing.values()], "revoked": revoked})
 
     async def _on_posture_request(self, message: Message) -> None:
         """`guardian.posture.request` -> `.reply` (contracts/messages/
@@ -741,10 +793,33 @@ class Service:
             return
 
         if verdict.kind == "needs_human":
+            key = standing_key(proposal, verdict.layer)
+            standing = self._standing.get(key) if verdict.layer not in NEVER_STANDING else None
+            if standing is not None:
+                # "always" was said to this kind of action before: approve
+                # it, and say which approval let it through.
+                standing["uses"] = int(standing.get("uses") or 0) + 1
+                await self._ctx.ledger.append(stream, self._event(stream, "answered", {
+                    "answer": "always", "outcome": "approved", "standing": key}))
+                token, expires_at, args_sha256 = self._tokens.issue(action_id, p["tool"], p["args"])
+                await self._ctx.bus.publish(message.caused(
+                    topics.ACTION_APPROVED,
+                    {"action_id": action_id, "tool": p["tool"], "args_sha256": args_sha256, "expires_at": expires_at,
+                     "approval_token": token, "mode_at_approval": self._config.mode},
+                    source="guardian",
+                ))
+                self._decided[action_id] = (fingerprint, True, self._ctx.clock.now())
+                return
+            options = ["yes", "no"] if verdict.layer in NEVER_STANDING else ["yes", "no", "always"]
+            try:
+                await self._ctx.ledger.append(stream, self._event(stream, "escalated", {
+                    "key": key, "layer": verdict.layer, "may_stand": verdict.layer not in NEVER_STANDING}))
+            except Exception:  # noqa: BLE001 -- without the key an "always" is only a "yes"
+                pass
             question = approval_question(p["tool"], p.get("args") or {}, verdict.reasons)
             await self._ctx.bus.publish(message.caused(
                 topics.ACTION_NEEDS_HUMAN,
-                {"action_id": action_id, "question": question, "options": ["yes", "no"], "default": "no"},
+                {"action_id": action_id, "question": question, "options": options, "default": "no"},
                 source="guardian",
             ))
             # Somebody has been told. The `ui.prompt` below is how the
@@ -761,7 +836,7 @@ class Service:
             # below find its way back to this exact pending proposal.
             await self._ctx.bus.publish(message.caused(
                 topics.UI_PROMPT,
-                {"prompt_id": action_id, "question": question, "options": ["yes", "no"],
+                {"prompt_id": action_id, "question": question, "options": options,
                  "timeout_s": self._config.human_prompt_timeout_s, "default": "no"},
                 source="guardian",
             ))
@@ -850,6 +925,23 @@ class Service:
     def _event(self, stream: str, type: str, payload: dict):
         from simorgh.contracts.envelope import Event
         return Event(stream=stream, type=type, ts=self._ctx.clock.now(), trace_id="", causation_id=None, payload=payload)
+
+
+#: Where standing approvals ("always") live, and are folded from at start.
+STANDING_STREAM = "guardian:standing"
+#: Escalations "always" is never offered for: each one must reach a
+#: person every time. `protected` is a write to `rules/` (the creator asked
+#: to see each one), `physical` a door, siren or lock, `human_only` a skill.
+NEVER_STANDING = frozenset({"protected", "physical", "human_only"})
+
+
+def standing_key(proposal, layer: str) -> str:
+    """What makes two escalations "the same kind": the tool, who asked
+    (a person, or the channel for Sim's own ideas), and which rule asked
+    for a person. Arguments are deliberately not in it -- "approve this
+    once for all similar" means the next motion notice, not this one."""
+    who = getattr(proposal, "requester", "") or getattr(proposal, "requester_channel", "") or "sim"
+    return f"{proposal.tool}|{who.lower()}|{layer}"
 
 
 def _sha256(text: str) -> str:

@@ -84,7 +84,7 @@ from .vitals import VitalsCache
 
 VERSION = "0.1.0"
 
-_YES_NO_SHORTHAND = {"y": "yes", "n": "no"}
+_YES_NO_SHORTHAND = {"y": "yes", "n": "no", "a": "always"}
 
 
 def _match_pending_answer(typed: str, options: list[str]) -> str | None:
@@ -97,8 +97,9 @@ def _match_pending_answer(typed: str, options: list[str]) -> str | None:
     for option in options:
         if lowered == option.lower():
             return option
-    if {o.lower() for o in options} == {"yes", "no"} and lowered in _YES_NO_SHORTHAND:
-        return _YES_NO_SHORTHAND[lowered]
+    if {o.lower() for o in options} <= {"yes", "no", "always"} and lowered in _YES_NO_SHORTHAND:
+        wanted = _YES_NO_SHORTHAND[lowered]
+        return wanted if wanted in {o.lower() for o in options} else None
     return None
 
 
