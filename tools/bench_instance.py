@@ -118,14 +118,17 @@ async def run(args) -> int:
     kernel = Kernel(LoadedConfig({
         "runtime": {"data_dir": str(data)},
         "execution": {"repo_root": str(repo)},
-        "curiosity": {"autonomy_on_boot": False},
         # Reflection's own self-improvement work, off. Its hourly pass turns
         # mined patterns into patch tasks and distillation turns solved cases
         # into skill tasks; in a benchmark copy those queued beside the cases,
         # held the worker for minutes, and each landing ran the test suite at
         # ~5.5 GB -- ten copies of that took the machine out of memory
         # (2026-09-14).
-        "reflection": {"reflect_after_start_s": 0, "distillation_enabled": False},
+        # Both under `[growth]` since the merge (2026-09-20); as
+        # `[curiosity]`/`[reflection]` nothing read them, and benchmark
+        # copies ran with autonomy and distillation ON until 2026-09-22.
+        "growth": {"explore": {"autonomy_on_boot": False},
+                   "monitors": {"reflect_after_start_s": 0, "distillation_enabled": False}},
         # A comparison arm's switches (`--orch reground_every_steps=6`), for
         # measuring one change against the baseline on the same cases
         # (docs/plans/long-run-context-design.md section 9).

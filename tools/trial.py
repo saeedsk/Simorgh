@@ -115,7 +115,7 @@ async def run_trial(task: str, *, kind: str, subject: str | None, root: str, tim
             # write tools at whichever repo was current that instant.
             "execution": {"repo_root": repo},
             # The point of a trial: nothing self-directed competes with it.
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
         }, None),
         secrets=EnvSecretStore({}),
     )

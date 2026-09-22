@@ -214,7 +214,7 @@ async def run_one(trial: Trial, root: str, timeout_s: float) -> Result:
             # process-global, which is also why `--parallel` runs each
             # trial in its own process rather than in this one.
             "execution": {"repo_root": repo},
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
             # Spend is capped and the providers are named: by default the
             # library order puts the Claude Code CLI behind Together with no
             # price and no cap (evaluation C3). `--providers` / `--max-usd`

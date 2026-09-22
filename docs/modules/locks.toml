@@ -35,6 +35,12 @@ task = "stage 8 item 5: evaluate a policy; rules/ into the agent body"
 since = "2026-09-22T10:37:41+00:00"
 until = "2026-09-22T18:37:41+00:00"
 
+[locks.tools]
+by = "opus-main"
+task = "trial harness: autonomy off under [growth.explore]"
+since = "2026-09-22T10:41:18+00:00"
+until = "2026-09-22T18:41:18+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "a kept turn names who spoke"

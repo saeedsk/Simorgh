@@ -67,7 +67,7 @@ async def main():
     kernel = Kernel(LoadedConfig({{
         "runtime": {{"data_dir": {data!r}}},
         "execution": {{"repo_root": {lab!r}}},
-        "curiosity": {{"autonomy_on_boot": False}},
+        "growth": {{"explore": {{"autonomy_on_boot": False}}}},
         "cognition": {{"provider_order": ["together", "floor"],
                        "providers": {{"together": {{"max_spend_usd": {max_usd}, "window_seconds": 86400.0}}}}}},
     }}, None), secrets=EnvSecretStore())
