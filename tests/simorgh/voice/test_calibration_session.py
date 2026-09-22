@@ -141,9 +141,9 @@ class TheServiceVerb(unittest.IsolatedAsyncioTestCase):
         return service
 
     async def _ask(self, service, value, name=""):
-        payload = {"action": "enroll", "key": "calibrate", "value": value, **({"name": name} if name else {})}
+        payload = {"action": "calibrate", "value": value, **({"name": name} if name else {})}
         with mock.patch("simorgh.voice.audio.input_device_name", return_value="Test Microphone"):
-            return await service._people_action("enroll", payload)  # noqa: SLF001
+            return await service._people_action("calibrate", payload)  # noqa: SLF001
 
     async def test_status_needs_no_microphone_and_names_the_owner(self):
         ok, said = await self._ask(self._service(), "status")

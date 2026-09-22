@@ -77,7 +77,7 @@ Replies received by request/reply: `task.list.reply`, `task.create.reply`, `syst
 | `system.status.request` | `messages/system.py` | dispatch.py; httpapi.py:1028 | `status` and `/api/status` |
 | `system.schedule.add`, `system.schedule.cancel`, `system.tick.idle` | `messages/system.py` | dispatch.py:749, 814, 353 | `schedule`, `remind`, `idle` commands |
 | `benchmark.run.request`, `.history`, `.suites`, `.load`, `.stop` | `messages/benchmark.py` | dispatch.py; httpapi.py:1013 | `benchmark` command and `/api/benchmarks` |
-| `voice.status|control|speak|listen|voices|devices|models|bench.request` | `messages/voice.py` | dispatch.py | `voice ...` commands. `voice calibrate [name] [aloud] [short] [en|fa] [room=..] [distance=..]` and `voice calibrate status|stop|keep|accept|skip [name]` send `voice.control.request{action: "enroll", key: "calibrate", value: "<verb> [options]", name?}` -- the action enum has no `calibrate` (voice/CONTRACT.md, Known issues) |
+| `voice.status|control|speak|listen|voices|devices|models|bench.request` | `messages/voice.py` | dispatch.py | `voice ...` commands. `voice calibrate [name] [aloud] [short] [en|fa] [room=..] [distance=..]` and `voice calibrate status|stop|keep|accept|skip [name]` send `voice.control.request{action: "calibrate", value: "<verb> [options]", name?}` (its own action since 2026-09-22) |
 | `curiosity.interest.add`, `curiosity.interest.list.request` | `messages/curiosity.py` | dispatch.py:366-368 | `interest` command |
 | `world.env.query` | `messages/world.py::WorldEnvQuery` | dispatch.py:664, 1652 | `status` and tool listing |
 

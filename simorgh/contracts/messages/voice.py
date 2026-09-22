@@ -26,11 +26,11 @@ VoiceStatusRequest = define(t.VOICE_STATUS_REQUEST, [])
 VoiceStatusReply = define(t.VOICE_STATUS_REPLY, [*_STATE])
 VoiceControlRequest = define(t.VOICE_CONTROL_REQUEST, [
     F("action", Enum("on", "off", "mute", "unmute", "barge_on", "barge_off", "aec_on", "aec_off", "set",
-                     "enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn")),
+                     "enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn", "calibrate")),
     O("key", Str), O("value", Str), O("name", Str), O("relation", Str), O("takes", Int)],
     doc="set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. "
         "enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; "
-        "people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`; tidy: drop the learnt takes pulling a profile apart, never the enrolment ones; relearn: rebuild a profile from recordings already kept, so nobody has to re-record.")
+        "people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`; tidy: drop the learnt takes pulling a profile apart, never the enrolment ones; relearn: rebuild a profile from recordings already kept, so nobody has to re-record; calibrate: `value` is the calibration verb (start [options] | status | stop | keep | accept | skip) for `name`'s record-once calibration set (voice/calibration.py).")
 VoiceControlReply = define(t.VOICE_CONTROL_REPLY, [O("detail", Str), *_STATE])
 VoiceSpeakRequest = define(t.VOICE_SPEAK_REQUEST, [F("text", Str), O("voice", Str)])
 VoiceSpeakReply = define(t.VOICE_SPEAK_REPLY, [O("seconds", Float), O("engine", Str), O("detail", Str)])

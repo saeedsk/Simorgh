@@ -27,7 +27,7 @@ class TheVerb(unittest.TestCase):
 
         seen = _sent("calibrate")
         self.assertEqual(seen.pop("_topic"), topics.VOICE_CONTROL_REQUEST)
-        self.assertEqual(seen, {"action": "enroll", "key": "calibrate", "value": "start"},
+        self.assertEqual(seen, {"action": "calibrate", "value": "start"},
                          "no name: the service picks the household's creator")
 
     def test_a_name_and_options(self):
@@ -39,7 +39,7 @@ class TheVerb(unittest.TestCase):
         for verb in ("status", "stop", "keep", "accept", "skip"):
             with self.subTest(verb=verb):
                 seen = _sent(f"calibrate {verb}")
-                self.assertEqual((seen["action"], seen["key"], seen["value"]), ("enroll", "calibrate", verb))
+                self.assertEqual((seen["action"], seen["value"]), ("calibrate", verb))
                 self.assertNotIn("name", seen)
         self.assertEqual(_sent("calibrate status Aran")["name"], "Aran")
 

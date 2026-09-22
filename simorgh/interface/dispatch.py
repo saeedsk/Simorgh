@@ -526,7 +526,7 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
             options = [w for w in words if w.lower() in flags or "=" in w]
             names = [w for w in words if w not in options]
             value = " ".join(["start", *options])
-        payload = {"action": "enroll", "key": "calibrate", "value": value}
+        payload = {"action": "calibrate", "value": value}
         if names:
             payload["name"] = " ".join(names)
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, payload, timeout=30.0, render=voiceview.controlled)

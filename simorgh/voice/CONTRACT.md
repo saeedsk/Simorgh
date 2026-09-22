@@ -49,7 +49,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:38-45`, pinned by `tes
 | Topic | Schema | Where | Does |
 |---|---|---|---|
 | `voice.status.request` | `messages/voice.py::VoiceStatusRequest` | service.py:358 | Replies with `VoiceState` plus session state and metrics |
-| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | service.py:361 | on/off/mute, `voice set`, enrol and people actions; refusals as error replies. `action: "enroll"` with `key: "calibrate"` is `voice calibrate` (`value` = start/status/stop/keep/accept/skip plus options; `service._calibrate`) |
+| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | service.py:361 | on/off/mute, `voice set`, enrol and people actions; refusals as error replies. `action: "calibrate"` (`value` start [options] | status | stop | keep | accept | skip; `name`) runs the calibration set. |
 | `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | service.py:618 | `voice test` / speak a text now |
 | `voice.listen.request` | `messages/voice.py::VoiceListenRequest` | service.py:649 | One transcription without asking Sim |
 | `voice.voices.request` | `messages/voice.py::VoiceVoicesRequest` | service.py:669 | Lists the synthesiser's voices |
@@ -263,7 +263,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - V10: the language a turn was heard in is recorded on the turn and `voice:turns` but absent from the percept contract. Open.
 - V11: kept family audio had no retention (6.4 GB). Fixed 2026-09-18 (commit eb207dc).
 - B15: `getattr(config, ...)` with fallbacks at `session.py` (e.g. `overheard_dir`). Open (stage 0 item 26).
-- `voice.control.request`'s `action` enum has no `calibrate`, so `voice calibrate` travels as `action: "enroll", key: "calibrate"` (pinned by `test_every_voice_verb_is_on_the_wire.py::test_calibrate_rides_enroll_on_both_ends`). A contracts change adding `calibrate` to the enum (and to the schema file) would let it have its own action; the service would then answer both. Open (needs the `contracts` lock).
+- Closed 2026-09-22: `voice calibrate` has its own `calibrate` action on `voice.control.request` (it first travelled as `enroll` + key=calibrate).
 - P6: no regression number on voice latency is compared run to run, although `voice:turns` carries per-turn metrics. Open (stage 1, stage 4 evals).
 
 ## Planned changes (roadmap)

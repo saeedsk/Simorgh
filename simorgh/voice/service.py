@@ -519,7 +519,7 @@ class Service:
                               "spoke (experimental)" if action == "aec_on" else "echo cancellation off -- back to the level gate")
             if self._pipeline is not None:
                 self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
-        elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn"):
+        elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn", "calibrate"):
             ok, detail = await self._people_action(action, message.payload)
         else:
             ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set | enroll | forget | people | whois)"
@@ -546,10 +546,10 @@ class Service:
                                refine_above=self.config.speaker_refine_above,
                                margin=self.config.speaker_margin, lean=self.config.speaker_lean)
         name = str(payload.get("name") or "").strip()
-        if action == "enroll" and str(payload.get("key") or "") == "calibrate":
-            # `voice calibrate` rides the enrol action: it is an enrolment
-            # of a different shape (a script read once, kept forever), and
-            # the wire's action enum has no word of its own for it.
+        if action == "calibrate":
+            # `voice calibrate`: an enrolment of a different shape (a
+            # script read once, kept forever). Its own action on the wire
+            # since 2026-09-22; it first rode `enroll` + key=calibrate.
             return await self._calibrate(payload, book)
         if action == "people":
             people = book.people()
