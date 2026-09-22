@@ -63,8 +63,19 @@ def controlled(payload: dict) -> str:
         return settings_panel(detail, enabled=colour)
     if " = " in detail.partition("\n")[0] and "\n" in detail:
         return one_setting(detail, enabled=colour)
-    if detail.startswith(("barge-in", "echo cancellation", "settings you can change", "people I know", "nobody is enrolled",
-                          "enrolling", "forgot", "say something")) or " = " in detail or " is said " in detail:
+    # Anything a handler actually SAID is shown. This was a whitelist
+    # of opening words -- "barge-in", "forgot", "enrolling" and five
+    # more -- and a verb whose message did not begin with one of them
+    # had it silently swallowed and the status panel printed instead.
+    #
+    # Live, 2026-09-21: the creator typed `voice tidy Saeed`, the tidy
+    # ran, and what came back was "voice agent speaking · stt
+    # whisper_server · 0 turn(s) this session". He could not tell
+    # whether it had done anything. Every new verb would have paid the
+    # same toll, which is why the default is now the other way round:
+    # the state verbs return an EMPTY detail (service.py), and that is
+    # the honest signal for "there is nothing to say but the state".
+    if detail:
         return f"voice: {detail}"
     return status(payload)
 

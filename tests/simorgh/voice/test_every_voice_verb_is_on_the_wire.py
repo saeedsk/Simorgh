@@ -70,3 +70,40 @@ class TheThreeListsAgree(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatAVerbSaysIsShown(unittest.TestCase):
+    """A handler's message was shown only if it began with one of
+    eight approved words.
+
+    Live, 2026-09-21: the creator typed `voice tidy Saeed`, the tidy
+    ran, and the console printed "voice agent speaking · stt
+    whisper_server · 0 turn(s) this session". He could not tell
+    whether anything had happened. `controlled` matched the detail
+    against a whitelist of opening words -- "barge-in", "forgot",
+    "enrolling" and five more -- and fell back to the status panel
+    for everything else, so every new verb paid the same toll.
+    """
+
+    STATE = {"ok": True, "state": "listening", "stt": "whisper", "tts": "kokoro", "turns": 0}
+
+    def _shown(self, detail: str) -> str:
+        from simorgh.interface.voiceview import controlled
+
+        return controlled({**self.STATE, "detail": detail})
+
+    def test_a_message_with_no_blessed_prefix_is_shown(self):
+        said = self._shown("dropped 7 learnt take(s) from Saeed: agreement 0.59 -> 0.76.")
+        self.assertIn("dropped 7", said)
+
+    def test_the_old_ones_still_are(self):
+        self.assertIn("forgot every voice", self._shown("forgot every voice: Ira, Iris"))
+        self.assertIn("is said", self._shown('Ira is said "Eye-ra" from now on'))
+
+    def test_no_message_falls_back_to_the_state(self):
+        """The state verbs return an empty detail, and that is the
+        honest signal for "nothing to say but the state"."""
+        self.assertNotIn("voice: ", self._shown(""))
+
+    def test_a_settings_panel_is_still_a_panel(self):
+        self.assertNotIn("voice: voice settings", self._shown("voice settings\n  a = b"))
