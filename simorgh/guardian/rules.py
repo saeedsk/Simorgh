@@ -365,6 +365,7 @@ class ProtectedRule:
             and not any(_code_arg_text(proposal.args.get(k)) for k in _CODE_ARG_KEYS)
         ):
             return Decision("abstain", self.layer)
+        asked: list[tuple[str, str]] = []
         for path in _subject_paths(proposal, ctx):
             # Canonicalized before comparison: `"simorgh//guardian/rules.py"`
             # and `"simorgh/./guardian/rules.py"` resolve to the identical
@@ -390,13 +391,23 @@ class ProtectedRule:
             # (over-match rather than under-match).
             canonical_lower = canonical.lower()
             path_lower = path.lower()
+            ask = tuple(getattr(ctx.config, "ask_subjects", ()) or ())
             for protected in ctx.config.protected_subjects:
                 protected_lower = protected.lower()
                 if protected in path or protected in canonical or protected_lower in path_lower or protected_lower in canonical_lower:
+                    if protected in ask:
+                        asked.append((path, protected))
+                        continue
                     return Decision(
                         "deny", self.layer,
                         (f"{path!r} is protected ({protected!r}); only the creator may edit it directly",),
                     )
+        if asked:
+            # Every protected path this touches is one a person may open
+            # (`ask_subjects`), and none is a flat refusal: ask them.
+            path, protected = asked[0]
+            return Decision("escalate", self.layer,
+                            (f"{path!r} is protected ({protected!r}); a person must say yes to this change",))
         return Decision("abstain", self.layer)
 
 

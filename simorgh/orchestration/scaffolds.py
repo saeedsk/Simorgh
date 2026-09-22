@@ -81,6 +81,8 @@ _TOOL_NOTES: dict[str, str] = {
                         "does what you need",
     "run_script": "run a Python script with the repo importable and the network reachable -- the way "
                    "to actually USE an installed library",
+    "policy_adopt": "not yours to call: the growth loop proposes it once a lesson has been measured, and a "
+                    "person says yes before rules/ changes",
     "notify": "send a short message to the person who runs you (their own ntfy/Gotify/Home "
                "Assistant/Matrix box, or Slack, email or SMS -- whichever is configured) -- for "
                "something they would want to know while not watching: work finished, a benchmark "

@@ -3277,6 +3277,9 @@ class PeopleTool:
         return ToolResult(ok=True, output=said, side_effects=(said,), metadata={"kind": "people"})
 
 
+from .policyadopt import PolicyAdoptTool  # noqa: E402 -- beside the list that registers it
+
+
 def builtin_tools(config: Config, *, secrets=None) -> list:
     """`secrets` is the subsystem's scoped secret store. Only the
     account-backed tools use it, and they take the value at call time so
@@ -3297,6 +3300,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         RealEstateListingsTool(config), GeocodeTool(config), ProposeMcpServerTool(),
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
         BrowsePageTool(config), RunContainerTool(config), NotifyTool(config),
+        PolicyAdoptTool(config),
         # The six product domains (knowledge, pim, security, home, energy,
         # media) used to be spliced in here. Since stage 9 item 1 they
         # are `simorgh/domains/` and arrive through `extra_tools`, so the

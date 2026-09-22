@@ -38,6 +38,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "worktree_open": ("reversible", False),
     "worktree_land": ("irreversible", False),
     "worktree_close": ("reversible", False),
+    # Proposed by the growth loop, never by a session (stage 8 item 5):
+    # an adopted lesson into `rules/`, which Guardian asks a person about.
+    "policy_adopt": ("irreversible", False),
     "list_dir": ("read_only", False),
     "search_code": ("read_only", False),
     "self_map": ("read_only", False),

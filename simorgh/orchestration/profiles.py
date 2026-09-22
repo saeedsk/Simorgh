@@ -16,6 +16,12 @@ from pathlib import Path
 #: `<!-- -->` notes in the body are for people and never reach the prompt.
 #: Guardian protects the folder (`guardian/config.py`), like the code.
 AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
+#: Adopted lessons, one file per kind of work (`rules/<agent>.md`), put
+#: after the agent's own body (stage 8 item 5). Protected like
+#: `agents/`: the growth loop may propose a rule, and a person puts it
+#: here. Until 2026-09-22 nothing read this folder, so an adopted
+#: policy changed nothing Sim did.
+RULES_DIR = Path(__file__).resolve().parents[2] / "rules"
 
 _FIELDS = ("tools", "read_only", "max_steps", "max_revisions", "scaffold", "max_output_tokens", "verify")
 _NOTES = re.compile(r"<!--.*?-->\n?", re.S)
@@ -43,9 +49,21 @@ def parse(text: str, *, source: str = "") -> tuple[dict, str]:
     return meta, _NOTES.sub("", body).strip()
 
 
-def load(directory: Path = AGENTS_DIR) -> dict[str, Profile]:
+def rules_for(name: str, directory: Path = RULES_DIR) -> str:
+    """The adopted lessons for agent `name`, as a block for its body,
+    or "" when there are none."""
+    path = Path(directory) / f"{name}.md"
+    try:
+        text = _NOTES.sub("", path.read_text(encoding="utf-8")).strip()
+    except OSError:
+        return ""
+    return f"Lessons adopted for this kind of work:\n{text}" if text else ""
+
+
+def load(directory: Path = AGENTS_DIR, rules: Path | None = RULES_DIR) -> dict[str, Profile]:
     """Every agent under `directory`, keyed by file name. `extends` takes
-    another agent's fields and body, then overrides what it names."""
+    another agent's fields and body, then overrides what it names; an
+    agent's `rules/<name>.md`, when there is one, follows its body."""
     raw = {}
     for path in sorted(Path(directory).glob("*.md")):
         raw[path.stem] = parse(path.read_text(encoding="utf-8"), source=str(path))
@@ -66,8 +84,11 @@ def load(directory: Path = AGENTS_DIR) -> dict[str, Profile]:
         missing = [f for f in ("tools", "read_only", "max_steps", "max_revisions", "scaffold") if f not in fields]
         if missing:
             raise AgentFileError(f"{key}: missing {missing}")
-        out[key] = Profile(name=str(meta.get("name") or (base.name if base else key)), body=body or (base.body if base else ""),
-                           **fields)
+        body = body or (base.body if base else "")
+        lessons = rules_for(key, rules) if rules is not None else ""
+        if lessons and lessons not in body:
+            body = f"{body}\n\n{lessons}" if body else lessons
+        out[key] = Profile(name=str(meta.get("name") or (base.name if base else key)), body=body, **fields)
         return out[key]
 
     for key in raw:

@@ -79,6 +79,7 @@ Events Guardian writes on `action:<id>`: `received` (the proposal, oversize stri
 | `baseline_posture` | `'guarded'` | yes |
 | `approval_ttl_s` | `120.0` | yes |
 | `protected_subjects` | `DEFAULT_PROTECTED_SUBJECTS` | yes |
+| `ask_subjects` | `("rules/",)` | yes; protected subjects `ProtectedRule` ESCALATES instead of denying (the creator, 2026-09-22: "let Guardian ask me before a rule is written into rules/"). A path also matching a plain protected subject is denied. `protected` is a person-only layer in `pipeline.py`, so no classifier ALLOW settles it |
 | `denylist` | `field(default_factory=lambda: dict(DEFAULT_DENYLIST))` | yes |
 | `immunity_similarity_threshold` | `0.85` | yes |
 | `max_consecutive_failures` | `15` | yes |

@@ -41,8 +41,34 @@ class TheGrowthLoopCannotLoosenItsOwnGate(unittest.IsolatedAsyncioTestCase):
 
         return (await ProtectedRule().evaluate(self._write(path), self._ctx())).kind
 
-    async def test_the_rules_an_agent_body_is_rendered_from_are_protected(self):
-        self.assertEqual(await self._kind("rules/patch.md"), "deny")
+    async def test_the_rules_an_agent_body_is_rendered_from_are_asked_about(self):
+        """The creator, 2026-09-22: "let Guardian ask me before a rule
+        is written into rules/". Asked, never quietly allowed."""
+        self.assertEqual(await self._kind("rules/patch.md"), "escalate")
+
+    async def test_a_rule_write_that_also_touches_a_refused_path_is_refused(self):
+        from simorgh.guardian.api import Proposal
+        from simorgh.guardian.rules import ProtectedRule
+
+        both = Proposal(action_id="a1", tool="apply_source_patch", args={"path": "rules/patch.md", "content": "x"},
+                        scope={"paths": ["rules/patch.md", "simorgh/guardian/rules.py"]},
+                        reversibility="irreversible", rationale="", proposed_by="orchestration")
+        self.assertEqual((await ProtectedRule().evaluate(both, self._ctx())).kind, "deny")
+
+    async def test_no_classifier_settles_it(self):
+        from simorgh.guardian.api import DecisionContext, Proposal
+        from simorgh.guardian.config import Config
+        from simorgh.guardian.pipeline import Pipeline
+        from simorgh.guardian.posture import Posture
+        from simorgh.guardian.rules import ProtectedRule
+
+        async def allow(_proposal):
+            return "ALLOW"
+
+        ctx = DecisionContext(now=0.0, system_state="running", posture=Posture(level="guarded"),
+                              config=Config(classifier_enabled=True), classify=allow)
+        verdict = await Pipeline((ProtectedRule(),)).decide(self._write("rules/patch.md"), ctx)
+        self.assertEqual(verdict.kind, "needs_human")
 
     async def test_the_suite_that_judges_a_policy_is_protected(self):
         """A loop that can edit its own evals can adopt anything."""

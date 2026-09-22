@@ -115,6 +115,13 @@ class Config:
     baseline_posture: str = "guarded"
     approval_ttl_s: float = 120.0
     protected_subjects: tuple[str, ...] = DEFAULT_PROTECTED_SUBJECTS
+    # Protected subjects a PERSON may still open (stage 8 item 5): a
+    # write there is escalated rather than denied. `rules/` is where an
+    # adopted lesson lands; the creator chose, 2026-09-22, "let Guardian
+    # ask me before a rule is written into rules/". Everything else in
+    # `protected_subjects` stays a flat refusal, and a path that matches
+    # both an ask subject and a plain one is refused.
+    ask_subjects: tuple[str, ...] = ("rules/",)
     denylist: Mapping[str, str] = field(default_factory=lambda: dict(DEFAULT_DENYLIST))
     immunity_similarity_threshold: float = 0.85
     # The creator, 2026-09-07: "more freedom in autonomously working and
@@ -224,6 +231,8 @@ class Config:
         kwargs = {k: v for k, v in (data or {}).items() if k in cls.__dataclass_fields__}
         if "protected_subjects" in kwargs:
             kwargs["protected_subjects"] = tuple(kwargs["protected_subjects"])
+        if "ask_subjects" in kwargs:
+            kwargs["ask_subjects"] = tuple(kwargs["ask_subjects"])
         if "autonomous_origins" in kwargs:
             kwargs["autonomous_origins"] = tuple(kwargs["autonomous_origins"])
         for key in ("physical_tool_prefixes", "physical_observe_tools", "physical_always_human_tools", "human_only_tools"):

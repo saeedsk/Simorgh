@@ -17,11 +17,23 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
+[locks.execution]
+by = "opus-main"
+task = "stage 8 item 5: an adopted rule lands after a person says yes"
+since = "2026-09-22T10:42:52+00:00"
+until = "2026-09-22T18:42:52+00:00"
+
 [locks.growth]
 by = "opus-main"
 task = "stage 8 item 5: evaluate a policy; rules/ into the agent body"
 since = "2026-09-22T10:37:41+00:00"
 until = "2026-09-22T18:37:41+00:00"
+
+[locks.guardian]
+by = "opus-main"
+task = "stage 8 item 5: an adopted rule lands after a person says yes"
+since = "2026-09-22T10:42:52+00:00"
+until = "2026-09-22T18:42:52+00:00"
 
 [locks.initiative]
 by = "opus-main"

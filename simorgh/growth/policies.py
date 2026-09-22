@@ -181,6 +181,17 @@ class PolicyStore:
             adopted_at=self._now(), samples_at_adoption=max(0, int(samples_at_adoption)),
             why=f"{result:.2f} against a baseline of {baseline:.2f} over {evaluated_on}"))
 
+    async def refuse(self, policy_id: str, *, baseline: float, result: float, evaluated_on: int,
+                     why: str) -> Policy | None:
+        """Refuse a proposed policy on a measurement `adopt` cannot see:
+        a case it broke, even when the mean did not move
+        (`growth/evaluate.py`)."""
+        policy = self._policies.get(policy_id)
+        if policy is None or policy.status != "proposed":
+            return None
+        return await self._write(replace(policy, status="refused", baseline=baseline, result=result,
+                                         evaluated_on=evaluated_on, why=why))
+
     async def retire(self, policy_id: str, *, why: str) -> Policy | None:
         policy = self._policies.get(policy_id)
         if policy is None or not policy.live:

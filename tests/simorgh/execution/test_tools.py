@@ -803,7 +803,7 @@ class TestBuiltinTools(unittest.TestCase):
             "git_commit", "git_revert", "git_discard", "git_history", "apply_skill",
             "web_fetch", "web_search", "render_page", "search_listings", "geocode",
             "find_package", "install_package", "run_script",
-            "browse_page", "run_container", "notify",
+            "browse_page", "run_container", "notify", "policy_adopt",
             "kb_search", "kb_ask", "kb_open", "kb_sources", "kb_status",
             "cal_list", "mail_search", "mail_read", "remind",
             "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",

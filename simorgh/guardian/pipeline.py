@@ -14,7 +14,10 @@ from .api import DecisionContext, Proposal, Rule, Verdict
 
 
 #: Escalations only a person may settle; no classifier ALLOW overrides them.
-_PERSON_ONLY_LAYERS = frozenset({"human_only", "physical"})
+#: `protected` is here because its only escalation is a write to an
+#: `ask_subjects` path (`rules/`), which the creator asked to see himself
+#: (2026-09-22): a classifier saying ALLOW is not him saying yes.
+_PERSON_ONLY_LAYERS = frozenset({"human_only", "physical", "protected"})
 
 class Pipeline:
     def __init__(self, rules: tuple[Rule, ...]) -> None:
