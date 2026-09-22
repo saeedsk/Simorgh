@@ -229,6 +229,7 @@ class Service:
         from .calibration import person_folder, read_rows, read_samples
 
         rows = read_rows(self.config.calibration_dir, name)
+        self._calibration_tried = 0
         if not rows:
             return None
         if embedder is None:
@@ -245,6 +246,7 @@ class Service:
         if not vectors:
             return None
         added, dropped, considered, before, after = book.relearn(name, vectors)
+        self._calibration_tried = considered
         if not added:
             return None
         swapped = f", replacing {dropped} weaker one(s)" if dropped else ""
@@ -307,9 +309,20 @@ class Service:
             return False, f"none of the {len(wavs)} kept recordings could be read{why}"
         added, dropped, considered, before, after = book.relearn(name, vectors)
         if not added:
-            return True, (f"nothing in {considered} kept recording(s) would make {name}'s profile better. "
-                          f"It is unchanged at {before:.2f} agreement with itself -- which is "
-                          f"the right answer when the recordings are of somebody else.")
+            from .speakers import MUDDLED_BELOW
+
+            tried = getattr(self, "_calibration_tried", 0)
+            where = (f"{tried} calibration take(s) and {considered} kept recording(s)" if tried
+                     else f"{considered} kept recording(s)")
+            # Live, 2026-09-22: a healthy 0.83 profile, 67 calibration takes
+            # and 300 kept turns -- and the answer named only the turns and
+            # blamed "somebody else". Nothing improving a profile that is
+            # already sound is the likelier reason; say which it is.
+            why = ("it is already healthy, and none of them would make it agree with itself more"
+                   if before >= MUDDLED_BELOW else
+                   "none of them is clearly this person -- the right answer when the recordings are of somebody else")
+            return True, (f"{name}'s profile is unchanged at {before:.2f} agreement with itself: looked at "
+                          f"{where}, and {why}.")
         swapped = f", replacing {dropped} weaker one(s)" if dropped else ""
         return True, (f"added {added} take(s) to {name} from {considered} kept recording(s){swapped}: "
                       f"agreement with itself {before:.2f} -> {after:.2f}. Nobody had to say anything.")

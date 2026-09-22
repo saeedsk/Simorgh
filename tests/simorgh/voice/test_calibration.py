@@ -387,6 +387,27 @@ class RelearnPrefersCalibration(unittest.TestCase):
             self.assertTrue(ok, said)
             self.assertIn("kept recording", said)
 
+    class _Healthy:
+        """A sound 0.83 profile nothing improves."""
+
+        def relearn(self, name, vectors):
+            return 0, 0, len(vectors), 0.83, 0.83
+
+    def test_nothing_better_for_a_healthy_profile_says_so_and_names_both_sources(self):
+        """Live, 2026-09-22: 67 calibration takes and 300 kept turns, a
+        0.83 profile -- and the answer named only the turns and said the
+        recordings were probably somebody else's."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            run = CalibrationRun("Saeed", tmp / "cal", script=[by_id("en-009")], measure_fn=lambda p, r: GOOD)
+            run.consider(_speech(1.0), transcript="Sim, put the charts on the TV.")
+            self._old_turn(tmp / "audio")
+            ok, said = self._service(tmp)._relearn_from_kept(self._Healthy(), "Saeed")  # noqa: SLF001
+            self.assertTrue(ok)
+            self.assertIn("1 calibration take(s)", said)
+            self.assertIn("already healthy", said)
+            self.assertNotIn("somebody else", said)
+
     @staticmethod
     def _old_turn(folder: Path) -> None:
         from simorgh.voice.api import Audio
