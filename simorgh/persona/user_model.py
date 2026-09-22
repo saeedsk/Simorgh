@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from simorgh.contracts.channels import CONSOLE_CHANNELS, is_console
+
 _PREFER_RE = re.compile(r"\bi prefer\s+(.+?)[.!]?$", re.IGNORECASE)
 # A name may be hyphenated or carry an apostrophe ("Ira-bear", "D'Arcy"):
 # `\w+` alone kept "Ira" of "call me Ira-bear" and dropped the part that
@@ -62,13 +64,10 @@ def _sanitize_facet_value(value: str) -> str:
     return collapsed[:_MAX_FACET_CHARS].rstrip() + "..."
 
 
-#: The channels that are the machine's own keyboard. A typed turn there
-#: names nobody and is the owner's -- the same convention as
-#: `guardian/tiers.py::role_of`, which treats "" and "cli" with no
-#: requester as the owner (it is his console; treating it as a stranger
-#: would lock the creator out of his own system). Every other channel has
-#: to name somebody.
-CONSOLE_CHANNELS: tuple[str, ...] = ("", "cli")
+#: The machine's own keyboard, whose turns that name nobody are the
+#: owner's: one answer, `contracts/channels.py::CONSOLE_CHANNELS`, shared
+#: with `guardian/tiers.py::role_of` and World Model's People store.
+#: Re-exported here for `persona.api`.
 
 #: The key a console turn's facets are kept under in this process. World
 #: Model maps it to whoever the People store says is the owner.
@@ -93,7 +92,7 @@ def attribute(payload: dict) -> str | None:
     channel = str(payload.get("channel") or "").strip()
     if speaker:
         return None if str(payload.get("speaker_doubt") or "").strip() else speaker
-    return OWNER if channel in CONSOLE_CHANNELS else None
+    return OWNER if is_console(channel) else None
 
 
 @dataclass(frozen=True)

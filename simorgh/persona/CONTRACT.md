@@ -17,7 +17,7 @@ Persona owns Sim's continuous mood (valence, arousal, cognitive load), the rule-
 | `simorgh/persona/mood.py` | `EmotionalState` and `MoodEngine`: apply delta, set, decay toward baseline, restore, bounded history |
 | `simorgh/persona/service.py` | the `Service`: subscriptions, mood restore, announce-on-change, voice replies |
 | `simorgh/persona/sharing.py` | `SharePolicy`: per-kind cooldown, quiet period after user activity, hourly cap |
-| `simorgh/persona/user_model.py` | `UserModel`: regex facet extraction with confidence merge, per person (`facets(person)`, `extract_from_text(..., person=)`), values sanitised for a prompt block; `attribute(payload)` says whose sentence a percept is (a named, undoubted speaker; `OWNER` "" for the console, `CONSOLE_CHANNELS` = `("", "cli")`, the `guardian/tiers.py::role_of` convention; None for anybody else) |
+| `simorgh/persona/user_model.py` | `UserModel`: regex facet extraction with confidence merge, per person (`facets(person)`, `extract_from_text(..., person=)`), values sanitised for a prompt block; `attribute(payload)` says whose sentence a percept is (a named, undoubted speaker; `OWNER` "" for the console, `contracts/channels.py::is_console` -- `CONSOLE_CHANNELS` is re-exported from there, the same answer `guardian/tiers.py::role_of` and World Model use; None for anybody else) |
 | `simorgh/persona/voice.py` | `mood_phrase` and `VoiceComposer`: identity summary + mood phrase within `voice_max_chars` |
 
 ## Consumes
@@ -41,7 +41,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 | Topic | Schema | Where | When |
 |---|---|---|---|
 | `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/persona/service.py | a mood change of at least 1e-4, a health reset, or decay past `decay_announce_delta` (consumed by Growth, Interface, Voice) |
-| `persona.user_model.updated` | `messages/persona.py::PersonaUserModelUpdated` | simorgh/persona/service.py | a facet is extracted from an attributable percept (consumed by World Model, which files it in that person's `preferences`). Payload also carries `person` (household name, "" for the console) and `channel` -- extra keys the schema admits (`additionalProperties`) but does not yet declare: declaring them as `O("person", Str)`, `O("channel", Str)` in `messages/persona.py::PersonaUserModelUpdated` needs the `contracts` lock |
+| `persona.user_model.updated` | `messages/persona.py::PersonaUserModelUpdated` | simorgh/persona/service.py | a facet is extracted from an attributable percept (consumed by World Model, which files it in that person's `preferences`). Payload also carries `person` (household name, "" for the console) and `channel`, declared optional in the schema since 2026-09-22 |
 | `persona.voice.reply` | `messages/persona.py::PersonaVoiceReply` | simorgh/persona/service.py | reply to `persona.voice` (via `bus.reply`) |
 
 ## Ledger streams
@@ -115,7 +115,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - Stage 1 (telemetry out of the decision log): `persona.state.changed` spans are sampled at 1/50 in the telemetry store.
 - Stage 4 item 4: one `ContextBuilder` in Orchestration renders "persona voice" in a fixed prefix order, the direction V6 names ("persona as an injected reader" instead of a bus request per prompt).
 - Stage 5 item 4: `persona/user_model.py`'s regex extraction is retired in favour of entity-linked facts and a per-person digest.
-- Stage 6 item 4, done 2026-09-22: facts go to the speaker's `Person.preferences`, not a household-wide profile. Open: `CONSOLE_CHANNELS` is repeated in `worldmodel/facets/people.py` and `guardian/tiers.py::role_of`; it belongs in `contracts/channels.py`.
+- Stage 6 item 4, done 2026-09-22: facts go to the speaker's `Person.preferences`, not a household-wide profile. Follow-up done the same day: the console convention is `contracts/channels.py::CONSOLE_CHANNELS`/`is_console`, and `person`/`channel` are declared on `persona.user_model.updated`.
 - Stage 6 item 6: `persona/sharing.py` moves into the new `initiative/` module with Curiosity's sharing and reminder delivery.
 
 ## Working on this module

@@ -26,6 +26,23 @@ class Attribution(unittest.TestCase):
                                      "speaker_doubt": "Ira sounds almost the same"}))
 
 
+    def test_the_console_is_the_one_in_contracts(self):
+        """One convention (2026-09-22): `contracts/channels.py`."""
+        from simorgh.contracts import channels
+        from simorgh.persona.user_model import CONSOLE_CHANNELS
+        self.assertIs(CONSOLE_CHANNELS, channels.CONSOLE_CHANNELS)
+        for channel in channels.ALL + ("",):
+            self.assertEqual(attribute({"channel": channel}) == OWNER, channels.is_console(channel), channel)
+
+    def test_a_doubtful_voice_is_nobody_whoever_it_names(self):
+        for doubt in ("Ira sounds almost the same", " maybe "):
+            self.assertIsNone(attribute({"channel": "voice", "speaker": "Saeed", "speaker_doubt": doubt}))
+        # ...and doubt on the console does not make the owner somebody else.
+        self.assertIsNone(attribute({"channel": "cli", "speaker": "Ira", "speaker_doubt": "guessed"}))
+        # A blank doubt is no doubt.
+        self.assertEqual(attribute({"channel": "voice", "speaker": "Ira", "speaker_doubt": "  "}), "Ira")
+
+
 class PerPerson(unittest.TestCase):
     def test_one_persons_facets_never_merge_with_anothers(self):
         model = UserModel()
