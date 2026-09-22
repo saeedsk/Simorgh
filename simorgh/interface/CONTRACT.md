@@ -77,7 +77,7 @@ Replies received by request/reply: `task.list.reply`, `task.create.reply`, `syst
 | `system.status.request` | `messages/system.py` | dispatch.py; httpapi.py:1028 | `status` and `/api/status` |
 | `system.schedule.add`, `system.schedule.cancel`, `system.tick.idle` | `messages/system.py` | dispatch.py:749, 814, 353 | `schedule`, `remind`, `idle` commands |
 | `benchmark.run.request`, `.history`, `.suites`, `.load`, `.stop` | `messages/benchmark.py` | dispatch.py; httpapi.py:1013 | `benchmark` command and `/api/benchmarks` |
-| `voice.status|control|speak|listen|voices|devices|models|bench.request` | `messages/voice.py` | dispatch.py | `voice ...` commands |
+| `voice.status|control|speak|listen|voices|devices|models|bench.request` | `messages/voice.py` | dispatch.py | `voice ...` commands. `voice calibrate [name] [aloud] [short] [en|fa] [room=..] [distance=..]` and `voice calibrate status|stop|keep|accept|skip [name]` send `voice.control.request{action: "enroll", key: "calibrate", value: "<verb> [options]", name?}` -- the action enum has no `calibrate` (voice/CONTRACT.md, Known issues) |
 | `curiosity.interest.add`, `curiosity.interest.list.request` | `messages/curiosity.py` | dispatch.py:366-368 | `interest` command |
 | `world.env.query` | `messages/world.py::WorldEnvQuery` | dispatch.py:664, 1652 | `status` and tool listing |
 
@@ -227,6 +227,8 @@ Lock it first (`python tools/modlock.py claim interface --by <you> --task "..."`
 - `help` lists one line per command, with `· help <name>: N ways` where a command has several; `help all` is the full manual with every word (the default until 2026-09-19, when it had grown to 120 lines).
 
 - `capabilities` and `skills list` render as panels (`render.capabilities_panel`, `render.skills_panel`): a count, sections (Ready / Not available; Installed / Written by Sim), one aligned row each with a coloured dot, cut to the terminal at a word.
+
+- `voice calibrate` (2026-09-22): a script read once and kept forever (voice/calibration.py). The verb is in `dispatch._voice`, `help voice` (`parser.SUBCOMMANDS`), the did-you-mean list and the unknown-verb line (`tests/simorgh/interface/test_voice_calibrate_verb.py`). Nothing new is rendered here: each line to read and each verdict arrive as `ui.notice` (source `voice calibrate`) and each take as `voice.transcript{enrolling}`, both already shown.
 
 - A voice turn's reply is printed at `turn.completed` (channel `voice`), while it is still being spoken; the later `voice.spoken` adds only an interruption note. It used to appear only when playback ended.
 

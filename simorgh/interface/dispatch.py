@@ -513,6 +513,23 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
         return await _request(bus, topics.VOICE_CONTROL_REQUEST,
                               {"action": "enroll", "name": " ".join(words), **({"relation": relation} if relation else {})},
                               timeout=30.0, render=voiceview.controlled)
+    if verb in ("calibrate", "calibration"):
+        # A script read once and kept forever (voice/calibration.py). It
+        # rides `enroll` with key=calibrate: the wire's action enum has
+        # no word of its own for it (voice/CONTRACT.md says so).
+        words = rest.strip().split()
+        controls = ("status", "stop", "keep", "accept", "skip")
+        if words and words[0].lower() in controls:
+            value, names = words[0].lower(), words[1:]
+        else:
+            flags = ("aloud", "short", "en", "fa", "english", "farsi")
+            options = [w for w in words if w.lower() in flags or "=" in w]
+            names = [w for w in words if w not in options]
+            value = " ".join(["start", *options])
+        payload = {"action": "enroll", "key": "calibrate", "value": value}
+        if names:
+            payload["name"] = " ".join(names)
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, payload, timeout=30.0, render=voiceview.controlled)
     if verb in ("pronounce", "say-as"):
         words = rest.strip().split()
         if len(words) >= 3 and words[1].lower() == "as":
@@ -582,11 +599,11 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
 
     close = difflib.get_close_matches(verb, ["status", "on", "off", "mute", "unmute", "barge", "listen", "test", "say",
                                              "voices", "devices", "models", "set", "bench", "enroll", "people", "family", "whois",
-                                             "forget", "pronounce", "tidy", "relearn"], n=1, cutoff=0.6)
+                                             "forget", "pronounce", "tidy", "relearn", "calibrate"], n=1, cutoff=0.6)
     if close:
         return Outcome(f"voice: unknown verb {verb!r} -- did you mean `voice {close[0]}`?")
     return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | barge on|off | listen [s] "
-                   f"| test <text> | enroll <name> | relearn <name> | tidy <name> | people | whois "
+                   f"| test <text> | enroll <name> | relearn <name> | calibrate [name] | tidy <name> | people | whois "
                    f"| forget <name> | pronounce <name> <as> "
                    f"| voices | devices | models [name] | set [key value] | bench [quiet]  (`help voice`)")
 
