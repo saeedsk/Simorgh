@@ -222,6 +222,23 @@ class Service:
     #: that sound like the room as it is now.
     RELEARN_LOOKS_AT = 300
 
+    def _rebuild_from_calibration(self, book, name: str, embedder) -> tuple[bool, str]:
+        """`voice calibrate apply`: `name`'s profile from their calibration
+        set (`SpeakerBook.rebuild`). In a thread: it embeds every take."""
+        from .calibration import person_folder, read_rows, read_samples
+
+        rows = read_rows(self.config.calibration_dir, name)
+        if not rows:
+            return False, f"{name} has no calibration takes -- `voice calibrate {name}` records them"
+        takes = []
+        for row in rows:
+            try:
+                samples, rate = read_samples(person_folder(self.config.calibration_dir, name) / str(row.get("file") or ""))
+                takes.append((embedder.embed(samples, rate), str(row.get("language") or "")))
+            except Exception:  # noqa: BLE001 -- one unreadable take is not the end of a rebuild
+                continue
+        return book.rebuild(name, takes)
+
     def _relearn_from_calibration(self, book, name: str, embedder) -> tuple[bool, str] | None:
         """`voice relearn` from the person's calibration takes, or None
         when they have none (or none would improve the profile) and the
@@ -664,7 +681,7 @@ class Service:
 
         words = str(payload.get("value") or "start").split()
         verb = words[0].lower() if words else "start"
-        if verb not in ("start", "status", "stop", "keep", "accept", "skip"):
+        if verb not in ("start", "status", "stop", "keep", "accept", "skip", "apply"):
             verb, options = "start", words          # `aloud short` alone is a start
         else:
             options = words[1:]
@@ -679,6 +696,13 @@ class Service:
             if live is not None:
                 text += f"\nrecording {live.person} now: {live.progress()} -- `voice calibrate stop` to pause"
             return True, f"{text}\nfiles: {person_folder(folder, name)} (never pruned; keep it in backups)"
+        if verb == "apply":
+            if live is not None:
+                return False, f"calibrating {live.person} right now -- `voice calibrate stop` first"
+            embedder = getattr(session, "_embedder", None) if session is not None else None
+            if embedder is None:
+                return False, "the speaker embedder is not loaded (`voice on` first), so nothing can be measured"
+            return await asyncio.to_thread(self._rebuild_from_calibration, book, name, embedder)
         if verb == "stop":
             said = session.stop_calibration() if session is not None and hasattr(session, "stop_calibration") else ""
             return (True, said) if said else (False, "no calibration is running")

@@ -120,7 +120,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
               ("relearn <name>", "rebuild a voice profile from recordings already kept -- nobody re-records"),
               ("calibrate [name] [aloud] [short] [en|fa]",
                "read a script once (English + Farsi), kept forever, so Sim can be re-tuned later without asking "
-               "again; resumes where it stopped -- `voice calibrate status|stop|skip|keep`"),
+               "again; resumes where it stopped -- `voice calibrate status|stop|skip|keep`; `voice calibrate apply` rebuilds the voice profile from the set"),
               ("pronounce <name> <as>", "how Sim says a name aloud (voice pronounce Saoirse Seer-sha); the screen keeps the spelling"),
               ("models chatterbox|miso", "install an expressive engine in its own environment; then `voice set tts chatterbox`"),
               ("voices", "the voices the engine has"), ("devices", "microphone, speaker, engines"),

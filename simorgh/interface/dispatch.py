@@ -518,7 +518,7 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
         # rides `enroll` with key=calibrate: the wire's action enum has
         # no word of its own for it (voice/CONTRACT.md says so).
         words = rest.strip().split()
-        controls = ("status", "stop", "keep", "accept", "skip")
+        controls = ("status", "stop", "keep", "accept", "skip", "apply")
         if words and words[0].lower() in controls:
             value, names = words[0].lower(), words[1:]
         else:

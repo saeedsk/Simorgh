@@ -543,6 +543,83 @@ class SpeakerBook:
         self._save(person)
         return added, dropped, considered, before, coherence(person.embeddings)
 
+    def rebuild(self, name: str, takes: Sequence[tuple[Sequence[float], str]], *,
+                keep: int = MAX_TAKES) -> tuple[bool, str]:
+        """Replace `name`'s takes with the most representative of `takes`
+        -- `(vector, group)` pairs, the group a language -- or refuse.
+
+        The calibration set is the person, labelled, read on purpose;
+        this is what it is FOR (`voice calibrate apply`). Found live,
+        2026-09-22: the creator's profile agreed with itself at 0.83 and
+        with his own 67 calibration takes at only 0.41 -- a consistent
+        voice, recorded in other conditions -- so his real turns scored
+        ~0.4 and `relearn` (which never touches the enrolment three and
+        judges against them) could never fix it. Rebuilt from the set,
+        held-out takes scored 0.81.
+
+        Picks by centrality (median cosine to the other takes), each
+        group in proportion (at least one each), the three most central
+        of the largest group first as the "enrolment". Refused, with the
+        profile unchanged, when the result would agree with itself below
+        `MUDDLED_BELOW`, or when any other enrolled person's take comes
+        within the book's threshold of it. The old profile is kept
+        beside the file (`<name>.json.before-<stamp>`).
+        """
+        self._load()
+        person = self._people.get((name or "").strip().lower())
+        if person is None:
+            return False, f"no one called {name!r} is in the speaker book"
+        pool = [([float(x) for x in v], str(g or "")) for v, g in takes if v]
+        if len(pool) < 3:
+            return False, f"{len(pool)} take(s) are not enough to build a profile from"
+        vectors = [v for v, _ in pool]
+        centrality = []
+        for i, v in enumerate(vectors):
+            others = sorted(cosine(v, w) for j, w in enumerate(vectors) if j != i)
+            centrality.append(others[len(others) // 2] if others else 0.0)
+        groups: dict[str, list[int]] = {}
+        for i in sorted(range(len(pool)), key=lambda i: -centrality[i]):
+            groups.setdefault(pool[i][1], []).append(i)
+        keep = max(3, min(int(keep), len(pool)))
+        share = {g: max(1, round(keep * len(ix) / len(pool))) for g, ix in groups.items()}
+        while sum(share.values()) > keep:
+            biggest = max(share, key=lambda g: share[g])
+            share[biggest] -= 1
+        largest = max(groups, key=lambda g: len(groups[g]))
+        picked = groups[largest][:3]
+        for g, ix in sorted(groups.items(), key=lambda kv: kv[0] != largest):
+            for i in ix:
+                if len([p for p in picked if pool[p][1] == g]) >= share[g] or len(picked) >= keep:
+                    break
+                if i not in picked:
+                    picked.append(i)
+        new = [vectors[i] for i in picked]
+        before, after = coherence(person.embeddings), coherence(new)
+        if after < MUDDLED_BELOW:
+            return False, (f"not changed: built from these takes, {person.name}'s profile would agree with itself "
+                           f"only {after:.2f} (needs {MUDDLED_BELOW:.2f})")
+        for other in self._people.values():
+            if other is person or not other.embeddings:
+                continue
+            closest = max(cosine(a, b) for a in other.embeddings for b in new if len(a) == len(b))
+            if closest >= self.threshold:
+                return False, (f"not changed: the new profile comes within {closest:.2f} of {other.name}'s voice "
+                               f"(the book's threshold is {self.threshold:.2f})")
+        path = self._folder / f"{_safe(person.name)}.json"
+        backup = ""
+        if path.exists():
+            import time as _time
+
+            backup_path = path.with_name(f"{path.name}.before-{_time.strftime('%Y%m%d-%H%M%S')}")
+            backup_path.write_bytes(path.read_bytes())
+            backup = backup_path.name
+        person.embeddings[:] = new
+        self._save(person)
+        by_group = ", ".join(f"{len([p for p in picked if pool[p][1] == g])} {g or 'other'}" for g in groups)
+        return True, (f"{person.name}'s profile rebuilt from {len(pool)} calibration take(s): {len(new)} kept "
+                      f"({by_group}); agreement with itself {before:.2f} -> {after:.2f}"
+                      + (f"; the old one is saved as {backup}" if backup else ""))
+
     def tidy(self, name: str) -> tuple[int, float, float]:
         """Drop the learnt takes that are pulling a profile apart.
 
