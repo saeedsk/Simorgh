@@ -35,15 +35,13 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from simorgh.contracts.channels import CONSOLE_CHANNELS, is_console
 from simorgh.contracts.people import Person, from_dict, household_people, normalise_identity
 
 
-#: The machine's own keyboard: a turn there that names nobody is the
-#: owner's. The same convention as `guardian/tiers.py::role_of` and
-#: `persona/user_model.py::CONSOLE_CHANNELS` (World Model may import
-#: neither, so the tuple is repeated; moving it to `contracts/channels.py`
-#: is the follow-up that makes it one answer).
-CONSOLE_CHANNELS: tuple[str, ...] = ("", "cli")
+#: The machine's own keyboard, whose turns that name nobody are the
+#: owner's: `contracts/channels.py::CONSOLE_CHANNELS`, the one answer
+#: Guardian's `role_of` and Persona's attribution also use. Re-exported.
 
 #: What the model is told only above this confidence (Persona's merge:
 #: one clear statement is 0.7, a contradicted one halves).
@@ -207,7 +205,7 @@ class PeopleFacet:
         name = (person or "").strip()
         if name:
             return self.by_name(name)
-        if channel is None or channel.strip() not in CONSOLE_CHANNELS:
+        if channel is None or not is_console(channel.strip()):
             return None
         return self.owner()
 

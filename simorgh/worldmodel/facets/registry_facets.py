@@ -1,7 +1,10 @@
-"""`tools` and `user_profile` facets -- both start empty this session
-(their producers, Execution's `tool.registered` and Persona's
-`persona.user_model.updated`, may not exist yet in a given boot) and
-fill in honestly as those events arrive. Never fabricate an entry.
+"""The `tools` facet -- starts empty this session (its producer,
+Execution's `tool.registered`, may not exist yet in a given boot) and
+fills in honestly as those events arrive. Never fabricate an entry.
+
+The `user_profile` facet that lived here (one global profile for the
+whole household) was removed on 2026-09-22: `user_profile` is now one
+person's preferences, `facets/people.py::UserProfileView`.
 """
 
 from __future__ import annotations
@@ -53,18 +56,3 @@ class ToolsFacet:
     async def get(self, args: dict) -> dict:
         return {"tools": list(self._tools.values())}
 
-
-class UserProfileFacet:
-    name = "user_profile"
-
-    def __init__(self) -> None:
-        self._facets: dict[str, dict] = {}
-
-    def on_updated(self, facet: str, value, confidence: float) -> None:
-        self._facets[facet] = {"value": value, "confidence": confidence}
-
-    def invalidate(self) -> None:
-        pass
-
-    async def get(self, args: dict) -> dict:
-        return {"facets": dict(self._facets)}

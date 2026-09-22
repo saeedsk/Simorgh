@@ -22,8 +22,9 @@ from pathlib import Path
 
 from simorgh.bus.config import Config as BusConfig
 from simorgh.bus.factory import make_backend, make_client
-from simorgh.contracts import topics
+from simorgh.contracts import channels, topics
 from simorgh.contracts.protocols import Context
+from simorgh.contracts.registry import get_spec
 from simorgh.ledger.factory import make_ledger
 from simorgh.persona.config import Config as PersonaConfig
 from simorgh.persona.service import Service as PersonaService
@@ -121,6 +122,38 @@ class PreferencesBelongToTheSpeaker(unittest.IsolatedAsyncioTestCase):
         # Persona did not even publish the three it could not attribute.
         self.assertEqual([u.get("person") for u in self.updates], ["Mallory"])
 
+    async def test_a_doubtful_voice_lands_nowhere_even_as_the_owner(self):
+        """`speaker_doubt` on a household name the store knows -- the
+        owner's included -- files nothing on anybody, and Persona does
+        not even publish it."""
+        await self._say("call me boss", speaker="Saeed", speaker_doubt="Aran sounds almost the same")
+        await self._say("I prefer loud music", speaker="Aran", speaker_doubt="guessed from one word")
+        self.assertTrue(all(not p.preferences for p in self.world._people.all()))
+        self.assertEqual(self.updates, [])
+
+    async def test_the_consoles_fact_lands_on_the_owner(self):
+        await self._say("call me Dad", channel="cli")
+        self.assertEqual(self._prefs("Saeed")["preferred_name"]["value"], "Dad")
+        others = [p.name for p in self.world._people.all() if p.name != "Saeed" and p.preferences]
+        self.assertEqual(others, [])
+        # What travelled says whose it is, in declared fields (not "" alone).
+        self.assertEqual([(u["person"], u["channel"]) for u in self.updates], [("", "cli")])
+        spec_fields = {f.name for f in get_spec(topics.PERSONA_USER_MODEL_UPDATED).fields}
+        self.assertLessEqual(set(self.updates[0]), spec_fields)
+
+    async def test_the_consoles_fact_follows_the_linked_owner(self):
+        """`cli:owner` linked to someone else makes the console theirs."""
+        self.world._people.link("Soodeh", "cli:owner")
+        await self._say("I prefer green tea", channel="cli")
+        self.assertEqual(self._prefs("Soodeh")["preference"]["value"], "green tea")
+        self.assertNotIn("preference", self._prefs("Saeed"))
+
+    async def test_the_owner_by_voice_and_at_the_console_is_one_record(self):
+        await self._say("call me Dad", channel="cli")
+        await self._say("I prefer short answers", speaker="Saeed")
+        self.assertEqual(self._prefs("Saeed")["preferred_name"]["value"], "Dad")
+        self.assertEqual(self._prefs("Saeed")["preference"]["value"], "short answers")
+
     async def test_the_prompt_for_saeeds_turn_does_not_show_iras_preference(self):
         await self._say("call me Ira-bear", speaker="Ira")
         await self._say("I prefer short answers", channel="cli")         # the console is the owner's
@@ -170,6 +203,15 @@ class TheStore(unittest.TestCase):
         self.assertEqual(self.people.speaker("", "").name, "Saeed")
         self.assertIsNone(self.people.speaker("", "voice"))
         self.assertIsNone(self.people.speaker("", None))
+
+    def test_the_console_is_the_one_in_contracts(self):
+        """One convention (2026-09-22): `contracts/channels.py`, which
+        Persona and Guardian's `role_of` read too."""
+        from simorgh.worldmodel.facets.people import CONSOLE_CHANNELS
+        self.assertIs(CONSOLE_CHANNELS, channels.CONSOLE_CHANNELS)
+        for channel in channels.ALL + ("", " cli "):
+            self.assertEqual(self.people.speaker("", channel) is not None,
+                             channels.is_console(channel.strip()), channel)
 
     def test_a_linked_console_wins_over_the_role(self):
         self.people.link("Soodeh", "cli:owner")
