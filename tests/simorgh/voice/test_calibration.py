@@ -445,3 +445,21 @@ class APauseLineSplitInTwo(unittest.TestCase):
             run.consider(_speech(2.0), transcript="What's the plan for tomorrow?")
             row = read_rows(Path(tmp) / "cal", "Saeed")[0]
             self.assertFalse(row.get("stitched"))
+
+
+class AnotherLanguageIsNotAnotherPerson(unittest.TestCase):
+    """Live, fa-005 (2026-09-22): the creator's Farsi scored 0.19 against
+    his English-enrolled profile and was refused as "not Saeed"."""
+
+    def test_the_farsi_bar_is_lower(self):
+        from simorgh.voice.calibration import SPEAKER_BAR_FACTOR
+
+        self.assertLess(SPEAKER_BAR_FACTOR["fa"], 1.0)
+        self.assertNotIn("en", SPEAKER_BAR_FACTOR)
+
+
+class FarsiColloquialCopula(unittest.TestCase):
+    def test_formal_and_colloquial_is_are_the_same_words(self):
+        from simorgh.voice.calibration import wer
+
+        self.assertEqual(wer("به سوده بگو شام آماده‌ست.", "به سوده بگو شام آماده است"), 0.0)

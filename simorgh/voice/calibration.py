@@ -82,6 +82,9 @@ CUT_TAIL_WITHIN_DB = 6.0
 #: failing is what the set is FOR.
 MAX_WER = {"en": 0.5, "fa": 0.75}
 DEFAULT_MAX_WER = 0.6
+#: The speaker bar per language, as a share of the book's: a profile
+#: enrolled in English scores the same person lower in Farsi.
+SPEAKER_BAR_FACTOR = {"fa": 0.5}
 #: A pause line's second half joins the refused first half when it
 #: arrives within this long (the endpoint closes a turn after ~1 s).
 STITCH_WITHIN_S = 6.0
@@ -207,7 +210,11 @@ def normalise(text: str) -> list[str]:
     words = text.split()
     joined: list[str] = []
     for word in words:
-        if joined and word in _FA_SUFFIXES and re.match(r"[\u0600-\u06FF]", joined[-1]):
+        if joined and word == "است" and re.match(r"[\u0600-\u06FF]", joined[-1]):
+            # "آماده است" and the colloquial "آماده‌ست" are the same words
+            # (live, fa-007, 2026-09-22: a correct transcript scored 0.4).
+            joined[-1] += "ست"
+        elif joined and word in _FA_SUFFIXES and re.match(r"[\u0600-\u06FF]", joined[-1]):
             joined[-1] += word
         elif joined and joined[-1] in _FA_PREFIXES and re.match(r"[\u0600-\u06FF]", word):
             joined[-1] += word
@@ -568,9 +575,15 @@ class CalibrationRun:
             score = float(self.book.score(vector, person))
             coherence_now = float(coherence(person.embeddings))
             profile_takes = len(person.embeddings)
-            if score < self.score_bar:
+            # A profile enrolled in one language hears the same person a
+            # little less surely in another: the creator's English takes
+            # scored ~0.4, his Farsi 0.19-0.39 (live, 2026-09-22), and a
+            # Farsi line was refused as "not Saeed" at 0.19. The check is
+            # there to catch the wrong PERSON, not an accent shift.
+            bar = self.score_bar * SPEAKER_BAR_FACTOR.get(line.language, 1.0)
+            if score < bar:
                 reasons.append(f"that did not sound like {person.name} ({score:.2f} against a bar of "
-                               f"{self.score_bar:.2f})")
+                               f"{bar:.2f})")
         error = wer(line.text, transcript)
         cut = "cut off -- it ends mid-word"
         if cut in reasons:
