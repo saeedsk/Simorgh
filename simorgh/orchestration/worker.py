@@ -34,6 +34,12 @@ from .session import SessionRunner
 
 # The most any one attempt may spend, whatever a task asks for. Nine
 # attempts (`[planning] max_blocked_retries`) of this is the true ceiling.
+
+#: What the conversation records for a turn that ended without an answer
+#: (cancelled, failed, blocked), so it is never read as still pending.
+UNANSWERED_NOTE = ("(Not answered and not acted on -- that turn was interrupted. It is not pending: "
+                   "do it only if they ask again.)")
+
 MAX_STEP_CAP = 200
 
 
@@ -460,6 +466,15 @@ class Worker:
         answer = strip_tone(str(outcome.result_summary or "")).strip() if outcome.kind == "completed" else ""
         if not answer and not text:
             return
+        if not answer and text:
+            # A turn that was cancelled, failed or blocked used to be
+            # written as the person's line with NO answer -- which reads,
+            # to the next turn's model, as a request still waiting. Live,
+            # 2026-09-22: "صدای تلویزیون رو کم کن" (turn the TV down) was
+            # interrupted by the next sentence; seven minutes later an
+            # unrelated "You see him, he's talking now" arrived and the
+            # model turned the TV down. Say plainly that it was dropped.
+            answer = UNANSWERED_NOTE
         try:
             await append_exchange(self._ledger, conversation_id(session.channel, session.speaker),
                                   user_text=text, answer=answer, who=session.speaker or "User",

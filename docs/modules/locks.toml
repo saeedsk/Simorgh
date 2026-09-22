@@ -41,6 +41,12 @@ task = "voice calibrate: the reusable calibration set"
 since = "2026-09-22T11:41:42+00:00"
 until = "2026-09-22T19:41:42+00:00"
 
+[locks.orchestration]
+by = "opus-main"
+task = "an interrupted request is not left pending in the conversation"
+since = "2026-09-22T13:46:11+00:00"
+until = "2026-09-22T21:46:11+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "voice calibrate: the reusable calibration set"
