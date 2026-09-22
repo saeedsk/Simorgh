@@ -561,6 +561,16 @@ class CalibrationRun:
                 reasons.append(f"that did not sound like {person.name} ({score:.2f} against a bar of "
                                f"{self.score_bar:.2f})")
         error = wer(line.text, transcript)
+        cut = "cut off -- it ends mid-word"
+        if cut in reasons:
+            # The tail test alone refused a clean read twice, live: a line
+            # ending on a held sound ("...home with Aran." -- the final /n/)
+            # is still loud when the take ends (2026-09-22, en-007). A take
+            # really cut mid-word loses its last word, so it stands only
+            # when the recogniser did NOT hear the line's last word.
+            said, wanted = normalise(transcript), normalise(line.text)
+            if said and wanted and said[-1] == wanted[-1]:
+                reasons.remove(cut)
         bar = MAX_WER.get(line.language, DEFAULT_MAX_WER)
         misread = error > bar
         if misread:

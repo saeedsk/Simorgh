@@ -197,6 +197,22 @@ class ARun(unittest.TestCase):
         self.assertIn("Sim, put the charts on the TV.", verdict.message)
         self.assertEqual(read_rows(self.folder, "Saeed"), [], "nothing filed")
 
+    def test_a_loud_ending_is_not_cut_off_when_the_last_word_was_heard(self):
+        """Live, 2026-09-22: en-007 ends "...with Aran." -- the held /n/
+        is still loud when the take ends, and the tail test refused a
+        clean read twice. A take really cut mid-word loses its last word."""
+        loud_tail = Levels(duration_s=3.0, speech_s=2.0, speech_dbfs=-25.0, noise_dbfs=-65.0,
+                           clipping=0.0, tail_dbfs=-27.0)
+        run = self._run(measure_fn=lambda pcm, rate: loud_tail)
+        heard_all = run.consider(_speech(), transcript="Sim, put the charts on the TV.")
+        self.assertEqual(heard_all.kind, "accepted", heard_all.message)
+        run = self._run(measure_fn=lambda pcm, rate: loud_tail)
+        run.consider(_speech(), transcript="Turn off the kitchen lights.")   # en-022 is next; move past en-009
+        cut = self._run(measure_fn=lambda pcm, rate: loud_tail)
+        missing_end = cut.consider(_speech(), transcript="Turn off the kitchen")
+        self.assertEqual(missing_end.kind, "rejected")
+        self.assertIn("cut off", missing_end.message)
+
     def test_a_voice_that_is_not_the_person_is_refused(self):
         book = _Book([[1.0, 0.0]])
         run = self._run(book=book)
