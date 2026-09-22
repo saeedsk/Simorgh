@@ -82,6 +82,12 @@ class DecisionContext:
     #: speaker-verified. None where nothing can answer -- which
     #: `PresenceRule` treats as "not present", never as "present".
     presence: Callable[[str], Awaitable[tuple[float, bool]]] | None = None
+    #: `(person) -> role` from World Model's People store (stage 6 item
+    #: 4), or None when the store has no record of them or cannot be
+    #: asked -- `PersonRule` then falls back to `contracts/household.py`.
+    #: Without it a role set through the `people` tool changed nothing
+    #: Guardian decided.
+    role: Callable[[str], Awaitable[str | None]] | None = None
 
 
 @dataclass(frozen=True)

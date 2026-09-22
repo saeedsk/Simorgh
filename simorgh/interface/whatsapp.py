@@ -106,8 +106,8 @@ class WhatsAppChannel:
             return ("no SIM_WHATSAPP_APP_SECRET: the webhook cannot check Meta's signature, so it "
                     "refuses every message -- an unsigned public endpoint starts real turns in this house")
         if not self._allowed:
-            return ("no [interface] whatsapp_allowed: nobody may talk to Sim here yet -- "
-                    "list the phone numbers that may")
+            return ("no [interface] whatsapp_allowed: only numbers linked to a person may talk to Sim here -- "
+                    "or list the phone numbers that may")
         return ""
 
     async def start(self) -> tuple[bool, str]:
@@ -173,7 +173,7 @@ class WhatsAppChannel:
 
     async def _on_message(self, message: dict, sender: str) -> None:
         wa_id = str(message.get("from") or sender or "")
-        if not channels.allowed(wa_id, self._allowed):
+        if not channels.allowed(wa_id, self._allowed) and not await self._stored_name(f"whatsapp:{wa_id}"):
             # Silence. A refusal would confirm to a stranger that
             # something is here and listening.
             self._log("warning", "whatsapp.sender_refused")
@@ -237,16 +237,21 @@ class WhatsAppChannel:
         People store first, `channels.person_for` as the fallback. A
         number nobody has claimed resolves to nothing, never to the
         number -- it must not reach the bus."""
+        return await self._stored_name(identity) or channels.person_for(sender)
+
+    async def _stored_name(self, identity: str) -> str:
+        """The person the People store links `identity` to, or "".
+
+        Also the second way in, beside `whatsapp_allowed` (stage 6 item
+        4): a number linked to somebody -- a tier-3 action a person
+        confirms -- may write. Only a link admits."""
         try:
             reply = await self._bus.request(Message.new(
                 topics.WORLD_ENV_QUERY, source="interface",
                 payload={"what": "people", "args": {"identity": identity}}), timeout=1.0)
-            name = str(((reply.payload or {}).get("person") or {}).get("name") or "")
-            if name:
-                return name
-        except Exception:  # noqa: BLE001 -- no world model, no link; fall back
-            pass
-        return channels.person_for(sender)
+            return str(((reply.payload or {}).get("person") or {}).get("name") or "")
+        except Exception:  # noqa: BLE001 -- no world model: no link
+            return ""
 
     async def _send(self, wa_id: str, text: str) -> None:
         if len(text) > MAX_REPLY:

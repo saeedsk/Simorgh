@@ -83,8 +83,14 @@ class PersonRule:
     layer = "person"
 
     async def evaluate(self, proposal: Proposal, ctx) -> Decision:
-        role = role_of(getattr(proposal, "requester", "") or "",
-                       channel=getattr(proposal, "requester_channel", "") or "")
+        requester = getattr(proposal, "requester", "") or ""
+        stored = None
+        if requester.strip() and getattr(ctx, "role", None) is not None:
+            # The People store first: it is where a role is set (stage 6
+            # item 4). The household file answers only for somebody the
+            # store has no record of.
+            stored = await ctx.role(requester.strip())
+        role = stored or role_of(requester, channel=getattr(proposal, "requester_channel", "") or "")
         tier, why = tier_of(proposal, getattr(ctx, "tool", None))
         if tier <= CEILING.get(role, 0):
             return Decision("abstain", self.layer)

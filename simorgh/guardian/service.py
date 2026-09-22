@@ -646,6 +646,7 @@ class Service:
             # house (stage 6 item 5). Asked of World Model, which owns
             # the belief; Guardian keeps no presence of its own.
             presence=self._presence_of,
+            role=self._role_in_store,
         )
 
         stream = f"action:{action_id}"
@@ -800,6 +801,33 @@ class Service:
         # Absent means NOT verified. A world model that does not say
         # whether it could tell one voice from another has not said yes.
         return (float(payload.get("belief") or 0.0), bool(payload.get("verified", False)))
+
+    async def _role_in_store(self, person: str) -> str | None:
+        """`person`'s role in the People store, or None for no record.
+
+        The store is where a role is SET -- `people set_role`, a tier-3
+        action a person confirms -- and until 2026-09-22 Guardian read
+        roles only from `contracts/household.py`, so setting one changed
+        nothing here (stage 6 items 4-5). None when World Model is slow,
+        absent or has never heard of them: `PersonRule` then uses the
+        household file, which is what it did before.
+        """
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+        from simorgh.contracts.people import ROLES
+
+        try:
+            reply = await self._ctx.bus.request(
+                Message.new(topics.WORLD_ENV_QUERY, source=self._ctx.source,
+                            payload={"what": "people", "args": {"name": person}}),
+                timeout=0.5)
+        except Exception:  # noqa: BLE001 -- no answer: the household file decides
+            return None
+        payload = reply.payload or {}
+        if not payload.get("person"):
+            return None
+        role = str(payload.get("role") or "")
+        return role if role in ROLES else None
 
     def _rejected_similarity(self, code: str):
         return rule_defs.similarity(code, self._rejected_excerpts, self._config.immunity_similarity_threshold)

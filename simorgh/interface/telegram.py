@@ -107,8 +107,8 @@ class TelegramChannel:
         if not self._token:
             return "no SIM_TELEGRAM_TOKEN secret: talk to @BotFather, then set it"
         if not self._allowed:
-            return ("no [interface] telegram_allowed: nobody may talk to Sim here yet -- "
-                    "list the usernames or numeric ids that may")
+            return ("no [interface] telegram_allowed: only handles linked to a person "
+                    "(`people link <name> telegram:<handle>`) may talk to Sim here")
         return ""
 
     async def start(self) -> tuple[bool, str]:
@@ -183,7 +183,7 @@ class TelegramChannel:
         who = str(sender.get("username") or "") or str(sender.get("id") or "")
         # Silence, not a refusal. Answering a stranger confirms that
         # something is here and listening.
-        if not channels.allowed(who, self._allowed):
+        if not channels.allowed(who, self._allowed) and not await self._linked(f"telegram:{who}"):
             self._log("warning", "telegram.sender_refused", sender=channels.normalise_sender(who))
             return
 
@@ -226,6 +226,27 @@ class TelegramChannel:
             return
         await self._send(chat_id, text)
 
+    async def _linked(self, identity: str) -> bool:
+        """Whether the People store links `identity` to a person.
+
+        The second way in, beside `telegram_allowed` (stage 6 item 4):
+        linking a handle to somebody is a tier-3 action a person
+        confirms, and it was not enough to let them write -- the config
+        list and the store were two answers to one question. Only a
+        LINK admits: a handle that merely spells a household name does
+        not, because anyone can choose that username.
+        """
+        return bool(await self._stored_name(identity))
+
+    async def _stored_name(self, identity: str) -> str:
+        try:
+            reply = await self._bus.request(Message.new(
+                topics.WORLD_ENV_QUERY, source="interface",
+                payload={"what": "people", "args": {"identity": identity}}), timeout=1.0)
+            return str(((reply.payload or {}).get("person") or {}).get("name") or "")
+        except Exception:  # noqa: BLE001 -- no world model: no link
+            return ""
+
     async def _person_for(self, identity: str, sender: str) -> str:
         """The household name behind a handle (stage 6 item 4).
 
@@ -239,17 +260,7 @@ class TelegramChannel:
         handle itself: an address on the bus is an address in the
         ledger and in memory tags for ever.
         """
-        try:
-            reply = await self._bus.request(Message.new(
-                topics.WORLD_ENV_QUERY, source="interface",
-                payload={"what": "people", "args": {"identity": identity}}), timeout=1.0)
-            person = (reply.payload or {}).get("person") or {}
-            name = str(person.get("name") or "")
-            if name:
-                return name
-        except Exception:  # noqa: BLE001 -- no world model, no link; fall back
-            pass
-        return channels.person_for(sender)
+        return await self._stored_name(identity) or channels.person_for(sender)
 
     async def _send(self, chat_id: int, text: str) -> None:
         if len(text) > MAX_REPLY:

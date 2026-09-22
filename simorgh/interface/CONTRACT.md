@@ -128,9 +128,9 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 | `http_status_timeout_s` | `3.0` | yes |
 | `http_chat_timeout_s` | `130.0` | yes |
 | `api_max_body_bytes` | `1000000` | yes |
-| `telegram_allowed` | `()` | yes |
+| `telegram_allowed` | `()` | yes; a handle the People store links to a person is admitted too (stage 6 item 4) -- a link, never a handle that merely spells a household name |
 | `telegram_poll_s` | `25.0` | yes |
-| `whatsapp_allowed` | `()` | yes |
+| `whatsapp_allowed` | `()` | yes; a number the People store links to a person is admitted too (stage 6 item 4) |
 | `whatsapp_api_version` | `'v21.0'` | yes |
 | `history_stream` | `'metrics:history'` | yes |
 | `history_default_minutes` | `10.0` | yes |
