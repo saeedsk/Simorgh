@@ -922,3 +922,26 @@ class ABrokenFileIsNotABadImage(unittest.TestCase):
     def test_no_secrets_file_at_all_is_fine(self):
         """Env-only deployments have none, and always worked."""
         self.assertEqual(self._loader().config_files_parse(self.repo), (True, ""))
+
+
+class TheHouseGateLeavesTheRepoAlone(unittest.TestCase):
+    """Without `--findings`, `simorgh.evals house` writes
+    `docs/findings/<date>-house.md`; the gate ran it on every boot, so a
+    machine file landed in the hand-written record and the live checkout
+    was left dirty each day (2026-09-22)."""
+
+    def test_the_report_goes_to_the_notes(self):
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen["argv"] = list(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout="house: 10/10 expectations\n", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(simloader.subprocess, "run", side_effect=fake_run):
+            notes = Path(tmp) / "notes"
+            simloader.run_house(Path(tmp), notes)
+        argv = seen["argv"]
+        self.assertIn("--findings", argv)
+        target = argv[argv.index("--findings") + 1]
+        self.assertTrue(target.startswith(str(notes)), target)
+        self.assertNotIn("docs/findings", target)

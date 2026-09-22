@@ -53,6 +53,7 @@ import re
 import select
 import shutil
 import subprocess
+import tempfile
 import sys
 import termios
 import threading
@@ -670,7 +671,13 @@ def run_house(repo: Path, notes: Path | None) -> tuple[bool, str]:
     say("five scenarios against a booted Sim -- a misheard name, a camera at night, a child at the "
         "door, a memory across a restart, the terminal -- about three minutes, no model, no money")
     try:
-        proc = subprocess.run([sys.executable, "-u", "-m", "simorgh.evals", "house", "--fast"],
+        # The report goes beside `last_house.txt`, not into the repo:
+        # without `--findings` the pack writes `docs/findings/<date>-house.md`
+        # on every boot -- a machine file in the hand-written record, and an
+        # untracked change in the live checkout each day (2026-09-22).
+        findings = str((notes or Path(tempfile.gettempdir())) / "last_house_findings.md")
+        proc = subprocess.run([sys.executable, "-u", "-m", "simorgh.evals", "house", "--fast",
+                               "--findings", findings],
                               cwd=repo, capture_output=True, text=True, timeout=900)
     except (subprocess.TimeoutExpired, OSError) as exc:
         say(f"the house did not run ({exc}); the unit suite still decides", "warn")

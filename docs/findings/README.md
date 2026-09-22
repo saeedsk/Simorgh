@@ -20,7 +20,6 @@ What changes next, and in what order, lives in `docs/plan/`. The 2026-09-14 benc
 | 2026-09-20 | [2026-09-20-stage-8-growth-merge.md](2026-09-20-stage-8-growth-merge.md) | The growth merge (18 to 16 subsystems), what an estimate rests on, clustering, Thompson exploration, the night |
 | 2026-09-20 | [2026-09-20-house-simulator.md](2026-09-20-house-simulator.md) | Stage 11 items 1-3: identification and WER by distance and noise; a talking television transcribed instead of the person |
 | 2026-09-20 | [2026-09-20-house-pack.md](2026-09-20-house-pack.md) | Stage 11 items 4-12: the scenario pack turned on a whole Sim, the falsifiability finding, arcs, benchmarks, latency |
-| 2026-09-20 | [2026-09-20-house.md](2026-09-20-house.md) | An observer run of the house pack (10/10 expectations) |
 | 2026-09-20 | [2026-09-20-what-a-scenario-was-paying-for.md](2026-09-20-what-a-scenario-was-paying-for.md) | Stage 11 item 8's `--profile` and the first thing it found |
 | 2026-09-20 | [2026-09-20-the-television-answered-as-a-person.md](2026-09-20-the-television-answered-as-a-person.md) | A documentary's narration answered as the creator, live |
 | 2026-09-20 | [2026-09-20-kill-and-resume.md](2026-09-20-kill-and-resume.md) | Stage 0 item 30's kill-and-resume drill with a real model: nothing that had succeeded ran again |
