@@ -1,5 +1,5 @@
-"""Observer W21-09: skill distillation (`reflection/distillation.py` +
-`reflection/service.py::_maybe_distil`) against a real Reflection
+"""Observer W21-09: skill distillation (`simorgh/growth/monitors/distillation.py` +
+`simorgh/growth/monitors/service.py::_maybe_distil`) against a real Reflection
 service -- same composition shape as
 `test_reflection_health_patterns_calibration.py`.
 

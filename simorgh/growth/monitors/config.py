@@ -1,4 +1,4 @@
-"""`simorgh.toml [reflection]` (spec section 3.5)."""
+"""`simorgh.toml [growth.monitors]` (spec section 3.5)."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class Config:
     # Repeated Guardian denials. One denial is Guardian working; the
     # same denial five times in an hour is a defect or a bad habit,
     # and either way it is Sim's job to raise, not the creator's to
-    # read off the terminal (reflection/denials.py).
+    # read off the terminal (simorgh/growth/monitors/denials.py).
     denial_window_seconds: float = 3600.0
     denial_min_repeats: int = 5
 

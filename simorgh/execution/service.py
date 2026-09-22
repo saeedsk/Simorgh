@@ -15,7 +15,7 @@ one newly-acquired skill -- never a directory scan of every skill ever
 acquired at boot, which is what makes this "on demand." `_load_skill`
 also best-effort enriches the tool's `description` via a
 `memory.retrieve{kinds:[procedural]}` request against the procedural
-record Learning writes on acquisition (learning/pipeline.py) -- the
+record Learning writes on acquisition (the retired learning/pipeline.py) -- the
 "discoverable by description" half of the same roadmap item. A second,
 independent on-demand path lives in `_on_approved`: an approved action
 naming an as-yet-unregistered `skill:<name>` tool (e.g. after a restart,
@@ -751,7 +751,7 @@ class Service:
 
     async def _skill_description(self, name: str) -> str | None:
         """Best-effort `memory.retrieve{kinds:[procedural]}` for the
-        description Learning stored on acquisition (learning/pipeline.py)
+        description Learning stored on acquisition (the retired learning/pipeline.py)
         -- the "discoverable by description" half of roadmap item 4.7.
         Absence (timeout, no Memory booted, nothing stored yet) degrades
         to a synthesized description rather than blocking the load."""

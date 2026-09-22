@@ -1,6 +1,6 @@
-# reflection -- contract
+# growth.monitors (was reflection) -- contract
 
-One-line status: layer 4 · 2,157 lines · 10 test files · lock: `reflection` in docs/modules/locks.toml
+One-line status: layer 4 · 2,157 lines · 10 test files · lock: `growth` in docs/modules/locks.toml (one lock for the three parts)
 
 ## Purpose
 
@@ -13,7 +13,7 @@ Reflection watches what the system does and turns it into signals other subsyste
 | `simorgh/growth/monitors/__init__.py` | empty package marker |
 | `simorgh/growth/monitors/api.py` | Protocols describing the four pure cores the service composes (documentation only) |
 | `simorgh/growth/monitors/calibration.py` | `CalibrationTable`: stated confidence vs outcome per task type, Brier score, min-sample gate |
-| `simorgh/growth/monitors/config.py` | frozen `Config` dataclass and `from_mapping` for `[reflection]` |
+| `simorgh/growth/monitors/config.py` | frozen `Config` dataclass and `from_mapping` for `[growth.monitors]` |
 | `simorgh/growth/monitors/critique.py` | lenient JSON parse of a model critique, with a floor critique when it fails |
 | `simorgh/growth/monitors/denials.py` | `DenialMiner`: same tool+reason denied N times in a window becomes one proposal |
 | `simorgh/growth/monitors/digest.py` | pure monitors, alert routing (rate limit, quiet hours, reopen), daily digest rendering |
@@ -77,13 +77,13 @@ Exact subscription list: `Service.consumes` (`service.py:106-117`).
 | `reflect:distillation` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
 | `reflect:patterns` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
 | `reflect:calibration` | simorgh/growth/monitors/service.py | - | 90d (`reflect:` prefix) |
-| `reflection:alerts` | simorgh/growth/monitors/service.py | simorgh/interface/dispatch.py | forever (no `DEFAULT_RETENTION` entry; `reflection:` does not match `reflect:`) |
+| `reflection:alerts` | simorgh/growth/monitors/service.py | simorgh/interface/dispatch.py | 90d (its own `DEFAULT_RETENTION` entry, `ledger/compaction.py`) |
 
 There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never written and was removed 2026-09-19); `self.observation` is a bus message only. Reflection reads no stream: all its state (task metas, miners, calibration, alert router) is in memory and starts empty on every boot.
 
 ## Config
 
-`[reflection]` in simorgh.toml; dataclass in `simorgh/growth/monitors/config.py`. Some keys are nested in the TOML: `health_*` under `[reflection.health]` (e.g. `window`, `oscillation_flips_warn`), `pattern_*` under `[reflection.pattern]`, `calibration_*` under `[reflection.calibration]` (`config.py:120-151`). An explicitly constructed `Config` wins over `ctx.config`.
+`[growth.monitors]` in simorgh.toml (`[reflection]` before the 2026-09-20 merge; nothing reads that name now); dataclass in `simorgh/growth/monitors/config.py`. Some keys are nested in the TOML: `health_*` under `[growth.monitors.health]` (e.g. `window`, `oscillation_flips_warn`), `pattern_*` under `[growth.monitors.pattern]`, `calibration_*` under `[growth.monitors.calibration]` (`config.py:120-151`). An explicitly constructed `Config` wins over `ctx.config`.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -121,7 +121,7 @@ There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never
 
 ## Public Python surface
 
-- `simorgh.reflection.service.Service` (`name = "reflection"`): the Subsystem (`start`, `stop`, `health` always `ok`). Two extra public methods, `register_monitor(monitor)` and `raise_alert(alert: digest.Alert)`, are the designed entry points for domains to add checks. Nothing outside the package calls either, and the service registers no monitor of its own: in a running Sim the registry is empty, no `reflect.alert.*` is ever published, no alert `notify` is proposed, and the daily digest renders empty and is skipped. The alert and digest path runs only in `tests/simorgh/growth/monitors/test_service_alerts.py`. There is no obvious caller to wire: a domain cannot import `simorgh.reflection` (`tests/simorgh/test_module_boundaries.py`), so a live caller needs a bus-level entry point (a topic) first, which is a contracts change.
+- `simorgh.growth.monitors.service.Service` (a part of `growth`, keyed `monitors` in `growth/service.py::PARTS`): the Subsystem (`start`, `stop`, `health` always `ok`). Two extra public methods, `register_monitor(monitor)` and `raise_alert(alert: digest.Alert)`, are the designed entry points for domains to add checks. Nothing outside the package calls either, and the service registers no monitor of its own: in a running Sim the registry is empty, no `reflect.alert.*` is ever published, no alert `notify` is proposed, and the daily digest renders empty and is skipped. The alert and digest path runs only in `tests/simorgh/growth/monitors/test_service_alerts.py`. There is no obvious caller to wire: a domain cannot import `simorgh.growth` (`tests/simorgh/test_module_boundaries.py`), so a live caller needs a bus-level entry point (a topic) first, which is a contracts change.
 - `Config` (`config.py`), read by the Kernel's config check.
 - Nothing is exported through `simorgh.contracts`; other packages see Reflection only through the topics above.
 - No module-level mutable singletons. Module constants: stream names, `_CRITIQUE_KINDS`. `_repo_root()` duplicates `execution/config.py::find_repo_root` (`service.py:44-69`) to resolve `skill_dir`.
@@ -143,7 +143,7 @@ There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never
 
 ## Contract tests
 
-The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract reflection`.
+The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract growth`.
 
 - `tests/simorgh/integration/test_reflection_health_patterns_calibration.py` -- the real Service over a real bus: health finding, patterns found, calibration, critique floor with no Cognition
 - `tests/simorgh/integration/test_reflection_pass_without_a_sleep_tick.py` -- the pass publishes patterns, calibration and limitations without a sleep tick
@@ -164,7 +164,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Planned changes (roadmap)
 
 - Stage 1 (telemetry) lists "reflection's trajectory reads" among the `trace:` consumers to port; Reflection reads no ledger stream today (the trajectory reader is `verification/trajectory.py`), so nothing changes here.
-- Stage 8 item 1: Reflection, Learning and Curiosity merge into one `simorgh/growth/` package; every `reflect.*` topic keeps being published so no consumer changes (`docs/plan/stage-8-growth-merge-policy-loop.md`).
+- Stage 8 item 1 (done 2026-09-20): Reflection, Learning and Curiosity merged into one `simorgh/growth/` package; every `reflect.*` topic keeps being published so no consumer changes (`docs/plan/stage-8-growth-merge-policy-loop.md`).
 - Stage 8 item 3: the pattern and denial miners fold into a deterministic failure-clustering "diagnose" step; the model only phrases a lesson.
 - Stage 8 items 5-6: distillation becomes a policy candidate evaluated on a held-out set before adoption, then monitored and retired on regression.
 - Stage 8 item 8: the nightly loop on `system.tick.sleep` (evals, trace mining, skill drafting) replaces the current sleep-tick pass.
@@ -172,4 +172,4 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 ## Working on this module
 
-Lock it first (`python tools/modlock.py claim reflection --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/monitors/`, `tests/simorgh/growth/monitors/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py reflection` before committing; commit subject `reflection: <what changed>`.
+Lock it first (`python tools/modlock.py claim growth --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/monitors/`, `tests/simorgh/growth/monitors/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py reflection` before committing; commit subject `reflection: <what changed>`.

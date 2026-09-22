@@ -31,7 +31,7 @@ People ── Interface (CLI · TUI · HTTP/dash · Telegram · WhatsApp) ──
                                           ▼
                        Guardian: 12 rules in order · HMAC token ── action.approved ──▶ Execution: 98 tools · re-verifies token
                                           ▲                                                     │ action.result
-     Learning · Reflection · Curiosity · World Model (Self Model) · Persona · Verification ◀────┘   observe and fold
+     Growth (estimate · monitors · explore) · World Model (Self Model) · Persona · Verification ◀────┘   observe and fold
                        Ledger: one JSONL file per stream, fsync per append          Bus: in-memory, 174 topics, traced
                        Kernel: config → secrets → Ledger → Bus → six layers in order → ticks → health → shutdown in reverse
 ```
@@ -66,7 +66,7 @@ Two things that are *not* enforced today and that the evaluation flags: the Ledg
 
 **A tool call** becomes `action.proposed` (`orchestration/session.py::_propose_and_await`) → Guardian runs twelve rules in order (paused, mode, protected, scope, denylist, static analysis, shellcheck, package, grant, immunity, budget, reversibility) → `action.approved` with a token → Execution verifies the token, runs the tool with a 60 s default timeout, and publishes `action.result` → the session appends the result as a user turn ("Result of read_file: ...", bounded at 8,000 chars) and asks the model again. The reversibility rule escalates irreversible actions to a human only if `irreversible_requires_human` is true; the Kernel sets it false unless `~/.simorgh/simorgh.toml` says otherwise (`kernel/service.py:203`), so the live system auto-approves. `run_shell` is on by default (`execution/config.py:193`).
 
-**The reply** is checked by seven regex guards in `session.py` (invented tool markers, markers mid-sentence, fabricated results, claimed commits, promised behaviour, claimed TV actions, claimed pronunciation notes); a hit costs one correction turn. Then `turn.completed` goes to Memory (which stores chat turns as episodic memory), Learning (which records an outcome, typed `unknown` for chat), Persona, and the surface that asked. Voice plans the reply (pronunciation, chunking, tone), synthesises it (Kokoro, Piper, or the expressive engine), plays it, and tracks what was played so the microphone can tell Sim's voice from a person's.
+**The reply** is checked by seven regex guards in `session.py` (invented tool markers, markers mid-sentence, fabricated results, claimed commits, promised behaviour, claimed TV actions, claimed pronunciation notes); a hit costs one correction turn. Then `turn.completed` goes to Memory (which stores chat turns as episodic memory), Growth's estimate part (which records an outcome, typed `unknown` for chat), Persona, and the surface that asked. Voice plans the reply (pronunciation, chunking, tone), synthesises it (Kokoro, Piper, or the expressive engine), plays it, and tracks what was played so the microphone can tell Sim's voice from a person's.
 
 **A code task** differs in three ways: the profile is PATCH (25 tools, verification on); the session opens a git worktree of the named repository and every edit lands there; on completion `worktree_land` rebases onto `main`, runs the suite as a gate, and fast-forwards. Ninety-four commits have landed this way. Retries carry a note of what earlier attempts did; a crash mid-task is resumed from the ledger.
 
@@ -98,7 +98,7 @@ One paragraph each: what it owns and the one fact to know before touching it. Th
 
 **Verification** (`simorgh/verification/`, 3.1k lines). Eleven mechanical checks run cheapest-first (syntax, JS syntax, docstring, invariants, denylist immunity, did-anything, full-suite-ran, isolated suite, sandbox smoke, render, trailing narration), a model checklist at higher rigor, trajectory scoring, plan review. Five of the eleven never run on the real path because the subject they need is not sent. It publishes only `verify.result`.
 
-**Growth: estimate** (`simorgh/growth/estimate/`, 1.0k lines; was `learning` until the stage 8 merge). Outcome recording, a competence table per task type with calibration, strategy suggestion, and a self-patch pipeline. The pipeline's trigger topic is never published and its tool is not registered; the path that actually lands code (`orchestration/session.py::_land`) publishes nothing to Learning. 91% of outcomes are `unknown` because chat turns have no task type.
+**Growth: estimate** (`simorgh/growth/estimate/`, 1.0k lines; was `learning` until the stage 8 merge). Outcome recording, a competence table per task type with calibration, strategy suggestion, and a self-patch pipeline. The pipeline's trigger topic is never published and its tool is not registered; the path that actually lands code (`orchestration/session.py::_land`) publishes nothing to it. 91% of outcomes are `unknown` because chat turns have no task type.
 
 **Growth: monitors** (`simorgh/growth/monitors/`, 2.1k lines; was `reflection`). Drift, calibration, health findings, critique, denial analysis, pattern mining, distillation into draft skills, digests. Observer only; its critiques are stored as episodic memory without a person tag and so reach family chat prompts.
 

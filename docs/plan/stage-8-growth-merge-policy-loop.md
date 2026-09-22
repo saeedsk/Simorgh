@@ -12,7 +12,7 @@ Evaluation C1/C2/C14 (the open loop), section 8.1 growth row, section 9.5. The j
 
 ## Before you start
 
-Every task type that a policy could target must have a held-out case set with a stored baseline in `simorgh/evals/` (stage 4). Read `learning/competence.py`, `learning/strategy.py`, `reflection/` (pattern mining, `distillation.py`, denial analysis), `curiosity/sampler.py` (diversity by construction; keep it and its regression test verbatim), `curiosity/drives.py`.
+Every task type that a policy could target must have a held-out case set with a stored baseline in `simorgh/evals/` (stage 4). Read `simorgh/growth/estimate/competence.py`, `learning/strategy.py`, `reflection/` (pattern mining, `distillation.py`, denial analysis), `curiosity/sampler.py` (diversity by construction; keep it and its regression test verbatim), `curiosity/drives.py`.
 
 ## Action items
 

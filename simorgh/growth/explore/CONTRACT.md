@@ -1,6 +1,6 @@
-# curiosity -- contract
+# growth.explore (was curiosity) -- contract
 
-One-line status: layer 4 · 1,433 lines · 9 test files · lock: `curiosity` in docs/modules/locks.toml
+One-line status: layer 4 · 1,433 lines · 9 test files · lock: `growth` in docs/modules/locks.toml (one lock for the three parts)
 
 ## Purpose
 
@@ -12,7 +12,7 @@ Curiosity owns Sim's self-directed exploration: when the system is idle and the 
 |---|---|
 | `simorgh/growth/explore/__init__.py` | re-exports `Service` |
 | `simorgh/growth/explore/api.py` | internal working types (`Area`, `Gap`, `Target`, `Idea`, `DriveContext`, `Interest`, `ShareDecision`) and Protocols; nothing on the wire |
-| `simorgh/growth/explore/config.py` | frozen `Config`, `drive_weights`, `from_mapping` for `[curiosity]` |
+| `simorgh/growth/explore/config.py` | frozen `Config`, `drive_weights`, `from_mapping` for `[growth.explore]` |
 | `simorgh/growth/explore/drives.py` | `DriveEngine`: per-area scores from gap, staleness, interest and boredom; mood -> temperature and research bias |
 | `simorgh/growth/explore/idea.py` | `TargetedIdeaProposer`: one think per target, parses only PATCH/RESEARCH + description |
 | `simorgh/growth/explore/interests.py` | `InterestService` (score, decay, follow-up cooldown) and the stdlib RSS/Atom parser |
@@ -74,7 +74,7 @@ Exact subscription list: `_CONSUMES` (`service.py:31-38`), plus `system.tick.sec
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `curiosity:ticks` | simorgh/growth/explore/service.py, only when `ctx.telemetry` is not a real store; otherwise each tick is the telemetry sample series `curiosity.tick` (stage 1 item 3) | - | 7d |
+| `curiosity:ticks` | simorgh/growth/explore/service.py, only when `ctx.telemetry` is not a real store; otherwise each tick is the telemetry sample series `growth.explore.tick` (`curiosity.tick` until 2026-09-22) (stage 1 item 3) | - | 7d |
 | `curiosity:candidates` | simorgh/growth/explore/service.py | - | forever (no `DEFAULT_RETENTION` entry) |
 | `curiosity:interests` | simorgh/growth/explore/service.py | simorgh/ledger/migrate_v1.py (writes v1 interests into it) | forever |
 | `curiosity:projects` | simorgh/growth/explore/service.py | - | forever |
@@ -84,7 +84,7 @@ All five are write-only from Curiosity's side: interests, backlog, staleness and
 
 ## Config
 
-`[curiosity]` in simorgh.toml; dataclass in `simorgh/growth/explore/config.py`. `from_mapping` keeps only known field names, so an unknown or misspelt key is dropped silently; `[curiosity.focus]` is an area -> multiplier table. An explicitly constructed `Config` wins over `ctx.config`.
+`[growth.explore]` in simorgh.toml (`[curiosity]` before the 2026-09-20 merge; nothing reads that name now); dataclass in `simorgh/growth/explore/config.py`. `from_mapping` keeps only known field names, so an unknown or misspelt key is dropped silently; `[growth.explore.focus]` is an area -> multiplier table. An explicitly constructed `Config` wins over `ctx.config`.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -115,7 +115,7 @@ All five are write-only from Curiosity's side: interests, backlog, staleness and
 
 ## Public Python surface
 
-- `simorgh.curiosity.Service` (`name = "curiosity"`, keyword-only `config`, `seed` for the sampler RNG): the Subsystem; `health()` is always `ok`.
+- `simorgh.growth.explore.service.Service` (a part of `growth`, keyed `explore` in `growth/service.py::PARTS`; keyword-only `config`, `seed` for the sampler RNG): the Subsystem; `health()` is always `ok`.
 - `Config` (`config.py`), read by the Kernel's config check.
 - Nothing is exported through `simorgh.contracts`; `api.py` types are package-internal.
 - No module-level mutable singletons. Per-instance state worth knowing: `_pending_web_fetches` (action_id -> feed) grows if a proposed fetch never gets a result or denial; `_task_subjects` likewise for tasks that never terminate.
@@ -132,11 +132,11 @@ All five are write-only from Curiosity's side: interests, backlog, staleness and
 - A candidate whose description is similar to a recent one is dropped, not published; a published one carries its measured `novelty_score` (`RecentCandidates.novelty`, pinned in `tests/simorgh/growth/explore/test_service.py::test_candidate_novelty_is_measured_against_recent_candidates`).
 - Exploration rate: 1.0 when budget is unknown, 0.5 at or below `budget_backoff_below_remaining`, 0 at or below `budget_stop_below_remaining`; a provider with no cap does not count.
 - World Model absent: the tick records `no_world_model` and does not raise. A floor (non-model) Cognition reply yields no idea and no candidate (`idea.py:79-80`).
-- Stage 8 merges this package into `growth/`; every `curiosity.*` topic keeps both its sides through the merge.
+- Merged into `growth/` on 2026-09-20 (stage 8 item 1); every `curiosity.*` topic kept both its sides.
 
 ## Contract tests
 
-The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract curiosity`.
+The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract growth`.
 
 - `tests/simorgh/growth/explore/test_service.py` -- the real Service on a real bus: tick guards, cooldown, discover/share/interest request-replies, feed follow-up via `action.proposed`/`action.result`, config reaching live objects
 - `tests/simorgh/integration/test_curiosity_repetition_regression.py` -- sampling spreads across every module before repeating (the reason the package exists)
@@ -157,10 +157,10 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Planned changes (roadmap)
 
 - Stage 6 item 2: the gap drive reads a real `self.gaps` (posterior-based) from the new Self Model.
-- Stage 6 item 6: `curiosity/sharing.py` moves into the new `initiative/` module (one proactive-delivery policy with Persona's sharing and reminders).
-- Stage 8 item 1: Curiosity, Reflection and Learning merge into `simorgh/growth/`; `sampler.py` moves verbatim; every `curiosity.*` topic is still published.
+- Stage 6 item 6: `simorgh/growth/explore/sharing.py` moves into the new `initiative/` module (one proactive-delivery policy with Persona's sharing and reminders).
+- Stage 8 item 1 (done 2026-09-20): Curiosity, Reflection and Learning merged into `simorgh/growth/`; `sampler.py` moved verbatim; every `curiosity.*` topic is still published.
 - Stage 8 item 7: exploration becomes Thompson sampling over posteriors and world-model unknowns, keeping the sampler's diversity; targets extend beyond repo areas (unanswered questions, stale facts, unprobed devices, unexercised skills). The sampler regression test must stay unchanged.
 
 ## Working on this module
 
-Lock it first (`python tools/modlock.py claim curiosity --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/explore/`, `tests/simorgh/growth/explore/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py curiosity` before committing; commit subject `curiosity: <what changed>`.
+Lock it first (`python tools/modlock.py claim growth --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/explore/`, `tests/simorgh/growth/explore/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py curiosity` before committing; commit subject `curiosity: <what changed>`.

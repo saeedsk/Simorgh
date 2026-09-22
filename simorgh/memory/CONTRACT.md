@@ -41,7 +41,7 @@ vocabulary rather than meaning.
 | **working** -- the conversation in front of Sim | `WorkingMemory._sessions`, keyed `conversation_key(channel, speaker)`; in process only | every chat `turn.completed` | Orchestration's memory block, under the same key | the process ending, or `working_max_turns` / `working_max_chars` pushing the oldest turn out |
 | **episodic** -- what happened, with when and who | `memory:episodic` | every stored chat turn (not task turns, not QUIET replies), tagged `session:` and `person:<name>` | `memory.retrieve` with `kinds` containing `episodic` | `prune`, by the forgetting score below |
 | **semantic** -- what holds now | `memory:facts` (`Fact{subject, predicate, object, person_scope, valid_from, valid_to, superseded_by, source_refs}`) and `memory:semantic` records | consolidation's fact pass; `store_fact` | returned with every `memory.retrieve.reply` as `facts` -- the facts the query mentions plus the asking person's digest | superseded, never deleted: a new fact for the same normalised `(person_scope, subject, predicate)` closes the old one with `valid_to` |
-| **procedural** -- how to do a thing here | `memory:procedural` | Reflection's critiques, skills and learned habits | `memory.retrieve` with `kinds` containing `procedural`; chat does not ask for it | `prune`, by the same score |
+| **procedural** -- how to do a thing here | `memory:procedural` | Growth's critiques (the monitors part), skills and learned habits | `memory.retrieve` with `kinds` containing `procedural`; chat does not ask for it | `prune`, by the same score |
 
 A fact is not an episode and does not decay: "the wifi password is on the
 fridge" was true before it was said and stays true after the conversation

@@ -176,11 +176,33 @@ class TestTheWholeConfigAudit(unittest.TestCase):
     def test_reflection_stall_idle_seconds_is_no_longer_dead(self) -> None:
         """It was on the whitelist from the day the check was written,
         and 12-reflection.md had specified the behaviour from the day
-        the subsystem was designed. `reflection/service.py::
+        the subsystem was designed. `simorgh/growth/monitors/service.py::
         _check_stalls` now reads it on every `system.tick.idle`, so the
         whitelist entry -- a statement that a field is unreachable --
         had to go with it (observer bulk5-02, 2026-09-10)."""
-        self.assertEqual(dead_fields(_Config({"reflection": {"stall_idle_seconds": 60.0}})), [])
+        config = _Config({"growth": {"monitors": {"stall_idle_seconds": 60.0}}})
+        self.assertEqual(dead_fields(config), [])
+        self.assertEqual(dead_sections(config), [])
+
+
+class TestTheGrowthPartsAreChecked(unittest.TestCase):
+    """Until 2026-09-22 the probe was keyed `[curiosity]`/`[learning]`/
+    `[reflection]`: only the dead pre-merge sections were inspected, and a
+    typo in the live `[growth.explore]` was never reported."""
+
+    def test_a_typo_in_a_growth_part_is_reported(self) -> None:
+        self.assertEqual(dead_sections(_Config({"growth": {"explore": {"autonomy_on_bot": False}}})),
+                         ["growth.explore"])
+
+    def test_a_real_growth_config_is_quiet(self) -> None:
+        config = _Config({"growth": {"nightly_usd": 0.5, "explore": {"autonomy_on_boot": False},
+                                     "monitors": {"distillation_enabled": False}}})
+        self.assertEqual(dead_sections(config), [])
+
+    def test_a_stray_growth_key_is_reported(self) -> None:
+        from simorgh.kernel.configcheck import unknown_growth_keys
+
+        self.assertEqual(unknown_growth_keys(_Config({"growth": {"curiosity": {}}})), ["curiosity"])
 
 
 class TestANestedFieldThatParsesButNoOneReads(unittest.TestCase):

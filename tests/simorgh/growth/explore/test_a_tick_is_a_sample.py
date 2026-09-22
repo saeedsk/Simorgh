@@ -31,5 +31,5 @@ class ATickIsASample(unittest.IsolatedAsyncioTestCase):
         svc._now = lambda: 100.0  # noqa: SLF001
         await svc._record_tick(skipped_reason="autonomy_paused")  # noqa: SLF001
         self.assertEqual(appended, [])
-        self.assertEqual(telemetry.samples[0][0], "curiosity.tick")
+        self.assertEqual(telemetry.samples[0][0], "growth.explore.tick")
         self.assertEqual(telemetry.samples[0][1]["skipped_reason"], "autonomy_paused")

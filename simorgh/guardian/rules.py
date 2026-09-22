@@ -391,7 +391,7 @@ class ProtectedRule:
             # (over-match rather than under-match).
             canonical_lower = canonical.lower()
             path_lower = path.lower()
-            ask = tuple(getattr(ctx.config, "ask_subjects", ()) or ())
+            ask = tuple(ctx.config.ask_subjects)
             for protected in ctx.config.protected_subjects:
                 protected_lower = protected.lower()
                 if protected in path or protected in canonical or protected_lower in path_lower or protected_lower in canonical_lower:

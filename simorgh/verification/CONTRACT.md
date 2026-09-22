@@ -52,7 +52,7 @@ The generated rows for `ui.notice` and a subscription to `verify.result` were wr
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `verify.result` | `messages/verify.py::VerifyResult` | simorgh/verification/service.py | once per request (partition key `task:<id>`); Orchestration, Learning and Reflection consume it |
+| `verify.result` | `messages/verify.py::VerifyResult` | simorgh/verification/service.py | once per request (partition key `task:<id>`); Orchestration and Growth (estimate, monitors) consume it |
 | `plan.reviewed` | `messages/plan.py::PlanReviewed` | simorgh/verification/service.py | after each `plan.proposed`; Planning consumes it |
 | `action.proposed` | `messages/action.py::ActionProposed` | simorgh/verification/service.py | when a check needs a tool (`render_page`, `run_js_sandboxed`, `run_python_sandboxed`, `run_isolated_test_suite`), `proposed_by="verification"`, labelled `read_only` |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/verification/service.py | checklist generation, per-item answers, plan goal coverage (`purpose` review) |

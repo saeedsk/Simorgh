@@ -30,7 +30,7 @@ VERSION = "0.1.0"
 
 
 class Service:
-    name = "learning"
+    name = "growth.estimate"
     version = VERSION
     consumes = (
         topics.TASK_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,

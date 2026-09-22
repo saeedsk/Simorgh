@@ -28,9 +28,15 @@ KNOWN_PREFIXES: dict[str, str] = {
     "memory:": "memory",
     "self:": "worldmodel",
     "world:": "worldmodel",
-    "learn:": "learning",
-    "reflect:": "reflection",
-    "curiosity:": "curiosity",
+    # One owner since the 2026-09-20 merge; the prefixes keep their old
+    # names so nothing written before it is orphaned. `growth:` and
+    # `reflection:` were missing, so `tools/scan_half_wired.py` skipped
+    # `growth:policies`, `growth:candidates` and `reflection:alerts`.
+    "learn:": "growth",
+    "reflect:": "growth",
+    "reflection:": "growth",
+    "curiosity:": "growth",
+    "growth:": "growth",
     "persona:": "persona",
     "cognition:": "cognition",
     "guardian:": "guardian",

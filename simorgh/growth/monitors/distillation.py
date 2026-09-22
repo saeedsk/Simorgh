@@ -19,7 +19,7 @@ a skills directory full of near-duplicates nobody trusts:
 - It must not be a **repeat** of a skill that already exists.
 
 The decision is a pure function of the task's own record, so it is
-testable without a Kernel, and the caller (`reflection/service.py`)
+testable without a Kernel, and the caller (`simorgh/growth/monitors/service.py`)
 only has to say yes to what it returns.
 """
 

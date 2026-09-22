@@ -1,4 +1,4 @@
-"""Config for `simorgh.growth.explore` (`[curiosity]` in `simorgh.toml`;
+"""Config for `simorgh.growth.explore` (`[growth.explore]` in `simorgh.toml`;
 docs/blueprint/subsystems/13-curiosity.md section 3.5). Every default
 below carries a v1 name in a comment so the migration is traceable."""
 
@@ -50,7 +50,7 @@ class Config:
     world_query_timeout: float = 3.0
     cognition_timeout: float = 20.0
     active_project_confirm_timeout: float = 60.0
-    focus: Mapping[str, float] = field(default_factory=dict)  # [curiosity.focus] area -> multiplier
+    focus: Mapping[str, float] = field(default_factory=dict)  # [growth.explore.focus] area -> multiplier
 
     @property
     def drive_weights(self) -> dict[str, float]:

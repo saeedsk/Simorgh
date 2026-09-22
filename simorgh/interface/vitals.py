@@ -148,8 +148,10 @@ class VitalsCache:
         return VitalsSnapshot(
             mood=self._mood, energy=self._energy, load=self._load,
             memory_records=self._memory_records(),
-            skills=self._gauge("execution.skills", "learning.skills_acquired"),
-            interests=self._gauge("curiosity.interests", "curiosity.interests"),
+            # `learning.skills_acquired` was a fallback nothing ever wrote;
+            # interests come from growth's explore part since the merge.
+            skills=self._gauge("execution.skills", "execution.skills"),
+            interests=self._gauge("growth.interests", "growth.interests"),
             backlog=self._gauge("planning.backlog", "planning.backlog"),
             posture=self._posture, budget=self._budget(),
             workers_busy=int(self._gauges.get("orchestration.workers.busy", 0) or 0),

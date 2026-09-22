@@ -13,9 +13,9 @@ until = "2026-09-22T18:50:29+00:00"
 
 [locks.contracts]
 by = "opus-main"
-task = "a namespaced tone tag"
-since = "2026-09-22T01:09:15+00:00"
-until = "2026-09-22T09:09:15+00:00"
+task = "growth merge leftovers (comments)"
+since = "2026-09-22T10:57:56+00:00"
+until = "2026-09-22T18:57:56+00:00"
 
 [locks.docs]
 by = "opus-main"
@@ -94,6 +94,12 @@ by = "opus-main"
 task = "growth merge leftovers"
 since = "2026-09-22T10:50:29+00:00"
 until = "2026-09-22T18:50:29+00:00"
+
+[locks.shared]
+by = "opus-main"
+task = "growth merge leftovers (comments)"
+since = "2026-09-22T10:57:56+00:00"
+until = "2026-09-22T18:57:56+00:00"
 
 [locks.telemetry]
 by = "opus-main"

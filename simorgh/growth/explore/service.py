@@ -59,7 +59,7 @@ class _BudgetState:
 
 
 class Service:
-    name = "curiosity"
+    name = "growth.explore"
     version = "0.1.0"
     consumes = _CONSUMES
     produces = _PRODUCES
@@ -67,7 +67,7 @@ class Service:
     def __init__(self, *, config: Config | None = None, seed: int | None = None) -> None:
         self._config_from_caller = config
         # Self-directed work held? Set by `auto off` / `auto on`, and
-        # seeded from `[curiosity] autonomy_on_boot`.
+        # seeded from `[growth.explore] autonomy_on_boot`.
         self._autonomy_paused = False
         self._config = config or Config()
         self._engine = DriveEngine(self._config)
@@ -102,7 +102,7 @@ class Service:
     # -- Subsystem protocol ---------------------------------------------------------------
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
-        # `Context.config` is this subsystem's `[curiosity]` section.
+        # `Context.config` is this subsystem's `[growth.explore]` section.
         # Nothing read it before, so every knob in it was dead --
         # including `min_explore_interval_seconds`, whose whole point
         # is being tunable. An explicitly-passed config still wins.
@@ -115,7 +115,7 @@ class Service:
             # they were constructed with, so `drive_gap`/`staleness`/
             # `interest`/`boredom` weights, every cooldown, and the
             # active-project confirm timeout were silently unaffected
-            # by anything written in `[curiosity]`. Confirmed live by
+            # by anything written in `[growth.explore]`. Confirmed live by
             # an observer 2026-09-08: nine settings changed in the
             # config, zero of them visible on the live objects that
             # actually score and pick candidates every tick. This is
@@ -374,7 +374,7 @@ class Service:
         await self._publish(topics.ACTION_PROPOSED, {
             "action_id": action_id, "tool": "web_fetch", "args": {"url": target.topic},
             "scope": {"paths": [], "network": True}, "reversibility": "read_only",
-            "rationale": f"following up on tracked interest {target.topic!r}", "proposed_by": "curiosity",
+            "rationale": f"following up on tracked interest {target.topic!r}", "proposed_by": "growth",
         })
 
     # -- ticks ------------------------------------------------------------------------------
@@ -396,7 +396,10 @@ class Service:
             return
         await self._ctx.bus.publish(Message.new(
             topics.SYSTEM_METRICS, source=self._ctx.source,
-            payload={"subsystem": "curiosity", "counters": {},
+            # Filed under `growth`, the subsystem that is booted: as
+            # `curiosity` it showed up in status and metrics history as a
+            # subsystem that no longer exists (2026-09-22).
+            payload={"subsystem": "growth", "counters": {},
                      "gauges": {"interests": len(self._interests.list_interests())}},
         ))
 
@@ -617,7 +620,7 @@ class Service:
         # only when the Context has no store (hand-built in tests).
         telemetry = getattr(self._ctx, "telemetry", None)
         if telemetry is not None and hasattr(telemetry, "series"):
-            telemetry.sample("curiosity.tick", payload)
+            telemetry.sample("growth.explore.tick", payload)
             return
         await self._append(_TICKS_STREAM, "tick", payload)
 

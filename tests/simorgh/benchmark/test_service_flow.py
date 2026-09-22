@@ -351,7 +351,7 @@ class SubsystemWiringTestCase(unittest.IsolatedAsyncioTestCase):
         self.kernel = Kernel(
             LoadedConfig({
                 "runtime": {"data_dir": str(Path(self._tmp.name) / "data")},
-                "curiosity": {"autonomy_on_boot": False},
+                "growth": {"explore": {"autonomy_on_boot": False}},
                 # An empty cache, so the gated path is really exercised:
                 # a suite already downloaded needs no token, which is
                 # correct behaviour and made this test pass vacuously
@@ -456,7 +456,7 @@ class StopAndBusyTestCase(unittest.IsolatedAsyncioTestCase):
         self.kernel = Kernel(
             LoadedConfig({
                 "runtime": {"data_dir": str(Path(self._tmp.name) / "data")},
-                "curiosity": {"autonomy_on_boot": False},
+                "growth": {"explore": {"autonomy_on_boot": False}},
                 "benchmark": {"cache_dir": str(Path(self._tmp.name) / "cache"), "case_timeout_s": 30.0},
             }, None),
             secrets=EnvSecretStore({}),

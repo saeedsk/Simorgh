@@ -104,7 +104,7 @@ class OrphanedCasesAreCancelledAtBootTestCase(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             kernel = Kernel(LoadedConfig({
                 "runtime": {"data_dir": str(Path(tmp) / "data")},
-                "curiosity": {"autonomy_on_boot": False},
+                "growth": {"explore": {"autonomy_on_boot": False}},
                 "orchestration": {"workers": 0},
             }, None), secrets=EnvSecretStore({}))
             await kernel.boot()

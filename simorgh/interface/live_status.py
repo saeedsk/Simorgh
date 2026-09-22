@@ -143,6 +143,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "git_revert"): "Reverting",
     ("act", "git_discard"): "Discarding",
     ("act", "propose_mcp_server"): "Proposing",
+    ("act", "policy_adopt"): "Adopting a lesson",
     ("verify", None): "Verifying",
 }
 _DEFAULT_VERB = "Working"

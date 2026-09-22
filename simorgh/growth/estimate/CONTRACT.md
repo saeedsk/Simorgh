@@ -1,6 +1,6 @@
-# learning -- contract
+# growth.estimate (was learning) -- contract
 
-One-line status: layer 4 · 727 lines · 4 test files · lock: `learning` in docs/modules/locks.toml
+One-line status: layer 4 · 727 lines · 4 test files · lock: `growth` in docs/modules/locks.toml (one lock for the three parts)
 
 ## Purpose
 
@@ -12,7 +12,7 @@ Learning owns the outcome record and the competence estimate: it turns `task.com
 |---|---|
 | `simorgh/growth/estimate/__init__.py` | re-exports `Service`, `VERSION` |
 | `simorgh/growth/estimate/competence.py` | `CompetenceTable`: the projection over `learn:outcomes` (rate, calibration, UCB1 strategy ranking) |
-| `simorgh/growth/estimate/config.py` | `[learning]` dataclass |
+| `simorgh/growth/estimate/config.py` | `[growth.estimate]` dataclass |
 | `simorgh/growth/estimate/correlator.py` | id-keyed futures for `action.result` / `verify.result`; a leftover of the retired pipeline, nothing awaits them |
 | `simorgh/growth/estimate/models.py` | plain dataclasses (`TaskTypeStats`, `StrategyStats`, `StrategyScore`; `Strategy`, `Outcome`, `PatchTaskSpec` unused) |
 | `simorgh/growth/estimate/outcomes.py` | `OutcomeRecorder`: terminal task messages to `learn:outcomes` events and the two announcements |
@@ -106,13 +106,13 @@ A chat turn never reaches any of this: it has no task type, and untyped outcomes
 
 ## Contract tests
 
-The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract learning`.
+The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract growth`.
 
 - `tests/simorgh/growth/estimate/test_outcomes.py` -- terminal message to outcome: success/failure/blocked weights, task type from the task stream, verify join, per-run cost and dedup keys.
 - `tests/simorgh/growth/estimate/test_competence.py` -- the projection math (Laplace, shrinkage, UCB1, calibration) and apply == rebuild, state/load round trip.
 - `tests/simorgh/growth/estimate/test_strategy.py` -- the `learn.strategy.suggest.reply` shape against the real schema, floor and overall-rate fallbacks.
 - `tests/simorgh/growth/estimate/test_service.py` -- health is `ok` and counts untyped turns; `draft_candidate` is not a registered tool.
-- `tests/simorgh/growth/estimate/test_config.py` -- `[learning]` has exactly the three live keys; a retired pipeline key changes nothing.
+- `tests/simorgh/growth/estimate/test_config.py` -- `[growth.estimate]` has exactly the three live keys; a retired pipeline key changes nothing.
 
 ## Known issues (2026-09-18 evaluation)
 
@@ -125,8 +125,8 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Planned changes (roadmap)
 
 - Stage 6 item 1 (`docs/plan/stage-6-self-world-people-tiers-initiative.md`): the Self Model is rebuilt at boot as a fold over `learn:outcomes` (Beta per task type and per strategy, forgetting, calibration as ECE); this package's stream becomes the input to that fold.
-- Stage 8 (`docs/plan/stage-8-growth-merge-policy-loop.md`): Learning, Reflection and Curiosity merge into `simorgh/growth/` (item 1, topics preserved); estimates count only verify-backed outcomes and eval pass rates, never chat self-reports (item 2); failure clustering, a policy store and propose-evaluate-adopt through the gate follow (items 3-6). The strategy-suggest consumer and a `learn.self_patch.reverted` publisher (the loader's rollback) arrive here.
+- Stage 8 (`docs/plan/stage-8-growth-merge-policy-loop.md`): Learning, Reflection and Curiosity merged into `simorgh/growth/` (item 1, done 2026-09-20, topics preserved); estimates count only verify-backed outcomes and eval pass rates, never chat self-reports (item 2); failure clustering, a policy store and propose-evaluate-adopt through the gate follow (items 3-6). The strategy-suggest consumer and a `learn.self_patch.reverted` publisher (the loader's rollback) arrive here.
 
 ## Working on this module
 
-Lock it first (`python tools/modlock.py claim learning --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/estimate/`, `tests/simorgh/growth/estimate/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py learning` before committing; commit subject `learning: <what changed>`.
+Lock it first (`python tools/modlock.py claim growth --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/estimate/`, `tests/simorgh/growth/estimate/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py learning` before committing; commit subject `learning: <what changed>`.

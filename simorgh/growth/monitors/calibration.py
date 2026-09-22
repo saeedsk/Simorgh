@@ -65,7 +65,7 @@ class CalibrationTable:
         if len(samples) < self._config.calibration_min_samples:
             return None
 
-        # `max(1, ...)`: `[reflection] calibration.bins = 0` is a
+        # `max(1, ...)`: `[growth.monitors] calibration.bins = 0` is a
         # misconfiguration, not a reason for the pass to die on a
         # ZeroDivisionError in `i / n_bins` before anything is
         # published.

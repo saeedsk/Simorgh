@@ -1,4 +1,4 @@
-"""Turning a solved problem into a skill (reflection/distillation.py).
+"""Turning a solved problem into a skill (simorgh/growth/monitors/distillation.py).
 
 Sim could always write skills when asked; what it never did was notice
 it had just worked something out that will be needed again. The 95120

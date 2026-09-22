@@ -102,18 +102,23 @@ def changed_files(ref: str | None) -> list[str]:
 
 
 def contract_tests(module: str) -> list[str]:
-    """Paths named under '## Contract tests' in simorgh/<module>/CONTRACT.md."""
-    doc = REPO / "simorgh" / module / "CONTRACT.md"
-    if not doc.exists():
-        return []
-    text = doc.read_text(errors="ignore")
-    m = re.search(r"^## Contract tests\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
-    if not m:
-        return []
+    """Paths named under '## Contract tests' in simorgh/<module>/CONTRACT.md,
+    and in the CONTRACT.md of each part directly under it -- `growth`'s
+    three parts (estimate, monitors, explore) each keep their own list,
+    and until 2026-09-22 none of them was ever run by this tier."""
+    root = REPO / "simorgh" / module
+    docs = [root / "CONTRACT.md", *sorted(root.glob("*/CONTRACT.md"))]
     found: list[str] = []
-    for hit in re.findall(r"tests/[\w./-]+\.py", m.group(1)):
-        if (REPO / hit).exists() and hit not in found:
-            found.append(hit)
+    for doc in docs:
+        if not doc.exists():
+            continue
+        text = doc.read_text(errors="ignore")
+        m = re.search(r"^## Contract tests\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+        if not m:
+            continue
+        for hit in re.findall(r"tests/[\w./-]+\.py", m.group(1)):
+            if (REPO / hit).exists() and hit not in found:
+                found.append(hit)
     return found
 
 

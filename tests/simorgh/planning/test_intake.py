@@ -125,7 +125,7 @@ class TestPatternsFoundDedupeUsesTaskType(unittest.TestCase):
 
 class TestCandidateDedupeUsesSubject(unittest.TestCase):
     """2026-09-08, observer w8-06: `TargetedIdeaProposer`'s prompt
-    (`curiosity/idea.py`) forces the model to reply with ONLY a one-line
+    (`simorgh/growth/explore/idea.py`) forces the model to reply with ONLY a one-line
     `PATCH ::`/`RESEARCH ::` description that explicitly must not name
     the file ("not even the file path, that part is already decided").
     For two genuinely different target files the model's common phrasing

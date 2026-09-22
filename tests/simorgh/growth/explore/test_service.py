@@ -379,7 +379,7 @@ if __name__ == "__main__":
 class TestConfigActuallyReachesTheDerivedObjects(unittest.IsolatedAsyncioTestCase):
     """`_recent` was the only one of six config-built objects rebuilt in
     `start()`. Confirmed live by an observer 2026-09-08: nine settings
-    changed in `[curiosity]`, zero of them visible on the objects that
+    changed in `[growth.explore]`, zero of them visible on the objects that
     actually score and pick candidates every tick -- the same "adopting
     a config and using it are different steps" bug found elsewhere in
     this project the same day, just with five objects instead of one.

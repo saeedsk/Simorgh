@@ -1,4 +1,4 @@
-"""`[reflection] stall_idle_seconds` finally does something.
+"""`[growth.monitors] stall_idle_seconds` finally does something.
 
 12-reflection.md section 3.5 has said since the subsystem was designed:
 "In-progress task with no step for this long -> `behavior` drift

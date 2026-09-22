@@ -2499,7 +2499,7 @@ class ApplySkillTool:
     complete module source to its subject path, confined to
     `write_scopes_skills` (`simorgh_skills/` by default) rather than the
     source tree -- the same scope `SkillPipeline`'s `apply_skill` action
-    proposal names (learning/pipeline.py)."""
+    proposal names (the retired learning/pipeline.py)."""
 
     name = "apply_skill"
     description = "Write a drafted skill's complete module source to its subject path within the skill scope."

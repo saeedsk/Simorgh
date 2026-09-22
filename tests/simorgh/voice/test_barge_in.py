@@ -535,7 +535,7 @@ class BargeToggleTestCase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         kernel = Kernel(LoadedConfig({
             "runtime": {"data_dir": str(Path(tmp.name) / "data")},
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
             "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake"},
         }, None), secrets=EnvSecretStore({}))
         await kernel.boot()

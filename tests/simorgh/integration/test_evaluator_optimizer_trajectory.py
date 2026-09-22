@@ -33,7 +33,7 @@ fakes-based tests could not see, both fixed alongside this test:
    service's `_resolve_subject` treats `subject_ref` as a Ledger blob id
    (`ledger.get_blob(subject_ref)`) holding a JSON object with
    `description`/`result` keys -- the shape every other producer already
-   sends (`learning/pipeline.py`'s `candidate_ref`, and every scenario in
+   sends (the retired `learning/pipeline.py`'s `candidate_ref`, and every scenario in
    `tests/simorgh/integration/test_verification_scenarios.py`). Raw text
    there is not a valid blob id, so it silently resolved to `subject={}`
    and the semantic checklist review ran against an empty description

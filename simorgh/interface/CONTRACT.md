@@ -90,7 +90,7 @@ Replies received by request/reply: `task.list.reply`, `task.create.reply`, `syst
 | `capabilities` | dispatch.py:63 (read) | execution, voice write it | forever |
 | `schedule` | dispatch.py:65 (read) | kernel scheduler writes it | forever |
 | `execution:tools` | dispatch.py:68 (read for `tool`) | execution writes it | 30d |
-| `reflection:alerts` | dispatch.py:69 (read for `alerts`) | reflection writes it | forever |
+| `reflection:alerts` | dispatch.py:69 (read for `alerts`) | growth's monitors part writes it (the stream kept its pre-merge name) | 90d |
 | `config:effective` | dispatch.py:71 (read for `config`) | kernel writes it | forever |
 | `metrics:history` | config.py `history_stream`; httpapi `/api/history` (read) | kernel writes it | 7d |
 | any stream | httpapi `/api/logs`, `/api/streams` (read, token-gated) | - | per stream |

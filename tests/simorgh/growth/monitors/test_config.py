@@ -55,7 +55,7 @@ class TestDistillationKeysAreRead(unittest.TestCase):
 
 
 class TestNoFieldIsUnreachableFromAMapping(unittest.TestCase):
-    """Three separate sweeps have now found a `[reflection]` field the
+    """Three separate sweeps have now found a `[growth.monitors]` field the
     running code reads and `from_mapping` silently drops. This test is
     the one that makes the fourth impossible to add quietly: every
     dataclass field must be settable from some mapping key, and a new

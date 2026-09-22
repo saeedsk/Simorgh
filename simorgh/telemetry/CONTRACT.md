@@ -110,6 +110,6 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 Lock it first (`python tools/modlock.py claim telemetry --by <you> --task "..."`), commit the lock, edit only `simorgh/telemetry/`, `tests/simorgh/telemetry/` and this file; a change to the `Telemetry` protocol in `simorgh/contracts/` needs the `contracts` lock and a note in the kernel's CONTRACT.md. Run `python tools/modtest.py telemetry` before committing; commit subject `telemetry: <what changed>`.
 
-- Series written today (stage 1 item 3): `metrics.history` (the Kernel's `MetricsHistoryWriter`) and `curiosity.tick` (Curiosity). `persona:state` stays in the ledger on purpose: it is what restores mood after a restart, and it is written only on a change of at least `decay_announce_delta`. Spans: one per traced bus message. `store.last_sample(path, series)` reads the newest sample read-only.
+- Series written today (stage 1 item 3): `metrics.history` (the Kernel's `MetricsHistoryWriter`) and `growth.explore.tick` (growth's explore part; `curiosity.tick` until 2026-09-22). `persona:state` stays in the ledger on purpose: it is what restores mood after a restart, and it is written only on a change of at least `decay_announce_delta`. Spans: one per traced bus message. `store.last_sample(path, series)` reads the newest sample read-only.
 
 - `event(..., end=None)`: with `end`, a timed span measured elsewhere (voice's stages).

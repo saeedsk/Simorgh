@@ -1,4 +1,4 @@
-"""The wire between the alerting core (reflection/digest.py) and the
+"""The wire between the alerting core (simorgh/growth/monitors/digest.py) and the
 running system: an idle tick runs the due monitors, a raised alert
 reaches the bus and the Ledger, and one that earned a person's
 attention becomes a real `notify` call.
@@ -217,7 +217,7 @@ class MonitorTickTestCase(_AlertingTestCase):
         """Falling back to "" would send at 3am precisely because
         somebody tried to stop it -- so the fallback is logged, loudly."""
         await self._start(quiet_hours="late at night")
-        self.assertIn("reflection.quiet_hours_invalid", [event for event, _ in self.logger.warnings])
+        self.assertIn("growth.monitors.quiet_hours_invalid", [event for event, _ in self.logger.warnings])
 
     async def test_an_ad_hoc_alert_is_routed_like_any_other(self):
         service = await self._start()

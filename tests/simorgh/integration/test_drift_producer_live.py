@@ -240,7 +240,7 @@ class TestRealDriftTrackerFiresAndForcesRealReground(_DriftFlowTestCase):
         # exactly the wire shape Guardian emits when a proposal's scope
         # doesn't match the task's declared one -- both attributed to
         # this task, which is the actual, only path that feeds
-        # `DriftTracker.observe_scope_denial` (reflection/service.py's
+        # `DriftTracker.observe_scope_denial` (simorgh/growth/monitors/service.py's
         # `_on_action_denied`).
         await bus.publish(Message.new(
             topics.TASK_STEP, source="tester",

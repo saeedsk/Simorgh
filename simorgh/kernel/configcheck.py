@@ -126,10 +126,10 @@ KNOWN_DEAD_FIELDS: dict[str, frozenset[str]] = {
     # config.leader` -- the gate the docstring describes was never
     # wired to the field.
     "planning": frozenset({"max_task_attempts", "leader"}),
-    # `[reflection] stall_idle_seconds` used to live here: nothing read
-    # it, and 12-reflection.md section 3.5 had specified it since the
-    # subsystem was designed. It is now really read, by
-    # `reflection/service.py::_check_stalls` on `system.tick.idle`
+    # `[growth.monitors] stall_idle_seconds` (then `[reflection]`) used to
+    # live here: nothing read it, and 12-reflection.md section 3.5 had
+    # specified it since the subsystem was designed. It is now really
+    # read, by `growth/monitors/service.py::_check_stalls` on `system.tick.idle`
     # (observer bulk5-02, 2026-09-10), so it is no longer dead and no
     # longer belongs in this list. A whitelist entry is a statement
     # that a field is unreachable; leaving one behind after the field
@@ -182,16 +182,16 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
     should not add sixteen imports to every process that touches the
     Kernel package."""
     from simorgh.cognition.config import Config as CognitionConfig
-    from simorgh.growth.explore.config import Config as CuriosityConfig
+    from simorgh.growth.explore.config import Config as ExploreConfig
     from simorgh.execution.config import Config as ExecutionConfig
     from simorgh.guardian.config import Config as GuardianConfig
     from simorgh.interface.config import Config as InterfaceConfig
-    from simorgh.growth.estimate.config import Config as LearningConfig
+    from simorgh.growth.estimate.config import Config as EstimateConfig
     from simorgh.memory.config import Config as MemoryConfig
     from simorgh.orchestration.config import Config as OrchestrationConfig
     from simorgh.persona.config import Config as PersonaConfig
     from simorgh.planning.config import Config as PlanningConfig
-    from simorgh.growth.monitors.config import Config as ReflectionConfig
+    from simorgh.growth.monitors.config import Config as MonitorsConfig
     from simorgh.verification.config import VerificationConfig
     from simorgh.worldmodel.config import Config as WorldModelConfig
 
@@ -217,16 +217,20 @@ def _config_classes() -> dict[str, Callable[..., Any]]:
         "benchmark": BenchmarkConfig,
         "bus": BusConfig,
         "cognition": CognitionConfig,
-        "curiosity": CuriosityConfig,
         "execution": ExecutionConfig,
+        # The growth parts, by their real (nested) tables since the
+        # 2026-09-20 merge. Keyed `[curiosity]`/`[learning]`/`[reflection]`
+        # until 2026-09-22, so a typo in the live `[growth.explore]` was
+        # never reported and only a dead section was ever inspected.
+        "growth.estimate": EstimateConfig,
+        "growth.explore": ExploreConfig,
+        "growth.monitors": MonitorsConfig,
         "guardian": GuardianConfig,
         "interface": InterfaceConfig,
-        "learning": LearningConfig,
         "memory": MemoryConfig,
         "orchestration": OrchestrationConfig,
         "persona": PersonaConfig,
         "planning": PlanningConfig,
-        "reflection": ReflectionConfig,
         "telemetry": TelemetryConfig,
         "verification": VerificationConfig,
         "worldmodel": WorldModelConfig,
@@ -308,6 +312,26 @@ RENAMED_SECTIONS: dict[str, str] = {
 }
 
 
+def _section(config, name: str) -> dict:
+    """`config.section(name)`, where `name` may be dotted: `growth.explore`
+    is the `explore` table inside `[growth]`. `LoadedConfig.section` does
+    not understand dots, which is how the growth parts went unchecked."""
+    head, *rest = name.split(".")
+    section = config.section(head)
+    for part in rest:
+        section = section.get(part) if isinstance(section, dict) else None
+    return dict(section) if isinstance(section, dict) else {}
+
+
+#: What `[growth]` itself may hold: its one key and its three parts' tables.
+GROWTH_KEYS = frozenset({"nightly_usd", "estimate", "monitors", "explore"})
+
+
+def unknown_growth_keys(config) -> list[str]:
+    """Keys in `[growth]` that are neither `nightly_usd` nor a part."""
+    return sorted(set(config.section("growth")) - GROWTH_KEYS)
+
+
 def renamed_sections(config) -> list[str]:
     """`"[curiosity] -> [growth.explore]"` for every pre-merge section
     the config still carries. Nothing reads these any more."""
@@ -330,7 +354,7 @@ def dead_sections(config, *, names: Iterable[str] | None = None) -> list[str]:
         cls = classes.get(name)
         if cls is None:
             continue
-        section = config.section(name)
+        section = _section(config, name)
         if not section:
             continue
         if unread_keys(cls, dict(section), EFFECTIVE_DEFAULTS.get(name, {})):
@@ -377,7 +401,7 @@ def dead_fields(config, *, names: Iterable[str] | None = None) -> list[tuple[str
         cls = classes.get(name)
         if cls is None:
             continue
-        section = config.section(name)
+        section = _section(config, name)
         if not section:
             continue
         present = known & set(section)
@@ -407,11 +431,20 @@ def report(config, logger) -> list[str]:
     dead = dead_sections(config)
     classes = _config_classes()
     for name in dead:
-        keys = unread_keys(classes[name], dict(config.section(name)), EFFECTIVE_DEFAULTS.get(name, {}))
+        keys = unread_keys(classes[name], _section(config, name), EFFECTIVE_DEFAULTS.get(name, {}))
         logger.warning(
             "config.section_had_no_effect", section=name, keys=keys,
             detail=f"[{name}] {', '.join(keys)} in simorgh.toml: nothing reads "
-                   f"{'it' if len(keys) == 1 else 'them'} -- check the names against simorgh/{name}/config.py",
+                   f"{'it' if len(keys) == 1 else 'them'} -- check the names against "
+                   f"simorgh/{name.replace('.', '/')}/config.py",
+        )
+    stray = unknown_growth_keys(config)
+    if stray:
+        logger.warning(
+            "config.section_had_no_effect", section="growth", keys=stray,
+            detail=f"[growth] {', '.join(stray)} in simorgh.toml: nothing reads "
+                   f"{'it' if len(stray) == 1 else 'them'} -- [growth] holds nightly_usd and the "
+                   f"[growth.estimate], [growth.monitors] and [growth.explore] tables",
         )
     for moved in renamed_sections(config):
         # A rename that says nothing is the silent half of a move: the

@@ -32,9 +32,18 @@ _PUB = re.compile(r"publish|request\(|request_or_error|Message\.new|reply\(|repl
 _SUB = re.compile(r"subscribe\s*\(|consumes|_on_[a-z_]+|case\s+topics\.|==\s*topics\.")
 _STREAM = re.compile(r'''["']([a-z][a-z0-9_]*:[a-z0-9_:<>{}.\-]*)["']''')
 
-LAYERS = {"bus": 0, "ledger": 0, "kernel": 0, "telemetry": 0, "contracts": "shared", "cognition": 2, "memory": 2, "worldmodel": 2,
-          "planning": 3, "guardian": 3, "execution": 3, "verification": 3, "learning": 4, "reflection": 4,
-          "curiosity": 4, "persona": 5, "benchmark": 5, "voice": 5, "interface": 5, "orchestration": "X"}
+def _layers() -> dict:
+    """Each module's boot layer, from the Kernel's own table rather than a
+    copy of it: the copy here still listed learning, reflection and
+    curiosity a week after they became `growth`, so growth rendered as `?`."""
+    from simorgh.kernel.registry import LAYERS as KERNEL_LAYERS
+
+    out: dict = {name: i for i, layer in enumerate(KERNEL_LAYERS) for name in layer}
+    out.update({"kernel": 0, "telemetry": 0, "contracts": "shared"})
+    return out
+
+
+LAYERS = _layers()
 PROTECTED = {"guardian", "execution", "contracts", "kernel"}
 
 

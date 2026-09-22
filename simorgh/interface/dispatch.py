@@ -65,7 +65,7 @@ CAPABILITIES_STREAM = "capabilities"
 # And for `kernel/scheduler.py::SCHEDULE_STREAM`, same agreement again.
 SCHEDULE_STREAM = "schedule"
 # `execution/service.py::TOOLS_STREAM` and
-# `reflection/service.py::Service.ALERTS_STREAM`, same agreement.
+# `simorgh/growth/monitors/service.py::Service.ALERTS_STREAM`, same agreement.
 TOOLS_STREAM = "execution:tools"
 ALERTS_STREAM = "reflection:alerts"
 # And `kernel/service.py::Kernel.CONFIG_STREAM`.

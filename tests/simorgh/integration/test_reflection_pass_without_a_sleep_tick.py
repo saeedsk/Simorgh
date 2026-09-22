@@ -185,7 +185,7 @@ class ReflectionPassWithoutASleepTickTestCase(unittest.IsolatedAsyncioTestCase):
         await self._record_three_failures()
         await asyncio.sleep(0.35)
 
-        self.assertIn("reflection.calibration_sample_unusable",
+        self.assertIn("growth.monitors.calibration_sample_unusable",
                       [event for event, _ in self.logger.warnings])
         self.assertEqual(len(self.seen["calibration"]), 1,
                          "the good task type still publishes after a bad sample")

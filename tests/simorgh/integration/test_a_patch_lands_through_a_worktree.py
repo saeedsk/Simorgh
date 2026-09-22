@@ -160,7 +160,7 @@ class TestAPatchLandsThroughAWorktree(unittest.IsolatedAsyncioTestCase):
         execution = {"repo_root": str(repo), "test_timeout_s": 120.0} if name_the_repo else {}
         config = LoadedConfig({"runtime": {"data_dir": str(root / "data")}, "execution": execution,
                                "guardian": {"irreversible_requires_human": False},
-                               "curiosity": {"autonomy_on_boot": False}}, None)
+                               "growth": {"explore": {"autonomy_on_boot": False}}}, None)
         kernel = Kernel(config, secrets=EnvSecretStore({}))
         patcher = mock.patch("simorgh.kernel.service.build_factories", new=_patched_build_factories(tasks=task, toys=toys))
         patcher.start()

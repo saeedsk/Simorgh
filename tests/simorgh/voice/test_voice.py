@@ -109,7 +109,7 @@ class PipelineOnAKernelTestCase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         kernel = Kernel(LoadedConfig({
             "runtime": {"data_dir": str(Path(tmp.name) / "data")},
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
             "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake",
                       "reply_timeout_s": 20.0, **voice},
         }, None), secrets=EnvSecretStore({}))
@@ -265,7 +265,7 @@ class SpeakRepliesTestCase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         kernel = Kernel(LoadedConfig({
             "runtime": {"data_dir": str(Path(tmp.name) / "data")},
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
             "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake",
                       "speak_replies": True},
         }, None), secrets=EnvSecretStore({}))
@@ -290,7 +290,7 @@ class SpeakRepliesTestCase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         kernel = Kernel(LoadedConfig({
             "runtime": {"data_dir": str(Path(tmp.name) / "data")},
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
             "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake",
                       "speak_replies": True, "enabled": True, "fake_transcript": ""},
         }, None), secrets=EnvSecretStore({}))
@@ -325,7 +325,7 @@ class SpeakRepliesTestCase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         kernel = Kernel(LoadedConfig({
             "runtime": {"data_dir": str(Path(tmp.name) / "data")},
-            "curiosity": {"autonomy_on_boot": False},
+            "growth": {"explore": {"autonomy_on_boot": False}},
             "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake", "vad": "fake"},
         }, None), secrets=EnvSecretStore({}))
         await kernel.boot()

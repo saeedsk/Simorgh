@@ -99,7 +99,7 @@ def procedure_from(session, outcome) -> str:
     """How this task was actually done, in the order it was done -- or "".
 
     `memory:procedural` had never held a single record. Its only writer
-    was skill acquisition (`learning/pipeline.py`), which fires when Sim
+    was skill acquisition (the retired `learning/pipeline.py`), which fires when Sim
     writes itself a new tool, and it never had. So the one kind of memory
     meant to answer "how did I do this last time" was empty while 2,422
     episodic transcripts answered "what was said".

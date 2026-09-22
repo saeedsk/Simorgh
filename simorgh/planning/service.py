@@ -939,7 +939,7 @@ class Service:
         re-grounding check across a multi-tick PROJECT_TASK."
 
         `reflect.drift.detected` is only ever computed at the drifting
-        task's own terminal transition (reflection/service.py's module
+        task's own terminal transition (simorgh/growth/monitors/service.py's module
         docstring), which means it always races the *same*
         `task.completed`/`task.failed`/`task.blocked` message Planning's
         own `_on_task_completed`/`_on_task_failed` react to. Reflection's

@@ -73,7 +73,7 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `task:<task_id>` | worker.py:491, session.py:1949 (append); resume.py:112 (read) | planning, verification, learning, reflection, interface, benchmark | forever (no prefix in DEFAULT_RETENTION) |
+| `task:<task_id>` | worker.py:491, session.py:1949 (append); resume.py:112 (read) | planning, verification, growth, interface, benchmark | forever (no prefix in DEFAULT_RETENTION) |
 | `execution:tools` | service.py:21 (read at start to replay registrations) | written by execution | 30d |
 | `capabilities` | service.py:22 (read at start to replay probes) | written by execution | forever |
 

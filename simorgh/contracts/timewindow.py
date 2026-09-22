@@ -1,7 +1,7 @@
 """Quiet hours: the `"22:00-07:00"` convention, parsed in one place.
 
 Two subsystems need this and may not import each other. Reflection uses
-it to hold back a `warn` alert overnight (`reflection/digest.py`);
+it to hold back a `warn` alert overnight (`simorgh/growth/monitors/digest.py`);
 Execution's media tools use it to refuse a loud speaker at three in the
 morning. Both mean exactly the same thing by the string, and the moment
 they each parse it there are two answers to "is it quiet hours" that

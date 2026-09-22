@@ -45,10 +45,10 @@ class DriveWeightedSampler:
         self._engine = engine
 
     def _focus_multiplier(self, area_name: str) -> float:
-        """`[curiosity.focus]` (`Config.focus`, area -> multiplier) was
+        """`[growth.explore.focus]` (`Config.focus`, area -> multiplier) was
         parsed but never read by either caller of `score_area` -- both
         left its `focus_multiplier` keyword at its default of 1.0, so
-        writing e.g. `[curiosity.focus] kernel = 5.0` changed the parsed
+        writing e.g. `[growth.explore.focus] kernel = 5.0` changed the parsed
         `Config` object but left every score, and therefore every pick,
         identical to leaving it unset (confirmed live, 2026-09-08: same
         `score_table()` output with and without the section). This is

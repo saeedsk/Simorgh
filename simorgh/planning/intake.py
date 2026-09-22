@@ -97,7 +97,7 @@ class Intake:
 
         `subject`, when given, narrows the same way but by exact field
         equality rather than substring: Curiosity's own `TargetedIdeaProposer`
-        prompt (`curiosity/idea.py`) forces the model to reply with ONLY a
+        prompt (`simorgh/growth/explore/idea.py`) forces the model to reply with ONLY a
         one-line `PATCH ::`/`RESEARCH ::` description and explicitly forbids
         it from stating the file path in that line ("not even the file
         path, that part is already decided") -- so the description the

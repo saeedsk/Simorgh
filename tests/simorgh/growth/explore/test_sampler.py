@@ -81,11 +81,11 @@ class DriveWeightedSamplerTest(unittest.TestCase):
         self.assertIn("total", table["a"])
 
     def test_focus_multiplier_from_config_changes_score_table(self):
-        """`[curiosity.focus]` (`Config.focus`, area -> multiplier) parses
+        """`[growth.explore.focus]` (`Config.focus`, area -> multiplier) parses
         but was never read by either caller of `DriveEngine.score_area`
         (`sampler.pick`, `sampler.score_table`), which both left its
         `focus_multiplier` keyword at the default of 1.0 -- so writing
-        `[curiosity.focus] a = 5.0` changed the parsed `Config` object
+        `[growth.explore.focus] a = 5.0` changed the parsed `Config` object
         but left every score, and therefore every pick, identical to
         leaving it unset. Regression for the live-confirmed 2026-09-08
         fix wiring `Config.focus` into both call sites via `_focus_multiplier`."""

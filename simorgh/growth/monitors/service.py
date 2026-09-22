@@ -1,4 +1,4 @@
-"""Reflection as a `Subsystem` (Layer 3, registry.py). An observer that
+"""Growth's monitors part (was Reflection until the 2026-09-20 merge). An observer that
 proposes: it never calls a tool itself and never writes `self:model`
 directly (only `self.observation`; World Model owns the projection).
 Its one `action.proposed` is the alert and daily-digest `notify`
@@ -38,7 +38,7 @@ from .drift import DriftTracker, parse_verdict
 from .health import HealthMonitor
 from .patterns import PatternMiner
 
-NAME = "reflection"
+NAME = "growth.monitors"
 VERSION = "0.1.0"
 
 
@@ -180,7 +180,7 @@ class Service:
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
-        # `Context.config` is this subsystem's own `[reflection]` section
+        # `Context.config` is this subsystem's own `[growth.monitors]` section
         # (03 section 6). Nothing read it, here or anywhere -- so every
         # knob in that section was dead, and only the dataclass defaults
         # ever applied. An explicitly-constructed config still wins, which
@@ -212,7 +212,7 @@ class Service:
         ]
         if self.config.reflect_after_start_s > 0:
             self._reflect_loop = asyncio.create_task(self._reflect_periodically(), name="reflection-pass")
-        ctx.logger.info("reflection.started")
+        ctx.logger.info("growth.monitors.started")
 
     async def stop(self) -> None:
         if self._reflect_loop is not None:
@@ -422,7 +422,7 @@ class Service:
             return
         if self._ctx is not None:
             self._ctx.logger.warning(
-                "reflection.calibration_sample_unusable", task_type=task_type, stated=repr(stated),
+                "growth.monitors.calibration_sample_unusable", task_type=task_type, stated=repr(stated),
             )
 
     # -- calibration inputs from elsewhere --------------------------------------------------
@@ -568,7 +568,7 @@ class Service:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._ctx.logger.warning("reflection.pass_failed", error=repr(exc))
+                self._ctx.logger.warning("growth.monitors.pass_failed", error=repr(exc))
             if self.config.reflect_every_s <= 0:
                 return
             delay = self.config.reflect_every_s
@@ -663,7 +663,7 @@ class Service:
             # that would send at 3am precisely because someone tried to
             # stop it.
             if self._ctx is not None:
-                self._ctx.logger.warning("reflection.quiet_hours_invalid", error=str(exc))
+                self._ctx.logger.warning("growth.monitors.quiet_hours_invalid", error=str(exc))
             self._router = AlertRouter(
                 clock=clock or time.time,
                 warn_window_s=self.config.alert_warn_window_s,
@@ -703,7 +703,7 @@ class Service:
             await self._run_monitors(message)
         except Exception as exc:  # noqa: BLE001 -- alerting must not break the tick it rides on
             if self._ctx is not None:
-                self._ctx.logger.warning("reflection.monitor_tick_failed", error=repr(exc))
+                self._ctx.logger.warning("growth.monitors.monitor_tick_failed", error=repr(exc))
         finally:
             self._alert_tick_running = False
 
@@ -823,7 +823,7 @@ class Service:
             "scope": {"paths": [], "network": True},
             "reversibility": "irreversible",
             "rationale": rationale,
-            "proposed_by": self._ctx.source if self._ctx is not None else "reflection",
+            "proposed_by": "growth",
         })
 
     def _drain_ad_hoc(self) -> dict:

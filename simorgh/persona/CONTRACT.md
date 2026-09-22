@@ -40,7 +40,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/persona/service.py | a mood change of at least 1e-4, a health reset, or decay past `decay_announce_delta` (consumed by Reflection, Curiosity, Interface, Voice) |
+| `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/persona/service.py | a mood change of at least 1e-4, a health reset, or decay past `decay_announce_delta` (consumed by Growth, Interface, Voice) |
 | `persona.user_model.updated` | `messages/persona.py::PersonaUserModelUpdated` | simorgh/persona/service.py | a facet is extracted from a percept (consumed by World Model) |
 | `persona.voice.reply` | `messages/persona.py::PersonaVoiceReply` | simorgh/persona/service.py | reply to `persona.voice` (via `bus.reply`) |
 

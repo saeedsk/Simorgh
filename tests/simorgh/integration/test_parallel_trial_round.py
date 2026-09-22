@@ -47,7 +47,7 @@ class OversizedPatchIsNotDroppedTestCase(unittest.IsolatedAsyncioTestCase):
             LoadedConfig({
                 "runtime": {"data_dir": str(Path(self._tmp.name) / "data")},
                 "execution": {"repo_root": str(repo)},
-                "curiosity": {"autonomy_on_boot": False},
+                "growth": {"explore": {"autonomy_on_boot": False}},
             }, None),
             secrets=EnvSecretStore({}),
         )

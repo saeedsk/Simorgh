@@ -92,7 +92,7 @@ Requests it makes: `cognition.think` (`purpose="decompose"` on replan, `purpose=
 
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
-| `task:<id>` | simorgh/planning/store.py:211 | written also by orchestration (the Worker appends `task.step` events); read by interface, orchestration (resume, progress), verification, learning, benchmark | forever (no `task:` entry in DEFAULT_RETENTION) |
+| `task:<id>` | simorgh/planning/store.py:211 | written also by orchestration (the Worker appends `task.step` events); read by interface, orchestration (resume, progress), verification, growth, benchmark | forever (no `task:` entry in DEFAULT_RETENTION) |
 | `planning:index` (snapshot key, not an event stream) | simorgh/planning/store.py:178 | - | snapshot, rewritten every 500 events and on clear |
 
 Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus partition keys; `dependency_failed:` is a note prefix (`model.py:34`). Nothing writes a `plan:` stream, although `planmode.py`'s docstring says the plan is recorded there (see Known issues).

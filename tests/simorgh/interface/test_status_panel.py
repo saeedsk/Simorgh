@@ -13,11 +13,11 @@ import unittest
 from simorgh.interface.render import display_width, meter, status_panel
 from simorgh.interface.vitals import VitalsSnapshot
 
-NAMES = ("bus", "ledger", "cognition", "memory", "guardian", "execution", "learning",
-         "reflection", "persona", "interface", "orchestration")
+NAMES = ("bus", "ledger", "cognition", "memory", "guardian", "execution", "growth",
+         "initiative", "persona", "interface", "orchestration")
 
 
-def _health(degraded=("learning",), down=()) -> dict:
+def _health(degraded=("growth",), down=()) -> dict:
     return {
         "state": "running", "mode": "single", "uptime_seconds": 949.5,
         "subsystems": [
@@ -93,7 +93,7 @@ class SubsystemStripTestCase(unittest.TestCase):
 
     def test_an_unhealthy_subsystem_is_named_with_its_reason(self):
         panel = _panel()
-        self.assertIn("learning", panel)
+        self.assertIn("growth", panel)
         self.assertIn("embedder fell back", panel)
 
     def test_the_counts_are_summarised(self):
@@ -104,7 +104,7 @@ class SubsystemStripTestCase(unittest.TestCase):
     def test_states_are_told_apart_by_shape_not_only_colour(self):
         """So the panel still works with no colour, and for anyone who
         cannot tell green from amber."""
-        panel = _panel(health=_health(degraded=("learning",), down=("memory",)), enabled=False)
+        panel = _panel(health=_health(degraded=("growth",), down=("memory",)), enabled=False)
         strip = next(line for line in panel.splitlines() if "subsystems" in line)
         self.assertEqual(len({c for c in strip if c in "●◐✕"}), 3)
 
@@ -204,6 +204,6 @@ class AsciiTestCase(unittest.TestCase):
             self.assertNotIn(glyph, panel)
 
     def test_ascii_states_are_still_told_apart(self):
-        panel = _panel(health=_health(degraded=("learning",), down=("memory",)), unicode="off")
+        panel = _panel(health=_health(degraded=("growth",), down=("memory",)), unicode="off")
         strip = next(line for line in panel.splitlines() if "subsystems" in line)
         self.assertEqual(len({c for c in strip if c in "o~x"}), 3)

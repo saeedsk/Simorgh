@@ -1,6 +1,6 @@
 # Stage 0 -- Close the safety gaps, wire what exists, promote the gate
 
-Status: **in progress** (started 2026-09-18 evening; items 1-29, 31 and 32 done except V7 (28); 30 partly) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, learning, worldmodel, curiosity, ledger, interface, memory, orchestration, contracts, kernel, cognition, reflection, voice, simloader, tools, shared, docs
+Status: **in progress** (started 2026-09-18 evening; items 1-29, 31 and 32 done except V7 (28); 30 partly) · Depends on: nothing · Estimated: 2 weeks · Modules touched: guardian, execution, growth (was learning, curiosity, reflection), worldmodel, ledger, interface, memory, orchestration, contracts, kernel, cognition, voice, simloader, tools, shared, docs
 
 ## Outcome
 
@@ -22,9 +22,9 @@ Each item is one commit. **Done** items record the commit so a reader can diff t
 
 1. **v1 deleted; test tiers and locks.** `src/`, `tests/test_*.py` (881 tests, 1,637 s of the suite), `games/`, tracked toys; code that named `src/` (planning source roots, a verification invariant, Guardian's protected list); `tools/modtest.py`, `tools/modlock.py`, `docs/modules/locks.toml`, `pyproject.toml` markers, `CLAUDE.md`, `docs/AGENTS.md`, `docs/testing.md`. Commit `a4bf8d1`.
 2. **PhysicalRule and `[guardian.physical]`.** `guardian/rules.py::PhysicalRule` before `ReversibilityRule`; recomputes the class from arguments via `contracts/home/policy.classify_call`; `human` escalates in every posture; `physical.auto_approve` is the only switch and `sim.sh` never sets it. Drill in `tests/simorgh/guardian/test_physical_rule.py`. Commit `8916e82`. (S1, S6, S8)
-3. **Outcomes refuse `unknown`; PatchPipeline retired.** `learning/outcomes.py` skips and counts untyped turns; `learning/pipeline.py` deleted; Learning's health reports ok. Commit in `stage 0: five wires closed`. (C2, C14)
+3. **Outcomes refuse `unknown`; PatchPipeline retired.** `learning/outcomes.py` skips and counts untyped turns; the retired `learning/pipeline.py` deleted; Learning's health reports ok. Commit in `stage 0: five wires closed`. (C2, C14)
 4. **`compute_gaps` and `capabilities["tools"]`.** `worldmodel/selfmodel.py::compute_gaps` ranks the least-known task types; `worldmodel/service.py::_sync_tools` writes the tool list from `tool.registered` once at `system.started` and on every change. Same commit. (C1 part)
-5. **Curiosity reads the real budget fields; skipped ticks are edge-triggered.** `curiosity/service.py`. Same commit. (C9, C4)
+5. **Curiosity reads the real budget fields; skipped ticks are edge-triggered.** `simorgh/growth/explore/service.py`. Same commit. (C9, C4)
 6. **Retention on every timer-driven stream.** `ledger/compaction.py::DEFAULT_RETENTION`. Same commit. (B3, B19)
 7. **The cameras are never open.** `interface/httpapi.py` gates `/api/dash/streams`, `/cameras/snap/`, `/tv/hls|media/`; a non-loopback bind without a token serves only the open routes; `tests/simorgh/interface/test_httpapi_token_boundary.py`. Same commit. (S15, V2)
 8. **A conversation window per (channel, person).** `contracts/settings.py::conversation_key`; Memory feeds `WorkingMemory` from `turn.completed`; `orchestration/context.py::_working_block` renders the last six turns before the memory block. Commit `stage 0: a conversation window per person`. (C8)

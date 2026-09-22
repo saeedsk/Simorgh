@@ -399,7 +399,6 @@ _ACTION_TIMEOUTS: dict[str, float] = {
 # accepted the task with `verification_ref=None`. Money spent on the
 # review, verdict discarded -- and the `blocked` path for a failing
 # verdict was unreachable, so verification could never stop a bad patch.
-# Matches `learning/config.py::verify_timeout_seconds`.
 VERIFY_TIMEOUT_S = 300.0
 
 
@@ -2451,7 +2450,7 @@ class SessionRunner:
         """`verify.requested.subject_ref` is a blob ref, not raw text --
         Verification's `_resolve_subject` reads it with `ledger.get_blob`
         and expects a JSON object with `description`/`result` (the shape
-        every other producer, e.g. `learning/pipeline.py`'s
+        every other producer, e.g. the retired `learning/pipeline.py`'s
         `candidate_ref`, already sends). Sending truncated raw text there
         silently resolves to an empty subject and the semantic checklist
         loses its signal.

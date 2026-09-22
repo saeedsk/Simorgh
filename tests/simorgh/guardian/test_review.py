@@ -28,7 +28,7 @@ class GuardianReviewTestCase(unittest.IsolatedAsyncioTestCase):
         self.kernel = Kernel(
             LoadedConfig({
                 "runtime": {"data_dir": str(Path(self._tmp.name) / "data")},
-                "curiosity": {"autonomy_on_boot": False},
+                "growth": {"explore": {"autonomy_on_boot": False}},
             }, None),
             secrets=EnvSecretStore({}),
         )

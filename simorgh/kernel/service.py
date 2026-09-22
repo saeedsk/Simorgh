@@ -362,8 +362,8 @@ class Kernel:
         # this flag and this is the only event most of them will see.
         await self._restore_autonomous_pause()
         # Only ever ASSERT a hold here, never a release. Absence of the
-        # key means "no opinion, keep your own default", and Curiosity
-        # relies on that: it seeds itself from `[curiosity]
+        # key means "no opinion, keep your own default", and growth.explore
+        # relies on that: it seeds itself from `[growth.explore]
         # autonomy_on_boot`, so publishing `autonomous_paused: False`
         # unconditionally silently overruled a config that says start
         # held. Found by that feature's own integration test within

@@ -1,4 +1,4 @@
-"""`[learning]` carries only the keys something reads.
+"""`[growth.estimate]` carries only the keys something reads.
 
 Six keys (`max_draft_attempts`, `max_pipeline_wall_seconds`,
 `action_timeout_seconds`, `verify_timeout_seconds`, `hot_swap_slots`,
