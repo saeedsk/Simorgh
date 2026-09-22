@@ -29,6 +29,12 @@ task = "refine must not muddle a profile"
 since = "2026-09-22T00:24:12+00:00"
 until = "2026-09-22T08:24:12+00:00"
 
+[locks.orchestration]
+by = "opus-main"
+task = "the voice prompt is told the speaker score"
+since = "2026-09-22T01:31:06+00:00"
+until = "2026-09-22T09:31:06+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "a kept turn names who spoke"
