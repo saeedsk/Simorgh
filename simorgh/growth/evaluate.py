@@ -94,12 +94,20 @@ async def measure_and_decide(store, policy_id: str, run_cases: RunCases, *,
     """Evaluate a proposed policy and record the store's verdict.
 
     Returns `(policy, evaluation)`. A regressed case refuses it whatever
-    the mean says; otherwise `adopt` applies its two conditions.
+    the mean says; otherwise `adopt` applies its two conditions. When no
+    case counted on both sides the policy is returned still proposed.
     """
     policy = next((p for p in store.all() if p.id == policy_id), None)
     if policy is None or policy.status != "proposed":
         return None, None
     ev = await evaluate(policy.body, run_cases, repeats=repeats)
+    if not ev.evaluated_on:
+        # Nothing counted on both sides -- every case skipped (a
+        # provider outage, a dataset that would not load). That is no
+        # measurement at all, so no verdict either: the policy stays
+        # proposed for the next night rather than being refused for
+        # ever over an outage.
+        return policy, ev
     if ev.regressed:
         refused = await store.refuse(policy_id, baseline=ev.baseline, result=ev.result,
                                      evaluated_on=ev.evaluated_on,

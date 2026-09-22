@@ -113,6 +113,11 @@ class TheRealNight(unittest.IsolatedAsyncioTestCase):
         service._ctx = None  # noqa: SLF001
         service._nightly_usd = DEFAULT_NIGHTLY_USD  # noqa: SLF001
         service._spent_today = 0.0  # noqa: SLF001
+        service._spent_day = None  # noqa: SLF001
+        from simorgh.growth.measure import MeasureConfig
+
+        service._measure = MeasureConfig()  # noqa: SLF001 -- off, the default
+        service._cases_for = None  # noqa: SLF001
         service.retired = 0
         service.last_night = None
         service.policies = None
@@ -120,10 +125,10 @@ class TheRealNight(unittest.IsolatedAsyncioTestCase):
 
     def test_the_free_steps_come_first(self):
         steps = self._service()._night_steps()  # noqa: SLF001
-        self.assertEqual([s.name for s in steps], ["evals", "review", "diagnose"])
+        self.assertEqual([s.name for s in steps], ["evals", "review", "diagnose", "measure"])
         self.assertTrue(all(s.est_usd == 0.0 for s in steps),
-                        "everything wired today is free; the drafting step that costs money "
-                        "is not built yet and would go last")
+                        "with measuring off (the default) every step is free; the paid "
+                        "measuring step goes last when it is switched on")
 
     def test_the_cap_comes_from_the_config(self):
         """A setting nothing reads is the bug this codebase keeps

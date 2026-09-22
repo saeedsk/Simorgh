@@ -19,8 +19,10 @@ The order is not arbitrary:
     evals        free, and the thing every other judgement rests on
     review       free, and it can only ever REMOVE a policy
     diagnose     free; counting, not asking
-    draft        costs money: one lesson phrased by a model
-    propose      free; writing down what the drafting produced
+    draft        costs money: one lesson phrased by a model (not built)
+    propose      free; writing down what the drafting produced (not built)
+    measure      costs money: a proposed rule on its held-out suite,
+                 with and without it (`measure.py`, off by default)
 
 A step that raises is recorded and the night goes on. One bad step at
 3am should not mean no evals ran.
@@ -117,7 +119,11 @@ async def run_night(steps, *, budget_usd: float = DEFAULT_NIGHTLY_USD, clock=Non
         spent = _spent_of(result, step.est_usd)
         day_spent += spent
         report.spent_usd += spent
-        report.steps.append(Ran(name=step.name, detail=_detail_of(result),
+        # A step may decline for a reason of its own (nothing to do, not
+        # configured, switched off) by returning `{"skipped": why}`; the
+        # record says so rather than listing it as having run.
+        declined = str(result.get("skipped") or "") if isinstance(result, dict) else ""
+        report.steps.append(Ran(name=step.name, skipped=declined, detail=_detail_of(result),
                                 seconds=float(now()) - started, spent_usd=spent))
     return report
 

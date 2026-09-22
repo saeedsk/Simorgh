@@ -39,6 +39,7 @@ from dataclasses import replace
 from simorgh.contracts import topics
 from simorgh.contracts.protocols import Context, Health
 
+from .measure import MeasureConfig, measure_config
 from .night import DEFAULT_NIGHTLY_USD
 
 from .estimate.service import Service as EstimateService
@@ -111,6 +112,14 @@ class Service:
         #: (stage 8 item 8).
         self._nightly_usd = DEFAULT_NIGHTLY_USD
         self._spent_today = 0.0
+        #: Which day `_spent_today` belongs to (days since the epoch by
+        #: the Context clock), so the cap is a cap on the DAY.
+        self._spent_day = None
+        #: Measuring proposed rules (stage 8 item 5): OFF unless
+        #: `[growth] measure_policies = true`, because it costs money.
+        self._measure = MeasureConfig()
+        #: The seam a test replaces: `(suite, task_type, cfg) -> run_cases`.
+        self._cases_for = None
         #: The last night's report, for `health()` and the tests.
         self.last_night = None
         self._failed: dict[str, str] = {}
@@ -145,6 +154,7 @@ class Service:
         # What a night may spend (stage 8 item 8). Read here, because a
         # setting nothing reads is the bug this codebase keeps finding.
         self._nightly_usd = nightly_usd(ctx.config)
+        self._measure = measure_config(ctx.config)
         self.policies = PolicyStore(ctx.ledger, clock=ctx.clock, publish=_announce)
         try:
             await self.policies.sync()
@@ -185,8 +195,11 @@ class Service:
     async def _on_sleep(self, _message) -> None:
         """The night (stage 8 item 8): a fixed list of steps, each run
         once, cheapest first, against one budget."""
-        from .night import Step, run_night
+        from .night import run_night
 
+        day = int(self._now() // 86400)
+        if day != self._spent_day:
+            self._spent_day, self._spent_today = day, 0.0
         report = await run_night(self._night_steps(), budget_usd=self._nightly_usd,
                                  spent_so_far=self._spent_today)
         self._spent_today += report.spent_usd
@@ -200,8 +213,10 @@ class Service:
 
         Ordered so that stopping early loses the least: the evals every
         other judgement rests on are free, retiring a policy is free and
-        can only ever REMOVE one, and the counting is free. Only the
-        drafting costs money, and it is last for that reason.
+        can only ever REMOVE one, and the counting is free. Measuring a
+        proposed rule costs money, and is last for that reason: one step
+        per policy, each priced at its worst case, so the night's cap
+        refuses the ones it cannot cover before anything is spent.
         """
         from .night import Step
 
@@ -209,7 +224,64 @@ class Service:
             Step("evals", self._step_evals, est_usd=0.0),
             Step("review", self._step_review, est_usd=0.0),
             Step("diagnose", self._step_diagnose, est_usd=0.0),
+            *self._measure_steps(),
         ]
+
+    def _measure_steps(self) -> list:
+        """One step per PROPOSED rule (stage 8 item 5), or one free step
+        that says why nothing was measured."""
+        from .night import Step
+
+        cfg = self._measure
+
+        def _declined(why: str):
+            async def _run() -> dict:
+                return {"skipped": why, "spent_usd": 0.0}
+            return [Step("measure", _run, est_usd=0.0)]
+
+        if not cfg.enabled:
+            return _declined("off: [growth] measure_policies is not true (it runs paid suites)")
+        if self.policies is None:
+            return _declined("no policy store")
+        proposed = [p for p in self.policies.all() if p.status == "proposed"]
+        if not proposed:
+            return _declined("nothing proposed")
+        steps = []
+        for policy in proposed:
+            if policy.kind != "rule":
+                steps.extend(_declined(f"{policy.id}: only a rule can be measured today, not a {policy.kind}"))
+                continue
+            # Free when there is no suite to run: the step only says so.
+            priced = cfg.est_usd() if cfg.held_out.get(policy.task_type) else 0.0
+            steps.append(Step(f"measure:{policy.id}", self._measure_step(policy), est_usd=priced))
+        return steps
+
+    def _measure_step(self, policy):
+        from .measure import measure_one
+
+        async def _run() -> dict:
+            return await measure_one(self.policies, policy, self._measure, land=self._land,
+                                     samples_now=self._samples_of(policy.task_type),
+                                     cases_for=self._cases_for)
+        return _run
+
+    def _samples_of(self, task_type: str) -> int:
+        try:
+            return self._posterior_of(task_type)[1]
+        except Exception:  # noqa: BLE001 -- no estimate is a count of nothing
+            return 0
+
+    async def _land(self, payload: dict) -> None:
+        """An adopted rule becomes `action.proposed(policy_adopt)`.
+        Only Guardian subscribes to it; it asks a person before
+        `rules/` changes (`guardian/config.py::ask_subjects`)."""
+        from simorgh.contracts.envelope import Message
+
+        ctx = self._ctx
+        if ctx is None:
+            raise RuntimeError("growth is not started; there is no bus to land a rule on")
+        await ctx.bus.publish(Message.new(topics.ACTION_PROPOSED, source=ctx.bus.source, payload=payload,
+                                          clock=ctx.clock.now))
 
     async def _step_evals(self) -> dict:
         """Re-read the eval record, so the morning's estimates rest on

@@ -18,7 +18,8 @@ Since stage 8 item 1 (2026-09-20) Growth is also the **merge** of learning, refl
 | `simorgh/growth/explore/` | what is worth finding out (was `simorgh/growth/explore/`): drives, the diversity sampler, ideas, project proposals, interests, sharing pace |
 | `simorgh/growth/diagnose.py` | `Failure`, `Cluster`, `cluster()`: terminal failures grouped by what they share; `phrasing_prompt` is the only thing a model is asked |
 | `simorgh/growth/policies.py` | `Policy`, `PolicyStore`: propose → adopt-with-a-measurement (or `refuse`) → retire, over `growth:policies` |
-| `simorgh/growth/evaluate.py` | stage 8 item 5: `evaluate(body, run_cases, repeats=3)` runs the held-out cases with and without a candidate, majority per case; `measure_and_decide` refuses on any regressed case (even at a flat mean) and otherwise lets `adopt` apply "no regression + one motivating case fixed". An adopted `rule` is handed to `land` as `adoption_action(policy)` -- an `action.proposed(policy_adopt)` on `rules/<task_type>.md` that Guardian asks a person about. Open: no live caller runs `measure_and_decide` yet; the night needs a step that runs the task type's held-out suite in a repo copy (paid) |
+| `simorgh/growth/evaluate.py` | stage 8 item 5: `evaluate(body, run_cases, repeats=3)` runs the held-out cases with and without a candidate, majority per case; `measure_and_decide` refuses on any regressed case (even at a flat mean) and otherwise lets `adopt` apply "no regression + one motivating case fixed". An adopted `rule` is handed to `land` as `adoption_action(policy)` -- an `action.proposed(policy_adopt)` on `rules/<task_type>.md` that Guardian asks a person about. When no case counted on both sides (every case skipped: an outage, a dataset that would not load) nothing is decided and the policy stays proposed, rather than being refused for ever over an outage |
+| `simorgh/growth/measure.py` | the live caller of `measure_and_decide` (stage 8 item 5, the night's `measure` step). `SuiteCases` is a real `run_cases`: one run of the task type's held-out evals suite (`[growth] held_out`) in a fresh copy of the repo's committed HEAD (`copy_repo`, via `git archive`) -- never the live checkout -- with the candidate appended to the copy's `rules/<task_type>.md` for the "with" side, run as `python -m simorgh.evals run <suite> --repeats 1 --json --paid --cases N` in a child interpreter whose cwd and `PYTHONPATH` are the copy (so `orchestration/profiles.py` reads the copy's `rules/`). Skipped cases count on neither side; each run's reported `cost_usd` is summed, and a run that reports nothing is charged `measure_usd_per_run`. `measure_one` is the step; `measure_config` reads the keys below |
 
 Each part keeps its own `CONTRACT.md` (`estimate/`, `monitors/`, `explore/`), its own config dataclass and its own tests, because they are separable and the merge is about ownership rather than entanglement.
 
@@ -44,6 +45,7 @@ A model is asked exactly one thing, after the counting, about something already 
 | `growth.policy.proposed` | `messages/growth.py::GrowthPolicyProposed` | `policies.py::PolicyStore._announce` | a policy is written down. It has changed nothing yet |
 | `growth.policy.adopted` | `messages/growth.py::GrowthPolicyAdopted` | `policies.py::PolicyStore._announce` | a policy cleared its measurement: carries `baseline`, `result`, `evaluated_on`, `ttl_s` |
 | `growth.policy.retired` | `messages/growth.py::GrowthPolicyRetired` | `policies.py::PolicyStore._announce` | a TTL ran out, or the task type got worse; carries the reason |
+| `action.proposed` | `messages/action.py::ActionProposed` | `service.py::_land` (and, as before, the monitors' digest and the explorer) | the night's `measure` step ADOPTED a `rule`: `adoption_action(policy)`, tool `policy_adopt` on `rules/<task_type>.md`, `reversibility: irreversible`, `proposed_by: growth`. Only Guardian subscribes; `rules/` is an `ask_subjects` path, so a person says yes before the file is written (`execution/policyadopt.py`) |
 
 A **refusal** is not announced. It changed nothing, and a household that hears about every rejected idea stops listening for the accepted ones; it is in `growth:policies` for whoever looks. `lesson.found` and `policy.proposed` are allow-listed announcements for the same reason: they are what Sim is thinking about, not what it has done.
 
@@ -58,10 +60,15 @@ Everything here happens when nobody is asking for anything, which is also when n
 | `evals` | free | re-reads `evals.jsonl`, so the morning's estimates rest on the latest run rather than on whatever was there at boot |
 | `review` | free | retires policies whose TTL ran out or whose task type got worse (item 6) |
 | `diagnose` | free | counts what keeps going wrong and writes the candidates (item 3) |
+| `measure:<policy id>` | `2 x measure_repeats x measure_usd_per_run` (the worst case: each run at its cap) | item 5, OFF by default. One step per PROPOSED `rule`: its task type's held-out suite (`[growth] held_out`) with and without the candidate, `measure_repeats` (3) a side, majority per case, refused on any regressed case, adopted on "no regression + one case fixed", and an adopted rule landed as `action.proposed(policy_adopt)`. A task type with no held-out suite is not run: the step is recorded as skipped ("no held-out suite for X") and the policy stays proposed -- never adopted without a measurement. A step the remaining budget cannot cover is skipped by `run_night` before anything is spent. A non-`rule` kind is recorded as skipped (only rules can be measured today). Off, or nothing proposed, is one free `measure` step recorded as skipped with the reason |
+
+A step can decline on its own by returning `{"skipped": why}`; `run_night` records it as skipped (not in `ran`). The day the budget counts against is the Context clock's day: `_spent_today` resets when it changes (before, it never reset, so the cap was on the process's lifetime).
+
+**At the defaults, switching measuring on is not enough**: one rule costs up to $3.00 (2 x 3 x $0.50, the benchmark sandbox's own cap per run) and the night is $0.50. The creator raises `nightly_usd` (or lowers `measure_usd_per_run`/`measure_cases`) on purpose, as the approval for paid runs.
 
 Cheapest first, deliberately: stopping early is the ordinary outcome, and the order means what is lost when it happens is the least important thing. The cap is checked **before** a step runs, because a model call cannot be taken back once it has been made; a step that does not report what it spent is charged its estimate rather than nothing, because guessing zero is how a budget quietly stops being one. A step that raises is recorded and the night goes on -- one bad step at 3am should not mean no evals ran.
 
-Not built yet: the drafting step (a lesson phrased by the skill-writer agent) and the proposal step. They are the ones that cost money, and they would go last.
+Not built yet: the drafting step (a lesson phrased by the skill-writer agent) and the proposal step, so the live system has still never proposed a policy for `measure` to run on.
 
 ## Exploring (stage 8 item 7)
 
@@ -78,6 +85,12 @@ Not built yet: the drafting step (a lesson phrased by the skill-writer agent) an
 | Key | Default | Read in the package |
 |---|---|---|
 | `nightly_usd` | `0.50` | yes (`service.py::nightly_usd`) -- what one night may spend, counted against the day. Anything unreadable falls back to the default rather than to no cap |
+| `measure_policies` | `false` | yes (`measure.py::measure_config`) -- the night measures proposed rules only when this is literally `true`: the held-out suites cost money and paid runs are approved explicitly. Anything else is off |
+| `held_out` | `{}` | yes -- task type -> evals suite name (`simorgh/evals/suites.py::SUITES`), e.g. `held_out = {research = "research", chat = "tooluse"}`. A task type not listed is never measured, so never adopted. The rule lands in `rules/<task_type>.md`, which `orchestration/profiles.py` reads per AGENT name, so it only reaches a body when the task type is also an agent name (`agents/*.md`) |
+| `measure_repeats` | `3` | yes -- runs per side; the majority of the repeats decides each case |
+| `measure_usd_per_run` | `0.50` | yes -- what one suite run is priced at for the budget check (the sandbox's cap). Unreadable falls back to the default, never to free |
+| `measure_cases` | `5` | yes -- `--cases` per run |
+| `measure_timeout_s` | `1800` | yes -- one run's wall clock before the child is killed (the step then fails and is recorded; the policy stays proposed) |
 
 ## Ledger streams
 
@@ -100,6 +113,7 @@ Not built yet: the drafting step (a lesson phrased by the skill-writer agent) an
 ## Contract tests
 
 - `tests/simorgh/growth/test_diagnose_and_policies.py` — thirty failures with two planted clusters and nothing else found; the three refusals; retirement and expiry.
+- `tests/simorgh/growth/test_the_night_measures_a_proposed_rule.py` — with fakes, no paid call: a proposed rule with a held-out suite is measured and, fixing a case, published as `action.proposed(policy_adopt)` (schema-valid); no held-out suite is skipped and recorded; over budget is skipped before anything runs; off by default nothing runs; the candidate is written into the copy, never the live repo.
 
 ## Planned changes (roadmap)
 
