@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-20: items 1, 2, 3, 5, 6, 7, 8, 9 done; 4 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-20: items 1-9 done (4 without the move to `Task`, reason below); 10 open) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -15,6 +15,8 @@ Evaluation section 8.1 rows planning and verification; section 9.2 (projects tha
 Stage 4's long-task suite (60 scripted turns, kill-and-resume) is the gate; record its numbers. Read `planning/decomposer.py` (`parse_steps`, the numbered-list regex), `planning/model.py`, `planning/service.py` (rollups, the DAG), `orchestration/session.py::_delegate`, `orchestration/api.py::Session`, `verification/` (plan review, trajectory), `kernel/scheduler.py`.
 
 ## Action items
+
+Done 2026-09-22 (item 4): a node is done only when its acceptance is met. The criteria reached the checkpoint critic, which decides whether to keep going, but not the final verdict that completes the child -- so a child could finish without anyone asking whether its "done when" held. The verify subject now carries `acceptance`, and `checklist.acceptance_items` puts each criterion first as a REQUIRED item: answered no, the verdict fails and the child revises. Deliberately NOT done: spawning a project's children through `Task` instead of Planning's queue. `Task` exists to avoid a worker waiting on its own child, and a project session does not wait -- Planning queues the children and the rollup follows their events, a pure function of their statuses. Moving it would put the decomposition path, which took a week to make produce a child at all, at risk for no measured gain. Revisit if a trace shows a project blocked on a child.
 
 Done 2026-09-19 (item 4, in part): a plan node's acceptance criteria reach the child session (note -> `task.created`/claim reply -> `Session.acceptance`), and the rollup treats a `WAITING` child as in progress. The rollup was already a pure function of children's statuses, so "complete when children exist" was not the behaviour; what was missing was the acceptance half and the new waiting state. Still open: a project session spawning children through `Task` rather than through Planning's queue, and marking a node done only once its acceptance is verified.
 

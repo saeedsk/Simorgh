@@ -119,6 +119,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/verification/test_rigor.py` -- `select_rigor` and the forced override.
 - `tests/simorgh/verification/test_parsing.py` -- a non-answer parses as `None`, never "no".
 - `tests/simorgh/verification/test_did_anything.py` -- a change task with no successful write fails.
+- `tests/simorgh/verification/test_acceptance_reaches_the_verdict.py` -- a plan node's acceptance criteria (verify subject `acceptance`) lead the checklist as required items; one answered no fails the verdict (stage 7 item 4).
 - `tests/simorgh/verification/test_a_retry_is_judged_on_the_whole_task.py` -- a retry (`complete_log=False`) passes when an earlier attempt wrote and fails when none ever did.
 - `tests/simorgh/verification/test_full_suite_ran.py` -- the whole-suite requirement on a code change.
 - `tests/simorgh/verification/test_red_suite_attribution.py` -- the base-revision and quiet-rerun excuse rules.

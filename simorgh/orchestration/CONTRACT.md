@@ -65,7 +65,7 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `task.completed` / `task.failed` / `task.blocked` | `messages/task.py` | worker.py:454-492 | Terminal outcome; appended to `task:<id>` then published |
 | `turn.completed` | `messages/task.py::TurnCompleted` | worker.py:523 | After every terminal outcome of every kind (Interface/Voice resolve chat by `session_id`; Memory feeds episodic and working memory) |
 | `memory.store` | `messages/memory.py::MemoryStore` | worker.py:500 | A procedural record of what a finished task did |
-| `verify.requested` | `messages/verify.py::VerifyRequested` | session.py:1751 | A final answer on a profile with `verify=True`; kind always `task` |
+| `verify.requested` | `messages/verify.py::VerifyRequested` | session.py:1751 | A final answer on a profile with `verify=True`; kind always `task`. The subject blob carries the session's `acceptance` criteria (stage 7 item 4) |
 | `learn.self_patch.applied` | `messages/learn.py::LearnSelfPatchApplied` | session.py:809 | `_land` succeeded: a worktree branch landed on main |
 | `system.metrics` | `messages/system.py::SystemMetrics` | service.py:312 | Every `metrics_interval_s` (worker busy gauges) |
 

@@ -196,7 +196,36 @@ class AnsweredItem:
     evidence: str
 
 
+#: How many of a node's acceptance criteria become required items.
+_MAX_ACCEPTANCE = 4
+
+
+def acceptance_items(subject: dict) -> list[ChecklistItem]:
+    """A plan node's "done when" criteria as REQUIRED checklist items
+    (stage 7 item 4).
+
+    They reached the checkpoint critic, which only decides whether to
+    keep going; the verdict that marks the node done never saw them, so
+    a child could complete without anyone asking whether its criteria
+    were met. Written by a planner, so they are the question, verbatim.
+    """
+    out = []
+    for raw in (subject.get("acceptance") or [])[:_MAX_ACCEPTANCE]:
+        text = " ".join(str(raw).split())
+        if text.lower().startswith("done when:"):
+            text = text[len("done when:"):].strip()
+        if text:
+            out.append(ChecklistItem(question=f"Is this acceptance criterion met: {text}?", required=True))
+    return out
+
+
 async def generate_checklist(think, req: VerifyRequest, config, max_items: int | None = None) -> list[ChecklistItem]:
+    accepted = acceptance_items(req.subject)
+    generated = await _generated_checklist(think, req, config, max_items)
+    return accepted + generated
+
+
+async def _generated_checklist(think, req: VerifyRequest, config, max_items: int | None = None) -> list[ChecklistItem]:
     max_items = max_items or config.checklist_max_items
     if req.checklist_hint:
         return [ChecklistItem(question=req.checklist_hint, required=True)]

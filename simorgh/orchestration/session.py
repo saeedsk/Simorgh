@@ -2508,6 +2508,10 @@ class SessionRunner:
             "description": session.user_text, "result": text[:2000], "kind": session.kind, "steps": steps,
             "complete_log": complete_log, "subject": session.subject or "", "written_paths": written,
             "base_ref": session.base_ref,
+            # A plan node's "done when" criteria (stage 7 item 4): the
+            # final verdict judges them, not only the checkpoint critic,
+            # so a node is done when its acceptance is met.
+            "acceptance": [str(a) for a in (session.acceptance or [])],
             # Where the written files are: the task's worktree, or ""
             # for the live tree (`verification/checks/_files.py`).
             "repo_root": session.worktree,
