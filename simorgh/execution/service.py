@@ -65,7 +65,34 @@ TOOLS_STREAM = "execution:tools"
 
 
 
-def metadata_for_blob(metadata: dict) -> dict:
+#: The most rows of evidence a tool may keep in its metadata blob
+#: (`evidence_fields`), and the most bytes they may take once
+#: serialised. A house read answers for one thing or for every player
+#: in the house -- tens, not hundreds -- and each kept row is a few
+#: short fields, so 50 rows fit easily inside 8 KB. Both bounds hold
+#: whatever the tool returns: the full list still goes to `results/`.
+EVIDENCE_MAX_ROWS = 50
+EVIDENCE_MAX_BYTES = 8 * 1024
+#: A kept string is cut at this many characters: a state or a title,
+#: never a document.
+EVIDENCE_MAX_CHARS = 200
+
+
+def _evidence_row(row, fields: tuple[str, ...]) -> dict | None:
+    """`row` projected onto `fields`, scalars only, strings cut short."""
+    if not isinstance(row, dict):
+        return None
+    out = {}
+    for name in fields:
+        value = row.get(name)
+        if isinstance(value, str):
+            out[name] = value[:EVIDENCE_MAX_CHARS]
+        elif value is None or isinstance(value, (bool, int, float)):
+            out[name] = value
+    return out or None
+
+
+def metadata_for_blob(metadata: dict, *, evidence_fields=()) -> dict:
     """A tool's metadata with the bulk row list replaced by a pointer.
 
     `_store_rows` already writes every row to `results/<id>.json` and
@@ -74,12 +101,47 @@ def metadata_for_blob(metadata: dict) -> dict:
     write an unbounded blob into the Ledger, a second uncapped copy of
     data that already had a home (W21-07). Everything else in the
     metadata is small and is kept exactly as the tool reported it.
+
+    A tool whose rows are EVIDENCE -- `home_state` and `media_now` say
+    what the house is doing right now -- declares `evidence_fields`,
+    and a small copy of its rows is kept beside the pointer as
+    `rows_kept` (each row projected onto those fields, scalars only),
+    with `rows_total` saying how many there were. Bounded by
+    `EVIDENCE_MAX_ROWS` and `EVIDENCE_MAX_BYTES`, so the W21-07 bound
+    still holds. Without it the World Model could never fold what Sim
+    had just READ about the house (stage 6 item 3, 2026-09-22): the
+    only copy of the reading was a file named in the output text.
     """
     out = dict(metadata or {})
     rows = out.get("rows")
     if isinstance(rows, list):
         out["rows"] = f"<{len(rows)} rows -- see the results file named in the output>"
+        fields = tuple(str(f) for f in (evidence_fields or ()) if f)
+        if fields:
+            kept, size = [], 2
+            for row in rows:
+                if len(kept) >= EVIDENCE_MAX_ROWS:
+                    break
+                projected = _evidence_row(row, fields)
+                if projected is None:
+                    continue
+                cost = len(json.dumps(projected, default=str).encode("utf-8")) + 2  # and its ", "
+                if size + cost > EVIDENCE_MAX_BYTES:
+                    break
+                kept.append(projected)
+                size += cost
+            out["rows_kept"] = kept
+            out["rows_total"] = len(rows)
     return out
+
+
+def evidence_fields_of(tool) -> tuple[str, ...]:
+    """The row fields `tool` declares as evidence (`evidence_fields`),
+    or () -- the default, which keeps no rows in the blob."""
+    fields = getattr(tool, "evidence_fields", ())
+    if isinstance(fields, str) or not isinstance(fields, (tuple, list, frozenset, set)):
+        return ()
+    return tuple(str(f) for f in fields if isinstance(f, str) and f)
 
 
 def result_error_kind(result) -> str:
@@ -934,7 +996,8 @@ class Service:
                 # call write an unbounded blob (W21-07). The ref keeps
                 # a pointer to the file instead.
                 metadata_ref = await self._ctx.ledger.put_blob(
-                    json.dumps(metadata_for_blob(result.metadata), default=str).encode("utf-8"),
+                    json.dumps(metadata_for_blob(result.metadata, evidence_fields=evidence_fields_of(tool)),
+                               default=str).encode("utf-8"),
                     content_type="application/json",
                 )
             await self._publish_result(
