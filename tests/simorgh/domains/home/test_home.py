@@ -428,6 +428,18 @@ class HomeUndoTestCase(_ToolCase):
         self.assertTrue(undone.ok, undone.error)
         self.assertEqual((await self.house.state("light.kitchen_main")).state, "off")
 
+    async def test_it_reports_what_it_put_back_the_way_home_call_does(self):
+        """`changed` and `after`, so the World Model folds an undo like
+        the call it undid (stage 6 item 3). Counts alone left Sim
+        believing a light it had just put back off was still on."""
+        tools = self._tools()
+        called = await tools["home_call"].run(
+            {"service": "light.turn_on", "target": "kitchen lights"}, ctx=_ctx())
+        undone = await tools["home_undo"].run({"before": called.metadata["before"]}, ctx=_ctx())
+        self.assertIn("light.kitchen_main", undone.metadata["changed"])
+        self.assertEqual(undone.metadata["after"]["light.kitchen_main"], "off")
+        self.assertEqual(set(undone.metadata["after"]), set(undone.metadata["changed"]))
+
     async def test_undoing_nothing_says_why_there_is_no_hidden_slot(self):
         result = await self._tools()["home_undo"].run({}, ctx=_ctx())
         self.assertFalse(result.ok)
@@ -467,6 +479,8 @@ class UndoSaysWhatActuallyWentBackTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((result.output or "").startswith("could not put back:"))
         self.assertIn("still", result.output or "")
         self.assertEqual(result.metadata["restored"], 0)
+        self.assertEqual((result.metadata["changed"], result.metadata["after"]), ([], {}),
+                         "a device that did not go back is not reported as changed")
 
     async def test_a_device_that_did_come_back_still_reports_restored(self):
         import json

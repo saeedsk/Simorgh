@@ -139,6 +139,12 @@ class HomeStateTool(_HomeTool):
     description = "What one thing in the house is doing right now. Takes an entity id or a name."
     read_only = True
     reversibility = "read_only"
+    #: The row fields Execution keeps in the metadata blob (bounded, see
+    #: `execution.service.metadata_for_blob`) so the World Model can
+    #: fold what Sim just read into its entity table. `attributes` stays
+    #: out: it is the bulky part, and the table holds a state, not a
+    #: device's whole attribute dump.
+    evidence_fields = ("entity_id", "state")
     args_schema = {"type": "object", "required": ["target"],
                    "properties": {"target": {"type": "string"}}}
 
@@ -353,6 +359,12 @@ class HomeUndoTool(_HomeTool):
             return self._unconfigured(client)
 
         restored, skipped = [], []
+        # What each restored thing IS now, read back from the house --
+        # the same `changed`/`after` shape `home_call` reports, so the
+        # World Model folds an undo exactly as it folds the call it
+        # undid. Until 2026-09-22 this reported only counts, and Sim put
+        # the kitchen light back off and still believed it was on.
+        changed, after_state = [], {}
         for entity_id, snapshot in before.items():
             domain = entity_id.split(".", 1)[0]
             pair = _UNDO_SERVICE.get(domain)
@@ -411,6 +423,8 @@ class HomeUndoTool(_HomeTool):
                 skipped.append(f"{entity_id} (still {after.state!r}, not {state!r})")
                 continue
             restored.append(f"{entity_id} -> {state}")
+            changed.append(entity_id)
+            after_state[entity_id] = after.state
 
         lines = []
         if restored:
@@ -420,7 +434,8 @@ class HomeUndoTool(_HomeTool):
         return ToolResult(ok=bool(restored), output="\n\n".join(lines) or "nothing to undo",
                           error=None if restored else "; ".join(skipped) or "nothing to undo",
                           side_effects=tuple(f"home:undo:{r.split(' ')[0]}" for r in restored),
-                          metadata={"restored": len(restored), "skipped": len(skipped)})
+                          metadata={"restored": len(restored), "skipped": len(skipped),
+                                    "changed": changed, "after": after_state})
 
 
 def home_tools(config, **kwargs) -> list:

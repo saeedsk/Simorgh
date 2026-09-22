@@ -88,6 +88,10 @@ class MediaNowTool(_MediaTool):
     description = "What is playing, and where. Give a room or player name, or leave it empty for all."
     read_only = True
     reversibility = "read_only"
+    #: Kept in the metadata blob by Execution (bounded, see
+    #: `execution.service.metadata_for_blob`) so the World Model can
+    #: fold what Sim just read about each player.
+    evidence_fields = ("entity_id", "state", "title", "volume")
     args_schema = {"type": "object", "properties": {"where": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
