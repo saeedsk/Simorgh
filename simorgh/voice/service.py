@@ -268,12 +268,13 @@ class Service:
             # exception was swallowed per file and never once shown.
             why = f": {problems[0]}" if problems else ""
             return False, f"none of the {len(wavs)} kept recordings could be read{why}"
-        added, considered, before, after = book.relearn(name, vectors)
+        added, dropped, considered, before, after = book.relearn(name, vectors)
         if not added:
-            return True, (f"nothing in {considered} kept recording(s) was unmistakably {name}. "
-                          f"The profile is unchanged at {before:.2f} agreement with itself -- which is "
+            return True, (f"nothing in {considered} kept recording(s) would make {name}'s profile better. "
+                          f"It is unchanged at {before:.2f} agreement with itself -- which is "
                           f"the right answer when the recordings are of somebody else.")
-        return True, (f"added {added} take(s) to {name} from {considered} kept recording(s): "
+        swapped = f", replacing {dropped} weaker one(s)" if dropped else ""
+        return True, (f"added {added} take(s) to {name} from {considered} kept recording(s){swapped}: "
                       f"agreement with itself {before:.2f} -> {after:.2f}. Nobody had to say anything.")
 
     async def health(self) -> Health:

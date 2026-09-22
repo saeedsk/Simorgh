@@ -463,10 +463,11 @@ class SpeakerBook:
             return ""
 
     def relearn(self, name: str, candidates: Sequence[Sequence[float]], *,
-                keep_max: int = MAX_TAKES) -> tuple[int, int, float, float]:
+                keep_max: int = MAX_TAKES) -> tuple[int, int, int, float, float]:
         """Rebuild a profile from recordings Sim already has.
 
-        `(added, considered, before, after)`. The creator, 2026-09-21:
+        `(added, dropped, considered, before, after)`: `dropped` is how
+        many learnt takes a better recording replaced. The creator, 2026-09-21:
         "I don't want to bother my kids again and again with
         re-enrollment." Sim keeps the family's turns on disk; this
         takes the ones that are unmistakably this person and adds
@@ -495,14 +496,14 @@ class SpeakerBook:
         self._load()
         person = self._people.get((name or "").lower())
         if person is None or not person.embeddings:
-            return 0, 0, 0.0, 0.0
+            return 0, 0, 0, 0.0, 0.0
         enrolment = list(person.embeddings[:3])
+        learnt = list(person.embeddings[3:])
         before = coherence(person.embeddings)
         others = [o for o in self._people.values() if o is not person and o.embeddings]
-        considered = added = 0
+        considered = 0
+        fresh: list[list[float]] = []
         for raw in candidates:
-            if len(person.embeddings) >= keep_max:
-                break
             vector = [float(x) for x in raw]
             considered += 1
             own = max((cosine(vector, take) for take in enrolment), default=0.0)
@@ -512,14 +513,35 @@ class SpeakerBook:
                 continue
             if agreement(vector, enrolment) < REFINE_AGREE:
                 continue
-            after = coherence([*person.embeddings, vector])
-            if after < MUDDLED_BELOW and after < coherence(person.embeddings):
-                continue
-            person.embeddings.append(vector)
-            added += 1
-        if added:
-            self._save(person)
-        return added, considered, before, coherence(person.embeddings)
+            fresh.append(vector)
+        # A FULL profile is the one that most needs this, and the first
+        # version stopped at the cap before looking at one recording: the
+        # creator's twelve takes at 0.66 answered "nothing in 0 kept
+        # recording(s)" twice (live, 2026-09-21). So the learnt slots are
+        # refilled, not appended to: the takes already there and the ones
+        # that qualified compete on how well they agree with the
+        # enrolment, best first, and each must still leave the profile
+        # agreeing with itself.
+        fresh_ids = {id(v) for v in fresh}
+        pool = sorted([*learnt, *fresh], key=lambda v: agreement(v, enrolment), reverse=True)
+        kept = list(enrolment)
+        for vector in pool:
+            if len(kept) >= keep_max:
+                break
+            if len(kept) >= 3:
+                after = coherence([*kept, vector])
+                if after < MUDDLED_BELOW and after < coherence(kept):
+                    continue
+            kept.append(vector)
+        added = sum(1 for v in kept[3:] if id(v) in fresh_ids)
+        dropped = len(learnt) - (len(kept) - 3 - added)
+        # Never leave it worse than it was: a relearn nobody watches may
+        # only improve a profile.
+        if not added or coherence(kept) < before:
+            return 0, 0, considered, before, before
+        person.embeddings[:] = kept
+        self._save(person)
+        return added, dropped, considered, before, coherence(person.embeddings)
 
     def tidy(self, name: str) -> tuple[int, float, float]:
         """Drop the learnt takes that are pulling a profile apart.
