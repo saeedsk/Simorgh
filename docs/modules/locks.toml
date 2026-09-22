@@ -5,6 +5,18 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.cognition]
+by = "opus-main"
+task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
+since = "2026-09-22T11:11:46+00:00"
+until = "2026-09-22T19:11:46+00:00"
+
+[locks.contracts]
+by = "opus-main"
+task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
+since = "2026-09-22T11:11:46+00:00"
+until = "2026-09-22T19:11:46+00:00"
+
 [locks.domains]
 by = "opus-main"
 task = "a reminder knows whose it is"
@@ -13,12 +25,30 @@ until = "2026-09-21T13:42:01+00:00"
 
 [locks.growth]
 by = "opus-main"
-task = "growth merge leftovers"
-since = "2026-09-22T10:50:29+00:00"
-until = "2026-09-22T18:50:29+00:00"
+task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
+since = "2026-09-22T11:11:45+00:00"
+until = "2026-09-22T19:11:45+00:00"
+
+[locks.persona]
+by = "opus-main"
+task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
+since = "2026-09-22T11:11:45+00:00"
+until = "2026-09-22T19:11:45+00:00"
 
 [locks.tools]
 by = "opus-main"
 task = "growth merge leftovers"
 since = "2026-09-22T10:50:29+00:00"
 until = "2026-09-22T18:50:29+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
+since = "2026-09-22T11:11:46+00:00"
+until = "2026-09-22T19:11:46+00:00"
+
+[locks.worldmodel]
+by = "opus-main"
+task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
+since = "2026-09-22T11:11:46+00:00"
+until = "2026-09-22T19:11:46+00:00"
