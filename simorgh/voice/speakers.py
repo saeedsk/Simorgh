@@ -462,6 +462,65 @@ class SpeakerBook:
         except (OSError, ValueError):
             return ""
 
+    def relearn(self, name: str, candidates: Sequence[Sequence[float]], *,
+                keep_max: int = MAX_TAKES) -> tuple[int, int, float, float]:
+        """Rebuild a profile from recordings Sim already has.
+
+        `(added, considered, before, after)`. The creator, 2026-09-21:
+        "I don't want to bother my kids again and again with
+        re-enrollment." Sim keeps the family's turns on disk; this
+        takes the ones that are unmistakably this person and adds
+        them, so a damaged profile is repaired from audio rather than
+        from another recording session.
+
+        The danger is the whole point, so the bars are high and
+        deliberately higher than `refine`'s. A profile collects two
+        people by admitting takes that were *probably* the right one,
+        and a relearn admits many at once with nobody in the room to
+        say otherwise.
+
+          * measured against the ENROLMENT takes, never the whole
+            profile: the enrolment three are the only ones a person
+            actually sat down and gave, and judging candidates against
+            takes that were themselves admitted this way is how the
+            ratchet starts;
+          * `threshold + margin` to be counted at all -- not the bare
+            threshold, which is where a television scored 0.37 on the
+            creator's own book;
+          * clear of every other enrolled person by `REFINE_CLEAR`, so
+            a take that might be either twin is nobody's lesson;
+          * and each one must still leave the profile agreeing with
+            itself, the same guard `refine` uses.
+        """
+        self._load()
+        person = self._people.get((name or "").lower())
+        if person is None or not person.embeddings:
+            return 0, 0, 0.0, 0.0
+        enrolment = list(person.embeddings[:3])
+        before = coherence(person.embeddings)
+        others = [o for o in self._people.values() if o is not person and o.embeddings]
+        considered = added = 0
+        for raw in candidates:
+            if len(person.embeddings) >= keep_max:
+                break
+            vector = [float(x) for x in raw]
+            considered += 1
+            own = max((cosine(vector, take) for take in enrolment), default=0.0)
+            if own < self.threshold + self.margin:
+                continue
+            if others and own - max(self.score(vector, o) for o in others) < REFINE_CLEAR:
+                continue
+            if agreement(vector, enrolment) < REFINE_AGREE:
+                continue
+            after = coherence([*person.embeddings, vector])
+            if after < MUDDLED_BELOW and after < coherence(person.embeddings):
+                continue
+            person.embeddings.append(vector)
+            added += 1
+        if added:
+            self._save(person)
+        return added, considered, before, coherence(person.embeddings)
+
     def tidy(self, name: str) -> tuple[int, float, float]:
         """Drop the learnt takes that are pulling a profile apart.
 

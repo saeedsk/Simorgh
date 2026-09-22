@@ -217,6 +217,51 @@ class Service:
             await sub.unsubscribe()
         self._subs = []
 
+    #: How many kept turns a relearn will look at, newest first.
+    #: Embedding is not free and the newest recordings are the ones
+    #: that sound like the room as it is now.
+    RELEARN_LOOKS_AT = 300
+
+    def _relearn_from_kept(self, book, name: str) -> tuple[bool, str]:
+        """Rebuild `name`'s profile from the turns already on disk.
+
+        Synchronous and run in a thread: it reads and embeds up to
+        `RELEARN_LOOKS_AT` recordings, which is seconds of work and
+        must not hold the event loop while somebody is talking.
+        """
+        import wave
+        from pathlib import Path
+
+        folder = Path(self.config.audio_dir)
+        if not folder.is_dir():
+            return False, (f"no kept recordings to learn from ({folder}). "
+                           "`voice set keep_audio true` keeps them from now on.")
+        session = self._session
+        embedder = getattr(session, "_embedder", None) if session is not None else None
+        if embedder is None:
+            return False, "the speaker embedder is not loaded, so nothing can be measured"
+        wavs = sorted(folder.glob("*.wav"))[-self.RELEARN_LOOKS_AT:]
+        if not wavs:
+            return False, f"no kept recordings in {folder}"
+        vectors = []
+        for path in wavs:
+            try:
+                with wave.open(str(path)) as handle:
+                    pcm = handle.readframes(handle.getnframes())
+                    rate = handle.getframerate()
+                vectors.append(embedder.embed(pcm, rate))
+            except Exception:  # noqa: BLE001 -- one unreadable file is not the end of a relearn
+                continue
+        if not vectors:
+            return False, f"none of the {len(wavs)} kept recordings could be read"
+        added, considered, before, after = book.relearn(name, vectors)
+        if not added:
+            return True, (f"nothing in {considered} kept recording(s) was unmistakably {name}. "
+                          f"The profile is unchanged at {before:.2f} agreement with itself -- which is "
+                          f"the right answer when the recordings are of somebody else.")
+        return True, (f"added {added} take(s) to {name} from {considered} kept recording(s): "
+                      f"agreement with itself {before:.2f} -> {after:.2f}. Nobody had to say anything.")
+
     async def health(self) -> Health:
         if not self._enabled:
             return Health.ok("off" if not self._problems else "; ".join(self._problems))
@@ -422,7 +467,7 @@ class Service:
                               "spoke (experimental)" if action == "aec_on" else "echo cancellation off -- back to the level gate")
             if self._pipeline is not None:
                 self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
-        elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy"):
+        elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn"):
             ok, detail = await self._people_action(action, message.payload)
         else:
             ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set | enroll | forget | people | whois)"
@@ -476,6 +521,10 @@ class Service:
                               f"nothing worth dropping")
             return True, (f"dropped {dropped} learnt take(s) from {name}: agreement with itself "
                           f"{before:.2f} -> {after:.2f}. The enrolment takes are untouched.")
+        if action == "relearn":
+            if not name:
+                return False, "usage: voice relearn <name>   (rebuilds a profile from recordings Sim already kept)"
+            return await asyncio.to_thread(self._relearn_from_kept, book, name)
         if action == "pronounce":
             say_as = str(payload.get("value") or "").strip()
             if not name or not say_as:

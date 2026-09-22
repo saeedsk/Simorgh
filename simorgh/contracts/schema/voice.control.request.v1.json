@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/voice.control.request.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`; tidy: drop the learnt takes pulling a profile apart, never the enrolment ones.",
+  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`; tidy: drop the learnt takes pulling a profile apart, never the enrolment ones; relearn: rebuild a profile from recordings already kept, so nobody has to re-record.",
   "properties": {
     "action": {
       "enum": [
@@ -20,7 +20,8 @@
         "people",
         "whois",
         "pronounce",
-        "tidy"
+        "tidy",
+        "relearn"
       ],
       "type": "string"
     },

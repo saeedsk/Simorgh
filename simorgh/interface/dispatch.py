@@ -526,6 +526,12 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
             return Outcome("usage: voice forget <name>   (or `voice forget all` to erase every voice and start again)")
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "forget", "name": rest.strip()}, timeout=10.0,
                               render=voiceview.controlled)
+    if verb == "relearn":
+        if not rest.strip():
+            return Outcome("usage: voice relearn <name>   (rebuilds a profile from recordings Sim "
+                           "already kept, so nobody has to read sentences again)")
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": "relearn", "name": rest.strip()},
+                              timeout=180.0, render=voiceview.controlled)
     if verb == "tidy":
         if not rest.strip():
             return Outcome("usage: voice tidy <name>   (drops the learnt takes pulling a profile "
@@ -576,11 +582,12 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
 
     close = difflib.get_close_matches(verb, ["status", "on", "off", "mute", "unmute", "barge", "listen", "test", "say",
                                              "voices", "devices", "models", "set", "bench", "enroll", "people", "family", "whois",
-                                             "forget", "pronounce"], n=1, cutoff=0.6)
+                                             "forget", "pronounce", "tidy", "relearn"], n=1, cutoff=0.6)
     if close:
         return Outcome(f"voice: unknown verb {verb!r} -- did you mean `voice {close[0]}`?")
     return Outcome(f"voice: unknown verb {verb!r} -- status | on | off | mute | unmute | barge on|off | listen [s] "
-                   f"| test <text> | enroll <name> | people | whois | forget <name> | pronounce <name> <as> "
+                   f"| test <text> | enroll <name> | relearn <name> | tidy <name> | people | whois "
+                   f"| forget <name> | pronounce <name> <as> "
                    f"| voices | devices | models [name] | set [key value] | bench [quiet]  (`help voice`)")
 
 

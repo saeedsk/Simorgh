@@ -61,6 +61,25 @@ class TheThreeListsAgree(unittest.TestCase):
         self.assertEqual(unhandled, [],
                          f"the contract permits these and nothing answers them: {unhandled}")
 
+    def test_the_usage_line_names_every_verb_that_takes_a_name(self):
+        """A FOURTH list, and the one that caught me: the creator
+        typed `voice relearn` and the "unknown verb" line listed
+        fourteen verbs without `tidy`, which had shipped hours
+        earlier. A verb nobody is told about is a verb nobody uses.
+        """
+        source = (_ROOT / "simorgh" / "interface" / "dispatch.py").read_text()
+        usage = source[source.index('unknown verb {verb!r} -- status'):][:600]
+        for verb in ("tidy", "relearn", "enroll", "forget", "pronounce", "whois", "people"):
+            self.assertIn(verb, usage, f"`voice {verb}` exists and the usage line does not say so")
+
+    def test_the_did_you_mean_list_knows_them_too(self):
+        """`voice relerarn` should suggest `relearn`, not list
+        everything."""
+        source = (_ROOT / "simorgh" / "interface" / "dispatch.py").read_text()
+        close = source[source.index("difflib.get_close_matches(verb"):][:400]
+        for verb in ("tidy", "relearn"):
+            self.assertIn(f'"{verb}"', close)
+
     def test_the_cli_only_sends_permitted_actions(self):
         source = (_ROOT / "simorgh" / "interface" / "dispatch.py").read_text()
         sent = set(re.findall(r'VOICE_CONTROL_REQUEST, \{"action": "([a-z_]+)"', source))
