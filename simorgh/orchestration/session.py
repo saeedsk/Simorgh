@@ -956,9 +956,18 @@ class SessionRunner:
     async def _land(self, session: Session, outcome: Outcome) -> Outcome:
         call = {"tool": "worktree_land", "args": {}}
         ok, summary, detail = await self._propose_and_await(session, call, session.next_step_no())
+        # A task that wrote nothing lands nothing, and `worktree_land`
+        # says so honestly ("nothing to land: the worktree made no
+        # commits") -- but prefixed with "landed on main:" the line read
+        # as a success, and a SWE-bench run where EVERY case produced no
+        # patch reported thirty clean landings (live, 2026-09-22). The
+        # wording now matches what happened, and the step is not ok:
+        # nothing was landed, so nothing succeeded.
+        nothing = ok and "nothing to land" in (detail or "")
         step = Step(session.next_step_no(), "act",
-                    (f"landed on main: {detail}" if ok else f"landing failed: {detail}")[:2000],
-                    tool="worktree_land", ok=ok, denied=was_denied(detail))
+                    (f"nothing landed: {detail}" if nothing else
+                     f"landed on main: {detail}" if ok else f"landing failed: {detail}")[:2000],
+                    tool="worktree_land", ok=ok and not nothing, denied=was_denied(detail))
         session.record(step)
         await self._record_step(session, step)
         if ok:
@@ -969,11 +978,21 @@ class SessionRunner:
             # subscribed to this topic since Phase 0 and nothing on the
             # real landing path ever published it: the self-improvement
             # loop was open (2026-09-18 evaluation, C1).
-            await self._publish(session, topics.LEARN_SELF_PATCH_APPLIED, {
-                "subject": session.subject or ", ".join(sorted(session.wrote)[:8]) or session.profile.name,
-                "commit": session.landed_commit,
-                "reason": f"landed by a {session.profile.name} task ({session.task_id})",
-            })
+            #
+            # Not when nothing landed. `worktree_land` returns ok for a
+            # worktree that made no commits -- there was nothing to
+            # refuse -- and announcing a self-patch there tells Learning,
+            # the Self Model, Reflection, Curiosity and Planning that Sim
+            # changed its own code when it wrote nothing, carrying main's
+            # own sha as the "patch". Thirty such announcements came out
+            # of one SWE-bench run where no case produced a patch (live,
+            # 2026-09-22).
+            if not nothing:
+                await self._publish(session, topics.LEARN_SELF_PATCH_APPLIED, {
+                    "subject": session.subject or ", ".join(sorted(session.wrote)[:8]) or session.profile.name,
+                    "commit": session.landed_commit,
+                    "reason": f"landed by a {session.profile.name} task ({session.task_id})",
+                })
             first = next((line.strip() for line in (summary or "").splitlines() if line.strip()), "landed")
             return Outcome(
                 "completed", result_summary=f"{outcome.result_summary}\n\n[{first}]".strip(),

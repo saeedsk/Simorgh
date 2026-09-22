@@ -66,7 +66,7 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `turn.completed` | `messages/task.py::TurnCompleted` | worker.py:523 | After every terminal outcome of every kind (Interface/Voice resolve chat by `session_id`; Memory feeds episodic and working memory) |
 | `memory.store` | `messages/memory.py::MemoryStore` | worker.py:500 | A procedural record of what a finished task did |
 | `verify.requested` | `messages/verify.py::VerifyRequested` | session.py:1751 | A final answer on a profile with `verify=True`; kind always `task`. The subject blob carries the session's `acceptance` criteria (stage 7 item 4) |
-| `learn.self_patch.applied` | `messages/learn.py::LearnSelfPatchApplied` | session.py:809 | `_land` succeeded: a worktree branch landed on main |
+| `learn.self_patch.applied` | `messages/learn.py::LearnSelfPatchApplied` | session.py:809 | `_land` succeeded AND commits actually landed: a `worktree_land` that reports "nothing to land" is ok (there was nothing to refuse) but publishes nothing and records the step as `nothing landed`, not ok -- announcing a self-patch there told five subsystems Sim had changed its own code, with main's own sha as the patch, for all 30 cases of a SWE-bench run that produced none (2026-09-22) |
 | `system.metrics` | `messages/system.py::SystemMetrics` | service.py:312 | Every `metrics_interval_s` (worker busy gauges) |
 
 ## Ledger streams
