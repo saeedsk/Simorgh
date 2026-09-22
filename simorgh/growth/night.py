@@ -19,8 +19,9 @@ The order is not arbitrary:
     evals        free, and the thing every other judgement rests on
     review       free, and it can only ever REMOVE a policy
     diagnose     free; counting, not asking
-    draft        costs money: one lesson phrased by a model (not built)
-    propose      free; writing down what the drafting produced (not built)
+    propose      costs money: a rule drafted by a model for each new
+                 cluster, guarded and written down (`propose.py`,
+                 off by default)
     measure      costs money: a proposed rule on its held-out suite,
                  with and without it (`measure.py`, off by default)
 

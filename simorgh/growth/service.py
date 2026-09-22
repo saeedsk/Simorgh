@@ -41,6 +41,7 @@ from simorgh.contracts.protocols import Context, Health
 
 from .measure import MeasureConfig, measure_config
 from .night import DEFAULT_NIGHTLY_USD
+from .propose import ProposeConfig, propose_config
 
 from .estimate.service import Service as EstimateService
 from .explore.service import Service as ExploreService
@@ -120,6 +121,16 @@ class Service:
         self._measure = MeasureConfig()
         #: The seam a test replaces: `(suite, task_type, cfg) -> run_cases`.
         self._cases_for = None
+        #: Drafting and proposing rules from what diagnose found: OFF
+        #: unless `[growth] propose_policies = true`, because every
+        #: draft is a paid call.
+        self._propose = ProposeConfig()
+        #: Seams a test replaces: `think(prompt) -> reply payload`, and
+        #: the agent names a rule can reach (None: read `agents/`).
+        self._think = None
+        self._agents = None
+        #: What tonight's `diagnose` step found, for the `propose` step.
+        self._candidates: list = []
         #: The last night's report, for `health()` and the tests.
         self.last_night = None
         self._failed: dict[str, str] = {}
@@ -155,6 +166,7 @@ class Service:
         # setting nothing reads is the bug this codebase keeps finding.
         self._nightly_usd = nightly_usd(ctx.config)
         self._measure = measure_config(ctx.config)
+        self._propose = propose_config(ctx.config)
         self.policies = PolicyStore(ctx.ledger, clock=ctx.clock, publish=_announce)
         try:
             await self.policies.sync()
@@ -224,8 +236,55 @@ class Service:
             Step("evals", self._step_evals, est_usd=0.0),
             Step("review", self._step_review, est_usd=0.0),
             Step("diagnose", self._step_diagnose, est_usd=0.0),
+            self._propose_step(),
             *self._measure_steps(),
         ]
+
+    def _propose_step(self):
+        """Draft a rule for what diagnose found and propose it (the gap
+        between items 3 and 5): one step, priced at every draft the
+        night may make, or one free step that says why it is off.
+
+        Measuring is built before the night runs, so a rule proposed
+        tonight is measured on the NEXT night -- after its
+        `growth.policy.proposed` has been announced to the household.
+        """
+        from .night import Step
+
+        cfg = self._propose
+        if not cfg.enabled:
+            async def _off() -> dict:
+                return {"skipped": "off: [growth] propose_policies is not true (every draft is a paid call)",
+                        "spent_usd": 0.0}
+            return Step("propose", _off, est_usd=0.0)
+        return Step("propose", self._step_propose, est_usd=cfg.est_usd())
+
+    async def _step_propose(self) -> dict:
+        from .propose import agent_names, propose_from
+
+        if self.policies is None:
+            return {"skipped": "no policy store", "spent_usd": 0.0}
+        if not self._candidates:
+            return {"skipped": "diagnose found nothing tonight", "spent_usd": 0.0}
+        agents = self._agents if self._agents is not None else agent_names()
+        return await propose_from(self._candidates, self.policies, self._think or self._think_draft,
+                                  self._propose, agents=agents)
+
+    async def _think_draft(self, prompt: str) -> dict:
+        """One `cognition.think` on the cheap purpose (`review`), capped
+        at `propose_usd_per_draft`; the reply payload, or an error
+        reply (`ok: false`) on a timeout."""
+        from simorgh.contracts.envelope import Message
+
+        ctx = self._ctx
+        if ctx is None:
+            return {"ok": False, "text": ""}
+        request = Message.new(topics.COGNITION_THINK, source=ctx.bus.source, clock=ctx.clock.now, payload={
+            "purpose": "review", "messages": [{"role": "user", "content": prompt}],
+            "budget": {"max_tokens": 200, "max_cost_usd": self._propose.usd_per_draft},
+            "require_real_provider": False})
+        reply = await ctx.bus.request_or_error(request, timeout=self._propose.timeout_s)
+        return dict(reply.payload or {})
 
     def _measure_steps(self) -> list:
         """One step per PROPOSED rule (stage 8 item 5), or one free step
@@ -312,11 +371,12 @@ class Service:
     async def _step_diagnose(self) -> dict:
         """What keeps going wrong, counted (stage 8 item 3). Free: the
         model is only ever asked to phrase what counting found, and
-        that is the drafting step, which costs money and comes last.
+        that is the `propose` step, which costs money and comes next.
         """
         monitors = self.monitors
         found = await monitors._record_candidates(  # noqa: SLF001 -- one subsystem, two parts
             monitors._patterns.mine(self._now()))    # noqa: SLF001
+        self._candidates = list(found or ())
         return {"detail": f"{len(found)} candidate(s)", "spent_usd": 0.0}
 
     def _now(self) -> float:

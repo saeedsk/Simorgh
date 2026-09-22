@@ -130,6 +130,11 @@ class Candidate:
     count: int
     subject: str = ""           # the task type or the tool it is about
     evidence: tuple[str, ...] = ()
+    #: Where a person can read the evidence: `task:<id>` for each member
+    #: of a failure cluster, `reflect:patterns:<task_type>` for the
+    #: pattern miner's window. A policy drafted from this candidate
+    #: carries these as its `evidence_refs` (`propose.py`).
+    refs: tuple[str, ...] = ()
 
     def describe(self) -> str:
         about = f" in {self.subject}" if self.subject else ""
@@ -139,7 +144,8 @@ class Candidate:
 def from_clusters(clusters) -> list[Candidate]:
     return [Candidate(source="failures", what=(c.key[1] or c.key[2] or c.key[3]),
                       count=len(c.members), subject=c.task_type,
-                      evidence=tuple(m.reason[:160] for m in c.members[:5] if m.reason))
+                      evidence=tuple(m.reason[:160] for m in c.members[:5] if m.reason),
+                      refs=tuple(f"task:{m.task_id}" for m in c.members if m.task_id))
             for c in clusters]
 
 
@@ -162,7 +168,8 @@ def from_patterns(patterns) -> list[Candidate]:
     """The pattern miner's findings as lesson candidates: a task type
     whose failure rate over the window is worth saying out loud."""
     return [Candidate(source="patterns", what=f"{p.kind} {p.rate:.0%}", count=1,
-                      subject=p.task_type, evidence=(p.proposal[:200],) if p.proposal else ())
+                      subject=p.task_type, evidence=(p.proposal[:200],) if p.proposal else (),
+                      refs=(f"reflect:patterns:{p.task_type}",) if p.task_type else ())
             for p in (patterns or ())]
 
 
