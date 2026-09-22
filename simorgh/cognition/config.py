@@ -20,7 +20,13 @@ DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
     # and hands the floor a turn that was going to be answered. `[voice]
     # reply_timeout_s` sits just above this, so the cap is what binds.
     "chat": Budget(12_000, 1_000, 0.05, max_seconds=90.0),
-    "draft": Budget(40_000, 8_000, 0.5),
+    # 300 s, not the 180 s default: the Router shares a purpose's deadline
+    # between candidates (`remaining / (still to try + 1)`), so 180 s over
+    # four providers was a 36 s slice -- and a real drafting call on a
+    # SWE-bench case measured up to 42.5 s (60 calls, live 2026-09-22).
+    # The slow tail was timing out and costing the case its answer, while
+    # the model was working normally.
+    "draft": Budget(40_000, 8_000, 0.5, max_seconds=300.0),
     "plan": Budget(24_000, 2_000, 0.2, require_real=False),
     "review": Budget(12_000, 1_000, 0.05, require_real=False),
     "research": Budget(24_000, 2_000, 0.2),

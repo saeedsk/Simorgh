@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -264,6 +265,7 @@ class TogetherProvider:
 
     def _post(self, url: str, body: dict, *, timeout: float) -> str:
         payload = json.dumps(body).encode()
+        started = time.monotonic()
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -289,7 +291,16 @@ class TogetherProvider:
             detail = exc.read().decode(errors="replace")[:300]
             raise ProviderUnavailable(f"Together HTTP {exc.code}: {detail}") from exc
         except Exception as exc:  # noqa: BLE001 -- network, DNS, TLS, timeout: degrade to the next provider
-            raise ProviderUnavailable(f"Together request failed: {exc!r}") from exc
+            # How long it waited, and how long it was ALLOWED to wait. The
+            # Router shares a purpose's deadline between candidates, so a
+            # failure that lands on its own budget ("after 36.0s of 36.0s")
+            # is Sim cutting its own call off, and one well inside the
+            # budget is Together stalling. Live on 2026-09-22 read timeouts
+            # came every couple of minutes on `draft` and this message
+            # could not tell those two apart.
+            raise ProviderUnavailable(
+                f"Together request failed after {time.monotonic() - started:.1f}s "
+                f"of {timeout:.1f}s: {exc!r}") from exc
 
     # -- response shaping -------------------------------------------------------
     def _to_response(self, data: dict, back: dict[str, str] | None = None) -> ProviderResponse:

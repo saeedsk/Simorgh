@@ -131,7 +131,18 @@ class Config:
     # be reached (observer, 2026-09-10 -- a task died at 121s with one
     # `think.completed` on record and no trace of a second call).
     # Cognition bounds the whole chain now; this waits for it.
-    think_timeout_s: float = 200.0
+    # 320 s, not 200: Cognition SHARES a purpose's deadline between
+    # candidates (`router._share_of`: `remaining / (still to try + 1)`),
+    # and it never exceeds what this caller will still wait. At 200 s a
+    # `draft` -- the coding call -- got a 40 s slice each, while real
+    # drafting calls on SWE-bench cases measured up to 42.5 s (live,
+    # 2026-09-22): Together timed out twice and Gemini answered
+    # `504 DEADLINE_EXCEEDED`, on one case, minutes apart, and the case
+    # fell to the floor model. This waits long enough for `draft`'s own
+    # 300 s cap, so each candidate gets 60 s. It does not slow chat or
+    # voice: those are bounded by `[cognition.purposes] chat.max_seconds`
+    # (90 s), which is the smaller of the two and still wins.
+    think_timeout_s: float = 320.0
     needs_human_timeout_s: float = 600.0
     # A patch or skill task works in its own git worktree and lands on
     # main through `worktree_land` (execution/worktree.py) instead of
