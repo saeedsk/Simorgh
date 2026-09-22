@@ -476,6 +476,16 @@ class Service:
             return 400, b'{"error":"invalid json"}', "application/json"
         if not line:
             return 400, b'{"error":"no line"}', "application/json"
+        if line.startswith("!"):
+            # `!` is a raw shell with no Guardian in it (`dispatch.py:191`),
+            # which is a person's own hands at their own keyboard. Over
+            # HTTP it would be a remote shell on this house, so it is
+            # refused here exactly as `ui.command.request` refuses it --
+            # `tool run_shell ...` does the same work through the gate.
+            return 400, json.dumps({"error": {
+                "code": "shell_refused",
+                "detail": "`!` runs a shell command -- use `tool run_shell ...`, which Guardian gates",
+            }}).encode("utf-8"), "application/json"
         command = parse(line)
         if command is None or command.name is None:
             return 400, json.dumps({"error": {

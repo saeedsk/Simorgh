@@ -91,6 +91,16 @@ class RemoteCommands(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
         self.assertEqual(self.handled, [])
 
+    async def test_a_shell_line_is_refused(self):
+        """`!` is a raw shell with no Guardian in it -- a person's own
+        hands at their own keyboard. Over HTTP it would be a remote shell
+        on this house."""
+        resp = await self._post({"line": "!rm -rf /tmp/whatever"})
+        self.assertEqual(resp.status, 400)
+        self.assertEqual(json.loads(resp.body)["error"]["code"], "shell_refused")
+        await asyncio.sleep(0.05)
+        self.assertEqual(self.handled, [])
+
     async def test_an_empty_or_unreadable_body_is_refused(self):
         self.assertEqual((await self._post({"line": "   "})).status, 400)
         self.assertEqual(self.handled, [])
