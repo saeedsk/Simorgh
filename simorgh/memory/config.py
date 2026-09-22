@@ -78,6 +78,14 @@ class Config:
     # name shape (`[ledger] compact_after_start_s`); this is that fix
     # for the other stream that grows without bound. 0 disables.
     consolidate_after_start_s: float = 120.0
+    #: How long consolidation waits for Cognition. It is the DEADLINE the
+    #: providers then share: the Router gives each candidate
+    #: `remaining / (still to try + 1)`, so 30 s over four providers was
+    #: an 8 s slice each -- live, 2026-09-22: Together timed out, Gemini
+    #: was abandoned at 8 s and its answer arrived 200 OK five seconds
+    #: later, the Claude CLI got 6.9 s, and the floor "consolidated"
+    #: nothing. Nobody waits on this work, so it may take its time.
+    consolidate_timeout_s: float = 120.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":

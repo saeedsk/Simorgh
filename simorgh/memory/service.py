@@ -335,6 +335,7 @@ class Service:
         since = self._ctx.clock.now() - window if window else None
         report = await run_consolidation(
             self.engine, bus=self._ctx.bus, source=self._ctx.source, keep_per_kind=self._keep_per_kind, since=since,
+            cognition_timeout=self._config.consolidate_timeout_s,
         )
         for ref_a, ref_b, evidence in report.contradictions:
             await self._ctx.bus.publish(Message.new(

@@ -53,6 +53,12 @@ task = "standing approvals: approve a kind of action once"
 since = "2026-09-22T14:09:20+00:00"
 until = "2026-09-22T22:09:20+00:00"
 
+[locks.memory]
+by = "opus-main"
+task = "consolidation waits long enough for a provider to answer"
+since = "2026-09-22T20:46:27+00:00"
+until = "2026-09-23T04:46:27+00:00"
+
 [locks.orchestration]
 by = "opus-main"
 task = "an interrupted request is not left pending in the conversation"

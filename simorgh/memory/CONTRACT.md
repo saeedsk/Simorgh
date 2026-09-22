@@ -119,6 +119,7 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 | `embedder` | `'auto'` (local sentence-transformers when installed, else hashing; since 2026-09-19; tests get hashing via `SIMORGH_NO_LOCAL_EMBEDDER`) | yes |
 | `recency_weight` | `0.1` | yes |
 | `consolidate_after_start_s` | `120.0` | yes |
+| `consolidate_timeout_s` | `120.0` | yes -- consolidation's wait on Cognition, which IS the deadline the providers share (each gets `remaining / (still to try + 1)`). At 30 s over four providers each got ~8 s: Gemini's answer arrived after it was abandoned and the floor "consolidated" nothing (live, 2026-09-22) |
 
 `default_k` is read only as a fallback when a `memory.retrieve` payload omits `k`, and the schema makes `k` required, so it never takes effect; `kernel/configcheck.py:66-67` lists it in `KNOWN_DEAD_FIELDS`. The keep-per-kind counts (2,000 / 2,000 / 500) are a constructor argument (`service.py:19`), not config.
 
