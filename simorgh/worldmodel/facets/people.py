@@ -16,6 +16,17 @@ Stage 10 adds the two things a companion needs to know and may not
 guess: what a person said yes to (`grant`/`revoke`) and what they care
 about (`add_interest`/`remove_interest`). Both arrive only through a
 confirmed `world.people.update`; the store never infers either.
+
+Preferences (stage 6 item 4, 2026-09-22) are the one thing a sentence
+MAY write, because they are only ever read by the model: "call me
+Ira-bear" and "I prefer tea" arrive from Persona as
+`persona.user_model.updated` naming who said them, and land in THAT
+person's `preferences` (`remember_preference`). They used to land in one
+global `user_profile` for the whole household, so what Ira asked to be
+called was how Sim addressed everybody. A statement nobody can be named
+for is written nowhere. A permission is never written this way -- it is
+what code gates on, and it arrives only through a confirmed
+`world.people.update{grant}`.
 """
 
 from __future__ import annotations
@@ -25,6 +36,23 @@ from dataclasses import replace
 from pathlib import Path
 
 from simorgh.contracts.people import Person, from_dict, household_people, normalise_identity
+
+
+#: The machine's own keyboard: a turn there that names nobody is the
+#: owner's. The same convention as `guardian/tiers.py::role_of` and
+#: `persona/user_model.py::CONSOLE_CHANNELS` (World Model may import
+#: neither, so the tuple is repeated; moving it to `contracts/channels.py`
+#: is the follow-up that makes it one answer).
+CONSOLE_CHANNELS: tuple[str, ...] = ("", "cli")
+
+#: What the model is told only above this confidence (Persona's merge:
+#: one clear statement is 0.7, a contradicted one halves).
+MIN_PREFERENCE_CONFIDENCE = 0.5
+#: The facets a sentence may set. Anything else in a `persona.user_model
+#: .updated` is refused, so a new extractor cannot quietly start writing
+#: a key some code later mistakes for a setting.
+PREFERENCE_FACETS: tuple[str, ...] = ("preferred_name", "preference")
+_PREFERENCE_MAX_CHARS = 200
 
 
 class PeopleFacet:
@@ -159,6 +187,57 @@ class PeopleFacet:
         person = self.by_name(name)
         return person is not None and person.grants(permission)
 
+    # -- what they told Sim about themselves (stage 6 item 4) --------------------------
+    def owner(self) -> Person | None:
+        """The console's person: whoever is linked `cli:owner`, else the
+        one record whose role is owner. None when the store has neither."""
+        self.load()
+        linked = self.resolve("cli:owner")
+        if linked is not None:
+            return linked
+        return next((p for p in self.all() if p.role == "owner"), None)
+
+    def speaker(self, person: str, channel: str | None) -> Person | None:
+        """Who said it: a named person the store knows, or the owner for
+        a console turn that names nobody. None for everybody else -- a
+        name the store has no record of, an unplaced voice, a local
+        surface that names nobody, or a message that does not say which
+        channel it came from (`channel is None`), which is how a payload
+        written before 2026-09-22 looks."""
+        name = (person or "").strip()
+        if name:
+            return self.by_name(name)
+        if channel is None or channel.strip() not in CONSOLE_CHANNELS:
+            return None
+        return self.owner()
+
+    def remember_preference(self, person: Person, facet: str, value, confidence: float,
+                            *, ts: float = 0.0) -> Person | None:
+        """File one extracted facet under `person`'s preferences. Refuses
+        (None) a facet that is not a preference or an empty value; never
+        touches permissions, role or identities."""
+        if facet not in PREFERENCE_FACETS:
+            return None
+        text = " ".join(str(value if value is not None else "").split())[:_PREFERENCE_MAX_CHARS]
+        if not text:
+            return None
+        entry = {"value": text, "confidence": round(float(confidence or 0.0), 4), "updated_at": ts}
+        return self._change(person.name, lambda p: replace(p, preferences={**p.preferences, facet: entry}))
+
+    def profile(self, person: Person | None) -> dict:
+        """The `user_profile` answer for one person: their preference
+        facets and a ready line for a prompt ("" when there is nothing
+        above the confidence floor, or nobody)."""
+        if person is None:
+            return {"person": None, "facets": {}, "text": ""}
+        facets = {k: dict(v) for k, v in person.preferences.items()
+                  if k in PREFERENCE_FACETS and isinstance(v, dict)}
+        known = [f"{k}: {v.get('value')}" for k, v in sorted(facets.items())
+                 if float(v.get("confidence") or 0.0) >= MIN_PREFERENCE_CONFIDENCE and v.get("value")]
+        text = (f"What {person.name} (who is speaking) has told you about themselves: " + "; ".join(known)
+                if known else "")
+        return {"person": person.name, "facets": facets, "text": text}
+
     async def get(self, args: dict) -> dict:
         """`world.env.query{what: "people"}`: by identity, by name, or all."""
         identity = str(args.get("identity") or "")
@@ -173,4 +252,30 @@ class PeopleFacet:
         return {"people": [p.to_dict() for p in self.all()]}
 
 
-__all__ = ["PeopleFacet"]
+class UserProfileView:
+    """`world.env.query{what: "user_profile", args: {person, channel}}`:
+    ONE person's preferences, read from the People store.
+
+    The name is kept so the query surface did not change; what it
+    answers did. It used to be one global profile; now it is the
+    speaker's, resolved exactly as a write is (`PeopleFacet.speaker`):
+    `person` is a household name, or "" with `channel` "cli" for the
+    owner's console. Asked without saying who, it answers nobody --
+    there is no household-wide "user" any more.
+    """
+
+    name = "user_profile"
+
+    def __init__(self, people: PeopleFacet) -> None:
+        self._people = people
+
+    def invalidate(self) -> None:
+        pass
+
+    async def get(self, args: dict) -> dict:
+        channel = args.get("channel")
+        who = self._people.speaker(str(args.get("person") or ""), None if channel is None else str(channel))
+        return self._people.profile(who)
+
+
+__all__ = ["CONSOLE_CHANNELS", "MIN_PREFERENCE_CONFIDENCE", "PREFERENCE_FACETS", "PeopleFacet", "UserProfileView"]

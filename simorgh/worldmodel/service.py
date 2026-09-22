@@ -24,8 +24,8 @@ from .facets.capability_map import CapabilityMapFacet
 from .facets.file_index import FileIndexFacet
 from .facets.git_state import GitStateFacet
 from .facets.home import FOLDED_TOOLS, HomeFacet, folded_observations
-from .facets.people import PeopleFacet
-from .facets.registry_facets import ToolsFacet, UserProfileFacet
+from .facets.people import PeopleFacet, UserProfileView
+from .facets.registry_facets import ToolsFacet
 from .facets.wellbeing import WellbeingFacet
 from .selfmodel import (
     add_change,
@@ -120,13 +120,15 @@ class Service:
         self._git_state = GitStateFacet(self.config.repo_root)
         self._tools = ToolsFacet()
         self._booted = False
-        self._user_profile = UserProfileFacet()
         # What the house is doing and who is in it (stage 6 item 3), folded
         # from the evidence Sim already sees.
         self._home = HomeFacet(clock=ctx.clock.now)
         # Who the people are (stage 6 item 4): one record per person, on
         # disk beside the rest of what Sim knows, seeded from the household.
         self._people = PeopleFacet(ctx.data_dir / "people.json")
+        # `user_profile` is one person's preferences out of that store
+        # now, not a household-wide profile (stage 6 item 4, 2026-09-22).
+        self._user_profile = UserProfileView(self._people)
         # How each consented adult seems against their own usual (stage
         # 10 item 2). The consent gate is the People store's answer, asked
         # on every observation, so a revoke takes effect on the next turn
@@ -588,8 +590,23 @@ class Service:
         await self._sync_tools()
 
     async def _on_user_model_updated(self, message: Message) -> None:
-        p = message.payload
-        self._user_profile.on_updated(p.get("facet", ""), p.get("value"), p.get("confidence", 0.0))
+        """File a "call me X" / "I prefer X" under the person who said it.
+
+        Persona names them (`person`: a household name, or "" with
+        `channel` "cli" for the owner's console). A statement nobody can be
+        named for is dropped here, not filed under "the user": that global
+        profile is how Ira's nickname became everybody's (stage 6 item 4).
+        A payload without `channel` predates the attribution and is
+        dropped too -- guessing the owner for it is the bug again.
+        Preferences only: a sentence never writes a permission or a role.
+        """
+        p = message.payload or {}
+        channel = p.get("channel")
+        who = self._people.speaker(str(p.get("person") or ""), None if channel is None else str(channel))
+        if who is None:
+            return
+        self._people.remember_preference(who, str(p.get("facet") or ""), p.get("value"),
+                                         float(p.get("confidence") or 0.0), ts=self._ctx.clock.now())
 
     # -- dynamic Self Model: competence, calibration, limitations, change history --------------
 
