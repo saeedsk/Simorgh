@@ -43,3 +43,4 @@ The domains publish (`ui.tv.state`, `ui.dash.*`, `world.camera.event`, `system.s
 ## Working on this module
 
 Lock `domains`; edit `simorgh/domains/<name>/`, `tests/simorgh/domains/<name>/` and the domain's own CONTRACT. A new tool for an external service does not belong here at all -- it arrives as an MCP server (`docs/adding-capability.md`). Run `python tools/modtest.py domains`; commit subject `domains: <what changed>` or `<domain>: <what changed>`.
+- 2026-09-22: `energy_tariff`'s `rates` declares its elements (`{name, price, hours: [int]}`). As a bare `array` it made Gemini refuse every native request, whatever tool was being asked for.

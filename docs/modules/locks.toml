@@ -5,6 +5,18 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.cognition]
+by = "opus-main"
+task = "Gemini native: an array with no items refused every call"
+since = "2026-09-22T12:08:45+00:00"
+until = "2026-09-22T20:08:45+00:00"
+
+[locks.domains]
+by = "opus-main"
+task = "Gemini native: an array with no items refused every call"
+since = "2026-09-22T12:08:45+00:00"
+until = "2026-09-22T20:08:45+00:00"
+
 [locks.growth]
 by = "opus-main"
 task = "diagnose sees real task failures"

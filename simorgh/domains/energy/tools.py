@@ -236,7 +236,10 @@ class EnergyTariffTool(_EnergyTool):
         "type": "object",
         "properties": {"op": {"type": "string", "enum": ["show", "set"]},
                        "spec": {"type": "object"}, "name": {"type": "string"},
-                       "currency": {"type": "string"}, "rates": {"type": "array"},
+                       "currency": {"type": "string"}, "rates": {"type": "array", "items": {
+                           "type": "object", "properties": {
+                               "name": {"type": "string"}, "price": {"type": "number"},
+                               "hours": {"type": "array", "items": {"type": "integer"}}}}},
                        "standing_charge_per_day": {"type": "number"}},
     }
 

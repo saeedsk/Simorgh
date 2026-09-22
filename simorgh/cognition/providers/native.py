@@ -107,6 +107,14 @@ def gemini_declarations(tools: list[dict] | None) -> list[dict]:
                 out[key] = clean(value)
             else:
                 out[key] = value
+        if out.get("type") == "array" and not isinstance(out.get("items"), dict):
+            # Gemini refuses the WHOLE request -- every tool, every call --
+            # for one array with no `items` (`function_declarations[30].
+            # parameters.properties[rates].items: missing field`), so the
+            # native dialect never answered once (2026-09-22). A schema
+            # that says nothing about its elements is given the loosest
+            # element Gemini accepts.
+            out["items"] = {"type": "string"}
         return out
 
     decls = [{"name": wire_name(t["name"]), "description": str(t.get("description") or "")[:1024],
