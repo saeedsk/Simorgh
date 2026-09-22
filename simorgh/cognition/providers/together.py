@@ -200,13 +200,22 @@ class TogetherProvider:
         loop.run_in_executor(None, _read)
         calls = ToolCallBuffer(native.names_back(tools))
         usage: dict = {}
+        started, lines = loop.time(), 0
         while True:
             item = await queue.get()
             if item is done:
                 break
             if isinstance(item, Exception):
+                # Which phase stalled: before the first line (the provider
+                # slow to start on a long prompt) or mid-reply (a stream
+                # that went quiet). Live, 2026-09-22, the timeouts came
+                # several times a day and a probe could not reproduce
+                # them; the fix differs by phase, so the failure says it.
+                phase = (f"no line in {loop.time() - started:.1f}s" if not lines
+                         else f"quiet after {lines} line(s), {loop.time() - started:.1f}s in")
                 raise item if isinstance(item, ProviderUnavailable) else ProviderUnavailable(
-                    f"Together stream failed: {item!r}") from item
+                    f"Together stream failed ({phase}): {item!r}") from item
+            lines += 1
             line = item.strip()
             if not line.startswith("data:"):
                 continue
