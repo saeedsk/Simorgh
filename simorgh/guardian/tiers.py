@@ -42,11 +42,12 @@ def role_of(person: str, *, channel: str = "") -> str:
     and treating it as a stranger would lock the creator out of his own
     system. Every other channel has to name somebody.
     """
+    from simorgh.contracts.channels import is_console
     from simorgh.contracts.household import CHILD_AGE, member
 
     name = (person or "").strip()
     if not name:
-        if channel in ("", "cli"):
+        if is_console(channel):          # `contracts/channels.py::CONSOLE_CHANNELS`
             return "owner"
         # Sim's own idea, which is not a voice and not a stranger.
         # Everything Initiative proposes arrives with no requester --

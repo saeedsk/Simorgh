@@ -197,6 +197,13 @@ class SimsOwnIdeaIsNotAStranger(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(role_of("", channel="voice"), "unknown", "an unplaced voice is still unplaced")
         self.assertEqual(role_of("", channel="cli"), "owner", "the console is the owner's keyboard")
 
+    def test_the_console_is_the_one_in_contracts(self):
+        """`role_of`'s console is `contracts/channels.py::CONSOLE_CHANNELS`
+        (2026-09-22), the same answer Persona and World Model use."""
+        from simorgh.contracts import channels
+        for channel in channels.ALL + ("", "initiative", "CLI"):
+            self.assertEqual(role_of("", channel=channel) == "owner", channels.is_console(channel), channel)
+
     async def test_a_tier_three_idea_of_sims_own_asks_rather_than_dying(self):
         decision = await PersonRule().evaluate(self._sims_idea(), _ctx())
         self.assertEqual(decision.kind, "escalate")
