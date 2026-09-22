@@ -5,12 +5,6 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.docs]
-by = "opus-main"
-task = "parallel agents round 2 (coordinator holds)"
-since = "2026-09-22T11:38:41+00:00"
-until = "2026-09-22T19:38:41+00:00"
-
 [locks.interface]
 by = "opus-main"
 task = "voice calibrate: the reusable calibration set"
