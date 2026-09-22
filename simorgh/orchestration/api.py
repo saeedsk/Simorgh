@@ -223,6 +223,9 @@ class Session:
     # Why the speaker's name is not certain (voice/speakers.py::doubt_of);
     # "" when it is. The prompt then asks for no name.
     speaker_doubt: str = ""
+    # How well the voice matched their enrolled profile this turn, as
+    # Voice words it; "" when nobody was matched.
+    speaker_score: str = ""
     #: What Sim believes about its own competence at this kind of task
     #: (`self.estimate.reply`), read once when the session starts.
     estimate: dict = field(default_factory=dict)

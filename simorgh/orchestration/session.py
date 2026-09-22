@@ -1483,6 +1483,7 @@ class SessionRunner:
                     unavailable=scaffolds.unavailable_note(offered), channel=session.channel,
                     speaker=session.speaker, speaker_relation=session.speaker_relation, room=session.room,
                     speaker_doubt=session.speaker_doubt,
+                    speaker_score=getattr(session, "speaker_score", ""),
                     speaker_before=getattr(session, "speaker_before", ""),
                     offered=() if no_tools else offered,
                     skills=catalog,

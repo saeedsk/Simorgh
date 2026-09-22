@@ -67,6 +67,12 @@
         "null"
       ]
     },
+    "speaker_score": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "steer": {
       "type": [
         "boolean",

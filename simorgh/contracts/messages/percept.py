@@ -28,6 +28,11 @@ PerceptTextReceived = define(t.PERCEPT_TEXT_RECEIVED, [
     # ("Iris sounds almost the same"; "" when it is): voice/speakers.py.
     O("speaker_before", Str),
     O("speaker_doubt", Str),
+    # How well this turn's voice matched the speaker's enrolled profile,
+    # as Voice words it ("0.47 against a bar of 0.30"). Without it the
+    # model, asked "what's my score?", said enrolment had never happened
+    # to an enrolled person, turn after turn (live, 2026-09-21).
+    O("speaker_score", Str),
 ], doc="channel=command + command for routed commands; steer=true marks a mid-task correction; "
        "channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation "
        "and the room's recent lines that were not addressed to Sim.")

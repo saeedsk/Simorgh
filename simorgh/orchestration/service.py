@@ -293,7 +293,7 @@ class Service:
         # never came back. Found by a watched chat trial 2026-09-07.
         channel = str(message.payload.get("channel") or "")
         who = {k: str(message.payload.get(k) or "") for k in ("speaker", "speaker_relation", "room", "speaker_before",
-                                                                  "speaker_doubt")}
+                                                                  "speaker_doubt", "speaker_score")}
         # The recall this turn will want, started now (stage 5 item 5): it
         # runs while the session is built, the profile chosen and the
         # scaffold rendered, so Memory is off the critical path instead of
