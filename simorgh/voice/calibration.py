@@ -52,19 +52,25 @@ MANIFEST = "manifest.jsonl"
 # later measurement would be wrong, not a matter of taste: a clipped
 # take measures the clipping, a take in a noisy room measures the room.
 
+#: Calibrated against the creator's own 35 kept turns (2026-09-22): the
+#: first estimates (-42 dBFS speech, -45 dBFS noise floor, 0.1% clipping)
+#: rejected 17 of them, mostly "too noisy" at a -42..-45 dBFS floor whose
+#: speech stood a median 20.7 dB above it. The set is meant to hold HIS
+#: room, not a studio: the signal-to-noise bar does the real work, and
+#: the absolute floor only turns away a genuinely loud room.
 #: Too short: less speech than the line could possibly take to say.
 MIN_SPEECH_S = 0.4
 MIN_SPEECH_S_PER_WORD = 0.1
 #: Too quiet: the loud end of the speech (90th percentile of 20 ms frame
 #: levels) under this. A laptop microphone at a metre hears ordinary
 #: speech around -35 to -25 dBFS.
-MIN_SPEECH_DBFS = -42.0
+MIN_SPEECH_DBFS = -48.0
 #: Clipping: more than this fraction of samples at full scale.
 CLIP_LEVEL = 32600
-MAX_CLIP_RATIO = 0.001
+MAX_CLIP_RATIO = 0.01
 #: Noise: the quiet end (10th percentile of frame levels) above this,
 #: or the speech less than `MIN_SNR_DB` above it.
-MAX_NOISE_DBFS = -45.0
+MAX_NOISE_DBFS = -35.0
 MIN_SNR_DB = 12.0
 #: Cut off: the take ran into the turn's length limit, or its last
 #: 100 ms are still speech (the person was stopped mid-word).
