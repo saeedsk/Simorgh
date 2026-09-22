@@ -53,6 +53,12 @@ task = "parallel agents round 2 (coordinator holds)"
 since = "2026-09-22T11:38:40+00:00"
 until = "2026-09-22T19:38:40+00:00"
 
+[locks.interface]
+by = "opus-main"
+task = "voice calibrate: the reusable calibration set"
+since = "2026-09-22T11:41:42+00:00"
+until = "2026-09-22T19:41:42+00:00"
+
 [locks.orchestration]
 by = "opus-main"
 task = "speaker preferences into the voice/chat prompt"
@@ -70,6 +76,12 @@ by = "opus-main"
 task = "growth merge leftovers"
 since = "2026-09-22T10:50:29+00:00"
 until = "2026-09-22T18:50:29+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "voice calibrate: the reusable calibration set"
+since = "2026-09-22T11:41:42+00:00"
+until = "2026-09-22T19:41:42+00:00"
 
 [locks.worldmodel]
 by = "opus-main"
