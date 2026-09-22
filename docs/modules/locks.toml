@@ -13,15 +13,21 @@ until = "2026-09-22T19:11:46+00:00"
 
 [locks.contracts]
 by = "opus-main"
-task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
-since = "2026-09-22T11:11:46+00:00"
-until = "2026-09-22T19:11:46+00:00"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
+
+[locks.docs]
+by = "opus-main"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:41+00:00"
+until = "2026-09-22T19:38:41+00:00"
 
 [locks.domains]
 by = "opus-main"
-task = "a reminder knows whose it is"
-since = "2026-09-21T05:42:01+00:00"
-until = "2026-09-21T13:42:01+00:00"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
 
 [locks.evals]
 by = "opus-main"
@@ -29,11 +35,29 @@ task = "evals: --providers for a one-provider benchmark run"
 since = "2026-09-22T11:12:55+00:00"
 until = "2026-09-22T19:12:55+00:00"
 
+[locks.execution]
+by = "opus-main"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
+
 [locks.growth]
 by = "opus-main"
-task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
-since = "2026-09-22T11:11:45+00:00"
-until = "2026-09-22T19:11:45+00:00"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:41+00:00"
+until = "2026-09-22T19:38:41+00:00"
+
+[locks.guardian]
+by = "opus-main"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
 
 [locks.orchestration]
 by = "opus-main"
@@ -43,9 +67,9 @@ until = "2026-09-22T19:24:16+00:00"
 
 [locks.persona]
 by = "opus-main"
-task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
-since = "2026-09-22T11:11:45+00:00"
-until = "2026-09-22T19:11:45+00:00"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
 
 [locks.tools]
 by = "opus-main"
@@ -55,12 +79,12 @@ until = "2026-09-22T18:50:29+00:00"
 
 [locks.voice]
 by = "opus-main"
-task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
-since = "2026-09-22T11:11:46+00:00"
-until = "2026-09-22T19:11:46+00:00"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
 
 [locks.worldmodel]
 by = "opus-main"
-task = "parallel agents: stage 8 item 5 night step; stage 6 items 3-4"
-since = "2026-09-22T11:11:46+00:00"
-until = "2026-09-22T19:11:46+00:00"
+task = "parallel agents round 2 (coordinator holds)"
+since = "2026-09-22T11:38:40+00:00"
+until = "2026-09-22T19:38:40+00:00"
