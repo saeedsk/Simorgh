@@ -243,17 +243,31 @@ class Service:
         wavs = sorted(folder.glob("*.wav"))[-self.RELEARN_LOOKS_AT:]
         if not wavs:
             return False, f"no kept recordings in {folder}"
-        vectors = []
+        vectors: list = []
+        problems: list[str] = []
         for path in wavs:
             try:
                 with wave.open(str(path)) as handle:
                     pcm = handle.readframes(handle.getnframes())
                     rate = handle.getframerate()
-                vectors.append(embedder.embed(pcm, rate))
-            except Exception:  # noqa: BLE001 -- one unreadable file is not the end of a relearn
+                # FLOAT samples, not the raw int16 bytes. `embed` hands
+                # what it is given to `np.asarray(..., dtype=float32)`,
+                # which raises on a bytes object -- so the first version
+                # of this failed on all 300 files and said only "none of
+                # the kept recordings could be read" (live, 2026-09-21).
+                samples = [x / 32768.0 for x in memoryview(pcm).cast("h")]
+                vectors.append(embedder.embed(samples, rate))
+            except Exception as exc:  # noqa: BLE001 -- one bad file is not the end of a relearn
+                if not problems:
+                    problems.append(repr(exc))
                 continue
         if not vectors:
-            return False, f"none of the {len(wavs)} kept recordings could be read"
+            # WHY, not just that. The first version of this said only
+            # "none could be read" and the reason -- bytes handed to a
+            # float array -- took a session to find because the
+            # exception was swallowed per file and never once shown.
+            why = f": {problems[0]}" if problems else ""
+            return False, f"none of the {len(wavs)} kept recordings could be read{why}"
         added, considered, before, after = book.relearn(name, vectors)
         if not added:
             return True, (f"nothing in {considered} kept recording(s) was unmistakably {name}. "
