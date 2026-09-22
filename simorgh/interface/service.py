@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+import json
 import os
 import sys
 import threading
@@ -441,7 +442,54 @@ class Service:
                 print(f"whatsapp: not listening -- {why}")
         elif self.config.whatsapp_allowed:
             ctx.logger.warning("whatsapp.not_listening", reason=self._whatsapp.why_not())
+        if self._http is not None and self.config.remote_commands:
+            self._http.register_route("POST", "/api/command", self._command_route, rate=(30, 60.0))
         ctx.logger.info("interface.started", session_id=self.session_id)
+
+    async def _command_route(self, _query: dict, body: bytes, _headers: dict) -> tuple[int, bytes, str]:
+        """POST /api/command -- one typed line, from somewhere that is not
+        this keyboard.
+
+        The creator, away from the house on 2026-09-22, asked for Sim to
+        be restarted and there was no way to say so: `/api/chat` starts a
+        conversational turn, Telegram becomes a percept, and neither can
+        reach `restart`, `run swebench-verified 30`, or any other
+        command. This is that missing half, and it is deliberately the
+        SAME path as typing: `_handle_line` -> `parse` -> `dispatch`, so
+        every effect behind it is gated by Guardian exactly as it is at
+        the keyboard, with nothing trusted because it arrived over HTTP.
+
+        Two limits it keeps on purpose. It answers only COMMANDS -- a
+        line that parses to chat is refused and pointed at `/api/chat`,
+        so this never becomes a second, unlogged way to talk to Sim. And
+        it is token-gated like every other `/api` route (`auth` defaults
+        to True), because the server may be bound to `0.0.0.0`: on that
+        bind this route is a remote control of the house.
+
+        The line is echoed on Sim's own screen before it runs. Somebody
+        is usually sitting there, and a command appearing out of nowhere
+        with no visible cause is how a household stops trusting it.
+        """
+        try:
+            line = str(json.loads(body or b"{}").get("line", "")).strip()
+        except (json.JSONDecodeError, AttributeError):
+            return 400, b'{"error":"invalid json"}', "application/json"
+        if not line:
+            return 400, b'{"error":"no line"}', "application/json"
+        command = parse(line)
+        if command is None or command.name is None:
+            return 400, json.dumps({"error": {
+                "code": "not_a_command",
+                "detail": f"{line!r} is not a command; talk to Sim through POST /api/chat",
+            }}).encode("utf-8"), "application/json"
+        self._ctx.logger.info("interface.remote_command", command=command.name)
+        self._out(f"[remote] {line}")
+        # Not awaited: `restart` never returns, and a benchmark run holds
+        # the line for hours. The caller is told it was accepted; what it
+        # DID shows up on Sim's screen and in the ledger, where the
+        # effects of a typed command show up too.
+        asyncio.get_running_loop().create_task(self._handle_line_guarded(line))
+        return 202, json.dumps({"accepted": command.name}).encode("utf-8"), "application/json"
 
     async def stop(self) -> None:
         self._stop_repl.set()

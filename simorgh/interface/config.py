@@ -90,6 +90,13 @@ class Config:
     # the second think alone could exhaust it and the REPL printed
     # "no response" over an answer that was still coming.
     chat_reply_timeout_s: float = 420.0
+    # `POST /api/command` -- a typed line from somewhere that is not this
+    # keyboard (the creator, away from the house on 2026-09-22, asked for
+    # a restart and had no way to say so). Token-gated like every other
+    # `/api` route and refused for anything that is not a command, but it
+    # is still a remote control of this house on a `0.0.0.0` bind, so it
+    # is one switch that turns the whole thing off.
+    remote_commands: bool = True
     http_host: str = "127.0.0.1"
     http_port: int = 8765
     http_status_timeout_s: float = 3.0
