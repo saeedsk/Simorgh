@@ -17,11 +17,23 @@ task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
 
+[locks.growth]
+by = "opus-main"
+task = "stage 8 item 5: evaluate a policy; rules/ into the agent body"
+since = "2026-09-22T10:37:41+00:00"
+until = "2026-09-22T18:37:41+00:00"
+
 [locks.initiative]
 by = "opus-main"
 task = "a reminder knows whose it is"
 since = "2026-09-21T05:42:01+00:00"
 until = "2026-09-21T13:42:01+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "stage 8 item 5: evaluate a policy; rules/ into the agent body"
+since = "2026-09-22T10:37:41+00:00"
+until = "2026-09-22T18:37:41+00:00"
 
 [locks.voice]
 by = "opus-main"
