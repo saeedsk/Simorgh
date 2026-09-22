@@ -61,7 +61,23 @@ class Config:
     calibration_bins: int = 10
     calibration_min_samples: int = 10
 
-    review_timeout_s: float = 8.0
+    #: How long a drift/scope review waits for Cognition. It is the
+    #: DEADLINE the providers then share: the Router gives each candidate
+    #: `remaining / (still to try + 1)` and never less than
+    #: `router._MIN_CANDIDATE_SECONDS` (5 s), so 8 s over the `review`
+    #: route's two providers was the 5 s FLOOR each -- a slice below what
+    #: the work takes, handed out anyway. Live on 2026-09-22, during a
+    #: SWE-bench case: `Together request failed after 5.1s of 5.0s`. The
+    #: call is billed, the answer is thrown away, and `require_real_provider`
+    #: is False here, so the monitor quietly read "unknown" instead of
+    #: saying it never got an answer.
+    #:
+    #: Nobody waits on a drift check -- it watches work that runs for
+    #: minutes -- so it may take its time. Memory's consolidation
+    #: (`consolidate_timeout_s`) and drafting (`cognition` `draft`) were
+    #: the same bug in the same week: a deadline shared N ways, sized as
+    #: though it were not.
+    review_timeout_s: float = 90.0
     max_concurrent_reviews: int = 2
 
     # -- when the reflection pass (pattern mining, calibration

@@ -114,7 +114,7 @@ There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never
 | `announce_critical` | `False` | yes |
 | `calibration_bins` | `10` | yes |
 | `calibration_min_samples` | `10` | yes |
-| `review_timeout_s` | `8.0` | yes |
+| `review_timeout_s` | `90.0` | yes -- it is the deadline Cognition SHARES between candidates (`router._share_of`), not one provider's timeout: at 8.0 each of the `review` route's two providers got the 5 s floor and the call died on it (`after 5.1s of 5.0s`, live 2026-09-22), leaving the monitor to read a floor "unknown" |
 | `max_concurrent_reviews` | `2` | yes |
 | `reflect_after_start_s` | `120.0` | yes |
 | `reflect_every_s` | `3600.0` | yes |
