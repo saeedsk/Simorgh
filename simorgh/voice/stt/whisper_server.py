@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import socket
 import time
 import urllib.error
@@ -31,6 +32,57 @@ from ..audio import wav_bytes
 from .whisper_cli import _TEST_MODEL, clean_transcript, find_model
 
 READY_TIMEOUT_S = 90.0
+
+
+def orphaned_servers(command: str, *, ps: object = None) -> list[int]:
+    """The pids of `whisper-server` processes whose Sim is gone.
+
+    A running server is a CHILD of the Sim that started it. Sim's
+    shutdown ends with `os._exit` (kernel/cli.py's Stopper: Ctrl-C had
+    to work while a tool thread was busy), so `close()` does not always
+    run -- and a crash or a `kill -9` never runs it. The server survives,
+    holding a multi-gigabyte model in RAM, and the next boot starts
+    another one. Five of them were found alive on the creator's laptop
+    on 2026-09-22.
+
+    Reparenting is what makes them findable: an orphan's parent is
+    `init` (pid 1), while a server belonging to a live Sim has that
+    Sim's pid. So this never touches a server another Sim is using --
+    including the ones a parallel agent or `tools/voice_replay.py`
+    booted -- and does not depend on any state written before the crash.
+    """
+    import subprocess
+
+    try:
+        out = (ps or subprocess.run)(["ps", "-ax", "-o", "pid=,ppid=,command="],
+                                     capture_output=True, text=True, timeout=10.0).stdout
+    except Exception:  # noqa: BLE001 -- no ps, no reaping; this is a courtesy, not a requirement
+        return []
+    name = Path(command).name
+    found = []
+    for line in (out or "").splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3 or Path(parts[2].split()[0]).name != name:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        if ppid == 1 and pid != os.getpid():
+            found.append(pid)
+    return found
+
+
+def reap_orphaned_servers(command: str, *, ps: object = None, kill: object = None) -> int:
+    """Terminate them. Returns how many were ended."""
+    ended = 0
+    for pid in orphaned_servers(command, ps=ps):
+        try:
+            (kill or os.kill)(pid, signal.SIGTERM)
+            ended += 1
+        except (OSError, ProcessLookupError):
+            pass
+    return ended
 
 
 def free_port() -> int:
@@ -107,6 +159,12 @@ class WhisperServerRecogniser:
             return
         if not self._port:
             self._port = free_port()
+        # Before adding one, end the ones a previous Sim left behind:
+        # each holds the whole model in RAM, and nothing else ever
+        # collects them (see `orphaned_servers`).
+        reaped = reap_orphaned_servers(self._command[0] if self._command else "whisper-server")
+        if reaped and os.environ.get("SIMORGH_STT_DEBUG"):
+            print(f"whisper-server: ended {reaped} orphaned server(s) from an earlier run")
         # Timed segments are what voice/diarize.py attributes to voices.
         # whisper's own segments cost nothing over none (1.28 s either
         # way on the six-second clip, 2026-09-13); one segment per word

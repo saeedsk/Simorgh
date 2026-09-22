@@ -25,6 +25,7 @@ Voice owns the spoken channel on this laptop: microphone frames, endpointing and
 | `simorgh/voice/planner.py` | Spoken-response planner: speakable text, chunking, connectors, leaked-marker removal |
 | `simorgh/voice/delivery.py` | Pace, loudness and pauses chosen from the situation and mood |
 | `simorgh/voice/backchannel.py` | "aha"/"let me check" sounds; addressed-to-Sim and quiet-reply detection |
+| `simorgh/voice/stt/whisper_server.py` | whisper.cpp kept loaded over HTTP; ends servers a previous Sim orphaned (`reap_orphaned_servers`) before starting one |
 | `simorgh/voice/commands.py` | "stop", "be quiet", "voice off", "restart" handled without the model |
 | `simorgh/voice/speakers.py` | Speaker embeddings and the household voice book (identify, enrol, refine) |
 | `simorgh/voice/diarize.py` | Who said which words within one turn |
