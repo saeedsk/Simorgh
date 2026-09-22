@@ -337,3 +337,46 @@ class HowThePersonSpeakingHasSeemed(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(note, "")
             self.assertEqual(asked, [], "a baseline belongs to a person, not to a keyboard")
+
+
+class WhatThePersonSpeakingAskedFor(unittest.IsolatedAsyncioTestCase):
+    """Stage 6 item 4: the speaker's own stated preferences, asked of
+    their People record with who is speaking and on what channel. One
+    household-wide profile used to go into every prompt."""
+
+    @run
+    async def test_the_speakers_preferences_are_asked_for_by_person_and_channel(self):
+        async with Harness() as h:
+            world_bus = h.client("worldmodel")
+            asked = []
+
+            async def _responder(message):
+                asked.append(dict(message.payload.get("args") or {}))
+                await world_bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "user_profile", "as_of": 0.0, "ok": True, "person": "Ira",
+                    "text": "Ira asked to be called Ira-bear."})
+
+            sub = await world_bus.subscribe(topics.WORLD_ENV_QUERY, _responder)
+            session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT)
+            session.speaker, session.channel = "Ira", "voice"
+            text = await Assembler(h.client("orchestration"))._their_preferences(session)  # noqa: SLF001
+            await sub.unsubscribe()
+
+            self.assertEqual(asked, [{"person": "Ira", "channel": "voice"}])
+            self.assertEqual(text, "Ira asked to be called Ira-bear.")
+
+    @run
+    async def test_nobody_gets_nothing(self):
+        async with Harness() as h:
+            world_bus = h.client("worldmodel")
+
+            async def _responder(message):
+                await world_bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
+                    "facet": "user_profile", "as_of": 0.0, "ok": True, "person": None, "text": ""})
+
+            sub = await world_bus.subscribe(topics.WORLD_ENV_QUERY, _responder)
+            session = Session(task_id="t", kind="chat", mode="execute", profile=profiles.CHAT)
+            session.channel = "voice"
+            text = await Assembler(h.client("orchestration"))._their_preferences(session)  # noqa: SLF001
+            await sub.unsubscribe()
+            self.assertEqual(text, "")

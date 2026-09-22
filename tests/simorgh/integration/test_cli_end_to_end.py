@@ -336,11 +336,11 @@ class TestAStatedPreferenceReachesTheUserModel(CliEndToEndTestCase):
     `_handle_line` path (not a unit-level call into `UserModel`
     directly) results in `Service._on_percept_text`
     (`simorgh/persona/service.py`) calling `UserModel.extract_from_text`,
-    publishing `persona.user_model.updated`, World Model's
-    `UserProfileFacet.on_updated` (`simorgh/worldmodel/facets/
-    registry_facets.py`) storing it, and a later `world.env.query` for
-    `user_profile` returning the fact -- exactly what `PromptAssembler.
-    _user_profile_text` reads for a chat turn's prompt. This test locks
+    publishing `persona.user_model.updated`, World Model filing it in the
+    speaker's People record (the console's is the owner's, stage 6 item
+    4, 2026-09-22), and a later `world.env.query` for `user_profile` with
+    that person and channel returning the fact -- what Orchestration's
+    `_their_preferences` puts in that person's chat prompt. This test locks
     in the write-side half of that chain (the read side already has its
     own unit coverage in `tests/simorgh/cognition/test_assembler.py`)."""
 
@@ -358,7 +358,8 @@ class TestAStatedPreferenceReachesTheUserModel(CliEndToEndTestCase):
         self.assertEqual(updates[0]["value"], "Alex")
 
         reply = await self.kernel.bus.request(
-            self.kernel.bus.new(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}}), timeout=5.0,
+            self.kernel.bus.new(topics.WORLD_ENV_QUERY,
+                                {"what": "user_profile", "args": {"person": "", "channel": "cli"}}), timeout=5.0,
         )
         self.assertTrue(reply.payload.get("ok"))
         self.assertIn("preferred_name", reply.payload.get("facets", {}))
