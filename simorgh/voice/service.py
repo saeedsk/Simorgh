@@ -222,6 +222,35 @@ class Service:
     #: that sound like the room as it is now.
     RELEARN_LOOKS_AT = 300
 
+    def _relearn_from_calibration(self, book, name: str, embedder) -> tuple[bool, str] | None:
+        """`voice relearn` from the person's calibration takes, or None
+        when they have none (or none would improve the profile) and the
+        kept turns should be tried instead."""
+        from .calibration import person_folder, read_rows, read_samples
+
+        rows = read_rows(self.config.calibration_dir, name)
+        if not rows:
+            return None
+        if embedder is None:
+            return False, "the speaker embedder is not loaded, so nothing can be measured"
+        vectors: list = []
+        problems: list[str] = []
+        for row in rows:
+            try:
+                samples, rate = read_samples(person_folder(self.config.calibration_dir, name) / str(row.get("file") or ""))
+                vectors.append(embedder.embed(samples, rate))
+            except Exception as exc:  # noqa: BLE001 -- one bad file is not the end of a relearn
+                if not problems:
+                    problems.append(repr(exc))
+        if not vectors:
+            return None
+        added, dropped, considered, before, after = book.relearn(name, vectors)
+        if not added:
+            return None
+        swapped = f", replacing {dropped} weaker one(s)" if dropped else ""
+        return True, (f"added {added} take(s) to {name} from {considered} calibration recording(s){swapped}: "
+                      f"agreement with itself {before:.2f} -> {after:.2f}. Nobody had to say anything.")
+
     def _relearn_from_kept(self, book, name: str) -> tuple[bool, str]:
         """Rebuild `name`'s profile from the turns already on disk.
 
@@ -232,12 +261,20 @@ class Service:
         import wave
         from pathlib import Path
 
+        session = self._session
+        embedder = getattr(session, "_embedder", None) if session is not None else None
+        # The calibration set first (`voice calibrate`): every take is
+        # this person, labelled, clean by the checks it passed when it
+        # was recorded -- better evidence than turns the book merely
+        # named. Kept turns are the fallback, not a top-up: the same
+        # bars apply either way (`SpeakerBook.relearn`).
+        calibrated = self._relearn_from_calibration(book, name, embedder)
+        if calibrated is not None:
+            return calibrated
         folder = Path(self.config.audio_dir)
         if not folder.is_dir():
             return False, (f"no kept recordings to learn from ({folder}). "
                            "`voice set keep_audio true` keeps them from now on.")
-        session = self._session
-        embedder = getattr(session, "_embedder", None) if session is not None else None
         if embedder is None:
             return False, "the speaker embedder is not loaded, so nothing can be measured"
         wavs = sorted(folder.glob("*.wav"))[-self.RELEARN_LOOKS_AT:]
@@ -509,6 +546,11 @@ class Service:
                                refine_above=self.config.speaker_refine_above,
                                margin=self.config.speaker_margin, lean=self.config.speaker_lean)
         name = str(payload.get("name") or "").strip()
+        if action == "enroll" and str(payload.get("key") or "") == "calibrate":
+            # `voice calibrate` rides the enrol action: it is an enrolment
+            # of a different shape (a script read once, kept forever), and
+            # the wire's action enum has no word of its own for it.
+            return await self._calibrate(payload, book)
         if action == "people":
             people = book.people()
             if not people:
@@ -581,6 +623,89 @@ class Service:
             return True, f"enrolling {name}: say {takes} sentences; each take is confirmed aloud"
         why = session.whois_next()
         return (False, why) if why else (True, "say something; I will tell you who it sounded like, with the scores")
+
+    @staticmethod
+    def _owner() -> str:
+        """Whose voice `voice calibrate` records when nobody is named:
+        the household's creator."""
+        return next((m.name for m in HOUSEHOLD if "creator" in (m.relation or "")),
+                    HOUSEHOLD[0].name if HOUSEHOLD else "")
+
+    @staticmethod
+    def _input_device_name() -> str:
+        """The default input device's own name, for the manifest."""
+        from .audio import input_device_name
+
+        return input_device_name()
+
+    async def _calibrate(self, payload: dict, book) -> tuple[bool, str]:
+        """`voice calibrate [name] [aloud] [short] [en|fa] [room=..] [distance=..]`,
+        `voice calibrate status|stop|keep|accept|skip` (voice/calibration.py).
+
+        The verb travels in `value` because `voice.control.request` has
+        no action of its own for it (see voice/CONTRACT.md)."""
+        from simorgh.contracts.household import member
+
+        from .calibration import CalibrationRun, person_folder, summary
+        from .calibration_script import lines
+
+        words = str(payload.get("value") or "start").split()
+        verb = words[0].lower() if words else "start"
+        if verb not in ("start", "status", "stop", "keep", "accept", "skip"):
+            verb, options = "start", words          # `aloud short` alone is a start
+        else:
+            options = words[1:]
+        name = str(payload.get("name") or "").strip() or self._owner()
+        known = member(name)
+        name = known.name if known is not None else name
+        folder = self.config.calibration_dir
+        session = self._session
+        live = getattr(session, "_calibrating", None) if session is not None else None
+        if verb == "status":
+            text = summary(folder, name)
+            if live is not None:
+                text += f"\nrecording {live.person} now: {live.progress()} -- `voice calibrate stop` to pause"
+            return True, f"{text}\nfiles: {person_folder(folder, name)} (never pruned; keep it in backups)"
+        if verb == "stop":
+            said = session.stop_calibration() if session is not None and hasattr(session, "stop_calibration") else ""
+            return (True, said) if said else (False, "no calibration is running")
+        if verb in ("keep", "accept", "skip"):
+            if live is None:
+                return False, "no calibration is running -- `voice calibrate` starts one"
+            return True, await session.calibration_control(verb)
+        if session is None or not getattr(session, "run", None) or self._loop_task is None:
+            return False, "the microphone is not listening -- `voice on` first"
+        if live is not None:
+            return False, (f"already calibrating {live.person} ({live.progress()}) -- "
+                           f"`voice calibrate stop` first")
+        aloud = "aloud" in [w.lower() for w in options]
+        short = "short" in [w.lower() for w in options]
+        language = next((code for w in options for code in ("en", "fa")
+                         if w.lower() in (code, {"en": "english", "fa": "farsi"}[code])), "")
+        extra = {k.lower(): v for k, _, v in (w.partition("=") for w in options if "=" in w)}
+        script = lines(language=language, short=short)
+        mic = getattr(session, "_mic", None)
+        run = CalibrationRun(
+            name, folder, script=script, book=book, score_bar=getattr(book, "threshold", None),
+            device=self.config.device, microphone=self._input_device_name() or getattr(mic, "name", "") or "",
+            room=extra.get("room", ""), distance=extra.get("distance", ""), aloud=aloud,
+            max_utterance_s=float(self.config.max_turn_ms) / 1000.0)
+        if run.finished:
+            return True, (f"{name} already has every line of this set -- {summary(folder, name, script)}. "
+                          f"Nothing to record; the takes are in {person_folder(folder, name)}.")
+        why = session.calibrate(run)
+        if why:
+            return False, why
+        resumed = f"resuming: {run.done_before} line(s) already kept are not asked again. " if run.done_before else ""
+        heard = ("I will read each line aloud first; wait for me to finish. " if aloud else
+                 "I stay silent: read each line from the screen, in your normal voice. ")
+        detail = (f"calibrating {name} -- {summary(folder, name, script)}. {resumed}{heard}"
+                  f"A take that is too short, quiet, clipped, noisy, not your voice or misread is refused "
+                  f"at once with the reason. Say \"skip\" to leave a line for later, \"stop calibrating\" "
+                  f"(or `voice calibrate stop`) to pause; `voice calibrate` resumes.\n{run.prompt()}")
+        if aloud:
+            asyncio.get_running_loop().create_task(session.say_calibration_line())
+        return True, detail
 
     async def _set(self, key: str, raw: str) -> tuple[bool, str]:
         """`voice set key value`: a safe setting, applied live and written

@@ -80,6 +80,17 @@ class TheThreeListsAgree(unittest.TestCase):
         for verb in ("tidy", "relearn"):
             self.assertIn(f'"{verb}"', close)
 
+    def test_calibrate_rides_enroll_on_both_ends(self):
+        """`voice calibrate` has no action of its own in the enum (a
+        contracts change nobody holding the voice lock may make), so it
+        travels as enroll + key=calibrate. Both ends must agree on that,
+        or the verb is the unconnected wire this file exists for."""
+        dispatch = (_ROOT / "simorgh" / "interface" / "dispatch.py").read_text()
+        service = (_ROOT / "simorgh" / "voice" / "service.py").read_text()
+        self.assertIn('{"action": "enroll", "key": "calibrate"', dispatch)
+        self.assertIn('str(payload.get("key") or "") == "calibrate"', service)
+        self.assertIn("enroll", _enum_actions())
+
     def test_the_cli_only_sends_permitted_actions(self):
         source = (_ROOT / "simorgh" / "interface" / "dispatch.py").read_text()
         sent = set(re.findall(r'VOICE_CONTROL_REQUEST, \{"action": "([a-z_]+)"', source))

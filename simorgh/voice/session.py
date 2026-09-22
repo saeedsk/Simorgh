@@ -214,6 +214,12 @@ def prune_kept_audio(folder, *, days: float, max_mb: float, now: float) -> int:
     turns went. Never raises: retention must not stop a turn."""
     from pathlib import Path
 
+    # Non-recursive on purpose: `voice calibrate`'s takes live in
+    # per-person folders (`[voice] calibration_dir`) and are never pruned,
+    # even when somebody points that setting inside `audio_dir`. A folder
+    # holding a calibration manifest is one of those, whatever it is called.
+    if (Path(folder) / "manifest.jsonl").exists():
+        return 0
     try:
         wavs = sorted(Path(folder).glob("*.wav"), key=lambda p: p.stat().st_mtime)
     except OSError:
@@ -264,6 +270,17 @@ class VoiceSession:
         self._timed: dict[int, tuple] = {}          # a turn's (audio, timed words), kept until attributed
         self._enrolling: dict | None = None          # {"name", "relation", "takes", "done"} while `voice enroll` runs
         self._whois = False                          # `voice whois`: the next turn reports its scores instead of asking
+        #: `voice calibrate` (voice/calibration.py): the run in progress, or
+        #: None. While it is set every final transcript is a take of the
+        #: line on screen, never a question for the model.
+        self._calibrating = None
+        #: turn_id -> the audio the recogniser heard, kept for a
+        #: calibration take (the per-turn-facts rule, V8: never a session
+        #: singleton read across an await).
+        self._calib_audio: dict[int, bytes] = {}
+        #: when Sim last finished reading a calibration line aloud: a take
+        #: that began before this is Sim's own voice in the microphone.
+        self._calib_said_at = 0.0
         # What the room said lately: (speaker, text, when, asked?) -- the
         # lines not asked of Sim go to the model as context, and two
         # people talking to each other is a reason to stay quiet.
@@ -608,7 +625,9 @@ class VoiceSession:
             await self._tts.cancel(str(action.response_id))
         elif kind == Actions.ASK:
             self._settled.set()
-            earlier = self._repeat_of(action.text)
+            # A calibration line read twice (the first take was refused) is
+            # the same words on purpose, not a question asked again.
+            earlier = self._repeat_of(action.text) if self._calibrating is None else None
             if earlier is not None:
                 await self._repeat_waits(action.turn_id, earlier, action.text)
             else:
@@ -741,7 +760,7 @@ class VoiceSession:
     async def _transcribe(self, turn_id: int, queue: asyncio.Queue) -> None:
         try:
             async for event in self._stt.start_stream(self._frames_until_end(queue, turn_id), turn_id=turn_id,
-                                                      language=self._config.stt_language):
+                                                      language=self._calibration_language() or self._config.stt_language):
                 if event.kind == "partial":
                     self.partial = event.text
                     await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
@@ -767,6 +786,13 @@ class VoiceSession:
                         clock.language = event.language or ""
                     if event.words and event.audio:
                         self._timed[turn_id] = (event.audio, event.words)
+                    if self._calibrating is not None and event.audio:
+                        # The take is the audio the recogniser was given --
+                        # onset, speech and the trailing silence -- the same
+                        # bytes a kept turn is written from.
+                        self._calib_audio[turn_id] = bytes(event.audio)
+                        for stale in [t for t in self._calib_audio if t < turn_id - 8]:
+                            self._calib_audio.pop(stale, None)
                     self.partial = ""
                     if self._config.keep_audio and event.audio:
                         # The streaming path kept none, so `keep_audio` was a
@@ -1054,6 +1080,8 @@ class VoiceSession:
 
     def enroll(self, name: str, *, relation: str = "", takes: int = 3) -> str:
         """Start `voice enroll <name>`; returns "" or why not."""
+        if self._calibrating is not None:
+            return "a calibration is in progress -- `voice calibrate stop` first"
         if self._speakers is None:
             return "speaker recognition is off ([voice] speaker_id)"
         why = self._open_embedder()
@@ -1064,6 +1092,112 @@ class VoiceSession:
             return "a name is needed"
         self._enrolling = {"name": name, "relation": relation.strip(), "takes": max(1, min(10, int(takes))), "done": 0}
         return ""
+
+    # ---------------------------------------------------------- calibration
+    def calibrate(self, run) -> str:
+        """Start (or resume) `voice calibrate`: `run` is a
+        `calibration.CalibrationRun`. Returns "" or why not. Every final
+        transcript from now on is a take of the line on screen, taken
+        where an enrolment take is taken, until the run ends or stops."""
+        if self._enrolling is not None or self._intro is not None:
+            return "an enrolment is in progress -- finish it (or say stop) first"
+        if run.finished:
+            return ""
+        person = self._speakers.get(run.person) if self._speakers is not None else None
+        if person is not None and person.embeddings:
+            # Scored against the enrolled profile when there is one; a
+            # missing speaker model is not a reason to refuse the set.
+            self._open_embedder()
+        self._calibrating = run
+        self._calib_audio.clear()
+        return ""
+
+    def stop_calibration(self) -> str:
+        """End the run in progress; "" when there was none."""
+        run, self._calibrating = self._calibrating, None
+        self._calib_audio.clear()
+        return run.stopped_message() if run is not None else ""
+
+    async def calibration_control(self, kind: str) -> str:
+        """`voice calibrate keep|accept|skip`, typed rather than said."""
+        run = self._calibrating
+        if run is None:
+            return ""
+        verdict = run.skip() if kind == "skip" else run.keep_pending(kind)
+        # The reply to the typed command carries the message; a notice as
+        # well would print it twice.
+        await self._calibration_after(0, run, verdict, notice=False)
+        return verdict.message
+
+    def _calibration_language(self) -> str:
+        """The language of the line on screen, as a hint to the
+        recogniser: a Farsi line must not be auto-detected as Arabic
+        and thrown away as "not a language of this house"."""
+        run = self._calibrating
+        line = run.current if run is not None else None
+        return line.language if line is not None else ""
+
+    async def say_calibration_line(self) -> None:
+        """Read the current line aloud (`voice calibrate ... aloud` only)."""
+        run = self._calibrating
+        if run is None or not run.aloud or run.current is None:
+            return
+        await self._say_aside(f"say-cal-{run.current.id}", run.current.text)
+        self._calib_said_at = self._now()
+
+    async def _calibration_take(self, turn_id: int, text: str, vector) -> None:
+        """One utterance while calibrating: judged, then filed or refused
+        with the reason, and the next line shown. Never asked of the model."""
+        run = self._calibrating
+        if run is None:
+            return
+        from .calibration import Verdict
+
+        pcm = self._calib_audio.pop(turn_id, b"") or self._facts(turn_id)["pcm"]
+        clock = self._clocks.get(turn_id)
+        if run.aloud and clock is not None and clock.speech_start and clock.speech_start < self._calib_said_at:
+            verdict = Verdict("rejected", "not kept, it began while I was still reading the line -- "
+                                          "wait for me to finish, then say it.\n" + run.prompt(),
+                              reasons=["began while Sim was speaking"])
+        else:
+            try:
+                verdict = await asyncio.to_thread(
+                    run.consider, pcm, transcript=text, vector=vector,
+                    engine=clock.engine_stt if clock is not None else "",
+                    heard_language=clock.language if clock is not None else "",
+                    confidence=clock.confidence if clock is not None else 0.0)
+            except Exception as exc:  # noqa: BLE001 -- a take that cannot be filed is said, never a dead session
+                self._log("warning", "voice.calibration_take_failed", error=repr(exc))
+                verdict = Verdict("rejected", f"not kept, it could not be filed ({exc!r}) -- say it again.\n"
+                                  + run.prompt(), reasons=[repr(exc)])
+        await self._calibration_after(turn_id, run, verdict, heard=text)
+
+    async def _calibration_after(self, turn_id: int, run, verdict, *, heard: str = "", notice: bool = True) -> None:
+        """Show (and with `aloud`, say) what became of a take, and the next line."""
+        if heard:
+            kept = verdict.kind in ("accepted", "finished") and bool(verdict.row.get("file"))
+            await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
+                "text": heard, "confidence": 1.0, "seconds": float(verdict.row.get("speech_s") or 0.0),
+                "engine": str(verdict.row.get("stt_engine") or ""), "device": self._config.device,
+                "turn": turn_id, "enrolling": run.person,
+                "speaker_note": "" if kept else ("not kept" if verdict.kind == "rejected" else verdict.kind)})
+        if verdict.kind in ("stopped", "finished"):
+            self._calibrating = None
+            self._calib_audio.clear()
+        self._log("info", "voice.calibration", kind=verdict.kind, person=run.person,
+                  line=str(verdict.row.get("line_id") or ""), reasons=list(verdict.reasons))
+        if notice:
+            await self._pipeline._publish(topics.UI_NOTICE, {  # noqa: SLF001
+                "level": "warn" if verdict.kind == "rejected" else "info", "text": verdict.message,
+                "source": "voice calibrate"})
+        if run.aloud:
+            if verdict.spoken:
+                await self._say_aside(f"say-cal-{turn_id}", verdict.spoken)
+            if self._calibrating is run:
+                await self.say_calibration_line()
+        if heard:       # a take moved the floor to thinking; a typed control did not
+            self.turns.state = LISTENING
+            await self._announce(self.turns.state)
 
     def whois_next(self) -> str:
         if self._speakers is None:
@@ -1079,6 +1213,10 @@ class VoiceSession:
         clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
         identification, vector = await self._identify(turn_id)
         self._note_score(turn_id, identification)
+        if self._calibrating is not None:
+            self._timed.pop(turn_id, None)
+            await self._calibration_take(turn_id, text, vector)
+            return
         if self._enrolling is not None or self._intro is not None:
             # "stop" / "voice off" are obeyed here too -- they became takes
             # 1 and 2 of Aran's voice once (observer, 2026-09-13).
@@ -1767,6 +1905,8 @@ class VoiceSession:
         # either started their next turn (then this one is over) or
         # the pause was real.
         await asyncio.sleep(self._config.backchannel_after_ms / 1000)
+        if self._calibrating is not None:
+            return  # a take is not a question, and an "aha" would land on the next line's recording
         if self.turns.turn_id != turn_id or self.turns.state not in (THINKING, USER_SPEAKING):
             return
         if turn_id in self._answered or turn_id in self._acknowledged:

@@ -60,6 +60,20 @@ def read_wav(path: Path) -> Audio:
     return Audio(done.stdout)
 
 
+def input_device_name() -> str:
+    """The default input device's own name ("MacBook Pro Microphone"),
+    for a calibration manifest. Reads PortAudio's device list and never
+    opens the device; "" when there is no sounddevice or no input."""
+    try:
+        import sounddevice  # type: ignore
+    except ImportError:
+        return ""
+    try:
+        return str(sounddevice.query_devices(kind="input").get("name") or "")
+    except Exception:  # noqa: BLE001 -- a missing name is a blank field, not a failure
+        return ""
+
+
 def write_wav(path: Path, audio: Audio) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(wav_bytes(audio))

@@ -352,6 +352,12 @@ class Config:
     keep_audio_days: float = 7.0
     keep_audio_max_mb: float = 500.0
     keep_transcripts: bool = True
+    # `voice calibrate` (voice/calibration.py): a WAV and a manifest row
+    # per line a person read on purpose, one folder per person. NEVER
+    # pruned -- `keep_audio_days`/`keep_audio_max_mb` apply to `audio_dir`
+    # alone -- and it belongs in backups: it is the recording nobody
+    # wants to make twice.
+    calibration_dir: str = "workspace/voice/calibration"
     # The device name a turn is recorded under (satellites will bring
     # their own).
     device: str = "laptop"
