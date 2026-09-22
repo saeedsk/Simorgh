@@ -18,6 +18,8 @@ simplified.
 
 from __future__ import annotations
 
+from collections import deque
+
 import asyncio
 import json
 import time
@@ -39,6 +41,8 @@ from .health import HealthMonitor
 from .patterns import PatternMiner
 
 NAME = "growth.monitors"
+#: How many recent terminal failures `diagnose` may cluster.
+_FAILURES_KEPT = 200
 VERSION = "0.1.0"
 
 
@@ -158,6 +162,14 @@ class Service:
         )
         self._calibration = CalibrationTable(self.config)
         self._tasks: dict[str, _TaskMeta] = {}
+        # Recent terminal failures, for `diagnose` (stage 8 item 3). Until
+        # 2026-09-22 it was handed an empty list, so a cluster of the
+        # same failure could never become a lesson -- only a falling
+        # success rate could. Bounded: the newest `_FAILURES_KEPT`.
+        self._failures: deque = deque(maxlen=_FAILURES_KEPT)
+        # Per task, what its last failing verdict and its last Guardian
+        # denial were, so a failure says WHY, not only that it happened.
+        self._why_failed: dict[str, dict] = {}
         self._paused = False
         self._review_sem: asyncio.Semaphore | None = None
         self._monitors = MonitorRegistry()
@@ -278,6 +290,13 @@ class Service:
             task_id = p["task_id"]
             meta = self._tasks.pop(task_id, _TaskMeta())
             succeeded = outcome == "completed"
+            why = self._why_failed.pop(task_id, {})
+            if not succeeded and meta.origin != "benchmark":
+                from simorgh.growth.diagnose import Failure
+
+                self._failures.append((message.ts, Failure(
+                    task_id=task_id, task_type=meta.kind, failed_check=why.get("check", ""),
+                    denied_tool=why.get("denied", ""), reason=str(p.get("reason") or "")[:200])))
 
             self._patterns.add(meta.kind, succeeded, None, message.ts)
 
@@ -429,6 +448,11 @@ class Service:
 
     async def _on_verify_result(self, message: Message) -> None:
         p = message.payload
+        if p.get("verdict") == "fail" and p.get("task_id"):
+            mechanical = p.get("mechanical") or {}
+            failed = next((name for name, r in mechanical.items()
+                           if isinstance(r, dict) and r.get("status") == "failed"), "")
+            self._remember_why(str(p["task_id"]), check=failed or "checklist")
         confidence = p.get("confidence")
         if isinstance(confidence, (int, float)):
             self._record_calibration("verify", confidence, p["verdict"] == "pass")
@@ -506,6 +530,8 @@ class Service:
         # untracked proposal (no task_id, or a task Reflection never saw
         # task.created for) is silently skipped, same as every other
         # per-task observation in this file.
+        if p.get("task_id") and p.get("tool"):
+            self._remember_why(str(p["task_id"]), denied=str(p["tool"]))
         if layer == "scope":
             task_id = p.get("task_id")
             meta = self._tasks.get(task_id) if task_id else None
@@ -863,7 +889,9 @@ class Service:
         """
         from simorgh.growth.diagnose import candidates
 
-        found = candidates([], denials=self._denials.counts(), patterns=patterns,
+        horizon = (self._ctx.clock.now() if self._ctx is not None else 0.0) - self.config.pattern_window_seconds
+        failures = [f for ts, f in self._failures if ts >= horizon]
+        found = candidates(failures, denials=self._denials.counts(), patterns=patterns,
                            min_repeats=self.config.denial_min_repeats)
         for candidate in found:
             payload = {"source": candidate.source, "subject": candidate.subject,
@@ -873,6 +901,12 @@ class Service:
             if cause is not None:
                 await self._publish(cause, topics.GROWTH_LESSON_FOUND, payload)
         return found
+
+    def _remember_why(self, task_id: str, **why: str) -> None:
+        entry = self._why_failed.setdefault(task_id, {})
+        entry.update({k: v for k, v in why.items() if v})
+        if len(self._why_failed) > _FAILURES_KEPT:
+            self._why_failed.pop(next(iter(self._why_failed)))
 
     async def _append(self, stream: str, event_type: str, payload: dict) -> None:
         if self._ctx is None:
