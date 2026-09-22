@@ -18,10 +18,14 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 import simorgh.contracts.messages.action  # noqa: F401 -- registers action.result
 from simorgh.contracts.registry import get_spec
-from simorgh.execution.service import metadata_for_blob
+from simorgh.contracts.home.fakes import FakeHomeAssistant
+from simorgh.domains.home.tools import home_tools
+from simorgh.domains.media.tools import media_tools
+from simorgh.execution.config import Config
+from simorgh.execution.service import evidence_fields_of, metadata_for_blob
 from simorgh.ledger.backends.memory import InMemoryBackend
 from simorgh.ledger.client import LedgerClient
-from simorgh.worldmodel.facets.home import HomeFacet, folded_observations
+from simorgh.worldmodel.facets.home import FOLDED_TOOLS, NOT_FOLDED_PENDING, HomeFacet, folded_observations
 
 
 class _Bus:
@@ -52,10 +56,10 @@ def _service(ledger=None):
     return service
 
 
-async def _published(service, tool: str, metadata: dict, *, ok: bool = True) -> Message:
+async def _published(service, tool: str, metadata: dict, *, ok: bool = True, evidence_fields=()) -> Message:
     """The `action.result` Execution would publish for this tool call."""
     ref = await service._ctx.ledger.put_blob(  # noqa: SLF001
-        json.dumps(metadata_for_blob(metadata), default=str).encode("utf-8"),
+        json.dumps(metadata_for_blob(metadata, evidence_fields=evidence_fields), default=str).encode("utf-8"),
         content_type="application/json")
     payload = {"action_id": "a1", "ok": ok, "output_ref": "", "stdout_preview": "done",
                "duration_ms": 12, "side_effects": [], "metadata_ref": ref, "tool": tool}
@@ -120,6 +124,103 @@ class TheFoldReadsTheBlob(unittest.IsolatedAsyncioTestCase):
             "service": "light.turn_on", "changed": ["light.hall"], "after": {"light.hall": "on"}}))
         self.assertIn("light.hall", service._home.entities)  # noqa: SLF001
         self.assertEqual(service._ctx.bus.published, [])  # noqa: SLF001
+
+
+def _tool(name: str, house: FakeHomeAssistant):
+    config = Config(home_settle_s=0.0)
+    tools = {t.name: t for t in (*home_tools(config, client=house), *media_tools(config, client=house))}
+    return tools[name]
+
+
+def _tool_ctx():
+    from pathlib import Path
+
+    from simorgh.contracts.protocols import ToolContext
+
+    return ToolContext(action_id="a1", task_id=None, scope={}, constraints={},
+                       data_dir=Path("."), clock=None, logger=None, ledger=None)
+
+
+async def _ran(service, house: FakeHomeAssistant, name: str, args: dict) -> Message:
+    """Run the REAL tool against the fake house and publish its result
+    the way Execution does: through `metadata_for_blob` with the
+    tool's own declared `evidence_fields`."""
+    tool = _tool(name, house)
+    result = await tool.run(args, ctx=_tool_ctx())
+    assert result.ok, result.error
+    return await _published(service, name, result.metadata, evidence_fields=evidence_fields_of(tool))
+
+
+class ReadsAreEvidence(unittest.IsolatedAsyncioTestCase):
+    """What Sim READ about the house is folded too (2026-09-22). Until
+    Execution kept a bounded copy of the rows in the blob, the only
+    record of a `home_state` reading was a file named in the output."""
+
+    async def test_a_state_sim_read_is_in_the_table_as_a_read(self):
+        service = _service()
+        await service._on_action_result(await _ran(service, FakeHomeAssistant(), "home_state",  # noqa: SLF001
+                                                   {"target": "light.living_room"}))
+        entity = service._home.entities["light.living_room"]  # noqa: SLF001
+        self.assertEqual((entity.kind, entity.state), ("light", "on"))
+        self.assertEqual(entity.detail["source"], "read")
+        self.assertNotIn("by", entity.detail, "a read is not something Sim did")
+        self.assertEqual(entity.at, service._ctx.clock.now(), "seen now, not whenever")  # noqa: SLF001
+
+    async def test_every_player_media_now_read_is_in_the_table(self):
+        service = _service()
+        await service._on_action_result(await _ran(service, FakeHomeAssistant(), "media_now", {}))  # noqa: SLF001
+        tv = service._home.entities["media_player.living_room_tv"]  # noqa: SLF001
+        echo = service._home.entities["media_player.kitchen_echo"]  # noqa: SLF001
+        self.assertEqual((tv.state, tv.detail["title"], tv.detail["volume"]), ("playing", "The Bear", 25))
+        self.assertEqual(echo.state, "idle")
+        self.assertEqual(tv.detail["source"], "read")
+
+    async def test_a_read_after_a_change_is_the_newer_word(self):
+        """Sim turned the light on; a later read says it is off (a
+        person flicked it). The read wins, because it is newer."""
+        service = _service()
+        await service._on_action_result(await _published(service, "home_call", {  # noqa: SLF001
+            "service": "light.turn_on", "changed": ["light.hall"], "after": {"light.hall": "on"}}))
+        service._ctx.clock.t += 60  # noqa: SLF001
+        await service._on_action_result(await _published(  # noqa: SLF001
+            service, "home_state", {"rows": [{"entity_id": "light.hall", "state": "off"}]},
+            evidence_fields=("entity_id", "state")))
+        entity = service._home.entities["light.hall"]  # noqa: SLF001
+        self.assertEqual((entity.state, entity.detail["source"]), ("off", "read"))
+
+    async def test_without_kept_rows_a_read_folds_nothing(self):
+        """The old blob shape (rows as a pointer string, nothing kept)
+        is no evidence, not a crash."""
+        service = _service()
+        await service._on_action_result(await _published(  # noqa: SLF001
+            service, "home_state", {"rows": [{"entity_id": "light.hall", "state": "off"}]}))
+        self.assertEqual(service._home.entities, {})  # noqa: SLF001
+
+    async def test_calendar_reads_are_not_folded_pending_the_creators_decision(self):
+        """`cal_list` would put calendar text in every chat prompt,
+        the children's included. That is the creator's call, pending."""
+        self.assertIn("cal_list", NOT_FOLDED_PENDING)
+        self.assertNotIn("cal_list", FOLDED_TOOLS)
+        service = _service()
+        await service._on_action_result(await _published(  # noqa: SLF001
+            service, "cal_list", {"rows": [{"entity_id": "calendar.family", "state": "on",
+                                            "title": "dentist"}]},
+            evidence_fields=("entity_id", "state", "title")))
+        self.assertEqual(service._home.entities, {})  # noqa: SLF001
+
+
+class AnUndoIsFoldedFromWhatTheToolReports(unittest.IsolatedAsyncioTestCase):
+    async def test_a_light_sim_put_back_is_known_to_be_back(self):
+        house = FakeHomeAssistant()
+        service = _service()
+        called = await _tool("home_call", house).run(
+            {"service": "light.turn_on", "target": "kitchen lights"}, ctx=_tool_ctx())
+        await service._on_action_result(await _published(service, "home_call", called.metadata))  # noqa: SLF001
+        self.assertEqual(service._home.entities["light.kitchen_main"].state, "on")  # noqa: SLF001
+        await service._on_action_result(await _ran(service, house, "home_undo",  # noqa: SLF001
+                                                   {"before": called.metadata["before"]}))
+        entity = service._home.entities["light.kitchen_main"]  # noqa: SLF001
+        self.assertEqual((entity.state, entity.detail["by"], entity.detail["service"]), ("off", "sim", "undo"))
 
 
 class WhatEachToolSays(unittest.TestCase):

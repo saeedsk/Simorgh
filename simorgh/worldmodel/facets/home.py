@@ -114,10 +114,25 @@ def decayed(belief: float, seconds: float) -> float:
     return belief * (0.5 ** (seconds / HALF_LIFE_S))
 
 
+#: The READS that are folded: what the house said it was doing when
+#: Sim asked. Their evidence is `rows_kept`, the bounded copy of the
+#: rows Execution keeps in the metadata blob for a tool that declares
+#: `evidence_fields` (`execution.service.metadata_for_blob`).
+READ_TOOLS = frozenset({"home_state", "media_now"})
 #: The tools whose `action.result` is evidence about the house
 #: (stage 6 item 3). A tool not named here is never folded, whatever
 #: its metadata looks like.
-FOLDED_TOOLS = frozenset({"home_call", "home_undo", "media_control", "media_play"})
+FOLDED_TOOLS = frozenset({"home_call", "home_undo", "media_control", "media_play"}) | READ_TOOLS
+
+#: Tools whose results are evidence about the household but are NOT
+#: folded, and why. The entity table reaches every chat prompt through
+#: `now_block` -- the children's included -- so folding a tool here is
+#: a decision about who gets to hear what it read, not only about
+#: whether it is true.
+NOT_FOLDED_PENDING = {
+    "cal_list": ("calendar text reaching every chat prompt, the children's included, is the "
+                 "creator's privacy decision, pending (2026-09-22)"),
+}
 
 #: What a `media_control` op leaves a player doing, for the ops where
 #: that is not in doubt. The media tools report which players CHANGED
@@ -135,7 +150,9 @@ def folded_observations(tool: str, metadata: dict) -> list[tuple[str, str, str, 
     call says the house is now doing -- only entities the house
     reported as CHANGED, because Home Assistant answers 200 for a call
     on an unplugged bulb and "the call succeeded" is not "the house did
-    something". Pure: the caller has already checked `ok`.
+    something". A READ (`READ_TOOLS`) is the other kind of evidence:
+    every row the house reported, as it was when Sim asked. Pure: the
+    caller has already checked `ok`.
     """
     metadata = metadata if isinstance(metadata, dict) else {}
     changed = [e for e in (metadata.get("changed") or []) if isinstance(e, str) and e]
@@ -147,8 +164,11 @@ def folded_observations(tool: str, metadata: dict) -> list[tuple[str, str, str, 
         for entity_id in changed:
             state = str(after.get(entity_id) or "")
             if state:
+                # `home_undo` names no service (it may use a different
+                # one per entity), so its detail says `undo` instead.
+                service = str(metadata.get("service") or ("undo" if tool == "home_undo" else ""))
                 out.append((entity_id, entity_id.split(".", 1)[0], state,
-                            {"by": "sim", "service": str(metadata.get("service") or "")}))
+                            {"by": "sim", "service": service}))
     elif tool == "media_control":
         op = str(metadata.get("op") or "")
         state = MEDIA_OP_STATE.get(op, "")
@@ -160,6 +180,29 @@ def folded_observations(tool: str, metadata: dict) -> list[tuple[str, str, str, 
         out.extend((entity_id, entity_id.split(".", 1)[0], "playing",
                     {"by": "sim", "op": "play", "state_from": "op", "title": title})
                    for entity_id in changed)
+    elif tool in READ_TOOLS:
+        out.extend(_read_observations(tool, metadata.get("rows_kept")))
+    return out
+
+
+def _read_observations(tool: str, rows) -> list[tuple[str, str, str, dict]]:
+    """A read's rows as observations: the state the house reported,
+    seen now, `source = "read"`. A read is not a change Sim made, so
+    `by` is absent; a row without an entity id or a state says
+    nothing and is skipped."""
+    out: list[tuple[str, str, str, dict]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        entity_id, state = str(row.get("entity_id") or ""), str(row.get("state") or "")
+        if "." not in entity_id or not state:
+            continue
+        detail: dict = {"source": "read", "tool": tool}
+        if row.get("title"):
+            detail["title"] = str(row["title"])[:120]
+        if isinstance(row.get("volume"), (int, float)) and not isinstance(row.get("volume"), bool):
+            detail["volume"] = row["volume"]
+        out.append((entity_id, entity_id.split(".", 1)[0], state, detail))
     return out
 
 
@@ -343,5 +386,5 @@ class HomeFacet:
         return rest.replace("_", " ") if rest else ""
 
 
-__all__ = ["Entity", "FOLDED_TOOLS", "HALF_LIFE_S", "HomeFacet", "MEDIA_OP_STATE", "PRESENT_AT", "QUIET_FROM",
-           "QUIET_TO", "STALE_AFTER_S", "decayed", "folded_observations"]
+__all__ = ["Entity", "FOLDED_TOOLS", "HALF_LIFE_S", "HomeFacet", "MEDIA_OP_STATE", "NOT_FOLDED_PENDING", "PRESENT_AT",
+           "QUIET_FROM", "QUIET_TO", "READ_TOOLS", "STALE_AFTER_S", "decayed", "folded_observations"]

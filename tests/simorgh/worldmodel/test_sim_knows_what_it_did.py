@@ -82,10 +82,26 @@ class SimKnowsWhatItDid(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._home.entities, {})  # noqa: SLF001
 
     async def test_an_undo_is_folded_the_same_way(self):
+        """The metadata is what the real `home_undo` reports, not a
+        hand-built shape: until 2026-09-22 this test gave the undo a
+        `service` and `changed`/`after` the tool never produced, while
+        the tool reported only counts and a real undo folded nothing.
+        The blob path is pinned in test_the_house_fold_reads_the_blob.py."""
+        from pathlib import Path
+
+        from simorgh.contracts.home.fakes import FakeHomeAssistant
+        from simorgh.contracts.protocols import ToolContext
+        from simorgh.domains.home.tools import home_tools
+        from simorgh.execution.config import Config
+
+        house = FakeHomeAssistant()
+        await house.call("light.turn_on", entity_ids=("light.kitchen_main",))
+        undo = {t.name: t for t in home_tools(Config(home_settle_s=0.0), client=house)}["home_undo"]
+        undone = await undo.run({"before": {"light.kitchen_main": {"state": "off", "attributes": {}}}},
+                                ctx=ToolContext(action_id="a1", task_id=None, scope={}, constraints={},
+                                                data_dir=Path("."), clock=None, logger=None, ledger=None))
         service = _service()
-        await service._on_action_result(_result(tool="home_undo", metadata={  # noqa: SLF001
-            "service": "light.turn_off", "entities": ["light.kitchen_main"],
-            "changed": ["light.kitchen_main"], "after": {"light.kitchen_main": "off"}}))
+        await service._on_action_result(_result(tool="home_undo", metadata=undone.metadata))  # noqa: SLF001
         self.assertEqual(service._home.entities["light.kitchen_main"].state, "off")  # noqa: SLF001
 
 
