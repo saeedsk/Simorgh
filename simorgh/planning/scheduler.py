@@ -185,6 +185,9 @@ class Scheduler:
     def _offerable(self, task: Task) -> bool:
         return not (self.autonomous_paused and task.origin in self._autonomous_origins)
 
+    #: How many ready tasks are offered at once (see `dispatch_ready`).
+    _WINDOW = 5
+
     async def dispatch_ready(self) -> None:
         """Offer the ready work, and offer each generation of it ONCE.
 
@@ -210,8 +213,18 @@ class Scheduler:
         if self.paused:
             return
         offered: dict[str, str] = {}
-        for task in select_ready(self._store, priority_weights=self._priority_weights, limit=5,
+        # The window is five OFFERABLE tasks, not the first five ready.
+        # Taking five and then dropping what `auto off` holds meant a
+        # queue of Sim's own work hid everything behind it: live,
+        # 2026-09-22, nine autonomous tasks (two project, the rest
+        # reflection) sat ready with autonomy off, and every SWE-bench
+        # case -- created, ready, exempt from the hold -- was sixth in
+        # that order, never offered, and cancelled 30 minutes later by
+        # its own timeout. A whole benchmark run scored nothing.
+        for task in select_ready(self._store, priority_weights=self._priority_weights, limit=self._WINDOW * 20,
                                  now=self._clock.now()):
+            if len(offered) >= self._WINDOW:
+                break
             if not self._offerable(task):
                 continue
             key = f"{task.id}:{task.updated_at}"
