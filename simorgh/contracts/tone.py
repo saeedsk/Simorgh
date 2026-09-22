@@ -45,7 +45,20 @@ _ALIASES = {"happy": "bright", "excited": "bright", "cheerful": "bright", "gentl
 #:
 #: The trailing full stop is allowed because a model wrote "[loud and
 #: clear.]" and, the tag being unmatchable, said it out loud.
-_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([^\W\d_][\w-]{0,24}(?:[ ,/&+\-–—;]+[^\W\d_][\w-]{0,24}){0,5})\s*\.?\s*[\])>]\s*[:\-–—]?\s*", re.I | re.U)
+#: A `.` or `:` INSIDE the token, so "[c.playful]" matches at all. It
+#: did not, so the whole tag fell through untouched and was printed
+#: and then spoken -- "[c.bright] Still the same answer, Saeed" (live
+#: 2026-09-21, twice in one conversation). Whether the thing is a tone
+#: is still decided by `_split_one`, which only accepts it when the
+#: last part names a feeling Sim knows.
+#: The dot and colon are allowed only in a SINGLE-token tag, not in
+#: the multi-word form. "[c.playful]" has to match at all -- it did
+#: not, so the whole tag fell through untouched and was printed and
+#: then spoken, "[c.bright] Still the same answer, Saeed" (live
+#: 2026-09-21, twice in one conversation). Allowing dots in the
+#: multi-word form too would swallow "[see the file.txt]" at the head
+#: of a reply, and ordinary prose in brackets stays untouched.
+_TAG = re.compile(r"^\s*[\[(<]\s*(?:tone\s*[:=]\s*)?([^\W\d_][\w-]{0,24}(?:[ ,/&+\-–—;]+[^\W\d_][\w-]{0,24}){0,5}|[^\W\d_][\w-]{0,12}[.:][\w-]{1,24})\s*\.?\s*[\])>]\s*[:\-–—]?\s*", re.I | re.U)
 
 
 #: A bracketed block at the head that is plainly not a feeling: it carries
@@ -105,6 +118,16 @@ def _split_one(text: str) -> tuple[str, str]:
         return "", text or ""
     word = match.group(1).lower()
     tone = word if word in TONES else _ALIASES.get(word, "")
+    if not tone and ("." in word or ":" in word):
+        # A namespaced tag: "[c.playful]", "[voice.warm]", "[tone:calm]".
+        # Live 2026-09-21, twice in one conversation -- "[c.bright] Still
+        # the same answer, Saeed" reached the screen AND the speaker,
+        # which said the tag out loud. The prefix is the model's own
+        # invention and there is no list of them to keep; what settles
+        # it is whether the last part is a tone Sim knows, so ordinary
+        # prose in brackets is still untouched.
+        tail = re.split(r"[.:]", word)[-1].strip()
+        tone = tail if tail in TONES else _ALIASES.get(tail, "")
     if not tone and not word.replace("_", "").replace("-", "").isalnum():
         # "[loud and warm]" (live 2026-09-13, spoken aloud): the feeling is
         # whichever word in it is one, and the tag goes whole.

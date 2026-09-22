@@ -7,9 +7,9 @@
 
 [locks.contracts]
 by = "opus-main"
-task = "voice relearn"
-since = "2026-09-22T00:57:15+00:00"
-until = "2026-09-22T08:57:15+00:00"
+task = "a namespaced tone tag"
+since = "2026-09-22T01:09:15+00:00"
+until = "2026-09-22T09:09:15+00:00"
 
 [locks.domains]
 by = "opus-main"
