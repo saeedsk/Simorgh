@@ -725,8 +725,30 @@ class VoiceSession:
         # conversation about anything. It counts only where a name goes,
         # after a greeting ("I said hey sim, but you listened hey team",
         # the creator, live 2026-09-15).
-        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme)\b"
-                              r"|\b(?:hey|hi|hello|ok|okay)\s+teams?\b", text or "", re.I))
+        # The rest is measured, not guessed: the creator's calibration set
+        # (60 takes that say "Sim") replayed through the real recogniser
+        # on 2026-09-22. It recognised 14 of them. Two things came out.
+        #
+        # Farsi was missing ENTIRELY -- "سیم هوا چطوره؟", "سیم ممنون",
+        # "سیم باید زودتر راه بیفتیم" all say the name and none of them
+        # matched, although `backchannel._NAMED` has carried سیم all
+        # along. Sim was deaf to its own name in half the house.
+        #
+        # And whisper writes it as an English word where a name goes:
+        # "Zim paused the music", "See him, who came to the front door",
+        # "Team, what's the plan for tomorrow". Those count only in NAME
+        # POSITION -- at the start, followed by a comma -- because "see"
+        # and "team" are ordinary words anywhere else. Measured against
+        # the same set: 20 of 60, no new false positives.
+        #
+        # The other 40 are not a regex problem. Whisper simply DROPS the
+        # name ("Sim, turn off the kitchen lights" -> "Turn off the
+        # kitchen lights"), and those turns are taken as addressed by the
+        # conversation window instead, which is why they worked.
+        return bool(re.search(r"\b(?:sim|sima|simorgh|sam|seem|seam|seym|syme|zim|zeem|seymour)\b"
+                              r"|سیم|سیمرغ"
+                              r"|\b(?:hey|hi|hello|ok|okay)\s+teams?\b"
+                              r"|^\s*(?:see him|see|team)\s*,", text or "", re.I))
 
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the
