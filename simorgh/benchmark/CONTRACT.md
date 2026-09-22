@@ -140,3 +140,4 @@ No catalogue id names this package directly. Related:
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim benchmark --by <you> --task "..."`), commit the lock, edit only `simorgh/benchmark/`, `tests/simorgh/benchmark/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py benchmark` before committing; commit subject `benchmark: <what changed>`.
+- 2026-09-22: a `swebench` case's `task.create` carries `subject` = the checkout path, so Orchestration can see the work is in somebody else's tree (and skip its worktree).

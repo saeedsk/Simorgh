@@ -891,6 +891,15 @@ class SessionRunner:
     def _uses_worktree(self, session: Session) -> bool:
         if not self._worktrees or session.kind not in WORKTREE_KINDS or session.mode != "execute":
             return False
+        if self._in_somebody_elses_checkout(session):
+            # A SWE-bench case works in a materialised checkout under
+            # `workspace/`, which a worktree of THIS repository does not
+            # contain. Live, 2026-09-22: the task opened a worktree, read
+            # the file through the checkout, never wrote it, and then
+            # `cd workspace/swebench/...` answered "No such file or
+            # directory" -- it reported a fix it had never applied, and
+            # the case scored "no patch".
+            return False
         # Only when Execution has announced the tool. `known_tools()` is
         # empty in a harness with no Execution (then the switch alone
         # decides); once anything has registered, an Execution that
@@ -899,6 +908,25 @@ class SessionRunner:
         # Guardian round trip to hear "unknown tool".
         known = known_tools()
         return not known or "worktree_open" in known
+
+    @staticmethod
+    def _in_somebody_elses_checkout(session: Session) -> bool:
+        """Whether this task's subject lies inside a materialised
+        checkout (`contracts/checkout.py`'s manifest)."""
+        from pathlib import Path
+
+        from simorgh.contracts.checkout import find_enclosing
+
+        subject = str(getattr(session, "subject", "") or "").strip()
+        if not subject:
+            return False
+        import os
+
+        root = Path(os.environ.get("SIMORGH_EXECUTION_REPO_ROOT") or Path.cwd())
+        try:
+            return find_enclosing(root, subject) is not None
+        except Exception:  # noqa: BLE001 -- no manifest readable: behave as before
+            return False
 
     async def _open_worktree(self, session: Session) -> None:
         """Ask Execution for this task's worktree. The tool's first two

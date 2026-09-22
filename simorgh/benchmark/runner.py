@@ -212,7 +212,8 @@ class Runner:
                 problem or "it could not be fetched")
         return f"{relative}/{path.name}", ""
 
-    async def _ask(self, case: Case, prompt: str, *, kind: str = "research") -> tuple[str, int, float, str]:
+    async def _ask(self, case: Case, prompt: str, *, kind: str = "research",
+                   subject: str = "") -> tuple[str, int, float, str]:
         """Ask the real system one thing. `(answer, steps, cost, error)`.
 
         Shared by every mode, because what is being measured is this
@@ -229,6 +230,11 @@ class Runner:
                 reply = await self._bus.request(
                     Message.new(topics.TASK_CREATE, source=self._bus.source, payload={
                         "kind": kind, "description": prompt,
+                        # The checkout this case is about. Orchestration
+                        # reads it to see that the work is in somebody
+                        # else's tree and must NOT open a worktree of
+                        # this repository over it (2026-09-22).
+                        **({"subject": subject} if subject else {}),
                         # NOT "human". A benchmark case is not something
                         # the human typed, and claiming it was had two
                         # costs: every case landed permanently in their
@@ -348,7 +354,7 @@ class Runner:
             # scored by running tests, and nothing the system says about
             # its own work is evidence.
             _said, steps, cost_usd, error = await self._ask(
-                case, self.patch_prompt(case, relative), kind="patch")
+                case, self.patch_prompt(case, relative), kind="patch", subject=relative)
             if error.startswith(_UNASKED):
                 # Never started (or never created): there is no patch to
                 # score and scoring the empty one as wrong would flatter
