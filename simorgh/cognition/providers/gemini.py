@@ -27,6 +27,21 @@ def _client_closed(exc: BaseException) -> bool:
     """The SDK's HTTP client was closed, which a fresh client fixes."""
     return "client has been closed" in str(exc)
 
+#: The shortest deadline Gemini's API accepts. Below it the request is
+#: refused outright -- `400 INVALID_ARGUMENT: Manually set deadline 8s is
+#: too short. Minimum allowed deadline is 10s.` -- and Cognition's `review`
+#: purpose gives an 8 s slice, so the first review call failed, the Router
+#: rested Gemini, and every later call that day fell to the floor. Found
+#: 2026-09-22 when a Gemini-only benchmark answered two cases and then
+#: nothing. The Router still enforces its own, shorter wait: this is only
+#: what the SERVER is told.
+MIN_SERVER_DEADLINE_S = 10.0
+
+
+def _server_deadline_ms(timeout: float) -> int:
+    return int(max(float(timeout), MIN_SERVER_DEADLINE_S) * 1000)
+
+
 class GeminiProvider:
     name = "gemini"
     capabilities = Capabilities(supports_tools=True, supports_streaming=True, supports_images=True,
@@ -64,7 +79,7 @@ class GeminiProvider:
         if max_tokens:
             config["max_output_tokens"] = int(max_tokens) + THINKING_RESERVE_TOKENS
         if timeout:
-            config["http_options"] = {"timeout": int(timeout * 1000)}
+            config["http_options"] = {"timeout": _server_deadline_ms(timeout)}
         if tools:
             config["tools"] = native.gemini_declarations(tools)
             config["automatic_function_calling"] = {"disable": True}
@@ -147,7 +162,7 @@ class GeminiProvider:
             # caller's number is the ANSWER's room, so thought gets its own.
             config["max_output_tokens"] = int(max_tokens) + THINKING_RESERVE_TOKENS
         if timeout:
-            config["http_options"] = {"timeout": int(timeout * 1000)}  # the SDK counts in milliseconds
+            config["http_options"] = {"timeout": _server_deadline_ms(timeout)}  # the SDK counts in milliseconds
         if tools:
             # Native function declarations (stage 2 item 4). The SDK must not
             # call anything itself: every call goes through Guardian.

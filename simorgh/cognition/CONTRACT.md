@@ -20,7 +20,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `simorgh/cognition/providers/__init__.py` | re-exports floor, Claude Code and Gemini providers |
 | `simorgh/cognition/providers/base.py` | `FloorProvider`: offline, purpose-specific template, never raises |
 | `simorgh/cognition/providers/claude_code.py` | the Claude Code CLI as a provider (subprocess) |
-| `simorgh/cognition/providers/gemini.py` | Gemini via lazy `google-genai` |
+| `simorgh/cognition/providers/gemini.py` | Gemini via lazy `google-genai`; the server is never told a deadline under `MIN_SERVER_DEADLINE_S` (10 s) -- Gemini answers a shorter one `400 INVALID_ARGUMENT`, which rested the provider after the first 8 s `review` call (2026-09-22); the Router still waits only its own slice |
 | `simorgh/cognition/providers/ollama.py` | local Ollama fallback, started on demand; the only vision-capable provider |
 | `simorgh/cognition/providers/together.py` | Together (OpenAI-compatible HTTP), cache-aware cost; the primary |
 | `simorgh/cognition/router.py` | ordered failover within one call deadline, budgets, cooldowns, floor |
