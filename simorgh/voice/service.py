@@ -422,7 +422,7 @@ class Service:
                               "spoke (experimental)" if action == "aec_on" else "echo cancellation off -- back to the level gate")
             if self._pipeline is not None:
                 self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
-        elif action in ("enroll", "forget", "people", "whois", "pronounce"):
+        elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy"):
             ok, detail = await self._people_action(action, message.payload)
         else:
             ok, detail = False, f"unknown action {action!r} (on | off | mute | unmute | set | enroll | forget | people | whois)"
@@ -467,6 +467,15 @@ class Service:
                 lines.append(f"  ! {name}'s profile only agrees with itself {score:.2f} over {takes} takes -- "
                              f"more than one voice is in it. `voice forget {name}` then `voice enroll {name}`.")
             return True, "\n".join(lines)
+        if action == "tidy":
+            if not name:
+                return False, "usage: voice tidy <name>   (drops the learnt takes pulling a profile apart)"
+            dropped, before, after = book.tidy(name)
+            if not dropped:
+                return True, (f"{name}'s profile is fine: {before:.2f} agreement with itself, "
+                              f"nothing worth dropping")
+            return True, (f"dropped {dropped} learnt take(s) from {name}: agreement with itself "
+                          f"{before:.2f} -> {after:.2f}. The enrolment takes are untouched.")
         if action == "pronounce":
             say_as = str(payload.get("value") or "").strip()
             if not name or not say_as:

@@ -462,6 +462,42 @@ class SpeakerBook:
         except (OSError, ValueError):
             return ""
 
+    def tidy(self, name: str) -> tuple[int, float, float]:
+        """Drop the learnt takes that are pulling a profile apart.
+
+        `(dropped, before, after)`. The three enrolment takes are
+        never touched -- they are the ones a person actually sat down
+        and gave -- and a learnt take is kept only if the profile
+        still agrees with itself without it being dragged under the
+        bar.
+
+        This exists because the damage is already done by the time
+        the guard in `refine` is added: the creator re-enrolled on
+        2026-09-21 and was back to 0.59 within hours, so telling him
+        to re-enrol again would be asking him to repeat a process
+        that will produce the same result. Repairing is cheaper than
+        re-recording and keeps the takes that are genuinely his.
+        """
+        self._load()
+        person = self._people.get((name or "").lower())
+        if person is None or len(person.embeddings) <= 3:
+            # Nothing learnt to drop. `before` and `after` are the same
+            # number, not zero: a caller printing "0.92 -> 0.00" on a
+            # healthy profile would read as having destroyed it.
+            score = coherence(person.embeddings) if person else 0.0
+            return 0, score, score
+        before = coherence(person.embeddings)
+        kept = list(person.embeddings[:3])
+        for vector in person.embeddings[3:]:
+            after = coherence([*kept, vector])
+            if after >= MUDDLED_BELOW or after >= coherence(kept):
+                kept.append(vector)
+        dropped = len(person.embeddings) - len(kept)
+        if dropped:
+            person.embeddings[:] = kept
+            self._save(person)
+        return dropped, before, coherence(person.embeddings)
+
     def refine(self, name: str, embedding: Sequence[float]) -> bool:
         """A confident turn becomes a take, quietly: the room, the mood,
         the distance that this take covers and the enrolment did not.
@@ -486,6 +522,31 @@ class SpeakerBook:
             # does not look like the takes in it: that is how a profile
             # drifts off its person. Refuse it (see REFINE_AGREE).
             return False
+        # And it must not make the profile disagree with ITSELF. The
+        # check above compares a take to the profile as it currently
+        # is, so as the profile widens a worse take clears the same
+        # bar, which widens it further -- the ratchet REFINE_AGREE was
+        # written to stop and does not.
+        #
+        # Measured on the creator's own book, 2026-09-21, hours after
+        # he re-enrolled: three enrolment takes at 0.80 coherence, then
+        # NINE learnt takes agreeing at 0.51 to 0.76 -- every one of
+        # them over the 0.5 bar -- and the profile back down to 0.59,
+        # which is where it had been before he re-enrolled. Replaying
+        # those nine through this guard keeps two and holds him at
+        # 0.76.
+        # Only once there are enough takes for "agrees with itself" to
+        # mean anything. Against a single enrolment take, coherence is
+        # just that one pair, and the guard would become "never learn
+        # below 0.65" -- which is the 2026-09-15 bug in the other
+        # direction: the bar sat above what the creator's own voice
+        # scored in his room, so the voice that most needed the
+        # practice never gave any.
+        if len(person.embeddings) >= 3:
+            before = coherence(person.embeddings)
+            after = coherence([*person.embeddings, vector])
+            if after < MUDDLED_BELOW and after < before:
+                return False
         person.embeddings.append(vector)
         # A loop, not a single delete: the cap was applied once per call
         # and the creator's profile still reached 18 against MAX_TAKES

@@ -146,7 +146,7 @@ class TestLongLinesDoNotFreezeCompletionOrLexing(unittest.TestCase):
         self.assertEqual(offered("tasks "), ["all", "work", "clear"])
         self.assertEqual(offered("tasks c"), ["clear"])
         self.assertEqual(offered("/voice "), ["status", "on", "off", "mute", "unmute", "barge", "listen", "test",
-                                              "enroll", "people", "whois", "forget", "pronounce",
+                                              "enroll", "people", "whois", "forget", "tidy", "pronounce",
                                               "models", "voices", "devices", "set", "bench"])
         self.assertIn("tts_voice", offered("voice set "))
         self.assertEqual(offered("voice set tts"), ["tts", "tts_farsi_voice", "tts_speed", "tts_voice"])
