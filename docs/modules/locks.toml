@@ -35,12 +35,6 @@ task = "stage 0 item 32: a paused system never accepts a task unverified"
 since = "2026-09-22T10:16:17+00:00"
 until = "2026-09-22T18:16:17+00:00"
 
-[locks.verification]
-by = "opus-main"
-task = "stage 0 item 32: confine baseline pytest runs; honour pause"
-since = "2026-09-22T10:14:20+00:00"
-until = "2026-09-22T18:14:20+00:00"
-
 [locks.voice]
 by = "opus-main"
 task = "a kept turn names who spoke"
