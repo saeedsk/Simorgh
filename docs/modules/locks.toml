@@ -5,12 +5,6 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.contracts]
-by = "opus-main"
-task = "voice tidy on the wire"
-since = "2026-09-22T00:35:01+00:00"
-until = "2026-09-22T08:35:01+00:00"
-
 [locks.domains]
 by = "opus-main"
 task = "a reminder knows whose it is"
@@ -31,6 +25,6 @@ until = "2026-09-22T08:24:12+00:00"
 
 [locks.voice]
 by = "opus-main"
-task = "refine must not muddle a profile"
-since = "2026-09-22T00:24:12+00:00"
-until = "2026-09-22T08:24:12+00:00"
+task = "a kept turn names who spoke"
+since = "2026-09-22T00:44:30+00:00"
+until = "2026-09-22T08:44:30+00:00"

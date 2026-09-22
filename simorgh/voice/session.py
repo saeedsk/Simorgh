@@ -291,6 +291,9 @@ class VoiceSession:
         # per-turn-facts-in-session-state bug shape).
         self._turn_facts: dict[int, dict] = {}
         self._scored: dict[int, dict] = {}   # turn_id -> what the book concluded
+        #: turn_id -> the sidecar `_keep_turn` wrote, so the speaker can
+        #: be added once the book has answered.
+        self._kept_json: dict = {}
         self._named: dict[int, str] = {}     # turn_id -> who the book said it was
         self._mic = microphone
         self._detector_factory = detector_factory
@@ -900,9 +903,40 @@ class VoiceSession:
                 note["speaker_runner_up"] = identification.runner_up
                 note["speaker_runner_up_score"] = round(float(identification.runner_up_score), 3)
         self._scored[turn_id] = note
+        self._name_the_kept_turn(turn_id, note)
         if len(self._scored) > 64:      # turns that never reach a spoken reply
             for stale in sorted(self._scored)[:-32]:
                 self._scored.pop(stale, None)
+
+    def _name_the_kept_turn(self, turn_id: int, note: dict) -> None:
+        """Add who spoke to a kept turn's sidecar.
+
+        `_keep_turn` writes on the final transcript, which is before
+        the speaker book has been asked, so the file it wrote says
+        what was heard and not by whom. 745 kept turns on the
+        creator's machine, 142 MB of his family's voices, and not one
+        of them named anybody -- so a profile could never be rebuilt
+        from audio Sim already had, and re-enrolment meant asking his
+        children to read sentences again.
+
+        Best effort and silent on failure: the turn happened, and a
+        sidecar that could not be updated is a worse record, not a
+        lost one.
+        """
+        import json as _json
+
+        path = self._kept_json.pop(turn_id, None)
+        if path is None:
+            return
+        try:
+            kept = _json.loads(path.read_text(encoding="utf-8"))
+            kept.update(note)
+            path.write_text(_json.dumps(kept, indent=1), encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            self._log("warning", "voice.kept_turn_not_named", error=repr(exc))
+        if len(self._kept_json) > 64:
+            for stale in sorted(self._kept_json)[:-32]:
+                self._kept_json.pop(stale, None)
 
     def _keep_turn(self, turn_id: int, event) -> None:
         """File a turn's audio and what was made of it, for calibration.
@@ -925,6 +959,13 @@ class VoiceSession:
             folder = Path(self._config.audio_dir)
             stamp = f"{int(_time.time() * 1000)}-{turn_id}"
             write_wav(folder / f"{stamp}.wav", Audio(bytes(event.audio)))
+            # Remembered so `_note_score` can add WHO said it once the
+            # book has answered. This runs on the final transcript,
+            # which is before identification -- so 745 kept turns of
+            # the family's voices carried no name at all (2026-09-21),
+            # and nothing could ever be relearnt from audio Sim
+            # already had.
+            self._kept_json[turn_id] = folder / f"{stamp}.json"
             (folder / f"{stamp}.json").write_text(_json.dumps({
                 "at": _time.time(), "turn": turn_id, "text": event.text,
                 "confidence": round(float(event.confidence), 4), "engine": event.engine,
