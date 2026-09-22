@@ -8,6 +8,7 @@ for exactly what's real vs. still an honest placeholder). Layer 1
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import replace
 
@@ -22,7 +23,7 @@ from .config import Config
 from .facets.capability_map import CapabilityMapFacet
 from .facets.file_index import FileIndexFacet
 from .facets.git_state import GitStateFacet
-from .facets.home import HomeFacet
+from .facets.home import FOLDED_TOOLS, HomeFacet, folded_observations
 from .facets.people import PeopleFacet
 from .facets.registry_facets import ToolsFacet, UserProfileFacet
 from .facets.wellbeing import WellbeingFacet
@@ -286,20 +287,35 @@ class Service:
                 self._tool_writes = 0
                 await self._record("tool_stats", {"tool_stats": tools_snapshot(self._model)},
                                    section="tool_stats", reason="action.result")
-        if not payload.get("ok") or tool not in ("home_call", "home_undo"):
+        if not payload.get("ok") or tool not in FOLDED_TOOLS:
             return
-        metadata = payload.get("metadata") or {}
-        after = metadata.get("after") or {}
-        changed = [str(e) for e in (metadata.get("changed") or [])]
-        for entity_id in changed:
-            state = str(after.get(entity_id) or "")
-            if not state:
-                continue
-            kind = entity_id.split(".", 1)[0]
-            self._home.observe(entity_id, kind=kind, state=state,
-                               detail={"by": "sim", "service": str(metadata.get("service") or "")})
-        if changed:
+        seen = folded_observations(tool, await self._result_metadata(payload))
+        for entity_id, kind, state, detail in seen:
+            self._home.observe(entity_id, kind=kind, state=state, detail=detail)
+        if seen:
             await self._announce_situation()
+
+    async def _result_metadata(self, payload: dict) -> dict:
+        """What the tool reported about its result. `action.result`
+        carries it as a Ledger blob (`metadata_ref`), never inline:
+        until 2026-09-22 this read `payload["metadata"]`, a field the
+        schema does not have and Execution never sends, so the home
+        fold of 2026-09-20 folded nothing live -- its tests built a
+        payload Execution cannot produce. Inline `metadata` is still
+        honoured for a hand-built payload. A blob that cannot be read
+        is no evidence, not a failed handler."""
+        inline = payload.get("metadata")
+        if isinstance(inline, dict):
+            return inline
+        ref = str(payload.get("metadata_ref") or "")
+        ledger = getattr(self._ctx, "ledger", None)
+        if not ref or ledger is None:
+            return {}
+        try:
+            data = json.loads((await ledger.get_blob(ref)).decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001 -- a missing blob is no evidence, not a crash
+            return {}
+        return data if isinstance(data, dict) else {}
 
     async def _on_tv_state(self, message: Message) -> None:
         mode = str(message.payload.get("mode") or "none")

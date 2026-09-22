@@ -114,6 +114,55 @@ def decayed(belief: float, seconds: float) -> float:
     return belief * (0.5 ** (seconds / HALF_LIFE_S))
 
 
+#: The tools whose `action.result` is evidence about the house
+#: (stage 6 item 3). A tool not named here is never folded, whatever
+#: its metadata looks like.
+FOLDED_TOOLS = frozenset({"home_call", "home_undo", "media_control", "media_play"})
+
+#: What a `media_control` op leaves a player doing, for the ops where
+#: that is not in doubt. The media tools report which players CHANGED
+#: but not what they changed to (unlike `home_call`'s `after`), so the
+#: state is the op's, and only for a player the house says moved. `on`
+#: and `stop` are left out on purpose: Home Assistant lands them on
+#: `on`, `idle`, `standby` or `off` depending on the device, and a
+#: guessed state is worse than none. Volume, mute and skip change an
+#: attribute, not the state.
+MEDIA_OP_STATE = {"play": "playing", "resume": "playing", "pause": "paused", "off": "off"}
+
+
+def folded_observations(tool: str, metadata: dict) -> list[tuple[str, str, str, dict]]:
+    """`(entity_id, kind, state, detail)` for what a successful tool
+    call says the house is now doing -- only entities the house
+    reported as CHANGED, because Home Assistant answers 200 for a call
+    on an unplugged bulb and "the call succeeded" is not "the house did
+    something". Pure: the caller has already checked `ok`.
+    """
+    metadata = metadata if isinstance(metadata, dict) else {}
+    changed = [e for e in (metadata.get("changed") or []) if isinstance(e, str) and e]
+    out: list[tuple[str, str, str, dict]] = []
+    if tool in ("home_call", "home_undo"):
+        after = metadata.get("after") or {}
+        if not isinstance(after, dict):
+            return []
+        for entity_id in changed:
+            state = str(after.get(entity_id) or "")
+            if state:
+                out.append((entity_id, entity_id.split(".", 1)[0], state,
+                            {"by": "sim", "service": str(metadata.get("service") or "")}))
+    elif tool == "media_control":
+        op = str(metadata.get("op") or "")
+        state = MEDIA_OP_STATE.get(op, "")
+        if state:
+            out.extend((entity_id, entity_id.split(".", 1)[0], state,
+                        {"by": "sim", "op": op, "state_from": "op"}) for entity_id in changed)
+    elif tool == "media_play":
+        title = str(metadata.get("what") or "")[:120]
+        out.extend((entity_id, entity_id.split(".", 1)[0], "playing",
+                    {"by": "sim", "op": "play", "state_from": "op", "title": title})
+                   for entity_id in changed)
+    return out
+
+
 class HomeFacet:
     """The entity table, the presence beliefs, and the situation facts."""
 
@@ -294,4 +343,5 @@ class HomeFacet:
         return rest.replace("_", " ") if rest else ""
 
 
-__all__ = ["Entity", "HALF_LIFE_S", "HomeFacet", "PRESENT_AT", "QUIET_FROM", "QUIET_TO", "STALE_AFTER_S", "decayed"]
+__all__ = ["Entity", "FOLDED_TOOLS", "HALF_LIFE_S", "HomeFacet", "MEDIA_OP_STATE", "PRESENT_AT", "QUIET_FROM",
+           "QUIET_TO", "STALE_AFTER_S", "decayed", "folded_observations"]
