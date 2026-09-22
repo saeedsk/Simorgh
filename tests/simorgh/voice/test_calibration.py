@@ -399,3 +399,16 @@ class RelearnPrefersCalibration(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class NumbersAreTheirDigits(unittest.TestCase):
+    """Live, en-033 (2026-09-22): "four eight one five" read correctly,
+    written "4815" by the recogniser, scored 0.4."""
+
+    def test_a_spelled_out_code_matches_its_digits(self):
+        from simorgh.voice.calibration import wer
+
+        self.assertEqual(wer("The code is four eight one five, then press enter.",
+                             "The code is 4815 then press enter."), 0.0)
+        self.assertEqual(wer("What is twenty seven times forty three?", "What is 27 times 43?"), 0.0)
+        self.assertGreater(wer("The code is four eight one five.", "The code is 4816."), 0.0)

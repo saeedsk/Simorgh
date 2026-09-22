@@ -210,7 +210,15 @@ def normalise(text: str) -> list[str]:
             joined[-1] += word
         else:
             joined.append(word)
-    return _numbers_to_digits(joined)
+    # Every number as its digits, on both sides: "4815" and "four eight
+    # one five" are the same code, "27" and "twenty seven" the same
+    # number. Without this a correct read of a spelled-out code scored
+    # 0.4 (live, en-033, 2026-09-22) -- the recogniser was right, the
+    # scorer was not.
+    out: list[str] = []
+    for word in _numbers_to_digits(joined):
+        out.extend(list(word) if word.isdigit() else [word])
+    return out
 
 
 def word_errors(reference: str, hypothesis: str) -> tuple[int, int]:
