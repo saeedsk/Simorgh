@@ -4,20 +4,20 @@ One-line status: layer 5 · 806 lines · 4 test files · lock: `persona` in docs
 
 ## Purpose
 
-Persona owns Sim's continuous mood (valence, arousal, cognitive load), the rule-based emotion floor that moves it, the identity-plus-mood "voice" block Cognition puts in prompts, and a narrow regex user model ("call me X", "I prefer X"). It no longer paces proactive shares: that was a second path for unprompted speech beside Initiative's, and stage 6 item 6 says there is one (removed 2026-09-20 with `sharing.py`, its four `[persona.share]` keys and its subscription). It never calls Cognition and never sits in a model call path: it reacts to bus events and answers `persona.voice` requests, so it keeps working with every provider down (`service.py:1-5`, `emotion.py`). It is the single writer of `persona:state` and restores mood from it at start, decayed forward by the time the process was down (`service.py:131-181`). The shaping decision is that mood is cheap deterministic arithmetic on an injected clock, announced on the bus only when it has really moved: a delta below 1e-4 is dropped, and decay is announced only after drifting `decay_announce_delta` from the last announced state (V6).
+Persona owns Sim's continuous mood (valence, arousal, cognitive load), the rule-based emotion floor that moves it, the identity-plus-mood "voice" block Cognition puts in prompts, and a narrow regex user model ("call me X", "I prefer X"), kept per person and published with who said it, so World Model files it under that person (stage 6 item 4, 2026-09-22). It no longer paces proactive shares: that was a second path for unprompted speech beside Initiative's, and stage 6 item 6 says there is one (removed 2026-09-20 with `sharing.py`, its four `[persona.share]` keys and its subscription). It never calls Cognition and never sits in a model call path: it reacts to bus events and answers `persona.voice` requests, so it keeps working with every provider down (`service.py:1-5`, `emotion.py`). It is the single writer of `persona:state` and restores mood from it at start, decayed forward by the time the process was down (`service.py:131-181`). The shaping decision is that mood is cheap deterministic arithmetic on an injected clock, announced on the bus only when it has really moved: a delta below 1e-4 is dropped, and decay is announced only after drifting `decay_announce_delta` from the last announced state (V6).
 
 ## Files
 
 | File | For |
 |---|---|
 | `simorgh/persona/__init__.py` | empty package marker |
-| `simorgh/persona/api.py` | re-exports the pure types (`EmotionalState`, `MoodEngine`, `VoiceComposer`, `SharePolicy`, `UserModel`, ...) for tests |
+| `simorgh/persona/api.py` | re-exports the pure types (`EmotionalState`, `MoodEngine`, `VoiceComposer`, `UserModel`, `attribute`, `OWNER`, `CONSOLE_CHANNELS`, ...) for tests |
 | `simorgh/persona/config.py` | frozen `Config`, `resolved_soul_path`, `from_mapping` for `[persona]` |
 | `simorgh/persona/emotion.py` | lexicon-based `react(text)` -> mood delta; no model |
 | `simorgh/persona/mood.py` | `EmotionalState` and `MoodEngine`: apply delta, set, decay toward baseline, restore, bounded history |
 | `simorgh/persona/service.py` | the `Service`: subscriptions, mood restore, announce-on-change, voice replies |
 | `simorgh/persona/sharing.py` | `SharePolicy`: per-kind cooldown, quiet period after user activity, hourly cap |
-| `simorgh/persona/user_model.py` | `UserModel`: regex facet extraction with confidence merge, values sanitised for a protected prompt block |
+| `simorgh/persona/user_model.py` | `UserModel`: regex facet extraction with confidence merge, per person (`facets(person)`, `extract_from_text(..., person=)`), values sanitised for a prompt block; `attribute(payload)` says whose sentence a percept is (a named, undoubted speaker; `OWNER` "" for the console, `CONSOLE_CHANNELS` = `("", "cli")`, the `guardian/tiers.py::role_of` convention; None for anybody else) |
 | `simorgh/persona/voice.py` | `mood_phrase` and `VoiceComposer`: identity summary + mood phrase within `voice_max_chars` |
 
 ## Consumes
@@ -26,7 +26,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/persona/service.py | notes user activity, applies the lexicon reaction, extracts user-model facets |
+| `percept.text.received` | `messages/percept.py::PerceptTextReceived` | simorgh/persona/service.py | notes user activity, applies the lexicon reaction, extracts user-model facets for the speaker (`speaker`, `speaker_doubt`, `channel`); a percept `attribute` cannot name is not extracted at all |
 | `task.completed` | `messages/task.py::TaskCompleted` | simorgh/persona/service.py | valence nudge `outcome_nudge_success` |
 | `task.failed` | `messages/task.py::TaskFailed` | simorgh/persona/service.py | valence nudge `outcome_nudge_failure` |
 | `task.blocked` | `messages/task.py::TaskBlocked` | simorgh/persona/service.py | smaller valence nudge `outcome_nudge_blocked` (blocked is retried, not terminal) |
@@ -41,7 +41,7 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 | Topic | Schema | Where | When |
 |---|---|---|---|
 | `persona.state.changed` | `messages/persona.py::PersonaStateChanged` | simorgh/persona/service.py | a mood change of at least 1e-4, a health reset, or decay past `decay_announce_delta` (consumed by Growth, Interface, Voice) |
-| `persona.user_model.updated` | `messages/persona.py::PersonaUserModelUpdated` | simorgh/persona/service.py | a facet is extracted from a percept (consumed by World Model) |
+| `persona.user_model.updated` | `messages/persona.py::PersonaUserModelUpdated` | simorgh/persona/service.py | a facet is extracted from an attributable percept (consumed by World Model, which files it in that person's `preferences`). Payload also carries `person` (household name, "" for the console) and `channel` -- extra keys the schema admits (`additionalProperties`) but does not yet declare: declaring them as `O("person", Str)`, `O("channel", Str)` in `messages/persona.py::PersonaUserModelUpdated` needs the `contracts` lock |
 | `persona.voice.reply` | `messages/persona.py::PersonaVoiceReply` | simorgh/persona/service.py | reply to `persona.voice` (via `bus.reply`) |
 
 ## Ledger streams
@@ -49,12 +49,12 @@ Exact subscription list: `Service.consumes` (`service.py:73-77`).
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
 | `persona:state` | simorgh/persona/service.py (written on every announce; its last event read back at start) | named in ledger/compaction.py for retention | 7d (keep_tail still leaves the last events for restore) |
-| `persona:user_model` | simorgh/persona/service.py | - (write-only; the user model is not restored at start) | forever (no `DEFAULT_RETENTION` entry) |
+| `persona:user_model` | simorgh/persona/service.py | - (write-only; the user model is not restored at start). Entries before 2026-09-22 carry no `person`/`channel` and cannot be attributed; they were never replayed and are not migrated | forever (no `DEFAULT_RETENTION` entry) |
 | `persona:shares` | simorgh/persona/service.py | - | forever |
 
 ## Config
 
-`[persona]` in simorgh.toml; dataclass in `simorgh/persona/config.py`. Several keys are nested in the TOML: `[persona.baseline] valence/arousal`, `[persona.outcome_nudge] success/failure/blocked`, `[persona.voice] max_chars` (`config.py:50-77`). An explicitly constructed `Config` wins over `ctx.config`. `[persona.user_model] min_confidence_to_use` (field `user_model_min_confidence`) was removed 2026-09-19: nothing read it (its only reader, `UserModel.register`, had no caller and was removed too); a `[persona]` section holding only that key is now reported by the Kernel's config check as changing nothing. The confidence floor for user facets in prompts is Cognition's own constant (`cognition/assembler.py::_MIN_FACET_CONFIDENCE`).
+`[persona]` in simorgh.toml; dataclass in `simorgh/persona/config.py`. Several keys are nested in the TOML: `[persona.baseline] valence/arousal`, `[persona.outcome_nudge] success/failure/blocked`, `[persona.voice] max_chars` (`config.py:50-77`). An explicitly constructed `Config` wins over `ctx.config`. `[persona.user_model] min_confidence_to_use` (field `user_model_min_confidence`) was removed 2026-09-19: nothing read it (its only reader, `UserModel.register`, had no caller and was removed too); a `[persona]` section holding only that key is now reported by the Kernel's config check as changing nothing. The confidence floor for user facets in prompts is World Model's (`worldmodel/facets/people.py::MIN_PREFERENCE_CONFIDENCE`, 0.5); Cognition's `_MIN_FACET_CONFIDENCE` went with its household-wide profile block on 2026-09-22.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -102,6 +102,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 - `tests/simorgh/persona/test_service.py` -- the real Service on a real bus: percept and task nudges, facet extraction, health reset, voice reply, decay, share pacing and suspension
 - `tests/simorgh/persona/test_voice_and_continuity.py` -- the voice block keeps the mood phrase and the whole Identity section; mood survives a restart and decays over an outage; facet sanitising
+- `tests/simorgh/persona/test_user_model_is_per_person.py` -- `attribute`: a named speaker, the console as owner, nobody for an unplaced/doubtful voice or a local surface; one person's facets never merge with another's
 - `tests/simorgh/persona/test_decay_is_announced_on_change.py` -- a slow decay over a hundred ticks is announced a few times, not every tick (V6)
 - `tests/simorgh/persona/test_sharing.py` -- hourly cap and pruning of old share times
 
@@ -114,6 +115,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - Stage 1 (telemetry out of the decision log): `persona.state.changed` spans are sampled at 1/50 in the telemetry store.
 - Stage 4 item 4: one `ContextBuilder` in Orchestration renders "persona voice" in a fixed prefix order, the direction V6 names ("persona as an injected reader" instead of a bus request per prompt).
 - Stage 5 item 4: `persona/user_model.py`'s regex extraction is retired in favour of entity-linked facts and a per-person digest.
+- Stage 6 item 4, done 2026-09-22: facts go to the speaker's `Person.preferences`, not a household-wide profile. Open: `CONSOLE_CHANNELS` is repeated in `worldmodel/facets/people.py` and `guardian/tiers.py::role_of`; it belongs in `contracts/channels.py`.
 - Stage 6 item 6: `persona/sharing.py` moves into the new `initiative/` module with Curiosity's sharing and reminder delivery.
 
 ## Working on this module

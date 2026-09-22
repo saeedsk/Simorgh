@@ -18,7 +18,7 @@ from simorgh.contracts.protocols import Context, Health
 from .config import Config
 from .emotion import react
 from .mood import EmotionalState, MoodEngine
-from .user_model import UserModel
+from .user_model import UserModel, attribute
 from .voice import VoiceComposer, mood_phrase
 
 VERSION = "0.1.0"
@@ -216,11 +216,23 @@ class Service:
         delta = react(text, lexicon_weight=self.config.lexicon_weight, exclamation_arousal=self.config.exclamation_arousal)
         await self._apply_and_announce(valence=delta.valence, arousal=delta.arousal, source="percept.text")
 
+        # Whose sentence it is decides whose record it lands in (stage 6
+        # item 4). A sentence nobody can be named for is not extracted at
+        # all: an unplaced voice saying "call me boss" must not become
+        # anybody's name. The console is the owner's (`attribute`).
+        person = attribute(message.payload)
+        if person is None:
+            return
+        channel = str(message.payload.get("channel") or "")
         session_id = message.payload.get("session_id", "")
         source_ref = hashlib.sha256(f"{message.id}:{session_id}".encode()).hexdigest()[:16] if message.id else session_id
-        for facet, value in self._user_model.extract_from_text(text, ts=now, source_ref=source_ref):
-            record = self._user_model.facets()[facet]
-            payload = {"facet": facet, "value": value, "confidence": record.confidence}
+        for facet, value in self._user_model.extract_from_text(text, ts=now, source_ref=source_ref, person=person):
+            record = self._user_model.facets(person)[facet]
+            # `person` is the household name ("" for the console, which
+            # World Model files under the owner); `channel` rides so World
+            # Model can apply the same console rule rather than trust "".
+            payload = {"facet": facet, "value": value, "confidence": record.confidence,
+                       "person": person, "channel": channel}
             await self._ctx.bus.publish(Message.new(topics.PERSONA_USER_MODEL_UPDATED, source=self._ctx.source, payload=payload))
             await self._persist("persona:user_model", topics.PERSONA_USER_MODEL_UPDATED, payload)
 
