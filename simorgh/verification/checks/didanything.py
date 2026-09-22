@@ -218,10 +218,15 @@ class DidAnythingCheck:
         # would fail a legitimate continuation. Default to True (a
         # complete log) so producers that do not send the field --
         # tests, other callers -- keep today's behaviour.
+        #
+        # Unless Verification read the whole task stream for it
+        # (`task_writes`, every attempt's write tools, stage 4 item 8):
+        # then a retry is judged on the task, not stood down.
+        whole = req.subject.get("complete_log", True) or isinstance(req.subject.get("task_writes"), list)
         return (
             req.subject.get("kind") in _CHANGE_KINDS
             and bool(_steps(req))
-            and req.subject.get("complete_log", True)
+            and whole
         )
 
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:
@@ -229,6 +234,10 @@ class DidAnythingCheck:
         used = {str(s.get("tool") or "") for s in steps}
         if write_steps(steps):
             return CheckResult(status="passed", detail="the session used a write tool")
+        earlier = req.subject.get("task_writes")
+        if isinstance(earlier, list) and earlier:
+            return CheckResult(status="passed",
+                               detail=f"an earlier attempt of this task wrote ({', '.join(sorted(set(earlier)))})")
         denied = sorted({str(s.get("tool")) for s in steps if s.get("tool") in WRITE_TOOLS and s.get("denied")})
 
         answer = str(req.subject.get("result") or "").lower()

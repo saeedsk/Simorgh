@@ -32,7 +32,7 @@ Verification owns the verdict on finished work: for each `verify.requested` it r
 | `simorgh/verification/planreview.py` | `review_plan`: ordering, step count, protected target, model-judged goal coverage |
 | `simorgh/verification/rigor.py` | `select_rigor`: max(by kind, by reversibility), or the forced override |
 | `simorgh/verification/service.py` | `VerificationService`: subscriptions, the pipeline, the three outbound calls |
-| `simorgh/verification/trajectory.py` | `compute_trajectory`: steps, wasted, denied, recovered from `task:<id>` |
+| `simorgh/verification/trajectory.py` | `compute_trajectory`: steps, wasted, denied, recovered from `task:<id>`; `writes_in_task`: every attempt's write tools (not denied), read for a retry so `did_anything` judges the task rather than standing down (stage 4 item 8) |
 | `simorgh/verification/verdict.py` | `combine`: mechanical, then required "no", then denials, then answered fraction |
 
 ## Consumes
@@ -119,6 +119,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/verification/test_rigor.py` -- `select_rigor` and the forced override.
 - `tests/simorgh/verification/test_parsing.py` -- a non-answer parses as `None`, never "no".
 - `tests/simorgh/verification/test_did_anything.py` -- a change task with no successful write fails.
+- `tests/simorgh/verification/test_a_retry_is_judged_on_the_whole_task.py` -- a retry (`complete_log=False`) passes when an earlier attempt wrote and fails when none ever did.
 - `tests/simorgh/verification/test_full_suite_ran.py` -- the whole-suite requirement on a code change.
 - `tests/simorgh/verification/test_red_suite_attribution.py` -- the base-revision and quiet-rerun excuse rules.
 - `tests/simorgh/verification/test_planreview.py` -- `plan.reviewed` verdicts: ordering, step count, protected target.

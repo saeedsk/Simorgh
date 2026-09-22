@@ -37,7 +37,7 @@ from .checks import ALL_CHECKS
 from .config import VerificationConfig
 from .planreview import review_plan
 from .rigor import select_rigor
-from .trajectory import TrajectoryMetrics, compute_trajectory
+from .trajectory import TrajectoryMetrics, compute_trajectory, writes_in_task
 from .verdict import combine, feedback_to_wire
 
 _ORDER = {"free": 0, "cheap": 1, "expensive": 2}
@@ -208,6 +208,13 @@ class VerificationService:
             return
 
         subject = await self._resolve_subject(payload.get("subject_ref", ""))
+        if isinstance(subject, dict) and subject.get("complete_log") is False and "task_writes" not in subject:
+            # A retry's subject holds only its own attempt's steps. The
+            # task stream holds every attempt's, so `did_anything` can
+            # judge the task instead of standing down (stage 4 item 8).
+            writes = await writes_in_task(ctx.ledger, task_id)
+            if writes is not None:
+                subject = {**subject, "task_writes": writes}
         req = VerifyRequest(
             verification_id=verification_id, task_id=task_id, kind=kind, subject=subject,
             checklist_hint=payload.get("checklist_hint"),

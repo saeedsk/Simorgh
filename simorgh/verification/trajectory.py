@@ -59,3 +59,29 @@ async def compute_trajectory(ledger, task_id: str | None) -> TrajectoryMetrics:
             last_action_failed = not ok
     wasted += sum(1 for count in seen_paths.values() if count > 2)
     return TrajectoryMetrics(steps=len(steps), wasted=wasted, denied_actions=denied, recovered_errors=recovered)
+
+
+async def writes_in_task(ledger, task_id: str | None) -> list[str] | None:
+    """Every write tool that ran in this task, across ALL its attempts:
+    the `task:<id>` stream holds each attempt's steps, where a verify
+    subject carries only the current one's. None when it cannot be read.
+
+    A step Guardian denied never reached its tool, and is recorded with
+    the `denied: ` summary Orchestration gives it (`DENIED_PREFIX`).
+    """
+    from .checks.didanything import WRITE_TOOLS
+
+    if not task_id:
+        return None
+    try:
+        events = await ledger.read(f"task:{task_id}")
+    except Exception:  # noqa: BLE001 -- ledger unavailable: no opinion
+        return None
+    out = []
+    for e in events:
+        p = e.payload or {}
+        if (e.type == "task.step" and p.get("phase") == "act" and p.get("tool") in WRITE_TOOLS
+                and not str(p.get("summary") or "").startswith("denied: ")):
+            out.append(str(p["tool"]))
+    return out
+

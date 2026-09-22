@@ -35,6 +35,12 @@ task = "stage 0 item 32: a paused system never accepts a task unverified"
 since = "2026-09-22T10:16:17+00:00"
 until = "2026-09-22T18:16:17+00:00"
 
+[locks.verification]
+by = "opus-main"
+task = "stage 4 item 8: did_anything reads the whole task stream"
+since = "2026-09-22T10:21:28+00:00"
+until = "2026-09-22T18:21:28+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "a kept turn names who spoke"
