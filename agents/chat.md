@@ -12,6 +12,17 @@ tools = [
     "cal_list", "mail_search", "mail_read", "remind",
     # "am I exposed?" is a question a person asks in chat.
     "sec_posture", "sec_findings", "sec_show",
+    # "was there a provider timeout just now?", "what did that error
+    # say?" -- its own console is the only place those answers are, and
+    # no agent listed the tool, so every such question was answered from
+    # memory or not at all (live, 2026-09-22: a timeout four minutes
+    # earlier, and Sim said it had no log to look at).
+    "console_tail",
+    # "what did you hear?", "what does the front door camera see?",
+    # "this room is the study", "grant Ira interest shares" -- all
+    # ordinary chat questions, and none of them was reachable by any
+    # agent until 2026-09-22 (the tools were registered and orphaned).
+    "overheard", "overheard_note", "camera_describe", "remember_place", "people",
     # "turn the kitchen light off" is the most ordinary chat
     # request there is.
     "home_find", "home_state", "home_describe", "home_call", "home_undo",
