@@ -37,6 +37,8 @@ def main(argv: list[str]) -> int:
                       help="how many benchmark cases to score (default 5); more is a narrower interval")
     runp.add_argument("--dialect", default="", choices=["", "markers", "native"],
                       help="force the tool dialect for a benchmark suite (stage 2's native-vs-markers question)")
+    runp.add_argument("--providers", default="", metavar="NAMES",
+                      help="comma-separated: the only providers a paid benchmark run may use (then the floor)")
     runp.add_argument("--record", default="", metavar="DATA_DIR", help="append the report to DATA_DIR/evals.jsonl")
     runp.add_argument("--verbose", action="store_true", help="let the suite narrate to stdout")
     sub.add_parser("list", help="the suites, and which cost money")
@@ -180,6 +182,8 @@ def main(argv: list[str]) -> int:
         os.environ["SIMORGH_EVALS_PAID"] = "1"
     if getattr(args, "dialect", ""):
         os.environ["SIMORGH_EVALS_DIALECT"] = args.dialect
+    if getattr(args, "providers", ""):
+        os.environ["SIMORGH_EVALS_PROVIDERS"] = args.providers
     if getattr(args, "cases", 0):
         os.environ["SIMORGH_EVALS_CASES"] = str(args.cases)
     if args.suite in PAID and not args.paid:

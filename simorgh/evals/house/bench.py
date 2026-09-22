@@ -82,7 +82,13 @@ async def score(suite: str, *, limit: int = DEFAULT_LIMIT, level: str = "",
         # which reads as "nothing ran" rather than "nothing could".
         import os
 
-        cognition = {"provider_order": list(PAID_PROVIDERS), "max_spend_usd": float(spend_cap_usd)}
+        # `SIMORGH_EVALS_PROVIDERS` (`--providers`) names the ONLY providers
+        # a run may use: a comparison on one model must not quietly fall
+        # through to another when the first one refuses (the Together day
+        # cap once failed over to the Claude CLI unannounced, 2026-09-15).
+        # The floor stays last so a dead provider shows as skipped cases.
+        chosen, order = provider_order(os.environ.get("SIMORGH_EVALS_PROVIDERS", ""))
+        cognition = {"provider_order": order, "max_spend_usd": float(spend_cap_usd)}
         if dialect:
             # Stage 2's open question, and the reason this argument
             # exists: markers scored 6/7 against native's 6/7 in a
@@ -90,7 +96,7 @@ async def score(suite: str, *, limit: int = DEFAULT_LIMIT, level: str = "",
             # flipped. A tool-use benchmark is the harness that was
             # missing -- the same cases, the same model, one setting
             # apart (stage 2's definition of done).
-            cognition["providers"] = {name: {"tool_dialect": dialect} for name in PAID_PROVIDERS}
+            cognition["providers"] = {name: {"tool_dialect": dialect} for name in (chosen or PAID_PROVIDERS)}
         config = {**(config or {}), "cognition": cognition}
         secrets = dict(os.environ)
     async with Sandbox(config=config, spend_cap_usd=spend_cap_usd, secrets=secrets) as sandbox:
@@ -125,4 +131,11 @@ def suite_runner(suite: str, *, level: str = "", limit: int = DEFAULT_LIMIT, pai
     return runner
 
 
-__all__ = ["DEFAULT_LIMIT", "PAID_PROVIDERS", "SPEND_CAP_USD", "score", "suite_runner"]
+def provider_order(named: str) -> tuple[tuple[str, ...], list[str]]:
+    """`(chosen, order)` for a paid run: the named providers then the
+    floor, or the library's paid order when none are named."""
+    chosen = tuple(p.strip() for p in (named or "").split(",") if p.strip())
+    return chosen, ([*chosen, "floor"] if chosen else list(PAID_PROVIDERS))
+
+
+__all__ = ["DEFAULT_LIMIT", "PAID_PROVIDERS", "SPEND_CAP_USD", "provider_order", "score", "suite_runner"]
