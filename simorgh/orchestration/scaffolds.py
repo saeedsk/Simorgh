@@ -159,7 +159,9 @@ _TOOL_NOTES: dict[str, str] = {
     "delegate": "hand ONE bounded investigation to a helper with a fresh context and its own few steps "
                 "(find where X is defined, run these tests and report failures, look up a fact). You get "
                 "back only its short report, not its steps -- use it to keep your own context focused. "
-                "Line one: the job; optional JSON line after it: {\"steps\": 8}",
+                "Line one: the job; optional JSON line after it: {\"steps\": 8, \"agent\": \"verify\", "
+                "\"isolation\": \"fork\"} -- `fork` gives the helper a copy of what you have seen so far, "
+                "`fresh` (the default) only the job",
     "start_task": "hand a BUILD off to a background task with its own step budget, which "
                    "resumes where it left off instead of starting over -- for an app, a game, a "
                    "long document, anything too big for one reply. authorised=true only when the "

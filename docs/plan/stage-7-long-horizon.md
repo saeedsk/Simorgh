@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-20: items 2, 3, 5, 6, 7, 8, 9 done; 1 and 4 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-20: items 1, 2, 3, 5, 6, 7, 8, 9 done; 4 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -29,6 +29,8 @@ Done 2026-09-19 (item 9): standing intents are waits. The prompt names the event
 Done 2026-09-19 (item 5): WAITING. `task.waiting{until|event}` parks a task and drops its lease; Planning wakes it when the moment passes, when the topic it named is heard, or on `task.wake`. The session's `wait` tool ends the attempt rather than sleeping with a worker and a context in hand. Not done: `human: question_id` waits (the answer path already exists for approvals).
 
 Done 2026-09-19 (item 2): `agents/planner.md`, `agents/verify.md`, `agents/skill-writer.md`, `agents/browser.md`. Each loads and its allowlist is enforced by the same loader as the rest: the verifier is read-only and is not itself verified, and the browser may not enter a password, a code or place an order.
+
+Done 2026-09-22 (item 1, the rest): the typed shape -- `task`/`delegate` take `{agent, brief, isolation, budget}`, `budget` a step count or `{steps: n}` -- and `isolation: fork`, which starts the helper from a COPY of the parent's conversation so it can check the parent's own work, with nothing it does reaching the parent's context; `fresh` stays the default. The child's own stream was already there: every non-chat session persists its transcript to `session:<its id>` (`_persist_transcript`), children included, so that part of the note above was stale. `tests/simorgh/orchestration/test_task_isolation.py`.
 
 Done 2026-09-19 (item 1, in part): a helper may be any agent (`delegate`/`task` with `{"agent": ...}`), children run as real asyncio tasks under a concurrency cap read from `max_children_concurrent`, and depth still bounds the chain. Still open in item 1: `isolation: fresh|fork`, a child's own `session:<id>` stream separate from its task stream, and the typed `Task` argument shape.
 

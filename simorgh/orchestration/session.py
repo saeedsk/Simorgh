@@ -1773,10 +1773,19 @@ class SessionRunner:
         if session.depth >= self._max_depth:
             text = f"delegate: refused -- helpers may not go deeper than {self._max_depth}"
             return False, text, text
+        # The typed shape (stage 7 item 1): `Task{agent, brief, isolation,
+        # budget}`. `budget` is a step count or `{"steps": n}`; `steps`
+        # stays for the marker form.
+        budget = args.get("budget")
+        raw_steps = budget.get("steps") if isinstance(budget, dict) else budget
         try:
-            steps = int(args.get("steps") or 0)
+            steps = int(raw_steps or args.get("steps") or 0)
         except (TypeError, ValueError):
             steps = 0
+        isolation = str(args.get("isolation") or "fresh").strip().lower()
+        if isolation not in ("fresh", "fork"):
+            text = f"delegate: refused -- isolation is `fresh` or `fork`, not {isolation!r}"
+            return False, text, text
         steps = max(3, min(self._delegate_max_steps, steps or self._delegate_max_steps))
         n = sum(1 for s in session.steps if s.tool in ("delegate", "task")) + 1
         child_id = f"{session.task_id}-h{n}"
@@ -1799,6 +1808,14 @@ class SessionRunner:
             budget=_Budget(max_steps=steps), worker_id=session.worker_id, user_text=brief,
             depth=session.depth + 1, parent_id=session.task_id,
         )
+        if isolation == "fork":
+            # A fork starts from what the parent has already seen -- its
+            # conversation so far, copied, so nothing the child does
+            # reaches the parent's context -- and ends with the one job.
+            # `fresh` (the default) sees only the brief: the cheap,
+            # focused helper this began as.
+            child.messages = [dict(m) for m in session.messages if m.get("role") in ("user", "assistant", "tool")]
+            child.messages.append({"role": "user", "content": f"Now, as the helper: {job}"})
         running_task = asyncio.ensure_future(self.run(child, user_text=brief))
         self._children.setdefault(session.task_id, []).append(running_task)
         try:
