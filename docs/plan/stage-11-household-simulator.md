@@ -1,6 +1,6 @@
 # Stage 11 -- The household simulator
 
-Status: **in progress** (2026-09-20: items 1-12 built over the day and the status line never caught up -- it still said "nothing built" while `simorgh/evals/house/` held the sandbox, the director, the personas, the scene, the script engine, the pack, the arcs, the timing table, the TUI grammar, the observer and `house --fast` in the bless. Corrected 2026-09-20 evening, together with stage 7's, where the same thing had happened. A plan file that lies about being unbuilt is worse than one that is out of date: somebody reads it and builds it again. Closed the same evening: `tools/house.py` (item 11) and `--profile` (item 8)) · Depends on: stage 4 (`simorgh/evals/`, the session stream), stage 6 (People, `world:home`, the fake house), stage 10 items 1-3 (consent, the wellbeing facet) · Estimated: 5 weeks, then ongoing · Modules touched: evals (owner), voice, interface, telemetry, contracts; `tools/`
+Status: **done** (2026-09-20: all twelve items built, `house --fast` in the bless, the findings in `docs/findings/2026-09-20-house-simulator.md` and `2026-09-20-house-pack.md`. The status line said "in progress" until 2026-09-22 while `../README.md` said done; checked against the code that day and the definition-of-done boxes ticked with their evidence. Earlier the same thing had happened in the other direction: the line said "nothing built" while `simorgh/evals/house/` held all of it -- a plan file that lies about being unbuilt is worse than one that is out of date. Grown since: two typed-command scenarios (2026-09-21, stage 9 item 11); the television scenario corrected twice on 2026-09-21 and shown NOT to reproduce the live failure, which needs the creator's own speaker book) · Depends on: stage 4 (`simorgh/evals/`, the session stream), stage 6 (People, `world:home`, the fake house), stage 10 items 1-3 (consent, the wellbeing facet) · Estimated: 5 weeks, then ongoing · Modules touched: evals (owner), voice, interface, telemetry, contracts; `tools/`
 
 ## Outcome
 
@@ -186,9 +186,9 @@ Three things this turned up, none of them about the models:
 
 ## Definition of done
 
-- [ ] Items 1-4: a scenario runs end to end through the director, with people, noise, and per-expectation outcomes; the five live-log failures reproduced.
+- [x] Items 1-4: a scenario runs end to end through the director, with people, noise, and per-expectation outcomes; the five live-log failures reproduced. **Checked 2026-09-22: `house/{sandbox,director,people,scene,script}.py`; the five live-log conversations 5 of 5 green (Measurements after). The later 2026-09-20 television-as-a-person failure is a sixth and is not reproduced (commit `229fa95`).**
 - [x] Item 6: the companion arcs, five of them, with recall per stretch and two counts that are not rates. Item 7: the three benchmark suites score through the sandbox, and the short-term memory probe is a stage-5 scenario. Item 5: a scenario pack per stage, the companion arcs with precision/recall, the benchmarks scoring through the sandbox.
-- [ ] Items 8-9: the latency table and the TUI grammar as expectations.
-- [ ] Items 10-11: findings written and clustered from a run; `house-fast` in the bless.
+- [x] Items 8-9: the latency table and the TUI grammar as expectations. **Checked 2026-09-22: `house/timing.py` (p50/p95 per segment against budget), `house/profile.py` (`--profile`), `script.tui_is_sane`.**
+- [x] Items 10-11: findings written and clustered from a run; `house-fast` in the bless. **Checked 2026-09-22: `house/observer.py` clusters and writes `docs/findings/<date>-house.md` (e.g. `2026-09-20-house.md`); `simloader.py::run_house` runs `python -m simorgh.evals house --fast` in the bless; `tools/house.py` runs one scenario in the foreground.**
 - [x] Item 12: `docs/findings/2026-09-20-house-pack.md` -- the falsifiability finding, the arc table, the benchmark scores, the latency table, the harness bugs, and what is still open.
-- [ ] `simorgh/evals/CONTRACT.md` describes the `house` suite, the director's surface, the scenario format and what the simulator never does.
+- [x] `simorgh/evals/CONTRACT.md` describes the `house` suite, the director's surface, the scenario format and what the simulator never does. **Checked 2026-09-22: its section "The household simulator".**

@@ -1,6 +1,6 @@
 # Stage 10 -- Companion
 
-Status: **in progress** (2026-09-20: items 1-3 first cut, on a branch; 4-10 open) · Depends on: stage 6 (People, `world:home`, Initiative) · Estimated: 4 weeks plus a two-week measurement · Modules touched: contracts, worldmodel, initiative, orchestration, execution, interface, memory, voice, persona, docs
+Status: **in progress** (2026-09-20: items 1-3 and 5-8 done -- items 1-3 were built on a branch and landed on main the same day (`f971627`, `cf302e4`, `defba70`); item 4 done bar the onboarding step, which needs the creator's wording; item 9 needs the creator's corpus; item 10's mechanism (`[initiative] companion_shadow`, `people wrong`) is built and the two weeks of shadow mode have not started) · Depends on: stage 6 (People, `world:home`, Initiative) · Estimated: 4 weeks plus a two-week measurement · Modules touched: contracts, worldmodel, initiative, orchestration, execution, interface, memory, voice, persona, docs
 
 Done 2026-09-20 (item 1, the last wire): the tier-3 `people` tool offers `grant`/`revoke` (a permission of `contracts.people.PERMISSIONS`) and `add_interest`/`remove_interest`, so consent has a path a person confirms through and is reachable from a conversation only as an action Guardian escalates. Pinned from the tool's end in `tests/simorgh/execution/test_people_tool_carries_consent.py`.
 
@@ -106,7 +106,7 @@ Started 2026-09-20 (item 10): the mechanism, which had to exist before the creat
 
 ## Definition of done
 
-- [ ] Items 1-3 with tests, `CONTRACT.md` for contracts, worldmodel and initiative (**first cut done 2026-09-20 on a branch; the branch has not landed**).
+- [x] Items 1-3 with tests, `CONTRACT.md` for contracts, worldmodel and initiative (done 2026-09-20; the branch landed on main -- checked 2026-09-22: `contracts/people.py::may_check_in`, `worldmodel/facets/wellbeing.py` and Initiative's `check_in`/`interest_share` are on main, and the three CONTRACT.md files describe them).
 - [~] Item 4: the tool verbs (done 2026-09-19) and the CLI (done 2026-09-20 -- `people`, `people <name>`, `people grant|revoke`, `people interest add|remove`, `people role|link|unlink`; reading is a query, every change goes through the tier-3 tool). **Still open: the onboarding step**, which needs the creator's own wording for the question each adult is asked once, and his answers to the two decisions beside it -- whether the twins get `interest_shares`, and whether a voice confirmed by the speaker book may say yes or only the CLI and the phone may.
 - [x] Item 5: the state note for the speaker only -- `context.py::_how_they_seem`, one line in the per-turn note, asked for by name, dropped if slow; a typed turn with no speaker asks for nothing (2026-09-20).
 - [x] Item 6: composition rules and the forbidden-word guard were already in; "not now" (a 24 h hold) and "stop" (a tier-3 `people revoke` the person confirms) landed 2026-09-20, and so did the HOLD -- `session.say` waits up to 8 s for somebody mid-sentence, then speaks anyway.

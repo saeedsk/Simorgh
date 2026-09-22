@@ -1,6 +1,6 @@
 # Stage 4 -- Session stream, ContextBuilder, compaction, evals package
 
-Status: **in progress** (2026-09-19: items 1-3, 5, 6, 7, 9, 10 and 11 done; items 4 and 8 in part) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
+Status: **in progress** (2026-09-22: items 1-3 and 5-11 done -- item 8 finished 2026-09-22; item 4 in part: the stable prefix landed, the ContextBuilder move measured and DEFERRED, see below and `docs/findings/2026-09-22-context-assembly-is-not-the-cost.md`) · Depends on: stages 1 and 2 · Estimated: 3 weeks · Modules touched: contracts, orchestration, cognition, memory, interface, voice, kernel, benchmark, tools, simloader
 
 ## Outcome
 
@@ -74,6 +74,6 @@ What would actually justify retiring `commit`: a bless cycle with real patch wor
 
 ## Definition of done
 
-- [ ] Items 1-10 with tests; CONTRACT.md for every touched module updated; `agents/` protected. **Items 1-3, 5-7, 9, 10 done and `agents/` is protected. Open: item 4's ContextBuilder move (the stable prefix landed) and item 8's Verification trajectory check (the Stop hook landed). Item 9 landed 2026-09-19 as `simorgh/evals/` with its own CONTRACT; three of its seven suites are stubs that list cases without scoring them, and the trial harness is adapted rather than physically moved -- both recorded there.**
+- [ ] Items 1-10 with tests; CONTRACT.md for every touched module updated; `agents/` protected. **Items 1-3, 5-10 done and `agents/` is protected. Open: item 4's ContextBuilder move (the stable prefix landed; the move is deferred on the 2026-09-22 measurement). Item 8's Verification trajectory check landed 2026-09-22; the Stop hook's rules are retired only by their counters. Item 9 landed 2026-09-19 as `simorgh/evals/` with its own CONTRACT; three of its seven suites are stubs that list cases without scoring them, and the trial harness is adapted rather than physically moved -- both recorded there.**
 - [x] `simloader.py bless` runs the evals suite. **Done 2026-09-19 (`simloader.py::run_evals`): every bless runs `household`, prints `household: 3/3 probes`, appends the report to `.simorgh_loader/evals.jsonl` and names the score in the decision log (`sim-good-0027`: "unit suite green (3886 tests ran, none failed); household evals 3/3"). A score below the last recorded run refuses the bless. The loader still imports nothing from `simorgh`.**
 - [x] Findings entry with the table. **`2026-09-19-stage-4-live-fixes-and-stage-5-recall.md`.**

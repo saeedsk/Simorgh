@@ -1,6 +1,6 @@
 # Stage 1 -- Telemetry out of the decision log
 
-Status: **in progress** (2026-09-19: items 1-5, 7, 8, 9 done; 6 and 10 deferred with reasons below; 11 open) · Depends on: stage 0 items 1-16 · Estimated: 2 weeks · Modules touched: bus, ledger, kernel, contracts, execution, interface, orchestration, cognition
+Status: **in progress** (2026-09-20: items 1-5, 7, 8, 9 and 11 done -- 11 is `docs/findings/2026-09-20-stage-1-after-numbers.md`; 6 and 10 deferred with reasons below) · Depends on: stage 0 items 1-16 · Estimated: 2 weeks · Modules touched: bus, ledger, kernel, contracts, execution, interface, orchestration, cognition
 
 ## Outcome
 
@@ -50,7 +50,7 @@ Deferred, with reasons:
 8. **A ledger client bound to its source.** *Lock `ledger`, `kernel`, `contracts`.* (B7) `LedgerClient` takes `source`; a writer table in `contracts/streamnames.py` says which source may append to which prefix; a violation is refused like a bus policy violation. Acceptance: Reflection appending to `self:model` is refused.
 9. **`simorgh status` reads, never boots.** *Lock `kernel`, `interface`.* (B17) The status subcommand calls `/api/status` on the running instance or reads the last `system.state` from the ledger, and appends nothing.
 10. **Retire the multi-process substrate behind its interfaces.** *Lock `bus`, `ledger`, `kernel`.* (B8, B14) Move `bus/backends/aws.py`, `ledger/backends/dynamodb.py`, `kernel/worker.py` (WorkerKernel), the identity registry and `contracts/compat.py` under `simorgh/_frozen/` with a README saying why; keep the backend protocol and the `sqlite` backends. Delete their tests from the core gate. Acceptance: boot unchanged; `--tier full` time drops.
-11. **Findings entry** with the after-numbers.
+11. **Findings entry** with the after-numbers. Done 2026-09-20: `docs/findings/2026-09-20-stage-1-after-numbers.md` (and `2026-09-20-the-action-stream-flood.md` for the `action:` streams row).
 
 ## Measurements after
 
