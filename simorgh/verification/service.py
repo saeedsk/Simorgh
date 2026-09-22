@@ -68,6 +68,10 @@ class VerificationService:
         self._pending_actions: dict[str, asyncio.Future] = {}
         self._paused = False
         self._stopping = False
+        # Set while the system runs; cleared while it is paused or
+        # stopping, so a verification waits instead of running tests.
+        self._running = asyncio.Event()
+        self._running.set()
         self._floor_streak = 0
         self._inflight: set[asyncio.Task] = set()
 
@@ -109,6 +113,10 @@ class VerificationService:
         state = message.payload.get("state")
         self._paused = state == "paused"
         self._stopping = state == "stopping"
+        if self._paused:
+            self._running.clear()
+        else:
+            self._running.set()     # resumed, or stopping: a waiter must wake to see which
 
     async def _on_action_result(self, message: Message) -> None:
         action_id = message.payload.get("action_id")
@@ -185,6 +193,16 @@ class VerificationService:
             await ctx.bus.publish(result_msg)
             return
 
+        if self._paused:
+            # A pause stops effects, and a verification RUNS things: the
+            # task's tests, the model's own tests on a copy of its tree,
+            # a reviewer's model calls. `_paused` was written and never
+            # read, so all of it went on through a pause (stage 0 item
+            # 32). It waits for the resume instead. Never answers early:
+            # "insufficient_evidence" is accepted by Orchestration, so
+            # an early answer would be the false pass. Orchestration
+            # parks the task if its own wait runs out meanwhile.
+            await self._running.wait()
         if self._stopping:
             await self._emit_result(message, verification_id, task_id, "insufficient_evidence", [], None, {"stopping": True})
             return

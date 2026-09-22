@@ -2320,6 +2320,10 @@ class SessionRunner:
             # the way it is honoured between ordinary steps.
             if self._is_cancelled(session.task_id):
                 return Outcome("failed", reason=CANCELLED_REASON, result_summary=text)
+            if self._paused():
+                # Verification holds its checks through a pause, so a
+                # request sent now would only run out the wait below.
+                return await self._pause(session)
             # A fresh verification_id per attempt (not just per session): a
             # real Verification service treats a *repeated* id on
             # `verify:<id>` as a redelivery and replays the recorded verdict
@@ -2341,6 +2345,13 @@ class SessionRunner:
             result = await self._waiter.wait(
                 (topics.VERIFY_RESULT,), key="verification_id", value=verification_id, timeout=self._verify_timeout_s,
             )
+            if result is None and self._paused():
+                # The system was paused while Verification had it, and
+                # Verification waits a pause out. Silence here is the
+                # pause, not a verdict: park the task, and the resumed
+                # attempt asks again. Accepting it would be the false
+                # pass (stage 0 item 32).
+                return await self._pause(session)
             if result is None:
                 # No verdict in time. Accept rather than block forever, but
                 # say so: "verification never answered" used to be

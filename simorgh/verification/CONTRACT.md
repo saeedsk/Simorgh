@@ -41,7 +41,7 @@ Verification owns the verdict on finished work: for each `verify.requested` it r
 |---|---|---|---|
 | `verify.requested` | `messages/verify.py::VerifyRequested` | simorgh/verification/service.py | runs one verification (consumer group `verification`); a redelivery re-emits the recorded verdict |
 | `plan.proposed` | `messages/plan.py::PlanProposed` | simorgh/verification/service.py | reviews the plan and publishes `plan.reviewed` |
-| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/verification/service.py | `stopping` makes new requests answer `insufficient_evidence`; `paused` is recorded but never read |
+| `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/verification/service.py | `stopping` makes new requests answer `insufficient_evidence`; `paused` holds every new verification until the resume (it never answers early: `insufficient_evidence` is accepted by Orchestration) |
 | `action.result` | `messages/action.py::ActionResult` | simorgh/verification/service.py | resolves the future of a check's own proposed action by `action_id`; `error_kind` becomes `api.ActionResult.error_kind` (stage 2 item 8), and `render` / `js_syntax` skip on `unconfigured`, keeping their text markers only for a result with no kind |
 | `cognition.think` reply | `messages/cognition.py::CognitionThink` | simorgh/verification/service.py | reply to its own `bus.request_or_error` (not a subscription) |
 | `guardian.review` reply | `messages/guardian.py::GuardianReview` | simorgh/verification/service.py | reply to its own `bus.request_or_error` (not a subscription) |
@@ -132,7 +132,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - T9 (low): tool errors are free text; `checks/render.py:32, 50` sniffs `result.error` for "no `node` executable" and "timeout", and `verdict.py::_REFUSAL_EVIDENCE` matches refusal phrases. Open; stage 2 item 8.
 - L8 (medium): claim-policing lives in `orchestration/session.py`; the plan moves it into a Verification trajectory check. Open; stage 4 item 8.
 - The manifest declared `ui.notice` and omitted `action.result`; fixed 2026-09-18 (commit `8b7e4dd`).
-- Not in the catalogue: `checks/_baseline.py:166, 215, 271` runs `git` and `pytest` with `subprocess.run` directly, outside `action.proposed`, Guardian and any sandbox limits, on a copy of the task's worktree (so it executes model-written tests with the full environment). `_paused` (`service.py:108`) is written and never read.
+- Not in the catalogue: `checks/_baseline.py` runs `git` and `pytest` with `subprocess.run` directly, outside `action.proposed` and Guardian, on a copy of the task's worktree. Since 2026-09-19 with a scrubbed environment and rlimits; since 2026-09-22 (stage 0 item 32) its three pytest runs go through `_confined`: on macOS `sandbox-exec` denies outbound network and every write outside the run's own temp directory (`TMPDIR` points there); elsewhere the run is as before. Closed 2026-09-22: `_paused` is read (see `system.state.changed`).
 
 ## Planned changes (roadmap)
 

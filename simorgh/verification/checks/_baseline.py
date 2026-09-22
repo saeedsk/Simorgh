@@ -163,11 +163,11 @@ def _present_at_base(dest: Path, nodeids: tuple[str, ...]) -> tuple[str, ...] | 
     if not on_disk:
         return ()
     try:
+        argv, env = _confined([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                               "--collect-only", "--continue-on-collection-errors", *on_disk], dest.parent)
         done = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-             "--collect-only", "--continue-on-collection-errors", *on_disk],
-            capture_output=True, text=True, cwd=dest, timeout=BASELINE_TIMEOUT_S / 2,
-            stdin=subprocess.DEVNULL, env=_scrubbed_env(), preexec_fn=_limits(),
+            argv, capture_output=True, text=True, cwd=dest, timeout=BASELINE_TIMEOUT_S / 2,
+            stdin=subprocess.DEVNULL, env=env, preexec_fn=_limits(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -214,6 +214,38 @@ def _limits():
     return _set
 
 
+#: macOS's kernel sandbox. Deprecated as a CLI and still what every
+#: browser and `xcodebuild` confine children with; absent elsewhere.
+_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+
+
+def _confined(argv: list[str], workdir: Path) -> tuple[list[str], dict[str, str]]:
+    """`argv` and its environment, confined to `workdir` where the OS
+    allows it: no outbound network, and writes only inside `workdir`.
+
+    The env scrub and rlimits above took the keys and bounded the
+    resources; they left a test the model had just written free to
+    reach the network and to write anywhere the user can -- run outside
+    Guardian, whose job that would otherwise be (stage 0 item 32). The
+    baseline and the quiet re-run need neither: they read a copy of the
+    tree and write only pytest's scratch, which `TMPDIR` points into
+    `workdir`. Where there is no sandbox the run is as it was.
+    """
+    env = _scrubbed_env()
+    scratch = workdir / "tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    env["TMPDIR"] = str(scratch)
+    if sys.platform != "darwin" or not os.path.exists(_SANDBOX_EXEC):
+        return argv, env
+    where = os.path.realpath(workdir).replace("\\", "\\\\").replace('"', '\\"')
+    profile = ("(version 1)(allow default)"
+               "(deny network-outbound (remote ip))"
+               "(deny file-write*)"
+               f'(allow file-write* (subpath "{where}") (literal "/dev/null") (literal "/dev/tty")'
+               ' (regex #"^/dev/fd/") (regex #"^/dev/ttys"))')
+    return [_SANDBOX_EXEC, "-p", profile, *argv], env
+
+
 def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] | None:
     """Which of `nodeids` ALSO fail at `base_ref`, or None for no opinion.
 
@@ -250,11 +282,11 @@ def failing_at_base(base_ref: str, nodeids: tuple[str, ...]) -> frozenset[str] |
         if remaining <= 0:
             return None
         try:
+            argv, env = _confined([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                                   "--continue-on-collection-errors", *runnable], dest.parent)
             done = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                 "--continue-on-collection-errors", *runnable],
-                capture_output=True, text=True, cwd=dest, timeout=remaining,
-                stdin=subprocess.DEVNULL, env=_scrubbed_env(), preexec_fn=_limits(),
+                argv, capture_output=True, text=True, cwd=dest, timeout=remaining,
+                stdin=subprocess.DEVNULL, env=env, preexec_fn=_limits(),
             )
         except (OSError, subprocess.SubprocessError):
             return None
@@ -324,11 +356,11 @@ def still_failing_here(root: Path, nodeids: tuple[str, ...]) -> frozenset[str] |
         except OSError:
             return None
         try:
+            argv, env = _confined([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                                   "--continue-on-collection-errors", *nodeids], dest.parent)
             done = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                 "--continue-on-collection-errors", *nodeids],
-                capture_output=True, text=True, cwd=dest, timeout=RERUN_TIMEOUT_S,
-                stdin=subprocess.DEVNULL, env=_scrubbed_env(), preexec_fn=_limits(),
+                argv, capture_output=True, text=True, cwd=dest, timeout=RERUN_TIMEOUT_S,
+                stdin=subprocess.DEVNULL, env=env, preexec_fn=_limits(),
             )
         except (OSError, subprocess.SubprocessError):
             return None
