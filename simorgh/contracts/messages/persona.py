@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..fields import Any_, Enum, F, Float, Obj, Str
+from ..fields import Any_, Enum, F, Float, O, Obj, Str
 from ..registry import define
 from .. import topics as t
 
@@ -19,4 +19,10 @@ PersonaUserModelUpdated = define(t.PERSONA_USER_MODEL_UPDATED, [
     F("facet", Str),
     F("value", Any_),
     F("confidence", Float),
+    # Whose sentence it was (stage 6 item 4): a household name, or "" for
+    # the owner's console; `channel` says which, so World Model applies
+    # the console rule (`channels.is_console`) rather than trusting "".
+    # A payload with neither predates attribution and is filed nowhere.
+    O("person", Str),
+    O("channel", Str),
 ])

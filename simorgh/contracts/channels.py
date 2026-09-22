@@ -45,6 +45,16 @@ LOCAL: tuple[str, ...] = (CLI, VOICE, API, CHAT, COMMAND)
 EXTERNAL: tuple[str, ...] = (WHATSAPP, TELEGRAM)
 ALL: tuple[str, ...] = LOCAL + EXTERNAL
 
+#: The console: the machine's own keyboard, which is the owner's. A turn
+#: there that names nobody is the owner's turn -- treating it as a
+#: stranger would lock the creator out of his own system -- and every
+#: other channel has to name somebody. "" is the console too: a request
+#: that does not say where it came from was typed here (the Kernel's own
+#: calls, a CLI command). One answer for Guardian's `role_of`, Persona's
+#: user-model attribution and World Model's People store, which used to
+#: carry three copies of this tuple (stage 6 item 4 follow-up, 2026-09-22).
+CONSOLE_CHANNELS: tuple[str, ...] = ("", CLI)
+
 #: What a channel is called in a sentence a person reads or hears. Sim
 #: says "on WhatsApp", never "on channel whatsapp".
 DISPLAY: dict[str, str] = {
@@ -69,6 +79,17 @@ def is_external(channel: str) -> bool:
     "did this come from someone the house has already admitted".
     """
     return (channel or "").strip().lower() in EXTERNAL
+
+
+def is_console(channel: str | None) -> bool:
+    """True when `channel` is the owner's console (`CONSOLE_CHANNELS`).
+
+    Exact match, no case folding and no stripping: a caller that wants a
+    looser reading normalises first, so this never quietly widens who
+    counts as the owner. `None` (a message that does not say) is not the
+    console.
+    """
+    return channel is not None and channel in CONSOLE_CHANNELS
 
 
 def display(channel: str) -> str:
@@ -145,8 +166,8 @@ def allowed(sender: str, allow: Iterable[str]) -> bool:
     return who in {normalise_sender(a) for a in allow if str(a or "").strip()}
 
 
-__all__ = ["person_for", 
-    "ALL", "API", "CHAT", "CLI", "COMMAND", "DISPLAY", "EXTERNAL", "LOCAL",
+__all__ = [
+    "ALL", "API", "CHAT", "CLI", "COMMAND", "CONSOLE_CHANNELS", "DISPLAY", "EXTERNAL", "LOCAL",
     "TELEGRAM", "VOICE", "WHATSAPP",
-    "allowed", "display", "is_external", "is_known", "normalise_sender",
+    "allowed", "display", "is_console", "is_external", "is_known", "normalise_sender", "person_for",
 ]

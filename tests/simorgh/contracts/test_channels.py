@@ -154,3 +154,24 @@ class ThePunctuationDoesNotLockTheFamilyOutTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheConsoleIsOneAnswer(unittest.TestCase):
+    """`CONSOLE_CHANNELS` (2026-09-22): Guardian's `role_of`, Persona's
+    attribution and World Model's People store used to carry three copies
+    of `("", "cli")`; they now read this one (their own tests check they
+    agree with it)."""
+
+    def test_the_console_is_the_keyboard_and_nothing_else(self):
+        self.assertEqual(channels.CONSOLE_CHANNELS, ("", "cli"))
+        self.assertTrue(channels.is_console("cli"))
+        self.assertTrue(channels.is_console(""))
+        for other in ("voice", "api", "chat", "command", "telegram", "whatsapp", "initiative"):
+            self.assertFalse(channels.is_console(other), other)
+
+    def test_it_never_widens(self):
+        """A message that does not say, or a spelling a caller did not
+        normalise, is not the owner's keyboard."""
+        self.assertFalse(channels.is_console(None))
+        self.assertFalse(channels.is_console("CLI"))
+        self.assertFalse(channels.is_console(" cli"))

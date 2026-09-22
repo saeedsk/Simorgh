@@ -4,11 +4,23 @@
   "additionalProperties": true,
   "description": "Payload of `persona.user_model.updated` (catalog v1).",
   "properties": {
+    "channel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "confidence": {
       "type": "number"
     },
     "facet": {
       "type": "string"
+    },
+    "person": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "value": {}
   },
