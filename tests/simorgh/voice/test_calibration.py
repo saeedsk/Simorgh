@@ -412,3 +412,36 @@ class NumbersAreTheirDigits(unittest.TestCase):
                              "The code is 4815 then press enter."), 0.0)
         self.assertEqual(wer("What is twenty seven times forty three?", "What is 27 times 43?"), 0.0)
         self.assertGreater(wer("The code is four eight one five.", "The code is 4816."), 0.0)
+
+
+class APauseLineSplitInTwo(unittest.TestCase):
+    """Live, en-049 (2026-09-22): "Sim... what's the plan for tomorrow?"
+    split at the pause into two turns. Without joining, the second half
+    alone can pass the misread bar and be FILED -- a recording missing
+    "Sim", stored against the whole line. The halves together are the take."""
+
+    def _run(self, tmp, now):
+        return CalibrationRun("Saeed", Path(tmp) / "cal", script=[by_id("en-049")],
+                              clock=lambda: now[0], measure_fn=lambda p, r: GOOD)
+
+    def test_the_two_halves_are_filed_as_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = [1_000_000.0]
+            run = self._run(tmp, now)
+            self.assertEqual(run.consider(_speech(1.0), transcript="Sim.").kind, "rejected")
+            now[0] += 2.0
+            self.assertIn(run.consider(_speech(2.0), transcript="What's the plan for tomorrow?").kind,
+                          ("accepted", "finished"))
+            row = read_rows(Path(tmp) / "cal", "Saeed")[0]
+            self.assertTrue(row.get("stitched"), "the whole line, both halves")
+            self.assertIn("Sim", row["stt_transcript"])
+
+    def test_halves_too_far_apart_are_not_joined(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = [1_000_000.0]
+            run = self._run(tmp, now)
+            run.consider(_speech(1.0), transcript="Sim.")
+            now[0] += 30.0
+            run.consider(_speech(2.0), transcript="What's the plan for tomorrow?")
+            row = read_rows(Path(tmp) / "cal", "Saeed")[0]
+            self.assertFalse(row.get("stitched"))

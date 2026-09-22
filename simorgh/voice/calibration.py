@@ -82,6 +82,9 @@ CUT_TAIL_WITHIN_DB = 6.0
 #: failing is what the set is FOR.
 MAX_WER = {"en": 0.5, "fa": 0.75}
 DEFAULT_MAX_WER = 0.6
+#: A pause line's second half joins the refused first half when it
+#: arrives within this long (the endpoint closes a turn after ~1 s).
+STITCH_WITHIN_S = 6.0
 
 FRAME_S = 0.02
 
@@ -615,8 +618,23 @@ class CalibrationRun:
             return self.skip()
         if control in ("keep", "accept"):
             return self.keep_pending(control)
+        fragment = getattr(self, "_fragment", None)
+        self._fragment = None
+        if (fragment is not None and "pause" in line.tags and fragment["line"] == line.id
+                and self._clock() - fragment["at"] <= STITCH_WITHIN_S):
+            # A pause line split at its pause into two turns (live, en-049,
+            # 2026-09-22: five refusals -- "Seem.", then "plan for"). The
+            # halves together are the take; judge them as one.
+            joined_pcm = fragment["pcm"] + bytes(pcm)
+            joined_text = f"{fragment['transcript'].strip()} {transcript.strip()}".strip()
+            reasons, row = self.judge(joined_pcm, transcript=joined_text, vector=vector, engine=engine,
+                                      heard_language=heard_language, confidence=confidence, sample_rate=sample_rate)
+            if not reasons:
+                return self._accept(joined_pcm, {**row, "stitched": True}, sample_rate)
         reasons, row = self.judge(pcm, transcript=transcript, vector=vector, engine=engine,
                                   heard_language=heard_language, confidence=confidence, sample_rate=sample_rate)
+        if reasons and "pause" in line.tags:
+            self._fragment = {"line": line.id, "pcm": bytes(pcm), "transcript": transcript, "at": self._clock()}
         if reasons:
             self.rejected += 1
             self.tries += 1
