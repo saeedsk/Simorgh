@@ -79,13 +79,23 @@ class _Tail:
 class LedgerClient:
     def __init__(
         self,
-        backend: LedgerBackend,
+        backend: LedgerBackend | None = None,
         *,
         clock: Clock | None = None,
         inline_threshold: int = 4096,
         tail_poll_ms: int = 100,
         source: str = "ledger",
     ) -> None:
+        # A default backend: live outcome forensics (chat-task failure
+        # review, 2026-09) kept hitting `TypeError` from a bare
+        # `LedgerClient()` and losing the outcome row entirely. An
+        # in-memory client reads nothing back but records, which is what
+        # those call sites wanted. Production boot always passes a real
+        # backend via `factory.make_ledger`; this changes nothing there.
+        if backend is None:
+            from .backends.memory import InMemoryBackend
+
+            backend = InMemoryBackend()
         self.backend = backend
         self._clock = clock
         self.inline_threshold = inline_threshold
