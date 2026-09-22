@@ -1,6 +1,6 @@
 # Stage 7 -- Long horizon: sub-agents, plans, waits, checkpoint critic
 
-Status: **in progress** (2026-09-20: items 2, 3, 5, 6, 7, 9 done; 8 done for the test runner; 1 and 4 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
+Status: **in progress** (2026-09-20: items 2, 3, 5, 6, 7, 8, 9 done; 1 and 4 in part) · Depends on: stages 4 and 6 · Estimated: 3 weeks · Modules touched: orchestration, planning, verification, kernel, contracts, execution
 
 ## Outcome
 
@@ -47,6 +47,8 @@ Checked 2026-09-20, because the status line and the code disagreed:
 
 6. **The checkpoint critic.** *Lock `verification`, `orchestration`.* `verify.checkpoint.request/reply`: at every progress note, score the trajectory against the node's acceptance criteria returning `{on_track | drifting | blocked, unmet: [], next}`; two consecutive `drifting` verdicts trigger re-planning of the subtree (planning's `reground.py` becomes a structured subtree revision on the cheap tier); `insufficient_evidence` preserved; majority vote of three cheap samples for the yes/no verdict. Acceptance: a scripted task that wanders is re-planned by the second note.
 7. **A checkpoint after every irreversible action.** *Lock `orchestration`.* `session.checkpoint` event after a successful tier-2/3 ToolResult so a crash-resume never repeats it. Acceptance: kill after a `git_commit` and resume: no second commit.
+Done 2026-09-22 (item 8, the rest): `run_container` runs `docker run` through `procs.run_child`, and a cancel or a timeout also sends `docker kill <name>` -- a container outlives its client, so killing the CLI alone left it running. It used to run in a thread no cancel could reach. The deadline from the envelope needed no new wire: Execution already shrinks the tool's timeout to it (`within_deadline`) and `asyncio.wait_for` cancels the tool, which now ends every heavy step's process group. Acceptance pinned by `tests/simorgh/execution/test_a_cancelled_container_is_gone.py` (a stand-in `docker` script; the cancel case fails on the old code).
+
 Done 2026-09-20 (item 8, for the test runner): `procs.py` -- written for this item weeks ago and imported by nothing -- is now what `run_tests` and the landing gate use. The suite is a child in its own process group, killed when the step ends for any reason, and the acceptance ("a cancelled task's test run is gone from `ps` within 2 s") is a test that cancels a real run and looks for the child. `run_container` and the in-container path still use the threaded form; they are next.
 
 8. **Heavy steps as subprocesses with kill-on-deadline.** *Lock `execution`.* `run_tests`, `run_container`, the landing gate run as subprocesses whose deadline comes from the envelope; cancellation kills the process group. Acceptance: a cancelled task's test run is gone from `ps` within 2 s.

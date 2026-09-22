@@ -25,7 +25,7 @@ Since 2026-09-20 `run_tests` runs the suite through `procs.run_child`: its own p
 | `simorgh/execution/netsafety.py` | SSRF guard for outbound URLs (`web_fetch`, `render_page`) |
 | `simorgh/execution/shell.py` | `run_shell` (on by default) and its refusal table, including credential reads |
 | `simorgh/execution/script.py` | `run_script`: Python with the repo importable and network on |
-| `simorgh/execution/container.py` | `run_container`: a command in a Docker image with a scratch mount |
+| `simorgh/execution/container.py` | `run_container`: a command in a Docker image with a scratch mount; `docker run` is a `procs.run_child` process group, and a cancel or timeout also sends `docker kill <name>` (a container outlives its client) |
 | `simorgh/execution/remote.py` | `run_remote`: a command over SSH (off unless `remote = true`) |
 | `simorgh/execution/writewatch.py` | discovers what a shell/script command wrote, for `session.wrote` |
 | `simorgh/execution/capabilities.py` | boot probes (node, puppeteer, docker, bandit, homeharvest, connectors) and the `capabilities` stream |
@@ -337,7 +337,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - Stage 2 (`docs/plan/stage-2-native-tool-use.md`): `tool.registered` carries the full ToolSpec with `input_schema` (item 1, `_announce_tool`, MCP `inputSchema` unflattened); `ToolResult.error_kind` (item 8, done 2026-09-19).
 - Stage 5 item 6: an effect-free `memory_search` built-in.
 - Stage 6 (`docs/plan/stage-6-self-world-people-tiers-initiative.md`): safety tiers 0-3 computed from the ToolSpec (item 5); `vision.py`'s announce step moves into `initiative/` (item 6); people-aware identity (item 4).
-- Stage 7 item 8 (`docs/plan/stage-7-long-horizon.md`): `run_tests`, `run_container` and the landing gate as subprocesses killed on deadline.
+- Stage 7 item 8 (`docs/plan/stage-7-long-horizon.md`): DONE 2026-09-22. `run_tests`, the landing gate and `run_container` are process groups killed on a cancel; the envelope's deadline reaches them through `within_deadline` and `asyncio.wait_for`, which cancels the tool.
 - Stage 8 items 5 and 9: `policy_adopt` landing through the gate; HA routine mining.
 - Stage 9 (`docs/plan/stage-9-consolidation-and-breadth.md`): the six domains move to `simorgh/domains/<name>/` behind `extra_tools`, leaving registry, verifier, sandboxes, worktrees and path/net safety here, the only part Guardian-protected (item 1, target under 8,000 lines); `vision.py` and the watchers move to `perception/` (item 4); MCP-first for new capability (item 9); `browse_page` becomes a snapshot-act loop (item 10).
 

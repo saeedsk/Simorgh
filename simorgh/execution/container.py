@@ -101,6 +101,9 @@ class RunContainerTool:
     def __init__(self, config: Config, *, docker_path: str | None = None, runner=None) -> None:
         self._config = config
         self._docker = find_docker(docker_path if docker_path is not None else config.container_docker_path)
+        # An injected runner is a test's fake `subprocess.run`; the real
+        # path is `procs.run_child` (stage 7 item 8).
+        self._injected = runner is not None
         self._runner = runner or subprocess.run
         self._daemon_checked_at = 0.0
         self._daemon_ok = False
@@ -150,9 +153,19 @@ class RunContainerTool:
         ]
         start = time.monotonic()
         try:
-            completed = await asyncio.to_thread(
-                self._runner, argv, capture_output=True, text=True,
-                timeout=timeout, stdin=subprocess.DEVNULL)
+            if self._injected:
+                completed = await asyncio.to_thread(
+                    self._runner, argv, capture_output=True, text=True,
+                    timeout=timeout, stdin=subprocess.DEVNULL)
+            else:
+                completed = await self._run_child(argv, name, timeout)
+        except asyncio.CancelledError:
+            # The task was cancelled. `run_child` has killed the docker
+            # CLI's process group, but a container outlives its client:
+            # with `--rm` and nobody attached it just keeps running. It
+            # used to run in a thread nothing could cancel at all.
+            await asyncio.shield(asyncio.to_thread(self._kill, name))
+            raise
         except subprocess.TimeoutExpired:
             # A timeout kills the *process*, not the container: without
             # this, the work keeps running with nobody watching. Same
@@ -176,6 +189,16 @@ class RunContainerTool:
                       "image": image, "duration_s": time.monotonic() - start,
                       "workspace": str(workdir), "files": produced},
         )
+
+    async def _run_child(self, argv: list[str], name: str, timeout: float):
+        """`docker run` as a child in its own process group (stage 7 item
+        8): a timeout or a cancel ends it, and the container with it."""
+        from .procs import run_child
+
+        done = await run_child(argv, timeout=timeout)
+        if done.timed_out:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return done
 
     def _stage_inputs(self, names, workdir: Path) -> str:
         """Copy repo files the caller named into the container's
