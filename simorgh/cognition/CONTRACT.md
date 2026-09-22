@@ -12,7 +12,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 |---|---|
 | `simorgh/cognition/__init__.py` | exports `Service` |
 | `simorgh/cognition/api.py` | `Purpose`, `Budget`, `BudgetStatus`, prompt/compaction/parse result types, errors |
-| `simorgh/cognition/assembler.py` | `PromptAssembler`: protected blocks via `persona.voice`, `self.summary`, `world.env.query` requests |
+| `simorgh/cognition/assembler.py` | `PromptAssembler`: protected blocks via `persona.voice` and `self.summary` requests (no user profile since 2026-09-22) |
 | `simorgh/cognition/budget.py` | `RollingWindowBudget` per provider on `cognition:budget:<provider>` |
 | `simorgh/cognition/compaction.py` | five-layer `Compactor`; layer-5 summaries to `cognition:summaries:<session>` |
 | `simorgh/cognition/config.py` | `[cognition]` dataclasses, default providers and purpose budgets |
@@ -52,9 +52,8 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `ui.notice` | `messages/ui.py::UiNotice` | simorgh/cognition/service.py:548 | the answering provider changed (not for image calls) |
 | `persona.voice` (request) | `messages/persona.py::PersonaVoice` | simorgh/cognition/assembler.py:54 | every think, `assembly_request_timeout` (2 s); omitted on timeout |
 | `self.summary` (request) | `messages/self_.py::SelfSummary` | simorgh/cognition/assembler.py:58 | every think, same timeout |
-| `world.env.query` (request) | `messages/world.py::WorldEnvQuery` | simorgh/cognition/assembler.py:99 | chat purpose only: the `user_profile` facet |
 
-`Service.produces` lists every row above, the three assembler requests included (fixed 2026-09-19; it used to omit `ui.notice` and the requests).
+`Service.produces` lists every row above, the two assembler requests included (fixed 2026-09-19; it used to omit `ui.notice` and the requests). The third, `world.env.query{what: "user_profile"}`, was removed 2026-09-22 (stage 6 item 4): it put ONE household-wide profile in every chat prompt, so a preference Ira stated became everybody's. A think does not carry the speaker, so the assembler cannot choose the right person's; Orchestration's context renders the speaker's instead. There is no `user_profile` prompt block and no `_MIN_FACET_CONFIDENCE`.
 
 ## Ledger streams
 
@@ -121,7 +120,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/cognition/test_budget_reads_its_stream_once.py` -- the budget stream is read once, then kept in memory (C13).
 - `tests/simorgh/cognition/test_parser.py` -- markers, code-bearing markers, edit blocks, verdicts, non-answers.
 - `tests/simorgh/cognition/test_compaction.py` -- each compaction layer and the pipeline; summaries and their events.
-- `tests/simorgh/cognition/test_assembler.py` -- protected block order and graceful omission when persona or self model do not answer.
+- `tests/simorgh/cognition/test_assembler.py` -- protected block order and graceful omission when persona or self model do not answer; a chat prompt carries nobody's preferences and asks no `world.env.query` (stage 6 item 4).
 
 ## Known issues (2026-09-18 evaluation)
 
@@ -133,7 +132,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - C12 (low): the no-real-provider health timer was reset on every floor reply. Fixed 2026-09-18, commit `aa05475`.
 - C13 (low): the rolling budget replayed its whole stream on every candidate check. Fixed 2026-09-18, commit `aa05475` (read once, then in memory); the retention half (`cognition:budget:` 3d) was added the same day but does not truncate an active stream.
 - L11 (low): orchestration never sends `session_id`, so a layer-5 summary would go to `cognition:summaries:unspecified`. Open (orchestration side).
-- V6 (low): every think makes a 2 s-timeout bus round trip to Persona (and to the World Model for self summary and chat profile) in `assembler.py`. Open; stage 4 item 4 replaces them with injected readers.
+- V6 (low): every think makes a 2 s-timeout bus round trip to Persona (and to the World Model for the self summary) in `assembler.py`. Open; stage 4 item 4 replaces them with injected readers.
 - B2 (medium): Cognition's `Message.new` sites mint fresh trace ids. Open; stage 1 item 2.
 
 Found while writing this contract (not in the catalogue): `_on_think` builds its `Budget` (`service.py:288-295`) without the purpose's `max_seconds`, so `[cognition.purposes.chat] max_seconds = 90` never applies and every think runs against the 180 s dataclass default (`api.py:96`), although `voice/config.py:213` is tuned to the 90 s value. `cognition:calls` is appended on every think, read by nothing, and never compacted.

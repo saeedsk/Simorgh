@@ -116,20 +116,20 @@ class TestPromptAssemblerWithResponders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_name["self_summary"].text, "I am Simorgh.")
 
 
-class TestUserProfileBlock(unittest.IsolatedAsyncioTestCase):
-    """2026-09-08 observer finding: World Model's `user_profile` facet was
-    fed by Persona's `persona.user_model.updated` but nothing ever read it
-    back -- a user who said "call me Al" got no different a reply than one
-    who never had. The assembler now asks for it (chat purpose only,
-    mirroring where `voice`/`self_summary` already effectively live) and
-    includes known facets above the confidence floor as a protected
-    block."""
+class TestNoHouseholdWideUserProfile(unittest.IsolatedAsyncioTestCase):
+    """Stage 6 item 4, 2026-09-22: the assembler used to put ONE
+    household-wide profile in every chat prompt as "What you know about
+    the user" -- so the nickname Ira asked for was what Sim called her
+    father. A `cognition.think` does not say who is speaking, so the
+    assembler cannot pick the right person's preferences and must show
+    nobody's; Orchestration's per-turn context renders the speaker's.
+
+    Pinned the strong way: even with World Model answering a profile
+    that holds Ira's preference, a chat prompt (say, for a turn by
+    Saeed) carries no profile block and asks no `world.env.query`."""
 
     async def asyncSetUp(self):
         self.clock = FakeClock()
-        # The in-memory bus answers at once; the timeout only bounds the
-        # blocks nobody answers here, and each of those waited it out (a
-        # second apiece, 2-3 s a test).
         backend = make_backend(BusConfig(backend="memory", request_default_timeout=0.05), clock=self.clock)
         self.bus = make_client(backend, source="cognition", clock=self.clock)
         await self.bus.start()
@@ -138,56 +138,25 @@ class TestUserProfileBlock(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.bus.stop()
 
-    async def test_known_facets_above_the_confidence_floor_become_a_block(self):
+    async def test_a_chat_prompt_shows_nobodys_preferences(self):
+        asked = []
+
         async def _answer(message):
+            asked.append(message.payload)
             await self.bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
-                "ok": True, "facet": "user_profile", "as_of": 0.0,
-                "facets": {"preferred_name": {"value": "Al", "confidence": 0.7}},
+                "ok": True, "facet": "user_profile", "as_of": 0.0, "person": "Ira",
+                "facets": {"preferred_name": {"value": "Ira-bear", "confidence": 0.7}},
+                "text": "What Ira (who is speaking) has told you about themselves: preferred_name: Ira-bear",
             })
 
         sub = await self.bus.subscribe(topics.WORLD_ENV_QUERY, _answer)
-        result = await self.assembler.assemble(purpose="chat", messages=[{"role": "user", "content": "hi"}])
+        result = await self.assembler.assemble(
+            purpose="chat", messages=[{"role": "user", "content": "Saeed here -- what's for dinner?"}])
         await sub.unsubscribe()
 
-        by_name = {b.name: b for b in result.blocks}
-        self.assertIn("user_profile", by_name)
-        self.assertTrue(by_name["user_profile"].protected)
-        self.assertIn("preferred_name: Al", by_name["user_profile"].text)
-
-    async def test_low_confidence_facets_are_omitted(self):
-        async def _answer(message):
-            await self.bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
-                "ok": True, "facet": "user_profile", "as_of": 0.0,
-                "facets": {"preference": {"value": "dark mode", "confidence": 0.2}},
-            })
-
-        sub = await self.bus.subscribe(topics.WORLD_ENV_QUERY, _answer)
-        result = await self.assembler.assemble(purpose="chat", messages=[{"role": "user", "content": "hi"}])
-        await sub.unsubscribe()
-
-        names = [b.name for b in result.blocks]
-        self.assertNotIn("user_profile", names)
-
-    async def test_no_responder_omits_the_block_not_fatal(self):
-        result = await self.assembler.assemble(purpose="chat", messages=[{"role": "user", "content": "hi"}])
-        names = [b.name for b in result.blocks]
-        self.assertNotIn("user_profile", names)
-
-    async def test_non_chat_purposes_never_request_the_user_profile(self):
-        requested = []
-
-        async def _answer(message):
-            requested.append(message.payload.get("what"))
-            await self.bus.reply(message, type=topics.WORLD_ENV_QUERY_REPLY, payload={
-                "ok": True, "facet": "user_profile", "as_of": 0.0,
-                "facets": {"preferred_name": {"value": "Al", "confidence": 0.9}},
-            })
-
-        sub = await self.bus.subscribe(topics.WORLD_ENV_QUERY, _answer)
-        await self.assembler.assemble(purpose="draft", messages=[])
-        await sub.unsubscribe()
-
-        self.assertNotIn("user_profile", requested)
+        self.assertNotIn("user_profile", [b.name for b in result.blocks])
+        self.assertFalse(any("Ira-bear" in b.text for b in result.blocks))
+        self.assertEqual(asked, [], "the assembler must not ask for a profile it cannot attribute")
 
 
 if __name__ == "__main__":

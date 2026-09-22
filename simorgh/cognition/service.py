@@ -241,13 +241,15 @@ class Service:
         topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SECOND, topics.SYSTEM_STARTED,
         topics.TOOL_REGISTERED,
     )
-    # Requests count as produced: the assembler sends persona.voice,
-    # self.summary and world.env.query and waits for their replies.
+    # Requests count as produced: the assembler sends persona.voice and
+    # self.summary and waits for their replies. (`world.env.query` for
+    # the user profile went 2026-09-22: it was one profile for the whole
+    # household; the speaker's preferences are Orchestration's to render.)
     produces: tuple[str, ...] = (
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
         topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
         topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS, topics.UI_NOTICE, topics.SESSION_DELTA,
-        topics.PERSONA_VOICE, topics.SELF_SUMMARY, topics.WORLD_ENV_QUERY,
+        topics.PERSONA_VOICE, topics.SELF_SUMMARY,
     )
 
     def __init__(self, *, config: Config | None = None, providers: list | None = None) -> None:

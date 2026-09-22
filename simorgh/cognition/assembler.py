@@ -7,14 +7,17 @@ Persona/World Model exist yet or are reachable (graceful degradation,
 principle 4.5's spirit applied to *other subsystems* being absent, not
 just providers).
 
-For `purpose="chat"` a `user_profile` block is also requested, from World
-Model's `user_profile` facet (fed by Persona's `persona.user_model.updated`
--- "call me X", "I prefer X" statements extracted by
-`persona/user_model.py`). Before this, nothing ever read that facet back:
-Persona wrote it and forgot it, so a user who said "call me Al" got no
-different a reply than one who never had. `_MIN_FACET_CONFIDENCE` (0.5) is
-the only confidence floor for those facets: Persona's own
-`user_model_min_confidence` was never read and was removed 2026-09-19."""
+There is no `user_profile` block any more (stage 6 item 4, 2026-09-22).
+From 2026-09-08 the assembler asked World Model for ONE household-wide
+profile ("call me X", "I prefer X", from `persona/user_model.py`) and put
+it in every chat prompt as "What you know about the user" -- so whatever
+Ira asked to be called was what Sim called her father. Those facts are a
+person's `preferences` in the People store now, and showing the right
+person's needs to know who is speaking, which a `cognition.think` does
+not carry. Orchestration's context, which builds the per-turn blocks
+with the session's speaker, renders them (`world.env.query{what:
+"user_profile", args: {person, channel}}` answers with a ready `text`).
+Showing nobody's is correct; showing the wrong person's is the bug."""
 
 from __future__ import annotations
 
@@ -29,9 +32,6 @@ CONSTITUTION_SUMMARY = (
     "Core directives, priority order: Safety > Lawfulness > Loyalty > "
     "Corrigibility > Restraint > Stability > Growth > Transparency."
 )
-
-_MIN_FACET_CONFIDENCE = 0.5
-
 
 _WINDING_DOWN_STEPS = 3
 
@@ -48,7 +48,7 @@ class PromptAssembler:
         steps_left: int | None = None, trace_id: str = "",
     ) -> AssembledContext:
         # `trace_id`: the think's own trace, carried onto the context
-        # requests it makes (persona voice, self summary, user profile) so
+        # requests it makes (persona voice, self summary) so
         # they belong to the turn that caused them (stage 1 item 2). Passed
         # down, not stored: one assembler serves concurrent thinks.
         blocks: list[PromptBlock] = [self._block("constitution", CONSTITUTION_SUMMARY, protected=True)]
@@ -60,11 +60,6 @@ class PromptAssembler:
         summary = await self._try_request(topics.SELF_SUMMARY, {"budget_tokens": 300}, trace_id)
         if summary is not None:
             blocks.append(self._block("self_summary", summary.get("text", ""), protected=True))
-
-        if purpose == "chat":
-            profile_text = await self._user_profile_text(trace_id)
-            if profile_text:
-                blocks.append(self._block("user_profile", profile_text, protected=True))
 
         if task_rules:
             blocks.append(self._block("task_rules", task_rules, protected=True))
@@ -92,19 +87,6 @@ class PromptAssembler:
                          "plainly what is done and what is left. Do not start anything new.")
 
         return AssembledContext(blocks=tuple(blocks), turn_note=turn_note)
-
-    async def _user_profile_text(self, trace_id: str = "") -> str:
-        reply = await self._try_request(topics.WORLD_ENV_QUERY, {"what": "user_profile", "args": {}}, trace_id)
-        if reply is None:
-            return ""
-        facets = reply.get("facets", {})
-        known = [
-            f"{name}: {facet.get('value')}" for name, facet in facets.items()
-            if facet.get("confidence", 0.0) >= _MIN_FACET_CONFIDENCE
-        ]
-        if not known:
-            return ""
-        return "What you know about the user: " + "; ".join(sorted(known))
 
     def _block(self, name: str, text: str, *, protected: bool) -> PromptBlock:
         return PromptBlock(name=name, text=text, protected=protected, tokens=estimate_tokens(text))
