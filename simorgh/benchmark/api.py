@@ -292,6 +292,22 @@ class RunRecord:
 
     @property
     def accuracy(self) -> float:
+        """Resolved out of every case the run TOOK ON, not out of the
+        ones that happened to be measurable.
+
+        A skipped case used to leave the denominator, so the score rose
+        when the harness failed to read its own logs. Live, 2026-09-22:
+        a 30-case run reported "12/21 correct (57.1%)" while nine cases
+        -- every one of which had really run, and five of which were
+        decidable from the log on disk -- had quietly dropped out. The
+        number a person remembers must be the conservative one; the
+        other is still here, named for what it is.
+        """
+        return self.correct / len(self.results) if self.results else 0.0
+
+    @property
+    def scored_accuracy(self) -> float:
+        """Resolved out of the cases that could be measured at all."""
         return self.correct / self.attempted if self.attempted else 0.0
 
     @property
@@ -326,6 +342,7 @@ class RunRecord:
             "run_id": self.run_id, "suite": self.suite, "suite_version": self.suite_version,
             "model": self.model, "started_at": self.started_at, "finished_at": self.finished_at,
             "attempted": self.attempted, "correct": self.correct, "skipped": self.skipped,
+            "case_count": len(self.results), "scored_accuracy": round(self.scored_accuracy, 4),
             "accuracy": round(self.accuracy, 4), "seconds": round(self.seconds, 2),
             "cost_usd": round(self.cost_usd, 6), "partial": self.partial, "note": self.note,
             "blocked": self.blocked, "blocked_but_correct": self.blocked_but_correct,

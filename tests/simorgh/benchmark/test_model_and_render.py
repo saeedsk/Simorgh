@@ -50,12 +50,20 @@ class SuiteTestCase(unittest.TestCase):
 
 
 class RunRecordTestCase(unittest.TestCase):
-    def test_accuracy_ignores_skipped_cases(self):
+    def test_a_skipped_case_does_not_leave_the_denominator(self):
+        """It used to: `accuracy` was correct/attempted, so the score
+        ROSE when the harness failed to read its own logs. Live,
+        2026-09-22 -- a 30-case run reported "12/21 correct (57.1%)"
+        while nine cases that had really run, five of them decidable
+        from the log on disk, quietly dropped out. The headline is the
+        conservative number now; `scored_accuracy` is the other one,
+        named for what it is."""
         record = _record(accuracy=(True, False))
         record.results.append(CaseResult(case_id="s", level="1", correct=False, skipped=True))
-        self.assertEqual(record.attempted, 2)
+        self.assertEqual(record.attempted, 2, "two could be measured")
         self.assertEqual(record.skipped, 1)
-        self.assertAlmostEqual(record.accuracy, 0.5)
+        self.assertAlmostEqual(record.accuracy, 1 / 3, msg="one resolved out of three taken on")
+        self.assertAlmostEqual(record.scored_accuracy, 0.5)
 
     def test_an_empty_run_is_zero_not_a_crash(self):
         self.assertEqual(RunRecord().accuracy, 0.0)

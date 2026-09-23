@@ -150,7 +150,7 @@ def _in_flight(payload: dict) -> str:
         return ""
     line = (
         f"  in flight: {progress.get('suite')} {progress.get('index', 0)}/{progress.get('total', 0)}"
-        f"  {progress.get('correct', 0)}/{progress.get('attempted', 0)} correct so far"
+        f"  {progress.get('correct', 0)}/{progress.get('done', progress.get('attempted', 0))} correct so far"
     )
     # The case actually running, and for how long. Typed mid-run, this
     # line used to read "0/2  0/0 correct so far" for as long as the

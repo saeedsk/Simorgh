@@ -459,8 +459,11 @@ class Service:
         ))
         await ctx.bus.publish(Message.new(topics.UI_NOTICE, source=ctx.source, payload={
             "level": "info", "source": "benchmark", "text": (
-                f"{finished.suite}: {finished.correct}/{finished.attempted} correct "
+                f"{finished.suite}: {finished.correct}/{len(finished.results)} resolved "
                 f"({finished.accuracy * 100:.1f}%) as {finished.model}"
+                + (f" -- {finished.skipped} could not be measured "
+                   f"({finished.scored_accuracy * 100:.1f}% of the {finished.attempted} that could)"
+                   if finished.skipped else "")
             ),
         }, clock=ctx.clock.now))
 
