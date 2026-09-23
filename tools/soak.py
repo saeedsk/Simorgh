@@ -77,6 +77,9 @@ JOB_TIMEOUT_S = 2400.0
 
 @dataclass
 class Instance:
+    """One sandboxed Sim. Odd-numbered ones run the creator's own
+    `simorgh.toml`; even ones run the defaults."""
+
     number: int
     root: Path
     data: Path
@@ -101,7 +104,18 @@ def make_instance(run_dir: Path, number: int, rotation: tuple[str, ...]) -> Inst
         shutil.rmtree(root, ignore_errors=True)
     fast_copy_repo(root, source=REPO)
     data = root / "sandbox-home"
-    data.mkdir(parents=True, exist_ok=True)
+    (data / ".simorgh").mkdir(parents=True, exist_ok=True)
+    # Half the instances run the CREATOR'S OWN settings, not the
+    # defaults. His house is `barge_in = false`, `vad_sensitivity =
+    # high`, `speaker_threshold = 0.2`, kokoro, a 0.0.0.0 bind -- and a
+    # scenario that passes on defaults can fail on the configuration
+    # somebody actually lives with. Copied WITHOUT secrets: the file
+    # holds none (they live in secrets.toml, which is not copied), and
+    # a soak that could spend money is not a soak (2026-09-23).
+    if number % 2 == 1:
+        live = Path.home() / ".simorgh" / "simorgh.toml"
+        if live.is_file():
+            shutil.copy2(live, data / ".simorgh" / "simorgh.toml")
     jobs = list(rotation[number % len(rotation):]) + list(rotation[:number % len(rotation)])
     return Instance(number=number, root=root, data=data, jobs=jobs)
 
