@@ -11,7 +11,13 @@ from simorgh.cognition.providers.gemini import GeminiProvider
 
 
 class TogetherStalls(unittest.TestCase):
-    def test_the_socket_timeout_is_the_silence_limit_not_the_budget(self):
+    def test_the_socket_carries_the_first_line_budget_not_the_call_budget(self):
+        """Waiting for the FIRST line is not the same as a gap between
+        two: nothing has been generated yet, the server is reading the
+        prompt, and that time grows with the prompt (a chat turn carries
+        72 tool schemas). Live 2026-09-22, `no line in 6.1s` abandoned a
+        healthy provider for being slow to start. It is still not the
+        whole budget -- that was the 2026-09-19 bug above."""
         seen = {}
 
         def transport(url, headers, payload, timeout):
@@ -26,7 +32,33 @@ class TogetherStalls(unittest.TestCase):
                                                      max_tokens=10, timeout=90.0)]
 
         asyncio.run(run())
-        self.assertEqual(seen["timeout"], together.STREAM_SILENCE_S)
+        self.assertEqual(seen["timeout"], together.FIRST_LINE_S)
+        self.assertLess(seen["timeout"], 90.0, "never the whole budget: that was the 2026-09-19 stall")
+
+    def test_a_gap_between_lines_still_fails_fast(self):
+        """The silence rule did not go away -- it moved to where it
+        belongs, between lines, enforced by the consumer."""
+        import time
+
+        def transport(url, headers, payload, timeout):
+            yield 'data: {"choices": [{"delta": {"content": "hi"}}]}\n'
+            time.sleep(together.STREAM_SILENCE_S + 2.0)          # ... and then nothing
+            yield "data: [DONE]\n"
+
+        provider = together.TogetherProvider(api_key="k", stream_transport=transport)
+
+        async def run():
+            out = []
+            async for delta in provider.stream([{"role": "user", "content": "x"}], tools=None,
+                                               max_tokens=10, timeout=90.0):
+                out.append(delta)
+            return out
+
+        started = time.monotonic()
+        with self.assertRaises(Exception) as caught:      # noqa: PT027 -- ProviderUnavailable is the contract
+            asyncio.run(run())
+        self.assertIn("quiet after", str(caught.exception))
+        self.assertLess(time.monotonic() - started, 20.0, "it must not wait out the budget")
 
 
 class GeminiClosedClient(unittest.TestCase):

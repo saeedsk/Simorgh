@@ -69,6 +69,12 @@ MIN_REASONING_MAX_TOKENS = 4_000
 #: Longest a stream may go without sending a line before it counts as
 #: stalled and the Router fails over (see `stream`).
 STREAM_SILENCE_S = 6.0
+#: Longest to wait for the FIRST line, before which nothing has been
+#: generated at all: the server is still reading the prompt, and that
+#: time grows with the prompt (a chat turn here carries 72 tool schemas).
+#: Live, 2026-09-22: `no line in 6.1s` abandoned a healthy provider on a
+#: long prompt. A gap BETWEEN lines still has `STREAM_SILENCE_S`.
+FIRST_LINE_S = 45.0
 USER_AGENT = "Simorgh/2.0 (+https://github.com/saeedsk/Simorgh)"
 
 # Per 1M tokens (Together's published GLM-5.3-Flash pricing). Mirrored in
@@ -186,11 +192,23 @@ class TogetherProvider:
         # nothing for STREAM_SILENCE_S has stalled, and waiting out the whole
         # purpose budget on it is what made voice turns take 23-31 s before
         # failing over (live, 2026-09-19).
+        #
+        # But the wait BEFORE the first line is a different thing from a gap
+        # between two lines. Nothing has been generated yet: the server is
+        # reading the prompt, and that time grows with the prompt -- a chat
+        # turn here carries 72 tool schemas and a long context. Live,
+        # 2026-09-22, exactly that failed: `no line in 6.1s`, a healthy
+        # provider abandoned for being slow to start, on a prompt that was
+        # always going to take longer than a gap between tokens.
+        #
+        # So the socket carries the FIRST-line budget, and the silence rule
+        # is enforced where it belongs -- between lines, by the consumer.
         silence = min(wait, STREAM_SILENCE_S)
+        first_line = min(wait, max(FIRST_LINE_S, silence))
 
         def _read() -> None:
             try:
-                for line in self._stream_lines(url, body, timeout=silence):
+                for line in self._stream_lines(url, body, timeout=first_line):
                     loop.call_soon_threadsafe(queue.put_nowait, line)
             except Exception as exc:  # noqa: BLE001 -- handed to the consumer
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
@@ -203,7 +221,16 @@ class TogetherProvider:
         usage: dict = {}
         started, lines = loop.time(), 0
         while True:
-            item = await queue.get()
+            # Between lines: `silence`. Before the first: whatever the
+            # socket allows (`first_line`), because the server has not
+            # started answering yet.
+            try:
+                item = await (queue.get() if not lines
+                              else asyncio.wait_for(queue.get(), timeout=silence + 1.0))
+            except asyncio.TimeoutError as exc:
+                raise ProviderUnavailable(
+                    f"Together stream failed (quiet after {lines} line(s), "
+                    f"{loop.time() - started:.1f}s in): no line for {silence:.0f}s") from exc
             if item is done:
                 break
             if isinstance(item, Exception):
