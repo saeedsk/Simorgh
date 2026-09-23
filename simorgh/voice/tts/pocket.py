@@ -104,17 +104,21 @@ class PocketSynthesiser(SubprocessSynthesiser):
     load_timeout_s = 900.0      # 438 MB of weights plus the G2P, the first time
 
     def __init__(self, config) -> None:
-        venv_dir = getattr(config, "venv_dir", DEFAULT_VENV_DIR)
+        venv_dir = config.venv_dir or DEFAULT_VENV_DIR
         ok, why = available(venv_dir)
         if not ok:
             raise ImportError(f"{why} (run `voice models pocket-fa`)")
-        reference = str(getattr(config, "tts_farsi_reference", "") or DEFAULT_REFERENCE)
+        # Read as typed. A `getattr` fallback here would be a second
+        # source of truth for the same key, which is what
+        # `test_config_is_read_typed` exists to stop (caught 2026-09-23,
+        # by a drill whose lab could not pass the suite because of it).
+        reference = str(config.tts_farsi_reference or DEFAULT_REFERENCE)
         if not Path(reference).is_file():
             raise ImportError(
                 f"Pocket-TTS speaks in a voice cloned from a reference clip, and {reference} is not there "
                 f"-- `voice models pocket-fa` fetches one, or set [voice] tts_farsi_reference")
         super().__init__(config, venv_dir=venv_dir, reference=str(Path(reference).resolve()),
-                         timeout_s=float(getattr(config, "expressive_timeout_s", 180.0)))
+                         timeout_s=float(config.expressive_timeout_s))
 
     def voices(self) -> list[str]:
         """Every reference clip beside the configured one: with cloning,

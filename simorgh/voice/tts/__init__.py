@@ -139,16 +139,20 @@ def _farsi_synthesiser(config):
     engine means it or nothing: a person who asked for MMS and silently
     got Piper would think MMS sounds exactly like Piper.
     """
-    from .mms import MmsSynthesiser
+    from .mms import MMS_MODELS, MmsSynthesiser
     from .piper import PiperSynthesiser
     from .pocket import PocketSynthesiser
+
+    from ..lang import FARSI
+
+    MMS_DEFAULT = MMS_MODELS[FARSI]
 
     named = {
         "pocket": lambda: PocketSynthesiser(config),
         "piper": lambda: PiperSynthesiser(config, voice=config.tts_farsi_voice),
-        "mms": lambda: MmsSynthesiser(config, model_id=getattr(config, "tts_farsi_mms_model", "")),
+        "mms": lambda: MmsSynthesiser(config, model_id=config.tts_farsi_mms_model or MMS_DEFAULT),
     }
-    choice = (getattr(config, "tts_farsi", "auto") or "auto").strip().lower()
+    choice = (config.tts_farsi or "auto").strip().lower()
     if choice in named:
         return named[choice]()
     # auto: the one the creator chose, then the one that is always

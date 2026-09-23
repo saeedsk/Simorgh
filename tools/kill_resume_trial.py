@@ -224,6 +224,16 @@ def _run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: bo
     # labs took twenty of them on 2026-09-23.
     shutil.rmtree(os.path.join(lab, "workspace"), ignore_errors=True)
     os.makedirs(os.path.join(lab, "workspace", "scratch"), exist_ok=True)
+    # The directory has to EXIST, and a test says so
+    # (`test_the_workspace_directory_exists_in_the_repository`): it is
+    # Sim's one writable place. Emptying it without leaving it there
+    # turned the lab's own suite red, so every verification in the drill
+    # failed, the task reverted its own commit and the drill could never
+    # reach a verdict -- the same shape as the workspace-dependent test
+    # that blocked every landing on 2026-09-19, reintroduced by me
+    # (2026-09-23).
+    Path(lab, "workspace", "README.md").write_text(
+        "A lab's workspace: empty on purpose (tools/kill_resume_trial.py).\n")
     shutil.rmtree(os.path.join(lab, ".git"), ignore_errors=True)
     shutil.rmtree(os.path.join(lab, ".claude"), ignore_errors=True)
     _git(lab, "init", "-q")
