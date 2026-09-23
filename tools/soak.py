@@ -404,13 +404,98 @@ def main() -> int:
                     help="rebuild each sandbox from the repo this often, so the soak tests what is committed NOW")
     ap.add_argument("--paid", action="store_true", help="let jobs reach a real model (costs money)")
     ap.add_argument("--report", action="store_true", help="read the findings of a run and stop")
+    ap.add_argument("--status", action="store_true", help="is a soak alive? one line, then stop")
     ap.add_argument("--detach", action="store_true",
                     help="run as a session of its own, so another command ending cannot kill it")
     args = ap.parse_args()
+    if args.status:
+        print(status(SOAK_DIR / args.run if args.run else None))
+        return 0
     if args.detach and not args.report:
-        detach(SOAK_DIR / f"{args.run or 'soak'}.log")
+        # Name the run BEFORE forking. A restart re-runs this file, and
+        # with an empty `--run` each restart would start a fresh dated
+        # run while the supervisor logged into the soak root -- so a
+        # restarted soak would look like a soak that had never run.
+        args.run = args.run or time.strftime("%Y%m%d-%H%M")
+        detach(SOAK_DIR / f"{args.run}.log")
         return supervise(args)
     return asyncio.run(main_async(args))
+
+
+def status(run_dir: Path | None) -> str:
+    """One command that answers "is the soak alive?".
+
+    It died four times in a morning and the fourth time the supervisor
+    died with it, leaving a log that ended mid-run. Nothing about that
+    was hard to see -- but seeing it took three commands (a `ps`, a
+    `tail`, a clock), and told twice that a soak was running I answered
+    from the last one I remembered instead (2026-09-23). A watcher that
+    is awkward to consult gets consulted from memory.
+
+    Alive means BOTH: a process, and a log that moved recently. Either
+    alone is the failure that hid -- a process wedged with nothing to
+    say, or a log full of good runs that stopped an hour ago.
+    """
+    if run_dir is None:
+        runs = [p for p in SOAK_DIR.iterdir() if p.is_dir()] if SOAK_DIR.is_dir() else []
+        if not runs:
+            return "no soak has ever run here"
+        run_dir = max(runs, key=lambda p: (p / "soak.jsonl").stat().st_mtime if (p / "soak.jsonl").is_file() else 0)
+    pids = _soak_pids()
+    events = _events(run_dir)
+    if not events:
+        return f"{run_dir.name}: DEAD -- no log at all; {len(pids)} process(es)"
+    last = events[-1]
+    quiet = time.time() - float(last.get("at") or 0)
+    runs = sum(1 for e in events if e["kind"] in ("ok", "finding"))
+    failures = sum(1 for e in events if e["kind"] == "finding")
+    restarts = sum(1 for e in events if e["kind"] == "restarted")
+    ended = last["kind"] == "end"
+    # A job can legitimately take a while (the full suite, an arc), so
+    # silence is only damning well past the longest one.
+    verdict = ("FINISHED" if ended else
+               "ALIVE" if pids and quiet < _QUIET_S else
+               "DEAD" if not pids else "STUCK")
+    return (f"{run_dir.name}: {verdict} -- {len(pids)} process(es), "
+            f"last {last['kind']} {quiet / 60:.0f} min ago, "
+            f"{runs} run(s), {failures} failure(s), {restarts} restart(s)")
+
+
+#: Longer than the slowest job, so a slow suite is not called a corpse.
+_QUIET_S = 25 * 60
+
+
+def _soak_pids() -> list[int]:
+    try:
+        out = subprocess.run(["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    mine = os.getpid()
+    found = []
+    for line in (out or "").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and "tools/soak.py" in parts[1] and "--status" not in parts[1]:
+            try:
+                pid = int(parts[0])
+            except ValueError:
+                continue
+            if pid != mine:
+                found.append(pid)
+    return found
+
+
+def _events(run_dir: Path) -> list[dict]:
+    path = run_dir / "soak.jsonl"
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                pass
+    return out
 
 
 def supervise(args) -> int:
