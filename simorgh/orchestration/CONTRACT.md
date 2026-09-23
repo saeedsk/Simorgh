@@ -123,6 +123,8 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 
 ## Invariants
 
+A resumed session owns what earlier attempts WROTE, read from their steps' side effects (`resume._claim_written`), not only from the `task.edits_kept` record an attempt writes when it ends. A SIGKILL writes no such record -- which is the case resume exists for -- so a crashed attempt's file was nobody's: `git_commit` refused it with "this task did not write <path>" and the task could never finish (kill-and-resume drill, 2026-09-23).
+
 A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that merely ran. `stophook`'s promise and TV guards asked `any(step.tool ...)`, so an action Guardian had escalated and a human then DENIED still counted: Iris (a child) was told "I'll keep it -- no cheering" one second after `overheard_note` went to an adult for approval, and forty-four seconds before it was refused (2026-09-22). `claimed_effect` always asked the right question; the others now ask it too.
 
 1. Every tool call a session makes, including `worktree_open`, `worktree_land`, `worktree_close` and `git_discard`, is published as `action.proposed` and awaited for `action.result|denied|needs_human` in `SessionRunner._propose_and_await` (`session.py:1626`); nothing in this package calls a tool directly. The local refusals -- `unplaced_voice_refusal`, `chat_outside_workspace_refusal`, `commit_of_unwritten_refusal` -- propose nothing. A task session (any scaffold but `chat`) treats `needs_human` as a question in flight, not an ending: it keeps waiting, up to `_HUMAN_ANSWER_WAIT_S` past Guardian's prompt timeout, for the `result` or `denied` the person's answer produces. A chat turn reports the question and moves on.

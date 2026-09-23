@@ -48,10 +48,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOOLS = Path(__file__).resolve().parent
 
+#: Small on purpose. The task is not what this drill measures -- the
+#: crash and the resume are -- and the first version (two functions, run
+#: the tests, then commit) took more than twenty steps and eight minutes
+#: of real model calls, so the drill timed out at "unfinished" every
+#: time and could never reach a verdict on the thing it exists to check
+#: (measured three times, 2026-09-23). The invariants held in all three:
+#: no step redone, no commit repeated.
 DEFAULT_TASK = (
     "Create a new file tools/kill_resume_notes.py containing a function add(a, b) that returns a + b, "
-    "with a one-line docstring. Then add a second function mul(a, b) that returns a * b in the same file. "
-    "Run the tests for that file if there are any, then commit the file with a short message."
+    "with a one-line docstring. Then commit that file with a short message. Do not do anything else."
 )
 
 _CHILD = r'''

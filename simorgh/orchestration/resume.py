@@ -83,6 +83,30 @@ def _attempts(events) -> list[dict]:
     return attempts
 
 
+def _claim_written(session, attempts: list[dict]) -> None:
+    """Seed `wrote`/`uncommitted` from what earlier attempts' STEPS say
+    they wrote.
+
+    A step records its tool's side effects (`file_write:<path>`,
+    `file_create:<path>`) as it happens; the end-of-attempt record only
+    exists if the attempt got to end. Reading the steps covers the
+    crash, and agrees with the tidy path where both exist.
+    """
+    from .session import is_scratch
+
+    for attempt in attempts:
+        for step in attempt.get("steps") or ():
+            for effect in step.get("side_effects") or ():
+                kind, _, path = str(effect).partition(":")
+                if not path or kind not in ("file_write", "file_create"):
+                    continue
+                session.wrote.add(path)
+                if not is_scratch(path):
+                    session.uncommitted.add(path)
+                    if kind == "file_create":
+                        session.created.add(path)
+
+
 def carried_note(attempts: list[dict]) -> str:
     """The earlier attempts, rendered for the model: what each did and
     how it ended. Oldest first; trimmed from the front when long, so the
@@ -177,6 +201,18 @@ async def restore_session(session: Session, ledger) -> int:
             # Its transcript, when it left one, is what it was really
             # looking at -- note included, if it had re-grounded.
             session.messages = messages
+        # What the DEAD attempt wrote, read back from its own steps.
+        #
+        # `kept`/`created` come from the `task.edits_kept` record an
+        # attempt writes when it ENDS -- and a SIGKILL writes nothing,
+        # which is the case resume exists for. So a crashed attempt left
+        # its edits in the tree and the resumed session did not know it
+        # owned them: `git_commit` refused with "this task did not write
+        # <path>, so it may not commit it", twice, and the task could
+        # never finish. Found by the kill-and-resume drill, 2026-09-23 --
+        # the drill's whole point, and it took reading the step log to
+        # see it, because the drill only reported "unfinished".
+        _claim_written(session, attempts)
         if len(attempts) > 1:
             session.carried = carried_note(attempts[:-1])
             # The edits the DEAD attempt inherited are still in the tree.
@@ -190,6 +226,7 @@ async def restore_session(session: Session, ledger) -> int:
         session.uncommitted.update(last["kept"])
         session.created.update(last["created"])
         return len(last["steps"])
+    _claim_written(session, attempts)
     session.carried = carried_note(attempts)
     session.attempt = len(attempts) + 1
     # Edits the last attempt left in the tree on purpose: this attempt
