@@ -86,6 +86,10 @@ class Router:
         # provider is not re-dialed every single step.
         self._cooldown_s = cooldown_s
         self._cooldown_until: dict[str, float] = {}
+        #: Providers whose own budget is currently refusing them, so the
+        #: fact is logged when it STARTS and when it ends, not on every
+        #: call (hundreds) and not never (see `_dial_chain`).
+        self._capped: set[str] = set()
 
     def candidate_names(self) -> list[str]:
         return [name for name in self._order if name in self._by_name] + [self._floor.name]
@@ -167,7 +171,30 @@ class Router:
                 # 2026-09-10 with a real `RollingWindowBudget`: spend went
                 # from $1.99 to $9.49 against a $2.00 cap in one call.
                 if not await provider_budget.can_spend(est_cost):
+                    # Say so ONCE. This was a bare `continue`, and the
+                    # neighbouring "no time for this candidate" branch
+                    # logs -- the asymmetry hid a real outage: on
+                    # 2026-09-22 `together_strong` hit its 200-call daily
+                    # cap at 16:16 and every escalation to the strong
+                    # tier quietly answered on the cheap model instead,
+                    # for hours, while the log kept saying
+                    # `cognition.escalated route=['together_strong', ...]`.
+                    # A whole SWE-bench run was scored on the wrong model
+                    # and nothing said so. (The same shape as 2026-09-15,
+                    # when "Sim got slow" was this cap and a silent
+                    # failover.)
+                    if name not in self._capped and self._logger is not None:
+                        self._capped.add(name)
+                        self._logger.warning(
+                            "cognition.provider_capped", provider=name, purpose=purpose.value,
+                            detail="its own budget refuses this call -- work that asks for it "
+                                   "is answered by the next provider until the window rolls over",
+                        )
                     continue
+                if name in self._capped:
+                    self._capped.discard(name)
+                    if self._logger is not None:
+                        self._logger.info("cognition.provider_uncapped", provider=name)
             remaining = deadline - self._clock.now()
             if remaining < _MIN_CANDIDATE_SECONDS:
                 # Not enough time left to be worth dialling: starting a
