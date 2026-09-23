@@ -163,12 +163,25 @@ def _spawn(lab: str, data: str, *, create: bool, task: str, max_usd: float, time
                             stderr=subprocess.STDOUT, text=True)
 
 
+def say(text: str) -> None:
+    """Progress, as it happens.
+
+    This drill can run half an hour -- two Sims booted, a real task, a
+    SIGKILL in the middle -- and printed nothing at all until its final
+    JSON. Run unattended on 2026-09-23 it left an EMPTY log and there
+    was no way to tell working from wedged from dead. A long tool that
+    speaks only at the end cannot be supervised.
+    """
+    print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
+
+
 def run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: bool) -> dict:
     sys.path.insert(0, str(TOOLS))
     from observer_kit import fast_copy_repo
 
     root = tempfile.mkdtemp(prefix="simorgh-killresume-")
     lab, data = os.path.join(root, "repo"), os.path.join(root, "data")
+    say(f"lab at {root}")
     fast_copy_repo(Path(lab), source=REPO_ROOT)
     shutil.rmtree(os.path.join(lab, ".git"), ignore_errors=True)
     shutil.rmtree(os.path.join(lab, ".claude"), ignore_errors=True)
@@ -180,6 +193,7 @@ def run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: boo
     report: dict = {"lab": root if keep else "", "kill_after": kill_after}
 
     # 1. child A: create the task and work until `kill_after` steps are on disk
+    say(f"booting child A (kill after {kill_after} completed step(s), cap ${max_usd:.2f})")
     a = _spawn(lab, data, create=True, task=task, max_usd=max_usd, timeout=timeout)
     task_id = ""
     started = time.monotonic()
@@ -193,6 +207,10 @@ def run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: boo
             pass
         if not task_id and "TASK_ID " in buffer:
             task_id = buffer.split("TASK_ID ", 1)[1].split()[0]
+            say(f"child A took task {task_id}")
+        if task_id and int(time.monotonic() - started) % 30 == 0:
+            say(f"  {len(_steps(_task_events(Path(data), task_id)))} step(s) on disk, "
+                f"{time.monotonic() - started:.0f}s in")
         if task_id and len(_steps(_task_events(Path(data), task_id))) >= kill_after:
             break
         if a.poll() is not None:
@@ -201,15 +219,20 @@ def run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: boo
     report["steps_before_kill"] = len(_steps(_task_events(Path(data), task_id))) if task_id else 0
     report["a_finished_on_its_own"] = a.poll() is not None
     if a.poll() is None:
+        say(f"SIGKILL after {report['steps_before_kill']} step(s)")
         a.send_signal(signal.SIGKILL)
         a.wait()
+    else:
+        say("child A finished on its own before the kill")
     report["commits_before_kill"] = int(_git(lab, "rev-list", "--count", "HEAD") or 0) - base_commits
 
     # 2. child B: same data dir, no task creation; it must pick the task up
+    say("booting child B on the same data dir; nothing re-creates the task")
     b = _spawn(lab, data, create=False, task=task, max_usd=max_usd, timeout=timeout)
     try:
         out, _ = b.communicate(timeout=timeout + 60)
     except subprocess.TimeoutExpired:
+        say(f"child B did not finish within {timeout + 60:.0f}s")
         b.kill()
         out = ""
     final = out.split("FINAL ", 1)[1].split()[0] if "FINAL " in out else "unfinished"
