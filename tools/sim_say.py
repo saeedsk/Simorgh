@@ -45,7 +45,7 @@ def main() -> int:
     ap.add_argument("line", nargs="+", help="the command, as you would type it")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--timeout", type=float, default=10.0)
+    ap.add_argument("--timeout", type=float, default=20.0)
     args = ap.parse_args()
     line = " ".join(args.line)
     body = json.dumps({"line": line}).encode()
@@ -57,7 +57,13 @@ def main() -> int:
         f"http://{args.host}:{args.port}/api/command", data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=args.timeout) as response:  # noqa: S310 -- operator-supplied host
-            print(f"{response.status} {response.read().decode()}")
+            body = json.loads(response.read().decode() or "{}")
+            if body.get("said"):
+                print(body["said"])
+            if "finished" not in body:          # a Sim running the route's first version
+                print(f"[{body.get('accepted', line)} accepted]")
+            elif not body.get("finished"):
+                print(f"[{body.get('accepted', line)} is still running -- it goes on in Sim's own session]")
             return 0
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")[:300]

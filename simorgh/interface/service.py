@@ -110,6 +110,15 @@ _PARTIAL_EVERY_S = 3.0
 #: this long, plus 0.4 s a word (voice off mid-reply, a crashed player).
 _SPEAKING_FALLBACK_S = 10.0
 
+#: How long `POST /api/command` waits for the command to finish before
+#: answering "accepted, still running". Long enough for the read-only
+#: commands a remote caller actually asks for (`status`, `tasks`,
+#: `benchmark history`), far short of a run or a restart.
+_COMMAND_WAIT_S = 8.0
+#: Most of an answer to hand back over HTTP.
+_COMMAND_SAID_MAX = 20_000
+
+
 class Service:
     name = "interface"
     version = VERSION
@@ -494,12 +503,41 @@ class Service:
             }}).encode("utf-8"), "application/json"
         self._ctx.logger.info("interface.remote_command", command=command.name)
         self._out(f"[remote] {line}")
-        # Not awaited: `restart` never returns, and a benchmark run holds
-        # the line for hours. The caller is told it was accepted; what it
-        # DID shows up on Sim's screen and in the ledger, where the
-        # effects of a typed command show up too.
-        asyncio.get_running_loop().create_task(self._handle_line_guarded(line))
-        return 202, json.dumps({"accepted": command.name}).encode("utf-8"), "application/json"
+        # Not awaited outright: `restart` never returns and a benchmark
+        # run holds the line for hours. But a caller that asked `status`
+        # or `tasks` wants the ANSWER, and "202 accepted" is not one --
+        # the first thing this route could not do, an hour after it
+        # existed, was tell its own author what `benchmark history` said.
+        # So: wait briefly, and answer with whatever Sim printed.
+        #
+        # Read back from the console log rather than intercepting the
+        # printing, because `_out` already records every line there
+        # (`contracts/console.py`) and a wrapper around it would have to
+        # be undone on every path, including the one where the command
+        # never returns.
+        # By BYTE OFFSET, not by line count: the log is trimmed to a
+        # fixed number of lines, so once it is full "how many lines were
+        # there before" stops growing and the new ones are invisible --
+        # which is exactly what this returned on a real console the
+        # first time (empty `said`, every time).
+        log = console.console_log_path()
+        try:
+            before = log.stat().st_size
+        except OSError:
+            before = 0
+        task = asyncio.get_running_loop().create_task(self._handle_line_guarded(line))
+        done, _ = await asyncio.wait({task}, timeout=_COMMAND_WAIT_S)
+        said = ""
+        try:
+            with log.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(before)
+                said = "\n".join(text for text in handle.read().splitlines()
+                                  if text.strip() and "[remote] " not in text)[-_COMMAND_SAID_MAX:]
+        except OSError:
+            pass
+        return (200 if done else 202), json.dumps({
+            "accepted": command.name, "finished": bool(done), "said": said,
+        }).encode("utf-8"), "application/json"
 
     async def stop(self) -> None:
         self._stop_repl.set()

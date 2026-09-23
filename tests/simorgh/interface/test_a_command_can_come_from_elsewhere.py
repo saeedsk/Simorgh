@@ -71,7 +71,7 @@ class RemoteCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_command_runs_the_same_way_typing_it_would(self):
         resp = await self._post({"line": "benchmark run swebench-verified 30"})
-        self.assertEqual(resp.status, 202)
+        self.assertIn(resp.status, (200, 202))
         self.assertEqual(json.loads(resp.body)["accepted"], "benchmark")
         await asyncio.sleep(0.05)
         self.assertEqual(self.handled, ["benchmark run swebench-verified 30"],
@@ -100,6 +100,25 @@ class RemoteCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(resp.body)["error"]["code"], "shell_refused")
         await asyncio.sleep(0.05)
         self.assertEqual(self.handled, [])
+
+    async def test_the_answer_comes_back_when_the_command_finishes(self):
+        """"202 accepted" is not an answer to `status`. The first thing
+        this route could not do, an hour after it existed, was tell its
+        own author what `benchmark history` said."""
+        from simorgh.contracts import console
+
+        async def _guarded(line):
+            self.handled.append(line)
+            console.record("suite   runs  best")
+            console.record("gaia-1     3   60%")
+
+        self.service._handle_line_guarded = _guarded      # noqa: SLF001
+        resp = await self._post({"line": "benchmark history"})
+        body = json.loads(resp.body)
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(body["finished"])
+        self.assertIn("gaia-1", body["said"])
+        self.assertNotIn("[remote]", body["said"], "the echo is for the screen, not the caller")
 
     async def test_an_empty_or_unreadable_body_is_refused(self):
         self.assertEqual((await self._post({"line": "   "})).status, 400)
