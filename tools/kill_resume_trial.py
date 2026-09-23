@@ -41,6 +41,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -146,12 +147,21 @@ def _task_events(data: Path, task_id: str) -> list[dict]:
     return events
 
 
-def _steps(events: list[dict]) -> list[dict]:
+#: Steps the HARNESS takes, which are not work a resume could redo.
+#: `worktree_open` lands within a second of the task starting, so
+#: counting it meant `--kill-after 2` killed after ONE real step and the
+#: drill tested less than it said it did (2026-09-23).
+_BOOKKEEPING = frozenset({"worktree_open", "worktree_close", "worktree_land"})
+
+
+def _steps(events: list[dict], *, real_only: bool = False) -> list[dict]:
     out = []
     for event in events:
         body = event.get("payload") or event.get("event", {}).get("payload") or {}
         etype = event.get("type") or event.get("event", {}).get("type")
         if etype in ("task.step", "step") and body.get("step_no") is not None:
+            if real_only and str(body.get("tool") or "") in _BOOKKEEPING:
+                continue
             out.append(body)
     return out
 
@@ -234,9 +244,9 @@ def _run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: bo
             task_id = buffer.split("TASK_ID ", 1)[1].split()[0]
             say(f"child A took task {task_id}")
         if task_id and int(time.monotonic() - started) % 30 == 0:
-            say(f"  {len(_steps(_task_events(Path(data), task_id)))} step(s) on disk, "
+            say(f"  {len(_steps(_task_events(Path(data), task_id), real_only=True))} real step(s) on disk, "
                 f"{time.monotonic() - started:.0f}s in")
-        if task_id and len(_steps(_task_events(Path(data), task_id))) >= kill_after:
+        if task_id and len(_steps(_task_events(Path(data), task_id), real_only=True)) >= kill_after:
             break
         if a.poll() is not None:
             break
@@ -254,6 +264,19 @@ def _run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: bo
     # 2. child B: same data dir, no task creation; it must pick the task up
     say("booting child B on the same data dir; nothing re-creates the task")
     b = _spawn(lab, data, create=False, task=task, max_usd=max_usd, timeout=timeout)
+
+    def _watch_b() -> None:
+        """Phase B ran in silence too -- ten minutes of nothing, which is
+        indistinguishable from wedged."""
+        began = time.monotonic()
+        while b.poll() is None and time.monotonic() - began < timeout + 60:
+            time.sleep(30)
+            if b.poll() is None:
+                say(f"  child B {len(_steps(_task_events(Path(data), task_id), real_only=True))} real step(s), "
+                    f"{time.monotonic() - began:.0f}s in")
+
+    watcher = threading.Thread(target=_watch_b, daemon=True)
+    watcher.start()
     try:
         out, _ = b.communicate(timeout=timeout + 60)
     except subprocess.TimeoutExpired:
