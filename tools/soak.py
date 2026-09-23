@@ -243,11 +243,36 @@ def _why(job: str, text: str, code: int) -> str:
     return f"exit {code}"
 
 
-async def drive(inst: Instance, run_dir: Path, *, until: float, paid: bool) -> None:
+async def drive(inst: Instance, run_dir: Path, *, until: float, paid: bool,
+                refresh_s: float = 0.0, rotation: tuple[str, ...] = ()) -> None:
+    next_refresh = time.monotonic() + refresh_s if refresh_s else 0.0
     while time.monotonic() < until:
         job = inst.jobs[inst.runs % len(inst.jobs)]
         await run_job(inst, job, run_dir, paid=paid)
+        if next_refresh and time.monotonic() >= next_refresh:
+            # A sandbox is a copy of the repository as it was when the
+            # soak started. Over eight hours the repository moves --
+            # that is the point of running one while fixing things -- and
+            # without this the soak spends the night testing the code of
+            # the hour it began, and none of the fixes it prompted
+            # (2026-09-23).
+            runs, failures = inst.runs, inst.failures
+            fresh = make_instance(run_dir, inst.number, rotation or tuple(inst.jobs))
+            inst.root, inst.data = fresh.root, fresh.data
+            inst.runs, inst.failures = runs, failures
+            _log(run_dir, "refreshed", instance=inst.number, head=_head())
+            next_refresh = time.monotonic() + refresh_s
         await asyncio.sleep(1.0)
+
+
+def _head() -> str:
+    """Which commit the sandboxes are now testing."""
+    try:
+        out = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def report(run_dir: Path) -> str:
@@ -293,7 +318,9 @@ async def main_async(args) -> int:
         instances.append(make_instance(run_dir, n, rotation))
         _log(run_dir, "sandbox", instance=n, of=args.instances)
     until = time.monotonic() + args.hours * 3600.0
-    await asyncio.gather(*(drive(i, run_dir, until=until, paid=args.paid) for i in instances))
+    await asyncio.gather(*(drive(i, run_dir, until=until, paid=args.paid,
+                                 refresh_s=args.refresh_hours * 3600.0, rotation=rotation)
+                           for i in instances))
     _log(run_dir, "end", runs=sum(i.runs for i in instances), failures=sum(i.failures for i in instances))
     print(report(run_dir))
     return 0
@@ -305,6 +332,8 @@ def main() -> int:
     ap.add_argument("--hours", type=float, default=8.0)
     ap.add_argument("--jobs", default="", help=f"comma-separated, from: {', '.join(JOBS)}")
     ap.add_argument("--run", default="", help="a run id (default: now)")
+    ap.add_argument("--refresh-hours", type=float, default=1.0,
+                    help="rebuild each sandbox from the repo this often, so the soak tests what is committed NOW")
     ap.add_argument("--paid", action="store_true", help="let jobs reach a real model (costs money)")
     ap.add_argument("--report", action="store_true", help="read the findings of a run and stop")
     return asyncio.run(main_async(ap.parse_args()))
