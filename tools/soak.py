@@ -136,7 +136,11 @@ async def run_job(inst: Instance, job: str, run_dir: Path, *, paid: bool) -> boo
     if job == "suite":
         # A different slice per instance, so eight of them cover the
         # suite rather than running the same third of it eight times.
-        modules = sorted(p.name for p in (inst.root / "tests" / "simorgh").iterdir() if p.is_dir())
+        # Directories that actually hold tests: `__pycache__` is a
+        # directory too, and pytest's "no tests ran" exit 5 was the
+        # soak's first finding -- about the soak (2026-09-23).
+        modules = sorted(p.name for p in (inst.root / "tests" / "simorgh").iterdir()
+                         if p.is_dir() and not p.name.startswith("_") and any(p.glob("test_*.py")))
         argv = [*argv, f"tests/simorgh/{modules[inst.number % len(modules)]}"]
     inst.current = job
     started = time.monotonic()
