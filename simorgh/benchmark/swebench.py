@@ -297,6 +297,32 @@ def _names(value) -> tuple[str, ...]:
     return ()
 
 
+def _status_of_truncated(name: str, results: dict[str, str]) -> str | None:
+    """The status of a dataset name that was stored CUT IN HALF.
+
+    SWE-bench's own name lists were built by splitting log lines on
+    whitespace, so a parametrised id containing a space is stored up to
+    that space:
+
+        expected: ...::test_totxtfile[home_is_data,
+        the log:  ...::test_totxtfile[home_is_data, pathlib]
+
+    The run measured it perfectly well; only the name does not match.
+    Live, 2026-09-22: astropy-14598 spent 11 minutes, produced a patch,
+    and was thrown away as "2 named test(s) never appeared in the log".
+
+    Narrow on purpose. It applies only to a name whose brackets are
+    UNBALANCED -- the signature of that truncation, not something a real
+    id ever has -- and only when exactly ONE parsed test extends it.
+    Two candidates mean the cut name genuinely cannot tell them apart,
+    and the case stays unmeasurable, which is the honest answer.
+    """
+    if name.count("[") <= name.count("]"):
+        return None
+    matches = [test for test in results if test.startswith(name)]
+    return results[matches[0]] if len(matches) == 1 else None
+
+
 def judge(log: str, instance: dict) -> Verdict:
     """SWE-bench's own definition, applied to one run's log."""
     results, problem = parse_log(log, str(instance.get("log_parser") or ""))
@@ -328,6 +354,8 @@ def judge(log: str, instance: dict) -> Verdict:
     # order the lists give.
     for name in dict.fromkeys(required_pass + required_keep):
         status = results.get(name)
+        if status is None:
+            status = _status_of_truncated(name, results)
         if status is None:
             missing.append(name)
         elif status in _BAD:
