@@ -206,6 +206,15 @@ class Service:
         # no watch and was dropped (the loader's gate caught it failing
         # under parallel load, 2026-09-14). `_handle_line` replays it.
         self._unclaimed_endings: dict[str, Message] = {}
+        #: Whose tree the last printed branch/corner belonged to. A
+        #: closing line (`⎿ ✅ completed in 88s`) carries no name, so on
+        #: a shared screen it reads as belonging to whatever tree was
+        #: opened last. Live, 2026-09-22 at 19:49:59: a benchmark case
+        #: finished in the same SECOND the creator asked a question, and
+        #: its patch summary was drawn under his question as though Sim
+        #: had answered "what's the conversation history with Said?"
+        #: with a fix to `astropy/utils/introspection.py`.
+        self._tree_owner: str = ""
         # What the Kernel last said its state was. A chat typed while
         # paused has nothing to wait for (`_handle_chat`).
         self._system_state = "running"
@@ -1038,6 +1047,23 @@ class Service:
             return True
         return bool(self.config.narrate_autonomous)
 
+    def _reopen_tree_if_needed(self, record, *, unicode: bool) -> None:
+        """Name the task again when another tree has printed since.
+
+        A branch or a corner carries no name -- `⎿ ✅ completed in 88s`
+        is whoever's tree is open. Live, 2026-09-22 at 19:49:59: a
+        benchmark case finished in the same second the creator asked
+        "what's the conversation history with Said?", and its patch
+        summary to `astropy/utils/introspection.py` was drawn under his
+        question as though that were Sim's answer. Reprinting the root
+        costs one line and is never wrong; guessing costs the reader
+        their trust in every line above it.
+        """
+        if self._tree_owner == record.task_id:
+            return
+        self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
+        self._tree_owner = record.task_id
+
     def _narrate_autonomous(self, message: Message, record, took: float | None = None) -> None:
         """Work this REPL did not start -- a spoken turn, Sim's own
         curiosity -- drawn as the same tree a typed turn gets
@@ -1050,12 +1076,14 @@ class Service:
         p = message.payload
         if message.type == topics.TASK_STARTED:
             self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
+            self._tree_owner = record.task_id
             return
         if message.type == topics.TASK_STEP:
             if not self.config.narrate_steps or p.get("ok") is None:
                 return  # a step in flight breathes in the footer; the branch prints when it lands
             head, sep, diff_body = str(p.get("summary", "")).partition("\n\n--- a/")
             line = panel_mod.tree_step(tool=p.get("tool"), head=head, ok=p.get("ok"), took=took, unicode=unicode)
+            self._reopen_tree_if_needed(record, unicode=unicode)
             self._out(render_mod.style(line, "green" if p.get("ok") else "red", enabled=self._color))
             if sep:
                 block = render_mod.diff_block((sep[2:] + diff_body).splitlines(), label=head,
@@ -1067,8 +1095,10 @@ class Service:
             elapsed = time.monotonic() - record.started_at
         detail = p.get("result_summary") or p.get("reason") or ""
         colour = "green" if record.status == "completed" else "yellow"
+        self._reopen_tree_if_needed(record, unicode=unicode)
         self._out(render_mod.style(panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
                                    colour, enabled=self._color))
+        self._tree_owner = ""
 
     def _refresh_activity_footer(self) -> None:
         """Keep the line under the prompt current: what is running, and
@@ -1677,6 +1707,7 @@ class Service:
                 # what it touched, ✓/✗, and how long it took.
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
                 line = panel_mod.tree_step(tool=tool, head=head, ok=ok, took=took, unicode=unicode)
+                self._reopen_tree_if_needed(record, unicode=unicode)
                 self._out(render_mod.style(line, "green" if ok else "red", enabled=self._color))
                 if sep:
                     lines = (sep[2:] + diff_body).splitlines()
@@ -1699,6 +1730,7 @@ class Service:
             if self._live.enabled:
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
                 self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
+                self._tree_owner = task_id
                 self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
                 return
             text = "thinking..."
@@ -1707,10 +1739,12 @@ class Service:
             if self._live.enabled:
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
                 detail = p.get("reason") or "" if message.type != topics.TASK_COMPLETED else ""
+                self._reopen_tree_if_needed(record, unicode=unicode)
                 self._out(render_mod.style(
                     panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
                     "green" if record.status == "completed" else "yellow", enabled=self._color,
                 ))
+                self._tree_owner = ""
             if watched:
                 # `task.blocked` (planning/service.py::_retry_or_block) is
                 # never the last word on a task: it is the ONLY event that
