@@ -56,6 +56,11 @@ MIN_IDENTIFIED = 0.9
 MIN_ADDRESSED = 0.9
 #: How long a take may take to come back as a transcript.
 TAKE_TIMEOUT_S = 45.0
+#: How long to let a turn finish before the next take is fed. A turn
+#: that called tools was still running them when the next take arrived,
+#: and two takes were lost that way -- the harness talking over Sim
+#: rather than Sim ignoring the room (2026-09-23).
+SETTLE_S = float(os.environ.get("SIMORGH_REPLAY_SETTLE_S") or 2.0)
 NAMES_SIM = ("sim-start", "sim-middle", "sim-end")
 
 
@@ -122,7 +127,15 @@ async def replay(person: str, *, limit: int = 0, paid: bool = False, language: s
             for n, take in enumerate(takes, 1):
                 await director._ready_to_listen()  # noqa: SLF001 -- the director's own wait
                 start = time.monotonic()
-                box.microphone.feed(Audio(take.pcm, take.sample_rate))
+                # Padded with silence, the way a room delivers a
+                # sentence: the endpointer needs quiet BEFORE speech to
+                # open a turn and quiet after it to close one. Fed
+                # bare, two Farsi takes produced no turn at all while
+                # the recogniser transcribed the same audio perfectly
+                # on its own -- the harness losing them, not Sim
+                # (2026-09-23).
+                quiet = b"\x00\x00" * int(take.sample_rate * 0.4)
+                box.microphone.feed(Audio(quiet + take.pcm + quiet, take.sample_rate))
                 transcript = None
                 while time.monotonic() - start < TAKE_TIMEOUT_S:
                     transcript = next((p for ts, kind, p in seen
@@ -130,7 +143,7 @@ async def replay(person: str, *, limit: int = 0, paid: bool = False, language: s
                     if transcript is not None:
                         break
                     await asyncio.sleep(0.1)
-                await asyncio.sleep(2.0)          # the turn's own decisions (addressed, acting) settle
+                await asyncio.sleep(SETTLE_S)     # the turn's own decisions (addressed, acting) settle
                 window = [(kind, p) for ts, kind, p in seen if ts >= start]
                 heard = str((transcript or {}).get("text") or "")
                 row = {

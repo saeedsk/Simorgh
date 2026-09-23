@@ -114,3 +114,30 @@ relation mechanically:
 One it flagged was a false alarm (a topic chosen by a conditional), and
 the scanner now reads that shape too: a scanner nobody trusts is not a
 scanner.
+
+## Open, with evidence: two Farsi takes Sim never hears
+
+`tools/voice_replay.py --language fa` over the creator's own
+calibration set: 8 of 10 takes identified, mean word error 57%, and
+**two takes produce no transcript at all** -- fa-003 ("چارت‌ها رو بذار
+روی تلویزیون") and fa-004 ("دوربین‌ها رو نشون بده").
+
+What has been ruled out, each by measurement:
+
+- **not transcription.** Handed the same PCM directly, whisper returns
+  both sentences correctly, with and without a language hint.
+- **not level.** They are slightly LOUDER than the takes that work
+  (-30.4 and -27.9 dBFS against -32.3 for one that does).
+- **not the language filter.** Whisper reports `persian` for every take
+  in the set, including the ones that come through.
+- **not pacing.** Eight seconds of settle between takes changes
+  nothing; they are lost with the previous turn long finished.
+
+So something between the microphone and the transcript drops these two
+specific utterances, reproducibly. The next step is to instrument the
+replay to record the turn's own events -- whether a turn opened at all --
+rather than guess a fifth time.
+
+English, by contrast, is healthy on the same path: 12 of 12 identified
+(0.78-0.87), 5 of 5 lines naming Sim taken as addressed, 5.8% word
+error, and the "Zim" mishearing added yesterday is being caught.
