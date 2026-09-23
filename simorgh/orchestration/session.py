@@ -23,6 +23,8 @@ import subprocess
 import time
 import uuid
 
+from pathlib import Path
+
 from simorgh.contracts import topics
 
 from . import pressure as pressure_mod
@@ -884,7 +886,52 @@ class SessionRunner:
                 await self._keep_uncommitted(session)
             else:
                 await self._discard_uncommitted(session)
+        await self._record_finding(session, outcome)
         return outcome
+
+    #: What a research answer ends with when it found one specific thing
+    #: that should change: `FOLLOW_UP: <path> :: <what to do about it>`.
+    _FOLLOW_UP = re.compile(r"^\s*FOLLOW[_ ]?UP\s*:\s*(?P<subject>[^\s:]{3,200}?)\s*::\s*(?P<what>.+)$",
+                            re.IGNORECASE | re.MULTILINE)
+
+    async def _record_finding(self, session: Session, outcome: Outcome) -> None:
+        """A research task's answer, written down where Planning can act
+        on it.
+
+        `research.finding.recorded` had a topic, a message type, a JSON
+        schema, a `Consumes` row in planning/CONTRACT.md and a handler
+        (`_on_research_finding` -> `on_research_follow_up`, which makes a
+        patch task SCOPED to the file the finding names) -- and no
+        publisher anywhere in `simorgh/`. Found by
+        `tools/scan_half_wired.py` on 2026-09-23. So every research task
+        Sim has ever run ended as prose in a ledger stream, and the one
+        route from "I found out what is wrong" to "fix that file" has
+        never once been travelled.
+
+        It matters more since the same day: a mined failure pattern now
+        becomes a research task rather than an unscoped patch, precisely
+        because this door was supposed to exist.
+        """
+        if outcome.kind != "completed" or session.profile.scaffold != "research":
+            return
+        answer = outcome.result_summary or ""
+        if not answer.strip():
+            return
+        payload: dict = {"task_id": session.task_id, "finding_ref": ""}
+        try:
+            payload["finding_ref"] = await self._ledger.put_blob(answer.encode("utf-8"), content_type="text/markdown")
+        except Exception:  # noqa: BLE001 -- the finding is worth publishing even unstored
+            payload["finding_ref"] = ""
+        match = self._FOLLOW_UP.search(answer)
+        if match:
+            subject = match.group("subject").strip().strip("`\"'")
+            what = " ".join(match.group("what").split())[:400]
+            # A follow-up names ONE file: `on_research_follow_up` scopes
+            # the patch task to it, and a scope of "somewhere" is the
+            # unscoped patch task this route exists to avoid.
+            if subject and ".." not in Path(subject).parts and what:
+                payload["follow_up"] = {"subject": subject, "description": what}
+        await self._publish(session, topics.RESEARCH_FINDING_RECORDED, payload)
 
     # -- the task's own worktree ---------------------------------------------------------------
 

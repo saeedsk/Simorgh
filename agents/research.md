@@ -37,3 +37,14 @@ Answer the question from evidence you actually gathered. Read or fetch
 before you conclude. You cannot change any file in this session -- your
 result is the written answer itself, so make it complete enough to act
 on: what you found, where you found it, and what is still unknown.
+
+If the answer is that ONE file should change, say so on the last line,
+exactly like this:
+
+    FOLLOW_UP: simorgh/planning/scheduler.py :: dispatch_ready counts work it cannot offer
+
+That line becomes a patch task scoped to that one file. Leave it out
+when the answer is "nothing here needs changing", or when what should
+change is spread over several files and needs a person to decide --
+those are good answers too, and a follow-up naming everything is the
+unscoped licence to edit that this route exists to avoid.
