@@ -1263,7 +1263,7 @@ class VoiceSession:
             if command is not None:
                 self._enrolling = None
                 self._intro = None
-                await self._obey(turn_id, command)
+                await self._obey(turn_id, command, said=text)
                 return
         if self._enrolling is not None:
             await self._enroll_take(turn_id, text, vector)
@@ -1418,7 +1418,7 @@ class VoiceSession:
             return
         command = spoken_command(text)
         if command is not None:
-            await self._obey(turn_id, command, speaker=speaker, clock=clock)
+            await self._obey(turn_id, command, speaker=speaker, clock=clock, said=text)
             return
         if _WHO_IS_SPEAKING.search(text) and self._speakers is not None and self._speakers.has_voices():
             # "Who is talking now?" is a fact the voice layer holds; the
@@ -2088,7 +2088,7 @@ class VoiceSession:
         clock.reply_at = self._now()
         await self._speak_reply(turn_id, "I'm here.", clock, Context(user_text=""))
 
-    async def _obey(self, turn_id: int, command: str, *, speaker: str = "", clock=None) -> None:
+    async def _obey(self, turn_id: int, command: str, *, speaker: str = "", clock=None, said: str = "") -> None:
         """"Stop", "be quiet", "voice off", "restart": done here and now,
         the model never hears of it. Playback is cut, the floor goes back
         to listening (or, for off/mute, to the service to close).
@@ -2114,7 +2114,10 @@ class VoiceSession:
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
             "command": command, "turn": turn_id})
         if command == HUSH:
-            await self._hush(turn_id, "")
+            # The WORDS, not just the verdict: "silence for two minutes"
+            # and "silence" are the same command with different ends to
+            # it, and `hush_seconds` reads the difference off the text.
+            await self._hush(turn_id, said)
             return
         if command == RESTART:
             await self._restart(turn_id, speaker=speaker, clock=clock)

@@ -41,13 +41,32 @@ _PHRASES: dict[str, tuple[str, ...]] = {
            "stay quiet", "keep quiet", "be quiet please", "silence please", "no talking",
            "ساکت", "ساکت باش", "ساکت شو", "سکوت", "خفه شو", "حرف نزن", "صحبت نکن"),
 }
+#: "be quiet for ten minutes" -- the same instruction with an end to it.
+#: Minutes by default: nobody means ten seconds, and "an hour" is said
+#: as an hour.
+_FOR_HOW_LONG = re.compile(
+    r"\bfor\s+(?:the\s+)?(?:next\s+)?(?P<n>\d+|a|an|one|two|three|five|ten|fifteen|twenty|thirty|half\s+an)\s*"
+    r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)\b"
+    r"|\b(?P<fa_n>\d+)\s*(?P<fa_unit>ثانیه|دقیقه|ساعت)\b", re.I)
+_WORD_NUMBERS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "five": 5,
+                 "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "half an": 0.5}
+
+
 _LOOKUP = {phrase: kind for kind, phrases in _PHRASES.items() for phrase in phrases}
 _MAX_WORDS = 5
 
 
 def spoken_command(text: str) -> str | None:
-    """`STOP`, `OFF`, `MUTE`, `RESTART`, or None when `text` is ordinary talk."""
+    """`STOP`, `OFF`, `MUTE`, `RESTART`, `HUSH`, or None for ordinary talk."""
     words = (text or "").strip()
+    # "Silence for two minutes." -- said by the creator, live on
+    # 2026-09-22, hours after the hush was built, and not recognised:
+    # the lookup is exact, so the very suffix `hush_seconds` exists to
+    # read was what made the phrase miss. An instruction with a time on
+    # it is the SAME instruction; how long belongs to `hush_seconds`.
+    without_time = _FOR_HOW_LONG.sub("", words).strip()
+    if without_time and len(without_time.split()) <= _MAX_WORDS:
+        words = without_time
     if not words or len(words.split()) > _MAX_WORDS:
         return None
     core = _TRAIL.sub("", _LEAD.sub("", words)).strip().lower()
@@ -68,17 +87,6 @@ _STOP_LEAD = re.compile(
 def opens_with_stop(text: str) -> bool:
     """Whether `text` begins by telling Sim to stop."""
     return bool(_STOP_LEAD.match(text or ""))
-
-
-#: "be quiet for ten minutes" -- the same instruction with an end to it.
-#: Minutes by default: nobody means ten seconds, and "an hour" is said
-#: as an hour.
-_FOR_HOW_LONG = re.compile(
-    r"\bfor\s+(?:the\s+)?(?:next\s+)?(?P<n>\d+|a|an|one|two|three|five|ten|fifteen|twenty|thirty|half\s+an)\s*"
-    r"(?P<unit>seconds?|secs?|minutes?|mins?|hours?|hrs?)\b"
-    r"|\b(?P<fa_n>\d+)\s*(?P<fa_unit>ثانیه|دقیقه|ساعت)\b", re.I)
-_WORD_NUMBERS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "five": 5,
-                 "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "half an": 0.5}
 
 
 def hush_seconds(text: str) -> float:

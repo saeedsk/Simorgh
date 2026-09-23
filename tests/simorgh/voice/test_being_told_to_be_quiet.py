@@ -21,6 +21,16 @@ class WhatCountsAsBeingToldToBeQuiet(unittest.TestCase):
                      "ساکت باش", "خفه شو", "حرف نزن"):
             self.assertEqual(spoken_command(text), HUSH, text)
 
+    def test_an_instruction_with_a_time_on_it_is_the_same_instruction(self):
+        """Said by the creator hours after the hush was built, and not
+        recognised: the lookup is exact, so the very suffix
+        `hush_seconds` exists to read was what made the phrase miss."""
+        for text in ("Silence for two minutes.", "sim be quiet for the next 10 minutes",
+                     "be quiet for an hour", "quiet for 30 seconds"):
+            self.assertEqual(spoken_command(text), HUSH, text)
+        self.assertIsNone(spoken_command("what is for dinner in ten minutes"),
+                          "an ordinary sentence with a time in it is not a command")
+
     def test_how_long_when_they_say_how_long(self):
         self.assertEqual(hush_seconds("sim be quiet for the next 10 minutes"), 600.0)
         self.assertEqual(hush_seconds("be quiet for an hour"), 3600.0)
