@@ -806,6 +806,12 @@ class HttpApi:
                 self._dash_state["scale"] = max(0.0, min(4.0, float(payload.get("scale") or 0)))
             except (TypeError, ValueError, OverflowError):
                 pass
+        if "camera" in payload:
+            # Which camera is shown FULL SCREEN, by name -- "" for none.
+            # A Ring camera cannot be relayed by ffmpeg (no RTSP), so
+            # before this the only way to fill the screen with one was
+            # to press `ok` on its tile with the remote.
+            self._dash_state["camera"] = str(payload.get("camera") or "").strip()[:60]
         if "live_max" in payload:
             # How many camera feeds decode at once; the TV's browser also plays the ambient video.
             try:

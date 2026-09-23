@@ -1008,10 +1008,15 @@ class DashViewTool(_CastTool):
                    "`symbol` pick the markets chart; `rotate_s` cycles the views every N seconds (0 stops); `scale` "
                    "fixes the page's zoom on a TV that misreports its size (0 = fit); `live_max` caps how many camera "
                    "feeds play at once, `live_step_s` how often the live window slides one camera on; `video_quality` "
-                   "light|full and `video_sound` on/off for the embedded video. `action` remote answers the phone "
+                   "light|full and `video_sound` on/off for the embedded video. `camera` <name> fills the screen "
+                   "with ONE camera (Ring included, which cam_stream cannot relay), \"\" goes back to the wall. "
+                   "`action` remote answers the phone "
                    "remote's link; link, the dashboard's own link for a browser (with the token).")
     args_schema = {"type": "object", "properties": {
         "view": {"type": "string"}, "timeframe": {"type": "string"}, "symbol": {"type": "string"},
+        # One camera, full screen, by name -- "" clears it. Works for a
+        # RING camera too, which `cam_stream` cannot relay (no RTSP).
+        "camera": {"type": "string"},
         "rotate_s": {"type": "number"}, "scale": {"type": "number"}, "live_max": {"type": "integer"},
         "live_step_s": {"type": "number"}, "video_sound": {"type": "boolean"},
         "video_quality": {"type": "string", "enum": ["light", "full"]}, "action": {"type": "string", "enum": ["view", "remote", "link"]}}}
@@ -1041,6 +1046,14 @@ class DashViewTool(_CastTool):
             if view not in self.VIEWS:
                 return ToolResult.refused(f"refused: no view called {view!r}; the views are {', '.join(self.VIEWS)}")
             payload["view"] = view
+        if "camera" in args:
+            # Naming a camera implies the view it lives in: nobody asks
+            # for the doorbell full screen and means "leave the markets
+            # up". "" clears it and the wall comes back.
+            wanted = str(args.get("camera") or "").strip()
+            payload["camera"] = wanted
+            if wanted:
+                payload.setdefault("view", "cameras")
         tf = str(args.get("timeframe") or "").strip().upper()
         if tf:
             if tf not in ("1D", "1W", "1M", "1Y"):

@@ -64,6 +64,11 @@ def available() -> tuple[bool, str]:
 #: The Ring cameras the Ring tools last listed (execution/home/ring.py
 #: writes it), relative to the repository Sim runs in.
 _RING_LIST = Path("workspace/cameras/ring/cameras.json")
+#: Said by `_camera_named` when the name belongs to Ring. Recognisable,
+#: because `cam_stream` reads it back to decide whether a refusal is
+#: really a refusal or a different route.
+RING_NOT_NVR = ("refused: {name} is a Ring camera, not one on the NVR -- `ring live {name}` or "
+                "`ring snapshot {name}`")
 
 
 def _ring_camera_named(wanted: str) -> str:
@@ -316,8 +321,11 @@ class _CameraTool:
             if ring:
                 # "cameras show Garden", three times, 2026-09-14: Garden is a
                 # Ring camera, and the NVR's list alone did not say where to look.
-                return None, (f"refused: {ring} is a Ring camera, not one on the NVR -- `ring live {ring}` or "
-                              f"`ring snapshot {ring}`")
+                # The caller decides what to do about it -- `cam_stream` in
+                # `full` mode now sends it to the dashboard's own zoom
+                # instead of refusing, because "show me that camera, big"
+                # is one intention whichever brand the camera is.
+                return None, RING_NOT_NVR.format(name=ring)
             return None, f"refused: no camera called {wanted!r}; cameras: {', '.join(c.name for c in cameras)}"
         if len(match) > 1:
             return None, f"refused: {wanted!r} could be {', '.join(c.name for c in match)}"

@@ -1355,7 +1355,18 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
             return Outcome(usage)
         mode = rest[-1].lower() if rest[-1].lower() in ("frame", "grid", "full", "stop", "tiled", "dash", "dashboard") else ""
         camera = " ".join(rest[:-1] if mode else rest) or "all"
-        return await _run("cam_stream", {"camera": camera, "mode": {"tiled": "grid", "dashboard": "dash"}.get(mode, mode) or "frame"})
+        outcome = await _run("cam_stream", {"camera": camera,
+                                            "mode": {"tiled": "grid", "dashboard": "dash"}.get(mode, mode) or "frame"})
+        # A Ring camera has no RTSP, so ffmpeg cannot relay it and
+        # `cam_stream` says so. But "show me that camera, big" is ONE
+        # intention whichever brand the camera is, and the dashboard can
+        # do it over WebRTC -- so the refusal becomes the other route
+        # rather than a dead end (the creator, 2026-09-22: "how to show
+        # ring camera on tv in fullscreen?"). The tool stays truthful;
+        # the routing lives here, where calling another tool is ordinary.
+        if mode in ("full", "", "frame") and "is a Ring camera" in (outcome.text or ""):
+            return await _run("dash_view", {"camera": camera, "view": "cameras"})
+        return outcome
     if verb in ("snapshot", "snap", "picture"):
         return await _run("cam_snapshot", {"camera": " ".join(rest)}) if rest else Outcome(usage)
     if verb in ("light", "spotlight", "ir"):
@@ -1445,13 +1456,25 @@ async def _ring(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: 
     words = (args or "").strip().split()
     verb = words[0].lower() if words else "list"
     rest = words[1:]
-    usage = ("usage: ring list | snapshot <camera|all> | events [camera] [n] | light <camera> on|off | siren <camera> [seconds] | "
-             "watch on|off [seconds] | setup <email> [code]")
+    usage = ("usage: ring list | live <camera>|off | snapshot <camera|all> | events [camera] [n] | "
+             "light <camera> on|off | siren <camera> [seconds] | watch on|off [seconds] | setup <email> [code]")
 
     async def _run(tool: str, payload: dict, timeout: float = 120.0) -> Outcome:
         return await _run_tool(bus=bus, ledger=ledger, tool=tool, raw=json.dumps(payload), session_id=session_id,
                                timeout=timeout)
 
+    if verb in ("live", "show", "watch_live", "fullscreen", "full"):
+        # A Ring camera has no RTSP, so `cam_stream` cannot relay it and
+        # the only way to fill the TV with one was to press `ok` on its
+        # tile with the dashboard's remote. The creator, 2026-09-22:
+        # "how to show ring camera on tv in fullscreen?" -- it is the
+        # dashboard's own zoom, now reachable by name.
+        wanted = " ".join(rest).strip()
+        if wanted.lower() in ("off", "stop", "none", "close"):
+            return await _run("dash_view", {"camera": ""})
+        if not wanted:
+            return Outcome("usage: ring live <camera>   (`ring list` names them, `ring live off` goes back)")
+        return await _run("dash_view", {"camera": wanted, "view": "cameras"})
     if verb in ("list", "cameras"):
         return await _run("ring_list", {})
     if verb in ("snapshot", "snap", "picture"):

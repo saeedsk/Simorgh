@@ -197,6 +197,17 @@ function applyState(st){
   if(st.video_quality&&st.video_quality!==VIDEO_QUALITY){VIDEO_QUALITY=st.video_quality;DK.np="";}
   const k=VIEW_ALIAS[st.view||""]||st.view||"";
   if(k&&RENDER[k]&&k!==CUR) go(st.view); else render();
+  // One camera, full screen, asked for by NAME rather than by pressing
+  // `ok` on the right tile. A Ring camera has no RTSP for ffmpeg to
+  // relay, so `cameras show <ring> full` could only refuse -- and the
+  // creator asked the obvious question, "how to show ring camera on tv
+  // in fullscreen?" (2026-09-22). The page already knew how: this is
+  // `navCamOpen`, the same thing `ok` does, reachable from a command.
+  if(st.camera!=null&&st.camera!==CAMFULL){
+    CAMFULL=String(st.camera||"");
+    if(CAMFULL){ if(CUR!=="cameras") go("cameras"); setTimeout(()=>navCamOpen(CAMFULL),60); }
+    else navLayerClose();
+  }
 }
 function setRotate(s){ROT=s;if(rotTimer){clearInterval(rotTimer);rotTimer=null;}
   const t=$("#rot");if(s>0){rotTimer=setInterval(()=>{const i=VIEWS.findIndex(v=>v[0]===CUR);go(VIEWS[(i+1)%VIEWS.length][0]);},s*1000);t.style.display="";t.textContent="rotating "+s+"s";}else t.style.display="none";}
@@ -653,6 +664,7 @@ const VIEW_ALIAS={news:"deck",discover:"deck",terminal:"deck",home:"deck",media:
 // time. Keys come from a keyboard or a remote that reaches the page and -- because a Cast receiver never hears the TV's
 // own remote -- from Sim, relayed through /api/dash/keys (the phone remote's D-pad, `tv nav`, the dash_key tool).
 const NAV={level:"ribbon",focus:{},zoom:"",tf:"",hudT:0,used:false};
+let CAMFULL="";   // the camera a command asked to see full screen, by name
 const NAV_KEYS={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down",Enter:"ok"," ":"ok",Escape:"back",Backspace:"back",GoBack:"back",BrowserBack:"back",MediaPlayPause:"playpause",MediaTrackNext:"next",MediaTrackPrevious:"prev"};
 let KEYSEQ=-1,KEYBUSY=false;
 async function pollKeys(){if(KEYBUSY||OFFLINE)return;KEYBUSY=true;

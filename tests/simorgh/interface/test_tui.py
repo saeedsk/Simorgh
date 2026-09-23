@@ -151,7 +151,8 @@ class TestLongLinesDoNotFreezeCompletionOrLexing(unittest.TestCase):
                                               "pronounce",
                                               "models", "voices", "devices", "set", "bench"])
         self.assertIn("tts_voice", offered("voice set "))
-        self.assertEqual(offered("voice set tts"), ["tts", "tts_farsi_voice", "tts_speed", "tts_voice"])
+        self.assertEqual(offered("voice set tts"),
+                         ["tts", "tts_farsi", "tts_farsi_reference", "tts_farsi_voice", "tts_speed", "tts_voice"])
         self.assertEqual(offered("improve "), [], "a free argument is not a word to offer")
 
     def test_completer_yields_nothing_past_the_cap(self):
