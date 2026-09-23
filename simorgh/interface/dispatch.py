@@ -441,8 +441,27 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "domains":
         return await _domains_command(ledger, args)
 
-    if name == "alerts":
+    if name == "alerts" and args.strip().split()[:1] != ["review"]:
         return await _alerts_command(ledger, args)
+
+    if name == "alerts":
+        args = " ".join(args.split()[1:])
+        # What Reflection SEES, before any of it becomes a task. The
+        # request topic had a subscriber and no publisher
+        # (`tools/scan_half_wired.py`, 2026-09-23): the answer existed
+        # and nobody could ask the question. It earns its place now --
+        # the creator, seeing reflection's tasks queued, 2026-09-22: "I
+        # don't like the fact sim is scheduling nonsense". This is how
+        # to look first.
+        hours = 0.0
+        for word in args.split():
+            try:
+                hours = float(word.rstrip("hH"))
+            except ValueError:
+                continue
+        payload = {"window_seconds": hours * 3600.0} if hours > 0 else {}
+        return await _request(bus, topics.REFLECT_REVIEW_REQUEST, payload, timeout=20.0,
+                              render=_render_review)
 
     if name == "capabilities":
         return await _capabilities_command(ledger)
@@ -714,6 +733,23 @@ async def _benchmark(bus: BusClient, args: str) -> Outcome:
         return await _request(bus, topics.BENCHMARK_RUN_REQUEST, payload, timeout=60.0,
                               render=benchmarkview.started)
     return Outcome(_BENCHMARK_USAGE)
+
+
+def _render_review(payload: dict) -> str:
+    """What reflection has noticed, as it would propose it."""
+    patterns = payload.get("patterns") or []
+    if not patterns:
+        return "reflection sees no pattern in that window -- nothing is failing often enough to name"
+    lines = [f"reflection sees {len(patterns)} pattern(s):"]
+    for p in patterns:
+        rate = p.get("rate")
+        mark = f"  [{float(rate):.0%}] " if isinstance(rate, (int, float)) else "  "
+        lines.append(mark + " ".join(str(p.get("proposal") or p.get("kind") or "").split())[:160])
+    takeaways = payload.get("takeaways") or []
+    for t in takeaways:
+        lines.append(f"  - {t}")
+    lines.append("each of these becomes a research task, not a patch (`tasks` shows what is queued)")
+    return "\n".join(lines)
 
 
 def _render_auto(payload: dict) -> str:
