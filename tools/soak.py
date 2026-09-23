@@ -180,13 +180,38 @@ async def run_job(inst: Instance, job: str, run_dir: Path, *, paid: bool) -> boo
     ok = code == 0 and not _failed_expectations(job, text)
     if not ok:
         inst.failures += 1
+        # The WHOLE output in a file of its own, and the failing
+        # expectations -- not the last 4,000 characters, which for a
+        # house run is the tail of a long JSON array of passes with the
+        # failure cut off the front. The soak's first real finding was
+        # unreadable for exactly that reason (2026-09-23).
+        where = run_dir / f"fail-{inst.number}-{job}-{int(time.time())}.log"
+        try:
+            where.write_text(text, encoding="utf-8")
+        except OSError:
+            where = Path("")
         _log(run_dir, "finding", instance=inst.number, job=job, code=code,
              seconds=round(time.monotonic() - started, 1),
-             why=_why(job, text, code), tail=text[-4000:])
+             why=_why(job, text, code), failed=_failed_rows(job, text), log=str(where),
+             tail=text[-1500:])
     else:
         _log(run_dir, "ok", instance=inst.number, job=job, seconds=round(time.monotonic() - started, 1))
     inst.history.append(f"{job}:{'ok' if ok else 'FAIL'}")
     return ok
+
+
+def _failed_rows(job: str, text: str) -> list[dict]:
+    """The expectations that failed, with the beat that broke them."""
+    if not job.startswith(("house", "arcs")):
+        return []
+    try:
+        rows = json.loads(text[text.index("["):text.rindex("]") + 1])
+    except (ValueError, IndexError):
+        return []
+    return [{"name": r.get("name"), "why": str(r.get("why") or "")[:300],
+             "scenario": (r.get("detail") or {}).get("scenario", ""),
+             "beat": str((r.get("detail") or {}).get("beat", ""))[:200]}
+            for r in rows if str(r.get("status")) == "failed"][:20]
 
 
 def _failed_expectations(job: str, text: str) -> bool:
