@@ -409,7 +409,41 @@ def main() -> int:
     args = ap.parse_args()
     if args.detach and not args.report:
         detach(SOAK_DIR / f"{args.run or 'soak'}.log")
+        return supervise(args)
     return asyncio.run(main_async(args))
+
+
+def supervise(args) -> int:
+    """Keep a soak running for its whole span, across being killed.
+
+    It was killed four times in one morning -- three times by another
+    command's process group ending (fixed by detaching), and once as a
+    daemon with an EMPTY log, which is a SIGKILL and almost certainly
+    the machine reclaiming memory from the largest process while four
+    sandboxes were booting whole Sims. A kill cannot be caught, so the
+    answer is to notice and start again.
+
+    The supervisor holds no sandboxes and runs no jobs, so it is a small
+    target; the work happens in a child.
+    """
+    deadline = time.monotonic() + args.hours * 3600.0
+    restarts = 0
+    while time.monotonic() < deadline:
+        left = (deadline - time.monotonic()) / 3600.0
+        child = subprocess.run([sys.executable, "-u", str(Path(__file__).resolve()),
+                                "--instances", str(args.instances), "--hours", f"{left:.3f}",
+                                "--refresh-hours", str(args.refresh_hours), "--run", args.run,
+                                *(["--jobs", args.jobs] if args.jobs else []),
+                                *(["--paid"] if args.paid else [])])
+        if child.returncode == 0:
+            return 0
+        restarts += 1
+        run_dir = SOAK_DIR / args.run
+        if run_dir.is_dir():
+            _log(run_dir, "restarted", why=f"the run died with code {child.returncode}", restarts=restarts)
+        print(f"soak died (code {child.returncode}); restarting, {left:.1f}h left", flush=True)
+        time.sleep(10.0)
+    return 0
 
 
 if __name__ == "__main__":
