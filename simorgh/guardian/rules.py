@@ -64,16 +64,37 @@ def _diff_subject(proposal: Proposal, ctx: DecisionContext) -> str | None:
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+#: Where a materialised checkout may live. `workspace/` is the one
+#: directory the file tools may write to, and where every checkout is
+#: actually created (`benchmark/config.py::swebench_checkout_dir`,
+#: `attachment_dir`).
+_CHECKOUT_ROOTS: tuple[str, ...] = ("workspace",)
+
+
 def _in_somebody_elses_checkout(subject: str) -> bool:
     """Is `subject` inside a materialised foreign checkout?
 
-    The signal is the manifest `execution/checkout.py` writes when it
-    materialises one (`.simorgh-checkout.json`), so this is a fact about
-    the tree, not a path spelling anybody can imitate: Simorgh's own
-    repository has no manifest, and `find_enclosing` never treats the
-    root as a checkout.
+    TWO facts, not one. The manifest `execution/checkout.py` writes
+    (`.simorgh-checkout.json`) says a tree is a checkout -- AND it must
+    sit under `workspace/`, where checkouts are actually made.
+
+    The manifest alone was the first version of this, and it was a
+    privilege escalation: Sim can write files, a manifest is JSON with
+    no denylisted pattern in it, and `simorgh/guardian` is protected but
+    `simorgh/memory` is not. Writing `simorgh/memory/.simorgh-checkout.json`
+    would have made Sim's own memory package "somebody else's program"
+    and exempted it from the capability denylist -- the exact rule that
+    stops Sim giving itself a subprocess. Caught reviewing my own diff
+    the same day I wrote it (2026-09-23), not by a test.
+
+    Under `workspace/` the escalation buys nothing: nothing there is
+    imported by Sim, and code that runs from there runs through the
+    sandbox and Guardian like anything else.
     """
     if not subject or ".." in Path(subject).parts:
+        return False
+    parts = Path(subject).parts
+    if not parts or parts[0] not in _CHECKOUT_ROOTS:
         return False
     from simorgh.contracts.checkout import find_enclosing
 

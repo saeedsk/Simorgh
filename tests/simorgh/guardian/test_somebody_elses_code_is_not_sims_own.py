@@ -72,7 +72,7 @@ class SomebodyElsesCodeIsNotSimsOwn(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("subprocess" in r for r in decision.reasons), decision.reasons)
 
     async def test_a_path_that_only_looks_like_a_checkout_is_still_judged(self):
-        """The manifest is the fact. A directory named like a checkout,
+        """The manifest is a fact. A directory named like a checkout,
         without one, is Sim's own tree."""
         fake = "workspace/swebench/not-really/mine.py"
         (self.root / "workspace" / "swebench" / "not-really").mkdir(parents=True)
@@ -80,6 +80,26 @@ class SomebodyElsesCodeIsNotSimsOwn(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(rules_mod, "_REPO_ROOT", self.root):
             decision = await _evaluate(DenylistRule(), self._patch(fake), _ctx())
         self.assertEqual(decision.kind, "deny")
+
+    async def test_a_manifest_inside_sims_own_source_exempts_nothing(self):
+        """The escalation this rule must not allow.
+
+        Sim can write files. A manifest is JSON with no denylisted
+        pattern in it, and `simorgh/guardian` is protected while
+        `simorgh/memory` is not -- so a first version keyed only on the
+        manifest would have let Sim write
+        `simorgh/memory/.simorgh-checkout.json` and thereby exempt its
+        own memory package from the rule that stops it giving itself a
+        subprocess. A checkout lives under `workspace/`; a manifest
+        anywhere else is a file Sim wrote.
+        """
+        planted = self.root / "simorgh" / "memory"
+        planted.mkdir(parents=True)
+        (planted / ".simorgh-checkout.json").write_text(json.dumps({"repo": "mine", "diff_base": "x"}))
+        (planted / "store.py").write_text("# mine\n")
+        with mock.patch.object(rules_mod, "_REPO_ROOT", self.root):
+            decision = await _evaluate(DenylistRule(), self._patch("simorgh/memory/store.py"), _ctx())
+        self.assertEqual(decision.kind, "deny", "Sim's own source is judged, manifest or no manifest")
 
     async def test_code_with_no_file_behind_it_is_still_judged(self):
         """`run_shell` / `run_python_sandboxed` name no subject: that
