@@ -368,7 +368,20 @@ def remembered(*words: str) -> Expectation:
             return "Sim never thought about it"
         context = " ".join(str(m.get("content", "")) for m in (think.payload.get("messages") or [])).lower()
         missing = [w for w in words if w.lower() not in context]
-        return "" if not missing else f"{missing} never reached the prompt"
+        if not missing:
+            return ""
+        # WHICH kind of forgetting. "Never reached the prompt" covers two
+        # different failures and the soak could not tell them apart when
+        # this failed once in sixteen runs under load (2026-09-23): the
+        # store was never READ (recall timed out -- 0.25 s on a busy
+        # machine, and `orchestration/context.py` then says so in the
+        # prompt), or it was read and the fact was not found, which is a
+        # scoring problem in Memory itself. Nothing else distinguishes
+        # them after the fact, and the run is gone by then.
+        why = ("memory was not consulted at all (the recall timed out and the prompt says so)"
+               if "memory could not be consulted" in context
+               else "memory WAS consulted and the fact was not among what it returned")
+        return f"{missing} never reached the prompt -- {why}"
     return Expectation(f"remembered {', '.join(words)}", _check, stage="5")
 
 
