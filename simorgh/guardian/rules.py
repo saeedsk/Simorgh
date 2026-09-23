@@ -64,6 +64,25 @@ def _diff_subject(proposal: Proposal, ctx: DecisionContext) -> str | None:
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _in_somebody_elses_checkout(subject: str) -> bool:
+    """Is `subject` inside a materialised foreign checkout?
+
+    The signal is the manifest `execution/checkout.py` writes when it
+    materialises one (`.simorgh-checkout.json`), so this is a fact about
+    the tree, not a path spelling anybody can imitate: Simorgh's own
+    repository has no manifest, and `find_enclosing` never treats the
+    root as a checkout.
+    """
+    if not subject or ".." in Path(subject).parts:
+        return False
+    from simorgh.contracts.checkout import find_enclosing
+
+    try:
+        return find_enclosing(_REPO_ROOT, subject) is not None
+    except (OSError, ValueError):
+        return False
+
+
 def _existing_text(subject: str) -> str | None:
     """The on-disk content of `subject`, or None if it doesn't exist yet
     (a new file -- everything in it is "new") or can't be read as text
@@ -463,6 +482,26 @@ class DenylistRule:
         # meaningful here.
         subject = _diff_subject(proposal, ctx)
         if subject:
+            if _in_somebody_elses_checkout(subject):
+                # This denylist exists to stop Sim GIVING ITSELF
+                # capabilities: code that will run as Sim, in Sim's
+                # process, outside the sandbox. A file inside a
+                # materialised foreign checkout is not that. It is
+                # somebody else's program, which Sim was asked to fix
+                # and which never runs here -- it runs in that case's
+                # own container, behind Guardian's gate on `run_tests`
+                # and `run_shell` like any other execution.
+                #
+                # Live, 2026-09-22: SWE-bench django-10973 is the issue
+                # "use subprocess.run and PGPASSWORD for the postgres
+                # client". The fix IS `subprocess.run`, so every attempt
+                # to write it was denied "spawns its own subprocess
+                # instead of using the sandbox", three times, and Sim --
+                # correctly refusing to rephrase its way past a denial --
+                # blocked the case and asked for a human. The same
+                # denial would land on any real repository of the
+                # creator's that legitimately shells out.
+                return Decision("abstain", self.layer)
             old_text = _existing_text(subject)
             if old_text is not None:
                 scan_text = _added_or_changed_lines(old_text, code)
