@@ -872,6 +872,13 @@ class OtherLanguageTestCase(unittest.IsolatedAsyncioTestCase):
         heard = iter([("Hayra Bey, sen bir bak", "tr"), ("saeed kojast", "fa")])
 
         async def transcribe(audio, *, language=""):
+            if language:
+                # A second opinion (`session.ask_again`), asked because
+                # the guess was Turkish. This recogniser hears Turkish
+                # however it is hinted, so the line stays discarded --
+                # and asking does not eat the next turn's line.
+                return Utterance(text="Hayra Bey, sen bir bak", confidence=0.95, seconds=audio.seconds,
+                                 engine="fake", language="tr")
             text, lang = next(heard, ("hello", "en"))
             return Utterance(text=text, confidence=0.95, seconds=audio.seconds, engine="fake", language=lang)
         session._stt._inner.transcribe = transcribe  # type: ignore[method-assign]  # noqa: SLF001

@@ -347,6 +347,7 @@ async def main_async(args) -> int:
         print(report(run_dir if args.run else max(SOAK_DIR.iterdir(), key=lambda p: p.stat().st_mtime)))
         return 0
     run_dir.mkdir(parents=True, exist_ok=True)
+    say_how_you_died(run_dir)
     rotation = tuple(args.jobs.split(",")) if args.jobs else DEFAULT_ROTATION
     for job in rotation:
         if job not in JOBS:
@@ -394,6 +395,34 @@ def detach(log_path: Path) -> None:
     os.dup2(devnull, 0)
 
 
+def say_how_you_died(run_dir: Path) -> None:
+    """Write down which signal ended this process, before it ends.
+
+    The soak has now died five times leaving an EMPTY log, and each
+    empty log was read as "SIGKILL, probably memory" -- twice with no
+    evidence at all, and the second time while four gigabytes were free.
+    A guess repeated is still a guess.
+
+    Every signal but KILL and STOP can be caught, so catch them and say
+    so. Then an empty log MEANS something: nobody signalled it politely,
+    and the remaining explanations are a real SIGKILL or the machine.
+    """
+    import signal as _signal
+
+    def note(signum, _frame):
+        try:
+            _log(run_dir, "signalled", signal=_signal.Signals(signum).name, pid=os.getpid())
+        except OSError:
+            pass
+        os._exit(128 + signum)
+
+    for name in ("SIGTERM", "SIGHUP", "SIGINT", "SIGQUIT", "SIGPIPE", "SIGXCPU"):
+        try:
+            _signal.signal(getattr(_signal, name), note)
+        except (OSError, ValueError, AttributeError):
+            pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--instances", type=int, default=8)
@@ -418,6 +447,8 @@ def main() -> int:
         # restarted soak would look like a soak that had never run.
         args.run = args.run or time.strftime("%Y%m%d-%H%M")
         detach(SOAK_DIR / f"{args.run}.log")
+        (SOAK_DIR / args.run).mkdir(parents=True, exist_ok=True)
+        say_how_you_died(SOAK_DIR / args.run)
         return supervise(args)
     return asyncio.run(main_async(args))
 

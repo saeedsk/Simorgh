@@ -122,8 +122,16 @@ async def replay(person: str, *, limit: int = 0, paid: bool = False, language: s
             async def _keep(message):
                 seen.append((time.monotonic(), message.type, dict(message.payload or {})))
 
+            # VOICE_LISTENING is the session announcing its own turn
+            # state, and it separates the two ways a take can be lost:
+            # the endpointer never opened a turn on it (no
+            # `user_speaking`), or a turn opened and what came out of it
+            # was thrown away. Four guesses were made about two silent
+            # Farsi takes before anyone asked which of those it was
+            # (2026-09-23).
             subs = [await bus.subscribe(t, _keep)
-                    for t in (topics.VOICE_TRANSCRIPT, topics.PERCEPT_TEXT_RECEIVED, topics.TASK_STEP)]
+                    for t in (topics.VOICE_TRANSCRIPT, topics.PERCEPT_TEXT_RECEIVED, topics.TASK_STEP,
+                              topics.VOICE_LISTENING)]
             for n, take in enumerate(takes, 1):
                 await director._ready_to_listen()  # noqa: SLF001 -- the director's own wait
                 start = time.monotonic()
@@ -154,12 +162,23 @@ async def replay(person: str, *, limit: int = 0, paid: bool = False, language: s
                     "score": (transcript or {}).get("speaker_score"),
                     "addressed": any(kind == topics.PERCEPT_TEXT_RECEIVED for kind, _ in window),
                     "acted": [str(p.get("tool")) for kind, p in window if kind == topics.TASK_STEP and p.get("tool")],
+                    "turn_states": [str(p.get("state") or "") for kind, p in window
+                                    if kind == topics.VOICE_LISTENING],
                 }
+                # A take with no transcript is two different bugs. Say
+                # which one it is on the line, rather than leaving a
+                # blank that reads the same either way.
+                if not heard:
+                    opened = "user_speaking" in row["turn_states"]
+                    row["lost"] = ("turn opened and produced nothing "
+                                   f"({'>'.join(row['turn_states'])})" if opened
+                                   else f"never opened a turn ({'>'.join(row['turn_states']) or 'no states'})")
                 rows.append(row)
                 mark = "ok " if row["who"] == person else "WHO"
                 print(f"{n:3}/{len(takes)} {row['line']:7} {mark} {row['who'] or '-':7} "
                       f"{row['score'] if row['score'] is not None else '-':>6} "
-                      f"{'addr' if row['addressed'] else '    '} wer={row['wer']:.2f}  {heard[:60]}",
+                      f"{'addr' if row['addressed'] else '    '} wer={row['wer']:.2f}  "
+                      f"{heard[:60] or 'LOST: ' + row.get('lost', '')}",
                       flush=True)
             for sub in subs:
                 await sub.unsubscribe()

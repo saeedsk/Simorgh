@@ -103,7 +103,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `stt_server_port` | `0` | yes |
 | `stt_model` | `'large-v3-turbo'` | yes |
 | `stt_language` | `''` | yes |
-| `stt_languages` | `'en,fa'` | yes |
+| `stt_languages` | `'en,fa'` | yes -- a final whose detected language is none of these is discarded as noise, but FIRST the audio is offered back once per house language and believed if it returns in another script (`session.ask_again`): whisper called two of the creator's Farsi takes Armenian and Icelandic and they were deleted every run (2026-09-23) |
 | `stt_compute` | `'auto'` | yes |
 | `tts` | `'auto'` | yes |
 | `tts_voice` | `'af_jessica'` | yes |
@@ -111,7 +111,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `tts_by_language` | `True` | yes |
 | `tts_farsi_voice` | `'fa_IR-amir-medium'` | yes |
 | `tts_farsi_reference` | `'workspace/voice/prompts/farsi.wav'` | yes -- the clip Pocket clones its Farsi voice from; any WAV of about five seconds, including a family member's |
-| `tts_farsi` | `'auto'` | yes, and live (`voice set tts_farsi mms`): it is in `contracts.settings.VOICE_SAFE_KEYS` and in `service._ENGINE_KEYS`, so the engines are reopened rather than waiting for a restart -- which engine speaks Farsi: `auto` prefers Piper and falls back to MMS, and NAMING one means it or nothing (silently swapping the engine somebody chose is how they conclude both sound the same) |
+| `tts_farsi` | `'auto'` | yes, and live (`voice set tts_farsi mms`): it is in `contracts.settings.VOICE_SAFE_KEYS` and in `service._ENGINE_KEYS`, so the engines are reopened rather than waiting for a restart -- which engine speaks Farsi: `auto` takes Pocket (the creator's choice, 2026-09-22), then Piper, then MMS, and NAMING one means it or nothing (silently swapping the engine somebody chose is how they conclude both sound the same) |
 | `tts_farsi_mms_model` | `'facebook/mms-tts-fas'` | yes |
 | `vad` | `'auto'` | yes |
 | `vad_threshold` | `0.5` | yes |

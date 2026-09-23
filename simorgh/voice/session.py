@@ -29,7 +29,7 @@ from dataclasses import dataclass, field, replace
 from simorgh.contracts.household import HOUSEHOLD
 from simorgh.contracts import topics
 
-from .api import Audio, PlaybackState, TtsRequest, VoiceTurn
+from .api import SAMPLE_RATE, Audio, PlaybackState, TtsRequest, VoiceTurn
 from .backchannel import (
     GREETING, Backchannel, addressed, asks_for_something_sim_does, classify, is_quiet,
     spell_household_names, strip_lead, to_someone_else,
@@ -188,6 +188,58 @@ _LANGUAGE_CODES = {
     "thai": "th", "indonesian": "id", "malay": "ms", "bengali": "bn", "punjabi": "pa",
     "tamil": "ta", "telugu": "te", "armenian": "hy", "azerbaijani": "az", "kurdish": "ku",
 }
+
+
+async def ask_again(recogniser, audio: bytes, *, heard: str, languages: tuple[str, ...],
+                    sample_rate: int = 16000) -> str:
+    """Hand the same audio back, naming a language the house speaks.
+
+    Whisper is asked to guess the language and it guesses badly on short
+    utterances. Two of the creator's own Farsi calibration takes come
+    back as ARMENIAN and ICELANDIC -- gibberish in those scripts -- and
+    the "not a language of this house" filter then deleted them, so
+    "دوربین‌ها رو نشون بده" (show me the cameras) was heard as nothing,
+    twice out of sixteen, reproducibly (2026-09-23). That filter is
+    right about noise and wrong about this, and it cannot tell them
+    apart, because both arrive as a confident sentence in a language
+    nobody here speaks.
+
+    So do not decide from the guess. Ask again, naming each house
+    language, and believe an answer only when it comes back in a
+    DIFFERENT SCRIPT from the one being thrown away. Whisper keeps
+    reporting `icelandic` even when it is handed `fa` and returns
+    perfect Persian, so its label cannot be checked against itself; the
+    letters can. Changing script is the evidence: the same audio read as
+    Persian letters rather than Latin ones is a different reading, not
+    the same mistake relabelled.
+
+    That deliberately leaves one case unfixed. An ENGLISH sentence
+    mislabelled `icelandic` comes back from an `en` hint in the same
+    Latin letters as the guess being discarded -- indistinguishable, on
+    the evidence here, from whisper dressing up noise, which is what the
+    filter exists to stop. Sim stays deaf to that one rather than
+    becoming credulous about the TV. Only two scripts are told apart
+    (`lang.language_of`), so this helps a house speaking Persian and
+    English, which is this one.
+
+    Returns the text that survived, or "" -- costing one extra
+    transcription per misheard utterance, and none per normal one.
+    """
+    transcribe = getattr(recogniser, "transcribe", None)
+    if transcribe is None or not audio:
+        return ""
+    discarded = language_of(heard)
+    for code in languages:
+        if _language_code(code) == discarded:
+            continue                     # the same script cannot be the evidence
+        try:
+            again = await transcribe(Audio(audio, sample_rate), language=code)
+        except Exception:  # noqa: BLE001 -- a second opinion that fails leaves the first one standing
+            continue
+        text = (getattr(again, "text", "") or "").strip()
+        if text and language_of(text) == _language_code(code):
+            return text
+    return ""
 
 
 def _language_code(value: str) -> str:
@@ -754,6 +806,10 @@ class VoiceSession:
                               r"|\b(?:hey|hi|hello|ok|okay)\s+teams?\b"
                               r"|^\s*(?:see him|see|team)\s*,", text or "", re.I))
 
+    def _house_languages(self) -> tuple[str, ...]:
+        """The codes of `[voice] stt_languages`, in order."""
+        return tuple(_language_code(c) for c in (self._config.stt_languages or "").split(",") if c.strip())
+
     def _other_language(self, heard: str) -> str:
         """The language code whisper heard, when it is not one of the
         house's (`[voice] stt_languages`); "" otherwise."""
@@ -806,6 +862,20 @@ class VoiceSession:
                         "seconds": event.audio_seconds, "engine": event.engine, "device": self._config.device})
                 else:
                     other = self._other_language(event.language)
+                    if other and event.text.strip():
+                        # ...unless asking again in a language the house
+                        # DOES speak reads the same audio in another
+                        # script. Two of the creator's Farsi takes were
+                        # deleted here every time (`ask_again`).
+                        second = await ask_again(
+                            self._stt, bytes(event.audio or b""), heard=event.text,
+                            languages=self._house_languages(),
+                            sample_rate=SAMPLE_RATE)
+                        if second:
+                            self._log("info", "voice.heard_on_asking_again", turn=turn_id,
+                                      guessed=other, text=second[:60])
+                            event = replace(event, text=second, language=language_of(second))
+                            other = ""
                     if other and event.text.strip():
                         # Not a language of this house: whisper's guess for
                         # noise, a TV, a song. Heard as nothing.

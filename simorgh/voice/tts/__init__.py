@@ -133,11 +133,11 @@ _LANGUAGE_NAMES = {"fa": "Farsi", "en": "English"}
 def _farsi_synthesiser(config):
     """Whichever engine `[voice] tts_farsi` names, or the one that works.
 
-    "auto" keeps Piper first -- it is a 63 MB download that speaks at
-    22.05 kHz and is already on this machine -- and reaches for MMS only
-    when Piper refuses (not installed, voice not fetched). Naming an
-    engine means it or nothing: a person who asked for MMS and silently
-    got Piper would think MMS sounds exactly like Piper.
+    "auto" takes Pocket first -- the creator heard all three read the
+    same sentence and chose it (2026-09-22) -- then Piper, which is
+    always there, then MMS. Naming an engine means it or nothing: a
+    person who asked for MMS and silently got Piper would think MMS
+    sounds exactly like Piper.
     """
     from .mms import MMS_MODELS, MmsSynthesiser
     from .piper import PiperSynthesiser
