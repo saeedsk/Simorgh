@@ -298,7 +298,23 @@ class Service:
                     task_id=task_id, task_type=meta.kind, failed_check=why.get("check", ""),
                     denied_tool=why.get("denied", ""), reason=str(p.get("reason") or "")[:200])))
 
-            self._patterns.add(meta.kind, succeeded, None, message.ts)
+            # Benchmark cases are MEASUREMENT, not Sim's work going
+            # wrong. The sibling guard above already knew that; this one
+            # did not, so a SWE-bench run taught Sim that its own
+            # patching ability was broken 4 times out of 4 and queued a
+            # task to go and fix it. Live, 2026-09-22 08:13:
+            #
+            #   'patch' tasks failed 4/4 recent outcomes (100%)
+            #      -- worth reviewing for a systematic issue.
+            #
+            # They were benchmark cases, several of them failing on
+            # harness bugs fixed later that day. A hard case chosen to
+            # be hard says nothing about whether Sim's own code needs
+            # changing, and acting on it means patching in response to a
+            # measurement. Calibration still counts them: a prediction
+            # and its outcome are honest data whoever set the question.
+            if meta.origin != "benchmark":
+                self._patterns.add(meta.kind, succeeded, None, message.ts)
 
             confidence = p.get("confidence")
             if isinstance(confidence, (int, float)):

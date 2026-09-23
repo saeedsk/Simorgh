@@ -118,7 +118,17 @@ class Intake:
                 continue
             if subject is not None and existing_subject != subject:
                 continue
-            if difflib.SequenceMatcher(None, description, desc).ratio() >= self._threshold:
+            # Against the FIRST PARAGRAPH of the stored description.
+            # These streams append standing instructions after a blank
+            # line (a reflection pattern says what to investigate and
+            # what not to touch), and comparing a bare proposal against
+            # proposal-plus-boilerplate drags every ratio down until
+            # nothing dedupes -- while comparing the whole of both drags
+            # it UP, because the boilerplate is identical, and unrelated
+            # ideas collapse into one another. The first paragraph is
+            # the idea; the rest is how to go about it.
+            if difflib.SequenceMatcher(None, description.split("\n\n")[0],
+                                       desc.split("\n\n")[0]).ratio() >= self._threshold:
                 return tid
         return None
 
@@ -168,8 +178,28 @@ class Intake:
         return IntakeResult(task, backlog=waiting)
 
     async def on_patterns_found(self, *, patterns: list[dict]) -> list[Task]:
-        """Port of v1 `discover_improvements`: each pattern's own
-        proposal text becomes a `patch` task (deduped)."""
+        """A mined pattern becomes an INVESTIGATION, not a patch.
+
+        It used to become `kind="patch"` with no scope: a statistic --
+        "'patch' tasks failed 4/4 recent outcomes (100%)" -- bought a
+        licence to edit any file in the repository. The creator, seeing
+        six such tasks queued, 2026-09-22: "I don't like the fact sim is
+        scheduling nonsense, if it continues that path, after a while
+        this code base will be full of uncontrolled source code."
+
+        He is right about the shape of it. A failure RATE is an
+        observation: it says something is wrong somewhere, and nothing
+        about what to change. The route to code already exists and is
+        the careful one -- `on_research_follow_up` turns a finding with
+        a named subject into a patch SCOPED to that subject. So a
+        pattern now asks for the cause, and a cause that is found comes
+        back through that door, named and scoped.
+
+        The cost of being wrong differs by two orders of magnitude: an
+        investigation that finds nothing wastes some model calls, while
+        an unscoped patch task edits the repository on the strength of a
+        percentage.
+        """
         created: list[Task] = []
         for pattern in patterns:
             proposal = pattern.get("proposal", "")
@@ -180,8 +210,15 @@ class Intake:
             if self._deferral("reflection"):
                 break  # the queue is full; the patterns will be found again
             task = await self._store.create(
-                kind="patch", description=proposal, origin="reflection", mode="execute",
-                risk="low", initial_status="available",
+                kind="research", origin="reflection", mode="execute", risk="low",
+                initial_status="available",
+                description=(
+                    f"{proposal}\n\nFind out WHY, and report it -- do not change any code in this "
+                    f"task. Read the ledger and the recent failures themselves rather than reasoning "
+                    f"from the rate. Finish with either a named cause in one specific file or "
+                    f"behaviour, which becomes a scoped fix of its own, or the finding that there is "
+                    f"nothing systematic here, which is an equally good answer."
+                ),
             )
             created.append(task)
         return created

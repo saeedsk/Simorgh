@@ -128,6 +128,8 @@ There is no `reflect:self` stream (a `SELF_STREAM` constant naming one was never
 
 ## Invariants
 
+Benchmark outcomes never feed failure-rate pattern mining: a benchmark case is a measurement, not Sim's work going wrong. The failure-diagnosis path already excluded them; its sibling `_patterns.add` did not, so a SWE-bench run taught Sim its own patching ability was broken 4 times out of 4 and queued a task to go and fix it (2026-09-22). Calibration still counts them -- a prediction and its outcome are honest data whoever set the question.
+
 - Every subscription is declared in `Service.consumes`, and every topic in `consumes`/`produces` is referenced in the package (`tests/simorgh/test_manifests_match_the_code.py`).
 - Reflection never subscribes to `action.proposed` or `action.approved` and never publishes `action.approved`, `action.denied`, `self.model.updated` or `plan.proposed` (`SUBSCRIBE_ONLY_BY` / `PUBLISH_ONLY_BY` in `contracts/topics.py`; no policy entry names Reflection itself).
 - Every `action.proposed` it publishes has `tool: notify`, `reversibility: irreversible` and `proposed_by` set to its source; it never invokes a tool itself.
