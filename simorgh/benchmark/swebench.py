@@ -174,6 +174,15 @@ _DJANGO_SUMMARY = re.compile(r"^(?P<status>FAIL|ERROR):\s+(?P<test>\S+(?: \([\w.
 #: (observer, 2026-09-10). Unmeasurable is the only honest reading.
 AMBIGUOUS = "AMBIGUOUS"
 
+#: Django's bare-id label: `test_name (module.Class)`. Used to tell a
+#: second test's label from a docstring that happens to contain "...".
+_DJANGO_ID = re.compile(r"^[\w.]+ \([\w.]+\)$")
+#: A verdict alone on its line, closing a label printed earlier.
+_DJANGO_LONE_VERDICT = re.compile(r"^(?:ok|OK|FAIL|ERROR|skipped\b.*)$")
+#: A label whose verdict has not arrived: `test ... ` with nothing after
+#: it, or with the test's own output continuing the line.
+_DJANGO_LABEL = re.compile(r"^(?P<test>.+?)\s+\.\.\.\s*(?P<rest>.*)$")
+
 _GOOD = {"PASSED", "ok"}
 _BAD = {"FAILED", "ERROR", "FAIL"}
 
@@ -212,14 +221,49 @@ def parse_django(log: str) -> dict[str, str]:
     every name the dataset asks about found.
     """
     out: dict[str, str] = {}
+    #: A label whose verdict has not printed yet (see `_DJANGO_LABEL`).
+    pending: str | None = None
     for line in log.split("\n"):
         line = line.strip()
+        # A verdict alone on its line closes the label that is waiting.
+        # Django writes `label ... ` when a test STARTS and the verdict
+        # when it ends, so everything the test printed in between --
+        # "Testing against Django installed in ...", the migrations, the
+        # test's own output -- sits between the two. Live, 2026-09-22:
+        # django-10914 and django-11066 were both thrown away as "named
+        # test(s) never appeared in the log", with the label at line
+        # 36,671 and its `ok` at 36,695.
+        if pending is not None and _DJANGO_LONE_VERDICT.match(line):
+            raw = line.strip()
+            out.setdefault(pending, "SKIPPED" if raw.startswith("skipped")
+                           else "PASSED" if raw in ("ok", "OK") else raw)
+            pending = None
+            continue
         found = _DJANGO_VERDICT.match(line)
         if found:
             raw = found.group("status")
             status = ("SKIPPED" if raw.startswith("skipped")
                       else "PASSED" if raw in ("ok", "OK") else raw)
             key = found.group("test").strip()
+            # Two labels on ONE line. Django writes `label ... ` and the
+            # verdict when the test ends, so a test whose own verdict is
+            # deferred (subtests report at the end) leaves its label
+            # dangling and the next test's label continues the same line:
+            #
+            #   test_negative (...) ... test_parse_postgresql_format (...) ... ok
+            #
+            # The `ok` is the LAST label's. Read whole, the key named
+            # neither test: `test_parse_postgresql_format` "never
+            # appeared in the log" and django-10999 was thrown away as
+            # unmeasurable, though the log says plainly what happened
+            # (live, 2026-09-22 -- one of nine such cases in a 30-case
+            # run). Only split when the tail really is a test id; a
+            # DOCSTRING label is free text and may contain "..." of its
+            # own, and cutting that would invent a name.
+            if " ... " in key:
+                tail = key.rsplit(" ... ", 1)[-1].strip()
+                if _DJANGO_ID.match(tail):
+                    key = tail
             seen = out.get(key)
             # Two progress lines under one key that disagree: the key
             # names more than one test and nothing here can tell them
@@ -244,6 +288,20 @@ def parse_django(log: str) -> dict[str, str]:
                 out[key] = seen
             else:
                 out[key] = AMBIGUOUS
+            continue
+        started = _DJANGO_LABEL.match(line)
+        if started:
+            # The label is there and the verdict is not: remember it.
+            # Only ONE is remembered -- a second label before any
+            # verdict means the first test's result is genuinely unknown
+            # from here, and guessing which `ok` belongs to which is how
+            # a passing test certifies a failing one.
+            label = started.group("test").strip()
+            if " ... " in label:
+                tail = label.rsplit(" ... ", 1)[-1].strip()
+                if _DJANGO_ID.match(tail):
+                    label = tail
+            pending = label if _DJANGO_ID.match(label) else None
             continue
         summary = _DJANGO_SUMMARY.match(line)
         if summary:
