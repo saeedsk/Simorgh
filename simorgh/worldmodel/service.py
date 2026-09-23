@@ -221,6 +221,19 @@ class Service:
         now = ctx.clock.now()
         await self._record("limitation", {"text": text, "evidence": [], "since": now},
                            section="limitations", reason="loader.rollback")
+        # And say it on the bus. Growth's monitors and this service both
+        # subscribe to `learn.self_patch.reverted` -- the counterpart of
+        # the `applied` event a landing publishes -- and NOTHING had ever
+        # published it (`tools/scan_half_wired.py`, 2026-09-23). A
+        # rollback became a private limitation in the Self Model and the
+        # two subsystems built to learn from one never heard a word.
+        # Observing is this service's job and this is an observation, not
+        # an act: no tool runs, nothing is proposed.
+        await ctx.bus.publish(ctx.bus.new(topics.LEARN_SELF_PATCH_REVERTED, {
+            "subject": str(note.get("from", "")) or "the checkout",
+            "commit": str(note.get("to", "")),
+            "reason": f"the loader rolled back: {note.get('reason', 'unknown')}",
+        }))
         try:
             seen.write_text(stamp)
         except OSError:
