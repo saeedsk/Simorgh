@@ -115,6 +115,43 @@ One it flagged was a false alarm (a topic chosen by a conditional), and
 the scanner now reads that shape too: a scanner nobody trusts is not a
 scanner.
 
+## The soak's five deaths were Sim killing it
+
+The soak daemon died five times across two days, each time leaving an
+empty log, and each time I named a cause without evidence: a process
+group being cleaned up (true for the first three), then memory pressure
+(asserted twice, once while four gigabytes were free).
+
+Making it say how it dies settled it in one run. Every signal but KILL
+and STOP can be caught, so the soak now catches them and writes a line
+before it goes. The line said **SIGTERM, to both processes, a second
+apart, in the middle of a test run** -- and a polite signal has a
+sender.
+
+The sender is Sim. `reap_orphaned_servers` ends whisper servers that
+outlived their Sim by matching the basename of its command against
+every process whose parent is init. The command can be an interpreter
+and a script -- the test suite builds exactly that,
+`[sys.executable, fixture.py]` -- so the name being matched was
+`python3`, and every orphaned python on the machine was a whisper
+server to terminate. Not only Sim's own: any background script of the
+creator's, reparented to init, was one test run away from being killed.
+
+An interpreter names nobody, so reaping by one now reaps nothing.
+
+Two things worth keeping from this:
+
+- **an empty log is not evidence for anything** until the process has
+  been given a way to speak on its way out. Five deaths were read as
+  "SIGKILL, probably memory" because silence looks the same as the
+  thing you already believe;
+- **a watchdog that dies with what it watches is not a watchdog.** The
+  supervisor added after death four was killed by the same SIGTERM as
+  its child, and logged zero restarts, which is precisely how a corpse
+  gets reported as healthy. `soak.py --status` now answers "is it
+  alive?" in one command, and calls it alive only when there is both a
+  process and a log that moved.
+
 ## Closed the same day: two Farsi takes Sim never heard
 
 `tools/voice_replay.py --language fa` over the creator's own
