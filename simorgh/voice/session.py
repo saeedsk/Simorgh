@@ -34,7 +34,8 @@ from .backchannel import (
     GREETING, Backchannel, addressed, asks_for_something_sim_does, classify, is_quiet,
     spell_household_names, strip_lead, to_someone_else,
 )
-from .commands import MUTE, OFF, RESTART, STOP, opens_with_stop, spoken_command
+from .commands import (HUSH, MUTE, OFF, RESTART, STOP, hush_seconds, opens_with_stop,
+                       spoken_command, wants_to_talk_again)
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
 from .lang import language_of
@@ -274,6 +275,9 @@ class VoiceSession:
         #: None. While it is set every final transcript is a take of the
         #: line on screen, never a question for the model.
         self._calibrating = None
+        #: When the hush ends: None = not hushed, 0.0 = until somebody asks
+        #: for Sim BY NAME, a timestamp = "be quiet for ten minutes".
+        self._hush_until: float | None = None
         #: turn_id -> the audio the recogniser heard, kept for a
         #: calibration take (the per-turn-facts rule, V8: never a session
         #: singleton read across an await).
@@ -1391,6 +1395,15 @@ class VoiceSession:
             await self._player.stop()
             self.stats.interruptions += 1
             self._log("info", "voice.stop_word", turn=turn_id, text=text[:40])
+        # Hushed: the room talks and Sim does not, until somebody asks
+        # for it BY NAME. Checked before anything else can answer --
+        # "who is talking now", an identity claim, the model itself.
+        if self._hushed():
+            if wants_to_talk_again(text):
+                await self._unhush(turn_id)
+            else:
+                await self._stay_quiet(turn_id, reason="asked to be quiet")
+            return
         command = spoken_command(text)
         if command is not None:
             await self._obey(turn_id, command, speaker=speaker, clock=clock)
@@ -2029,6 +2042,40 @@ class VoiceSession:
         clock.reply_at = self._now()
         await self._speak_reply(turn_id, said, clock, Context(user_text=text))
 
+    def _hushed(self) -> bool:
+        """Is Sim keeping quiet because somebody asked it to?"""
+        if self._hush_until is None:
+            return False
+        if self._hush_until and self._now() >= self._hush_until:
+            self._hush_until = None          # the time they asked for is up
+            return False
+        return True
+
+    async def _hush(self, turn_id: int, text: str) -> None:
+        """"Be quiet", with or without an end to it.
+
+        One short line first, because a thing that goes silent without
+        saying how to bring it back has to be rebooted to be forgiven --
+        and then nothing at all until it is asked for by name.
+        """
+        seconds = hush_seconds(text)
+        self._hush_until = (self._now() + seconds) if seconds else 0.0
+        how_long = f" for {int(seconds // 60)} minutes" if seconds >= 60 else (
+            f" for {int(seconds)} seconds" if seconds else "")
+        self._log("info", "voice.hushed", turn=turn_id, seconds=seconds)
+        clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
+        clock.reply_at = self._now()
+        await self._speak_reply(
+            turn_id, f"Quiet{how_long}. Say \u201cSim, talk\u201d when you want me back.",
+            clock, Context(user_text=text))
+
+    async def _unhush(self, turn_id: int) -> None:
+        self._hush_until = None
+        self._log("info", "voice.unhushed", turn=turn_id)
+        clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
+        clock.reply_at = self._now()
+        await self._speak_reply(turn_id, "I'm here.", clock, Context(user_text=""))
+
     async def _obey(self, turn_id: int, command: str, *, speaker: str = "", clock=None) -> None:
         """"Stop", "be quiet", "voice off", "restart": done here and now,
         the model never hears of it. Playback is cut, the floor goes back
@@ -2054,6 +2101,9 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "interrupted": False,
             "command": command, "turn": turn_id})
+        if command == HUSH:
+            await self._hush(turn_id, "")
+            return
         if command == RESTART:
             await self._restart(turn_id, speaker=speaker, clock=clock)
             return

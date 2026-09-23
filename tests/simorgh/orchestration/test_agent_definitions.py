@@ -16,7 +16,18 @@ class TheFiles(unittest.TestCase):
                                                 # the helper roles (stage 7 item 2)
                                                 "planner", "verify", "skill-writer", "browser"})
         self.assertEqual(profiles.VOICE_CHAT.name, "chat", "a spoken chat is still a chat to the session")
-        self.assertEqual(profiles.VOICE_CHAT.body, profiles.CHAT.body, "extends takes the body")
+        # A spoken turn has its OWN body now. It inherited the typed
+        # one until 2026-09-22, so the voice was told to answer like an
+        # executive summary -- "the outcome in one line, then short
+        # nested bullets" -- and read bullet lists aloud at a household
+        # that cannot skim them ("sim persona should talk less and be
+        # concise ... avoiding bulky sentences", the creator).
+        self.assertNotEqual(profiles.VOICE_CHAT.body, profiles.CHAT.body)
+        self.assertIn("SPEECH", profiles.VOICE_CHAT.body)
+        for shape in ("bullets", "headings"):
+            self.assertIn(shape, profiles.VOICE_CHAT.body, f"a spoken answer says no {shape}")
+        self.assertEqual(profiles.VOICE_CHAT.tools, profiles.AGENTS["voice_chat"].tools,
+                         "extends still takes everything it does not override")
         self.assertEqual(profiles.VOICE_CHAT.max_steps, 6)
         self.assertIn("apply_source_patch", profiles.PATCH.tools)
 

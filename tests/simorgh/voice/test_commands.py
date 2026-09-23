@@ -11,9 +11,21 @@ from simorgh.voice.commands import MUTE, OFF, STOP, spoken_command
 
 class TestSpokenCommand(unittest.TestCase):
     def test_stop_in_its_many_forms(self) -> None:
-        for text in ("stop", "Stop.", "Sim, stop talking", "Stop it please.", "Be quiet!", "okay stop", "Shut up.",
-                     "enough", "بس کن", "سیم ساکت شو", "Hey Sim, be quiet"):
+        """STOP cuts the sentence in flight and then carries on."""
+        for text in ("stop", "Stop.", "Sim, stop talking", "Stop it please.", "okay stop",
+                     "enough", "بس کن"):
             self.assertEqual(spoken_command(text), STOP, text)
+
+    def test_being_told_to_be_quiet_is_not_the_same_as_stop(self) -> None:
+        """The creator, 2026-09-22: a house wants to tell the thing in
+        the corner to leave them alone and have it MEAN it. "Stop" ends
+        a sentence; these end the talking until Sim is asked for by
+        name."""
+        from simorgh.voice.commands import HUSH
+
+        for text in ("Be quiet!", "Shut up.", "silence", "Hey Sim, be quiet", "سیم ساکت شو",
+                     "hush", "no talking", "حرف نزن"):
+            self.assertEqual(spoken_command(text), HUSH, text)
 
     def test_off_and_mute(self) -> None:
         for text in ("Voice off.", "turn off the voice", "Sim, voice off", "صدا قطع"):
