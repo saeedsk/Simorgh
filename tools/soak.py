@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Run many Sims at once, for hours, and write down what breaks.
+
+    python tools/soak.py --instances 8 --hours 8
+    python tools/soak.py --instances 2 --hours 0.5 --jobs house-fast,suite
+    python tools/soak.py --report                      # what the run has found
+
+The creator, going out for the evening of 2026-09-22: "start running sim
+in simulation mode in 8 instances and start testing it and observe, find
+bugs and fix them ... continue this test for next 8 hours and
+automatically fix and commit".
+
+Each instance gets its OWN COPY of the repository (`fast_copy_repo`:
+copy-on-write on APFS, so eight copies cost about what one read costs)
+and its own data directory. Nothing here touches the live Sim, the live
+ledger, or the checkout the creator is using -- the lesson of
+2026-09-06, when a sandboxed run with only its HOME moved committed into
+the real project.
+
+What it runs, cycling so a failure is retried on fresh ground rather
+than repeated in a poisoned sandbox:
+
+  house        the household simulator, all scenarios (`simorgh.evals
+               house`) -- a whole simulated family talking to Sim
+  house-fast   the bless subset, quick, for a fast loop
+  arcs         weeks of household life compressed (`simorgh.evals arcs`)
+  suite        that instance's module tier of the unit tests
+  trial        one real watched task in the sandbox (`tools/trial.py`)
+
+Every failure becomes a JSON line under `workspace/soak/<run>/`: what
+ran, what it said, and the last of its output. `--report` clusters them
+by the first line of the failure, so eight instances finding the same
+bug read as one bug with eight witnesses.
+
+FREE by default. `--paid` lets the jobs that need a real model run one;
+without it those scenarios skip themselves, and everything else still
+exercises the whole system against the floor provider.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+#: Where a run's sandboxes and findings live: OUTSIDE the repository,
+#: on the same filesystem so the clone is still copy-on-write. Inside
+#: it, `fast_copy_repo` refuses -- the copy would recurse into its own
+#: output -- and that refusal is right.
+SOAK_DIR = Path(os.environ.get("SIMORGH_SOAK_DIR") or (Path.home() / "simorgh-soak"))
+
+#: One job = a name and the argv to run inside a sandbox.
+JOBS: dict[str, list[str]] = {
+    "house": [sys.executable, "-m", "simorgh.evals", "house", "--json"],
+    "house-fast": [sys.executable, "-m", "simorgh.evals", "house", "--fast", "--json"],
+    "arcs": [sys.executable, "-m", "simorgh.evals", "arcs", "--json"],
+    "suite": [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-x", "-m", "not live and not slow"],
+    "trial": [sys.executable, "tools/trial.py", "--task", "read simorgh/kernel/service.py and say what boots first"],
+}
+#: The order instances take jobs in, so eight instances are not all
+#: doing the same thing at the same moment.
+DEFAULT_ROTATION = ("house-fast", "house", "suite", "house-fast", "arcs", "house", "house-fast", "suite")
+#: A job that has not printed anything for this long is wedged, and a
+#: wedged job is a finding of its own.
+JOB_TIMEOUT_S = 2400.0
+
+
+@dataclass
+class Instance:
+    number: int
+    root: Path
+    data: Path
+    jobs: list[str]
+    runs: int = 0
+    failures: int = 0
+    current: str = ""
+    history: list[str] = field(default_factory=list)
+
+
+def _log(run_dir: Path, kind: str, **fields) -> None:
+    line = json.dumps({"at": round(time.time(), 1), "kind": kind, **fields}, ensure_ascii=False)
+    with (run_dir / "soak.jsonl").open("a", encoding="utf-8") as out:
+        out.write(line + "\n")
+
+
+def make_instance(run_dir: Path, number: int, rotation: tuple[str, ...]) -> Instance:
+    from tools.observer_kit import fast_copy_repo
+
+    root = run_dir / f"sim{number}"
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    fast_copy_repo(root, source=REPO)
+    data = root / "sandbox-home"
+    data.mkdir(parents=True, exist_ok=True)
+    jobs = list(rotation[number % len(rotation):]) + list(rotation[:number % len(rotation)])
+    return Instance(number=number, root=root, data=data, jobs=jobs)
+
+
+def env_for(inst: Instance, *, paid: bool) -> dict:
+    """A sandbox's environment: its own home, its own ledger, no keys
+    unless the run is paid for.
+
+    `SIMORGH_DATA_DIR` and `HOME` both move, because a subsystem that
+    reads `~/.simorgh` directly -- and several do -- would otherwise
+    write into the creator's own house while he is out.
+    """
+    env = dict(os.environ)
+    env.update({
+        "HOME": str(inst.data),
+        "SIMORGH_DATA_DIR": str(inst.data / ".simorgh"),
+        "SIMORGH_LEDGER_DIR": str(inst.data / ".simorgh" / "ledger"),
+        "SIMORGH_NO_LOADER": "1",
+        "SIMORGH_COGNITION_PROVIDER_ORDER": "floor" if not paid else env.get("SIMORGH_COGNITION_PROVIDER_ORDER", "together,floor"),
+        "SIMORGH_SOAK": f"sim{inst.number}",
+        "PYTHONUNBUFFERED": "1",
+    })
+    if not paid:
+        # Not "please do not spend money": no key to spend it with.
+        for key in ("TOGETHER_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            env.pop(key, None)
+    return env
+
+
+async def run_job(inst: Instance, job: str, run_dir: Path, *, paid: bool) -> bool:
+    argv = JOBS[job]
+    if job == "suite":
+        # A different slice per instance, so eight of them cover the
+        # suite rather than running the same third of it eight times.
+        modules = sorted(p.name for p in (inst.root / "tests" / "simorgh").iterdir() if p.is_dir())
+        argv = [*argv, f"tests/simorgh/{modules[inst.number % len(modules)]}"]
+    inst.current = job
+    started = time.monotonic()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, cwd=str(inst.root), env=env_for(inst, paid=paid),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    except OSError as exc:
+        _log(run_dir, "finding", instance=inst.number, job=job, why=f"could not start: {exc}")
+        return False
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=JOB_TIMEOUT_S)
+        code = proc.returncode
+    except asyncio.TimeoutError:
+        proc.kill()
+        out, code = b"", -9
+        _log(run_dir, "finding", instance=inst.number, job=job, seconds=round(time.monotonic() - started, 1),
+             why=f"wedged: no result in {JOB_TIMEOUT_S:.0f}s", tail="")
+        inst.failures += 1
+        return False
+    text = out.decode(errors="replace")
+    inst.runs += 1
+    ok = code == 0 and not _failed_expectations(job, text)
+    if not ok:
+        inst.failures += 1
+        _log(run_dir, "finding", instance=inst.number, job=job, code=code,
+             seconds=round(time.monotonic() - started, 1),
+             why=_why(job, text, code), tail=text[-4000:])
+    else:
+        _log(run_dir, "ok", instance=inst.number, job=job, seconds=round(time.monotonic() - started, 1))
+    inst.history.append(f"{job}:{'ok' if ok else 'FAIL'}")
+    return ok
+
+
+def _failed_expectations(job: str, text: str) -> bool:
+    """A house run exits 0 and reports its failures in JSON."""
+    if not job.startswith(("house", "arcs")):
+        return False
+    try:
+        rows = json.loads(text[text.index("["):text.rindex("]") + 1])
+    except (ValueError, IndexError):
+        return False
+    return any(str(r.get("status")) == "failed" for r in rows)
+
+
+def _why(job: str, text: str, code: int) -> str:
+    """One line: what a person would say broke."""
+    if job.startswith(("house", "arcs")):
+        try:
+            rows = json.loads(text[text.index("["):text.rindex("]") + 1])
+            bad = [r for r in rows if str(r.get("status")) == "failed"]
+            if bad:
+                first = bad[0]
+                where = (first.get("detail") or {}).get("scenario", "")
+                return f"{where}: {first.get('name')} -- {str(first.get('why') or '')[:160]}"
+        except (ValueError, IndexError):
+            pass
+    for line in reversed(text.strip().splitlines()):
+        if any(mark in line for mark in ("Error", "error:", "FAILED", "assert", "Traceback", "refused")):
+            return line.strip()[:200]
+    return f"exit {code}"
+
+
+async def drive(inst: Instance, run_dir: Path, *, until: float, paid: bool) -> None:
+    while time.monotonic() < until:
+        job = inst.jobs[inst.runs % len(inst.jobs)]
+        await run_job(inst, job, run_dir, paid=paid)
+        await asyncio.sleep(1.0)
+
+
+def report(run_dir: Path) -> str:
+    """Findings, clustered by what broke -- eight instances finding one
+    bug is one bug with eight witnesses."""
+    path = run_dir / "soak.jsonl"
+    if not path.is_file():
+        return f"no soak at {run_dir}"
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    findings = [r for r in rows if r.get("kind") == "finding"]
+    oks = [r for r in rows if r.get("kind") == "ok"]
+    clusters: dict[str, list[dict]] = {}
+    for row in findings:
+        clusters.setdefault(f"{row.get('job')}: {row.get('why')}", []).append(row)
+    out = [f"soak {run_dir.name}: {len(oks)} clean run(s), {len(findings)} failure(s), "
+           f"{len(clusters)} distinct"]
+    for why, rows_ in sorted(clusters.items(), key=lambda kv: -len(kv[1])):
+        seen = sorted({r.get("instance") for r in rows_})
+        out.append(f"  x{len(rows_):<3} instances {seen}  {why}")
+    return "\n".join(out)
+
+
+async def main_async(args) -> int:
+    run_dir = SOAK_DIR / (args.run or time.strftime("%Y%m%d-%H%M"))
+    if args.report:
+        print(report(run_dir if args.run else max(SOAK_DIR.iterdir(), key=lambda p: p.stat().st_mtime)))
+        return 0
+    run_dir.mkdir(parents=True, exist_ok=True)
+    rotation = tuple(args.jobs.split(",")) if args.jobs else DEFAULT_ROTATION
+    for job in rotation:
+        if job not in JOBS:
+            raise SystemExit(f"no job called {job!r}; have {', '.join(JOBS)}")
+    print(f"soak {run_dir.name}: {args.instances} instance(s), {args.hours:g}h, "
+          f"{'paid' if args.paid else 'free'}, jobs {', '.join(rotation)}")
+    instances = [make_instance(run_dir, n, rotation) for n in range(args.instances)]
+    _log(run_dir, "start", instances=args.instances, hours=args.hours, paid=args.paid, jobs=list(rotation))
+    until = time.monotonic() + args.hours * 3600.0
+    await asyncio.gather(*(drive(i, run_dir, until=until, paid=args.paid) for i in instances))
+    _log(run_dir, "end", runs=sum(i.runs for i in instances), failures=sum(i.failures for i in instances))
+    print(report(run_dir))
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--instances", type=int, default=8)
+    ap.add_argument("--hours", type=float, default=8.0)
+    ap.add_argument("--jobs", default="", help=f"comma-separated, from: {', '.join(JOBS)}")
+    ap.add_argument("--run", default="", help="a run id (default: now)")
+    ap.add_argument("--paid", action="store_true", help="let jobs reach a real model (costs money)")
+    ap.add_argument("--report", action="store_true", help="read the findings of a run and stop")
+    return asyncio.run(main_async(ap.parse_args()))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
