@@ -130,11 +130,33 @@ async def _with_tone(engine, text: str, *, voice: str, speed: float, tone: str, 
 _LANGUAGE_NAMES = {"fa": "Farsi", "en": "English"}
 
 
-def _default_openers() -> dict:
-    from ..lang import FARSI
+def _farsi_synthesiser(config):
+    """Whichever engine `[voice] tts_farsi` names, or the one that works.
+
+    "auto" keeps Piper first -- it is a 63 MB download that speaks at
+    22.05 kHz and is already on this machine -- and reaches for MMS only
+    when Piper refuses (not installed, voice not fetched). Naming an
+    engine means it or nothing: a person who asked for MMS and silently
+    got Piper would think MMS sounds exactly like Piper.
+    """
+    from .mms import MmsSynthesiser
     from .piper import PiperSynthesiser
 
-    return {FARSI: lambda config: PiperSynthesiser(config, voice=config.tts_farsi_voice)}
+    choice = (getattr(config, "tts_farsi", "auto") or "auto").strip().lower()
+    if choice == "mms":
+        return MmsSynthesiser(config, model_id=getattr(config, "tts_farsi_mms_model", ""))
+    if choice == "piper":
+        return PiperSynthesiser(config, voice=config.tts_farsi_voice)
+    try:
+        return PiperSynthesiser(config, voice=config.tts_farsi_voice)
+    except ImportError:
+        return MmsSynthesiser(config, model_id=getattr(config, "tts_farsi_mms_model", ""))
+
+
+def _default_openers() -> dict:
+    from ..lang import FARSI
+
+    return {FARSI: _farsi_synthesiser}
 
 
 def open_synthesiser(config: Config) -> tuple[object | None, str]:

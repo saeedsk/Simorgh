@@ -25,6 +25,7 @@ Voice owns the spoken channel on this laptop: microphone frames, endpointing and
 | `simorgh/voice/planner.py` | Spoken-response planner: speakable text, chunking, connectors, leaked-marker removal |
 | `simorgh/voice/delivery.py` | Pace, loudness and pauses chosen from the situation and mood |
 | `simorgh/voice/backchannel.py` | "aha"/"let me check" sounds; addressed-to-Sim and quiet-reply detection |
+| `simorgh/voice/tts/mms.py` | Meta's MMS-TTS (`facebook/mms-tts-fas`): a second Farsi voice, 16 kHz, ~6x real time; optional (transformers+torch) and refused by name without them |
 | `simorgh/voice/stt/whisper_server.py` | whisper.cpp kept loaded over HTTP; ends servers a previous Sim orphaned (`reap_orphaned_servers`) before starting one |
 | `simorgh/voice/commands.py` | "stop", "be quiet", "voice off", "restart" handled without the model |
 | `simorgh/voice/speakers.py` | Speaker embeddings and the household voice book (identify, enrol, refine) |
@@ -108,6 +109,8 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `tts_speed` | `1.3` | yes (Kokoro natively; StyleTTS2 by dividing the model's phoneme durations since 2026-09-19) |
 | `tts_by_language` | `True` | yes |
 | `tts_farsi_voice` | `'fa_IR-amir-medium'` | yes |
+| `tts_farsi` | `'auto'` | yes -- which engine speaks Farsi: `auto` prefers Piper and falls back to MMS, and NAMING one means it or nothing (silently swapping the engine somebody chose is how they conclude both sound the same) |
+| `tts_farsi_mms_model` | `'facebook/mms-tts-fas'` | yes |
 | `vad` | `'auto'` | yes |
 | `vad_threshold` | `0.5` | yes |
 | `endpoint_silence_ms` | `1000` | yes |

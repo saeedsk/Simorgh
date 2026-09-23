@@ -1034,12 +1034,14 @@ class Service:
         from .stt.whisper_cli import KNOWN_MODELS, download_model
 
         from .tts.kokoro import download_kokoro
+        from .tts.mms import MMS_MODELS, download_mms
         from .tts.piper import PIPER_VOICES, download_piper
 
         name = str(message.payload.get("name") or "base.en").strip()
         model_dir = Path(self.config.model_dir)
         piper_names = {f"piper-{lang}": voice for lang, voice in PIPER_VOICES.items()}
-        available = [*KNOWN_MODELS, "kokoro", *piper_names, "chatterbox", "styletts2", "miso"]
+        mms_names = {f"mms-{lang}": model for lang, model in MMS_MODELS.items()}
+        available = [*KNOWN_MODELS, "kokoro", *piper_names, *mms_names, "chatterbox", "styletts2", "miso"]
         if name in ("chatterbox", "styletts2", "miso"):
             # The expressive engines: a virtual environment of their own
             # (torch 2.6 / Python 3.10 do not fit the repository's), built
@@ -1059,6 +1061,14 @@ class Service:
             return
         if name == "kokoro":
             path, problem = await asyncio.to_thread(download_kokoro, model_dir)
+        elif name in mms_names or name.startswith("mms-"):
+            # A second voice for a language Piper already speaks -- a
+            # different model on different data, for a household that
+            # does not like the first one (the creator, 2026-09-22).
+            # It lands in the HuggingFace cache, not `model_dir`, so the
+            # "path" here is the model id it answers to.
+            model_id, problem = await asyncio.to_thread(download_mms, model_id=mms_names.get(name, ""))
+            path = Path(model_id) if model_id else None
         elif name in piper_names or name.startswith("piper-"):
             voice = piper_names.get(name) or self.config.tts_farsi_voice
             path, problem = await asyncio.to_thread(download_piper, model_dir, voice=voice)

@@ -47,6 +47,15 @@ class Config:
     # (2026-09-11). Off = the one engine above speaks everything.
     tts_by_language: bool = True
     tts_farsi_voice: str = "fa_IR-amir-medium"  # a Piper voice id; `voice models piper-fa` fetches it
+    # Which engine speaks Farsi. "piper" is five VITS-medium voices that
+    # share a family resemblance; "mms" is Meta's Massively Multilingual
+    # Speech (`facebook/mms-tts-fas`) -- a different model on different
+    # data, so a genuinely different voice, at 16 kHz against Piper's
+    # 22.05 kHz and about six times real time. The creator, 2026-09-22:
+    # "i don't like the farsi voice model, what are my options?".
+    # "auto" keeps Piper and falls back to MMS only if Piper refuses.
+    tts_farsi: str = "auto"            # auto | piper | mms
+    tts_farsi_mms_model: str = "facebook/mms-tts-fas"
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
     vad_threshold: float = 0.5
