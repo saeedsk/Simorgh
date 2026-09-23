@@ -588,8 +588,54 @@ def diff_of(checkout: Path, *, base: str = "", timeout: float = 120.0) -> tuple[
     # reason. All of it lives in `contracts.checkout.staged_diff`, which
     # reads through a private index so nothing here touches the
     # checkout's own.
-    return staged_diff(checkout, base, timeout=timeout, exclude=(
-        MANIFEST_NAME, "tests", "*/tests/*", "test_*.py"))
+    exclude = (MANIFEST_NAME, "tests", "*/tests/*", "test_*.py")
+    patch, problem = staged_diff(checkout, base, timeout=timeout, exclude=exclude)
+    if patch.strip() or problem:
+        return patch, problem
+    # Nothing in the tree and nothing committed -- but the work may be
+    # in `refs/stash`. Live, 2026-09-22, astropy-13236: ten steps, a real
+    # six-line fix in `astropy/table/table.py`, then
+    #
+    #   run_shell: Saved working directory and index state WIP on main
+    #
+    # -- the model stashed its own change (to compare against a clean
+    # tree, most likely), never restored it, and the case was scored
+    # "the system produced no patch". The work existed; it was hidden.
+    # This is the same failure as the committed-work one above, in the
+    # one other place git can hold a change, so it gets the same answer:
+    # look where the work actually is instead of reporting none.
+    #
+    # Only a checkout with no other change reaches here, and a checkout
+    # is materialised fresh per case, so any stash in it was made by
+    # this run.
+    return _stashed_diff(checkout, base, timeout=timeout, exclude=exclude)
+
+
+def _stashed_diff(checkout: Path, base: str, *, timeout: float,
+                  exclude: tuple[str, ...]) -> tuple[str, str]:
+    """The newest stash entry as a patch, or `("", "")` if there is none."""
+    git = shutil.which("git")
+    if not git:
+        return "", ""
+
+    def run(*cmd: str) -> subprocess.CompletedProcess:
+        return subprocess.run([git, "-C", str(checkout), "-c", "core.fileMode=false", *cmd],
+                              capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+
+    try:
+        listed = run("stash", "list")
+        if listed.returncode != 0 or not listed.stdout.strip():
+            return "", ""
+        # `stash@{0}` is a commit whose tree is the stashed work, so the
+        # same base-relative diff that reads a committed change reads
+        # this one -- with the same exclusions, since a stashed test edit
+        # is no more the answer than a committed one.
+        shown = run("diff", base or "HEAD", "stash@{0}", "--", *(f":(exclude){p}" for p in exclude))
+        if shown.returncode != 0:
+            return "", ""
+        return shown.stdout, ""
+    except (OSError, subprocess.SubprocessError):
+        return "", ""
 
 
 def evaluate(instance: dict, patch: str, *, timeout: float = 3600.0,
