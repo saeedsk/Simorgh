@@ -115,7 +115,7 @@ One it flagged was a false alarm (a topic chosen by a conditional), and
 the scanner now reads that shape too: a scanner nobody trusts is not a
 scanner.
 
-## Open, with evidence: two Farsi takes Sim never hears
+## Closed the same day: two Farsi takes Sim never heard
 
 `tools/voice_replay.py --language fa` over the creator's own
 calibration set: 8 of 10 takes identified, mean word error 57%, and
@@ -133,10 +133,42 @@ What has been ruled out, each by measurement:
 - **not pacing.** Eight seconds of settle between takes changes
   nothing; they are lost with the previous turn long finished.
 
-So something between the microphone and the transcript drops these two
-specific utterances, reproducibly. The next step is to instrument the
-replay to record the turn's own events -- whether a turn opened at all --
-rather than guess a fifth time.
+So something between the microphone and the transcript dropped these
+two specific utterances, reproducibly. The next step was to instrument
+the replay to record the turn's own events -- whether a turn opened at
+all -- rather than guess a fifth time.
+
+**It was the language filter after all.** The replay now subscribes to
+`voice.listening`, and both lost takes read `user_speaking>listening`:
+the turn OPENED, the audio was captured, and what came back was thrown
+away. Watching the session's own log through one take shows why --
+whisper reports ARMENIAN for fa-003 and ICELANDIC for fa-004, with a
+confident sentence of gibberish in each of those scripts, and
+`_other_language` deletes anything not in `[voice] stt_languages`.
+
+The measurement that ruled the filter out was taken OUTSIDE the
+session, on the whole recording; the session hands whisper VAD-trimmed
+audio, and on that audio it guesses differently. A ruled-out cause is
+only ruled out on the path it was measured on.
+
+Handed the same session audio with `fa` named, whisper returns
+`توبین ها رو نشون بده` -- the sentence. So Sim now asks again rather
+than deleting: on a final in no house language, the audio is offered
+back once per house language and an answer is believed only when it
+returns in a different SCRIPT from the reading being discarded (whisper
+keeps reporting `icelandic` even while returning perfect Persian, so
+its label cannot check itself). Noise hinted `fa` comes back as noise
+and is still discarded.
+
+Same set, same path, before and after:
+
+| | placed as Saeed | word error | |
+|---|---|---|---|
+| before | 14/16 | 63.8% | FAIL |
+| after | 16/16 | 31.6% | PASS |
+
+fa-013 came back too -- it had been counted as merely misheard ("I'm
+going to go to the next day.") rather than lost.
 
 English, by contrast, is healthy on the same path: 12 of 12 identified
 (0.78-0.87), 5 of 5 lines naming Sim taken as addressed, 5.8% word
