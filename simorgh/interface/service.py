@@ -110,6 +110,32 @@ _PARTIAL_EVERY_S = 3.0
 #: this long, plus 0.4 s a word (voice off mid-reply, a crashed player).
 _SPEAKING_FALLBACK_S = 10.0
 
+#: Tools that must not be reachable over `POST /api/command`.
+#:
+#: Refusing `!` there was cosmetic while this was allowed: `tool
+#: run_shell {"command": "..."}` is the same remote shell one hop
+#: further on, and Guardian's own auto-approve -- the default this house
+#: has run with since 2026-09-07 -- means nothing stops it. A token
+#: would have been shell access on a `0.0.0.0` bind (found reviewing my
+#: own diff, 2026-09-23).
+#:
+#: Not a boundary against the MODEL: Sim reaches these tools through
+#: Guardian as before, at the keyboard and inside a task. This is about
+#: what a network request can start with nobody in the room.
+_NOT_OVER_THE_WIRE: frozenset[str] = frozenset({
+    "run_shell", "run_script", "run_python_sandboxed", "run_js_sandboxed", "install_package",
+})
+
+
+def _not_over_the_wire(line: str) -> str:
+    """Why this line may not be run remotely, or "" when it may."""
+    words = (line or "").split()
+    if len(words) >= 2 and words[0].lower() == "tool" and words[1].lower() in _NOT_OVER_THE_WIRE:
+        return (f"`{words[1]}` runs code on this machine and is not reachable over the network; "
+                f"type it at Sim's own keyboard, or ask Sim for the work and let it decide")
+    return ""
+
+
 #: How long `POST /api/command` waits for the command to finish before
 #: answering "accepted, still running". Long enough for the read-only
 #: commands a remote caller actually asks for (`status`, `tasks`,
@@ -494,6 +520,10 @@ class Service:
             return 400, b'{"error":"invalid json"}', "application/json"
         if not line:
             return 400, b'{"error":"no line"}', "application/json"
+        refused = _not_over_the_wire(line)
+        if refused:
+            return 400, json.dumps({"error": {"code": "not_over_the_wire", "detail": refused}}).encode("utf-8"), \
+                "application/json"
         if line.startswith("!"):
             # `!` is a raw shell with no Guardian in it (`dispatch.py:191`),
             # which is a person's own hands at their own keyboard. Over

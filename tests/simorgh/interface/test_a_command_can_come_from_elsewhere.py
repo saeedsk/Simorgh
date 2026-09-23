@@ -120,6 +120,26 @@ class RemoteCommands(unittest.IsolatedAsyncioTestCase):
         self.assertIn("gaia-1", body["said"])
         self.assertNotIn("[remote]", body["said"], "the echo is for the screen, not the caller")
 
+    async def test_a_tool_that_runs_code_is_not_reachable_over_the_network(self):
+        """Refusing `!` was cosmetic while this was allowed: `tool
+        run_shell {...}` is the same remote shell one hop further on,
+        and Guardian's auto-approve -- this house's default -- means
+        nothing stops it. A token would have been shell access on a
+        0.0.0.0 bind."""
+        for line in ('tool run_shell {"command": "id"}', 'tool run_python_sandboxed {"code": "1"}',
+                     'TOOL INSTALL_PACKAGE {"name": "x"}'):
+            resp = await self._post({"line": line})
+            self.assertEqual(resp.status, 400, line)
+            self.assertEqual(json.loads(resp.body)["error"]["code"], "not_over_the_wire", line)
+        await asyncio.sleep(0.05)
+        self.assertEqual(self.handled, [])
+
+    async def test_an_ordinary_tool_still_runs(self):
+        resp = await self._post({"line": "tool cam_list {}"})
+        self.assertIn(resp.status, (200, 202))
+        await asyncio.sleep(0.05)
+        self.assertEqual(self.handled, ["tool cam_list {}"])
+
     async def test_an_empty_or_unreadable_body_is_refused(self):
         self.assertEqual((await self._post({"line": "   "})).status, 400)
         self.assertEqual(self.handled, [])
