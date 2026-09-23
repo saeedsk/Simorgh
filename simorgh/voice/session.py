@@ -2112,11 +2112,19 @@ class VoiceSession:
         """The model heard words that were not for it. Nothing is said;
         the floor goes back to listening, and the screen shows why
         there was no reply."""
-        actions = self.turns.reply_ready(turn_id)
-        speak = next((a for a in actions if a.kind == Actions.SPEAK), None)
-        if speak is not None:
-            # A response was minted; it is over before it started.
-            self.turns.handle_playback_state(PlaybackState("finished", str(speak.response_id)))
+        # A turn that was not for Sim asked NOTHING, so it must not
+        # cancel the answer Sim still owes somebody. It did: the room's
+        # own noise -- the TV, the twins, a passing sentence -- became a
+        # turn, went to the model, came back "not for me", and took the
+        # floor from the question that was really waiting. With enough of
+        # them the real turn fell off `_superseded` (four slots) and its
+        # answer was dropped as "a later turn was asked": the creator saw
+        # his reply on screen and heard nothing. Nine of those in one
+        # evening, 2026-09-22 -- "in general sim skips responding me".
+        #
+        # `reply_ready` cannot do this: it reads an answer as the newest
+        # turn being satisfied and clears what was owed.
+        self.turns.quiet_reply(turn_id)
         # Only the turn still owed an answer may hand the floor back. A
         # superseded turn staying quiet used to flip THINKING to LISTENING
         # while a NEWER turn was the one being thought about, and that

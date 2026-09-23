@@ -230,6 +230,23 @@ class TurnManager:
         self._go(THINKING, "final transcript")
         return [Action(Actions.ASK, turn_id=self.turn_id, text=text)]
 
+    def quiet_reply(self, turn_id: int) -> None:
+        """The model heard words that were not for Sim.
+
+        That turn asked NOTHING, so whatever was owed before it is owed
+        still. `reply_ready` cannot be used for this: it treats an answer
+        as the newest turn being satisfied and clears the owed list, so a
+        passing sentence from the television retired a question somebody
+        was waiting on. Live, 2026-09-22 -- nine answers dropped as "a
+        later turn was asked" in one evening, in a room running at about
+        six voice turns a minute, and the creator saw every reply on
+        screen and heard none of them.
+        """
+        if turn_id == self._asked_turn:
+            self._asked_turn = self._superseded.pop() if self._superseded else 0
+        elif turn_id in self._superseded:
+            self._superseded.remove(turn_id)
+
     def withdraw_ask(self, turn_id: int) -> None:
         """The turn just asked was the same question again (voice/repeat.py):
         it is not asked, and the earlier turn's answer is owed as before."""
