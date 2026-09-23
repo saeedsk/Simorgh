@@ -788,6 +788,18 @@ class VoiceSession:
             async for event in self._stt.start_stream(self._frames_until_end(queue, turn_id), turn_id=turn_id,
                                                       language=self._calibration_language() or self._config.stt_language):
                 if event.kind == "partial":
+                    # A partial in a language this house does not speak is
+                    # not shown. The FINAL is already dropped below, but
+                    # the partial was published first and reached the
+                    # screen -- "🎤 はい" under `/tasks`, and the creator
+                    # asking what the weird task was (live, 2026-09-22).
+                    # Whisper invents a sentence out of near-silence and
+                    # names a language for it; Turkish, Russian and
+                    # Portuguese all arrived in one evening. It also went
+                    # into the console log, where `console_tail` can hand
+                    # Sim its own hallucination back as something heard.
+                    if self._other_language(event.language):
+                        continue
                     self.partial = event.text
                     await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                         "text": event.text, "partial": True, "turn": turn_id, "confidence": event.confidence,
