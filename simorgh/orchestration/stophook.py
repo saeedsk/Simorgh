@@ -140,7 +140,19 @@ def promised_behaviour(text: str, session) -> str:
     directly." Nothing was stored, no setting changed, and the next
     unaddressed utterance was answered exactly as before. A promise the
     next turn cannot honour is worse than a refusal: it looks handled."""
-    if not text or any(step.tool for step in session.steps):
+    # A tool that RAN is not a tool that worked. Live, 2026-09-22:
+    # Iris asked Sim not to cheer while she played. This guard fired,
+    # Sim did the right thing and reached for `overheard_note` to make
+    # the promise real -- and Guardian escalated it, because Iris is a
+    # child and the note is irreversible. One second later, without
+    # waiting, Sim answered "I'll keep it, Iris -- no cheering, I'll
+    # just sit here quietly". Forty-four seconds after that the request
+    # was DENIED. She was promised something no part of the system now
+    # remembers, by the very turn this guard had already corrected once.
+    #
+    # `claimed_effect` in this same file has always required a step
+    # that succeeded; this one took any step at all.
+    if not text or _changed_something(session):
         return ""
     match = _PROMISED_BEHAVIOUR.search(text)
     return match.group(0).strip() if match else ""
@@ -171,8 +183,8 @@ def claimed_tv_act(text: str, session) -> str:
         on_tv = _DASH_ON_TV.search(text)
         if on_tv:
             return on_tv.group(0).strip()
-    if any(step.tool for step in session.steps):
-        return ""
+    if _changed_something(session):
+        return ""      # something really happened; the same rule as the promise above
     match = _TV_CLAIM.search(text)
     return match.group(0).strip() if match else ""
 

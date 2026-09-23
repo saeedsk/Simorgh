@@ -122,6 +122,8 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 
 ## Invariants
 
+A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that merely ran. `stophook`'s promise and TV guards asked `any(step.tool ...)`, so an action Guardian had escalated and a human then DENIED still counted: Iris (a child) was told "I'll keep it -- no cheering" one second after `overheard_note` went to an adult for approval, and forty-four seconds before it was refused (2026-09-22). `claimed_effect` always asked the right question; the others now ask it too.
+
 1. Every tool call a session makes, including `worktree_open`, `worktree_land`, `worktree_close` and `git_discard`, is published as `action.proposed` and awaited for `action.result|denied|needs_human` in `SessionRunner._propose_and_await` (`session.py:1626`); nothing in this package calls a tool directly. The local refusals -- `unplaced_voice_refusal`, `chat_outside_workspace_refusal`, `commit_of_unwritten_refusal` -- propose nothing. A task session (any scaffold but `chat`) treats `needs_human` as a question in flight, not an ending: it keeps waiting, up to `_HUMAN_ANSWER_WAIT_S` past Guardian's prompt timeout, for the `result` or `denied` the person's answer produces. A chat turn reports the question and moves on.
 2. Orchestration never subscribes to `action.proposed` (`SUBSCRIBE_ONLY_BY[action.proposed] = {guardian}`) and never publishes `action.approved`, `action.denied`, `system.pause|stop|resume|restart|reload`, `self.model.updated` or `plan.proposed` (`contracts/topics.py:288-303`).
 3. An unregistered tool is labelled `irreversible` in the proposal (`tools.py:572-585`); the label is a request, and Guardian decides (S6, T1: Guardian still reads this label).
