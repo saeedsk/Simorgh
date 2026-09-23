@@ -103,6 +103,17 @@ def make_instance(run_dir: Path, number: int, rotation: tuple[str, ...]) -> Inst
     if root.exists():
         shutil.rmtree(root, ignore_errors=True)
     fast_copy_repo(root, source=REPO)
+    # ...without the household's `workspace/`: several gigabytes of
+    # models, venvs, camera stills and TTS samples that no scenario
+    # needs. The clone is copy-on-write, so it costs nothing until
+    # something WRITES -- and eight sandboxes running for an hour wrote
+    # enough of it to take 8 GB of free space (2026-09-23). The
+    # directory itself stays, because tools expect it to exist.
+    workspace = root / "workspace"
+    if workspace.is_dir():
+        shutil.rmtree(workspace, ignore_errors=True)
+    (workspace / "scratch").mkdir(parents=True, exist_ok=True)
+    (workspace / "README.md").write_text("A sandbox's workspace: empty on purpose (tools/soak.py).\n")
     data = root / "sandbox-home"
     (data / ".simorgh").mkdir(parents=True, exist_ok=True)
     # Half the instances run the CREATOR'S OWN settings, not the
@@ -197,6 +208,18 @@ async def run_job(inst: Instance, job: str, run_dir: Path, *, paid: bool) -> boo
     else:
         _log(run_dir, "ok", instance=inst.number, job=job, seconds=round(time.monotonic() - started, 1))
     inst.history.append(f"{job}:{'ok' if ok else 'FAIL'}")
+    # The data a run left behind, gone before the next one. Eight
+    # sandboxes writing ledgers, logs and telemetry for eight hours ate
+    # 8 GB of free space in fifty minutes (2026-09-23) -- and a fresh
+    # data directory is better science anyway: a scenario that only
+    # passes because a previous run's memory is still there is not
+    # passing.
+    for leftover in ("ledger", "logs", "telemetry.sqlite", "telemetry.sqlite-wal", "telemetry.sqlite-shm"):
+        target = inst.data / ".simorgh" / leftover
+        try:
+            shutil.rmtree(target) if target.is_dir() else target.unlink(missing_ok=True)
+        except OSError:
+            pass
     return ok
 
 

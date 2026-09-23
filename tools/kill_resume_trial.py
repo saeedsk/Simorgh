@@ -176,13 +176,38 @@ def say(text: str) -> None:
 
 
 def run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: bool) -> dict:
+    """The drill, and the lab cleaned up whatever happens to it."""
+    root = ""
+    try:
+        return _run(task, kill_after=kill_after, max_usd=max_usd, timeout=timeout, keep=keep,
+                    remember=lambda where: globals().__setitem__("_LAST_LAB", where))
+    finally:
+        # The cleanup was the LAST line of the drill, so a crash, a
+        # KeyboardInterrupt or a kill left the lab behind -- and a lab
+        # is a whole clone of the repository. Two abandoned ones took
+        # 20 GB of a machine that had 31 GB free (2026-09-23), which is
+        # how a testing tool becomes the outage.
+        root = globals().get("_LAST_LAB", "")
+        if root and not keep:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+def _run(task: str, *, kill_after: int, max_usd: float, timeout: float, keep: bool, remember) -> dict:
     sys.path.insert(0, str(TOOLS))
     from observer_kit import fast_copy_repo
 
     root = tempfile.mkdtemp(prefix="simorgh-killresume-")
     lab, data = os.path.join(root, "repo"), os.path.join(root, "data")
+    remember(root)
     say(f"lab at {root}")
     fast_copy_repo(Path(lab), source=REPO_ROOT)
+    # Without the household's `workspace/`: 9.7 GB of voice models,
+    # venvs and camera stills that no task in this drill touches. The
+    # clone is copy-on-write and costs nothing until something writes --
+    # and then it costs ten gigabytes a lab, which is how two abandoned
+    # labs took twenty of them on 2026-09-23.
+    shutil.rmtree(os.path.join(lab, "workspace"), ignore_errors=True)
+    os.makedirs(os.path.join(lab, "workspace", "scratch"), exist_ok=True)
     shutil.rmtree(os.path.join(lab, ".git"), ignore_errors=True)
     shutil.rmtree(os.path.join(lab, ".claude"), ignore_errors=True)
     _git(lab, "init", "-q")
