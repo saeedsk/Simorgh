@@ -48,21 +48,26 @@ class WhenTheCameraIsARingOne(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(dispatch, "_run_tool", self._run_tool):
             return await dispatch._ring(line, bus=None, ledger=None, session_id="s")      # noqa: SLF001
 
-    async def test_a_refused_relay_becomes_the_other_route(self):
-        await self._cameras("show Front Door full")
-        self.assertEqual([t for t, _ in self.calls], ["cam_stream", "dash_view"],
-                         "it tries the relay, and a Ring refusal is not a dead end")
-        self.assertEqual(self.calls[-1][1], {"camera": "Front Door", "view": "cameras"})
-
-    async def test_an_nvr_camera_still_relays_and_nothing_else_happens(self):
-        async def _ok(*, bus, ledger, tool, raw, session_id, timeout=120.0):
-            self.calls.append((tool, json.loads(raw)))
-            return _Outcome("Driveway is live on the TV")
-
+    async def test_a_ring_camera_goes_straight_to_the_dashboard(self):
+        """By NAME, before the NVR is asked. The first version read it
+        off cam_stream's refusal -- and when the NVR itself was
+        unreachable the refusal was "the NVR lists no cameras", so the
+        Ring route never ran and the answer was an error about hardware
+        that had nothing to do with it (live, 2026-09-22)."""
         from unittest import mock
 
-        with mock.patch.object(dispatch, "_run_tool", _ok):
-            await dispatch._cameras("show Driveway full", bus=None, ledger=None, session_id="s")  # noqa: SLF001
+        with mock.patch.object(dispatch, "_ring_camera_named", lambda n: "Front Door" if "front" in n.lower() else ""), \
+             mock.patch.object(dispatch, "_run_tool", self._run_tool):
+            await dispatch._cameras("show Front Door full", bus=None, ledger=None, session_id="s")   # noqa: SLF001
+        self.assertEqual(self.calls, [("dash_view", {"camera": "Front Door", "view": "cameras"})],
+                         "the NVR is not asked about a camera that is not on it")
+
+    async def test_an_nvr_camera_still_relays(self):
+        from unittest import mock
+
+        with mock.patch.object(dispatch, "_ring_camera_named", lambda _n: ""), \
+             mock.patch.object(dispatch, "_run_tool", self._run_tool):
+            await dispatch._cameras("show Driveway full", bus=None, ledger=None, session_id="s")     # noqa: SLF001
         self.assertEqual([t for t, _ in self.calls], ["cam_stream"])
 
     async def test_ring_live_names_the_camera(self):
@@ -72,6 +77,24 @@ class WhenTheCameraIsARingOne(unittest.IsolatedAsyncioTestCase):
     async def test_ring_live_off_goes_back_to_the_wall(self):
         await self._ring("live off")
         self.assertEqual(self.calls, [("dash_view", {"camera": ""})])
+
+    async def test_tv_show_cameras_is_a_view_not_a_device(self):
+        """It tried to cast to a device called "cameras" and refused
+        with "found Family Room TV, Pioneer Speaker" (live,
+        2026-09-22). The dashboard is cast either way; the word says
+        which face of it to show."""
+        from unittest import mock
+
+        with mock.patch.object(dispatch, "_run_tool", self._run_tool):
+            await dispatch._tv("show cameras", bus=None, ledger=None, session_id="s")   # noqa: SLF001
+        self.assertEqual(self.calls, [("cast_show", {"view": "cameras"})])
+
+    async def test_tv_show_still_takes_a_device(self):
+        from unittest import mock
+
+        with mock.patch.object(dispatch, "_run_tool", self._run_tool):
+            await dispatch._tv("show Family Room TV", bus=None, ledger=None, session_id="s")   # noqa: SLF001
+        self.assertEqual(self.calls, [("cast_show", {"device": "Family Room TV"})])
 
     async def test_ring_live_with_no_camera_says_how(self):
         outcome = await self._ring("live")

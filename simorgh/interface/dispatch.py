@@ -46,6 +46,35 @@ from . import render as render_mod
 from .parser import Command
 from .vitals import VitalsCache
 
+def _ring_camera_named(wanted: str) -> str:
+    """The Ring camera this name means, or "".
+
+    Read from the list `ring_list` leaves in the workspace, the same
+    file `domains/home/cameras.py` reads -- Interface may not import a
+    domain, and a shared FILE is not a shared import.
+    """
+    import json
+
+    try:
+        names = [str(c.get("name") or "")
+                 for c in json.loads(Path("workspace/cameras/ring/cameras.json").read_text(encoding="utf-8")) or []]
+    except (OSError, ValueError, AttributeError):
+        return ""
+    low = (wanted or "").strip().lower()
+    if not low or low in ("all", "every", "everything", "*"):
+        return ""
+    for name in names:
+        if name and (name.lower() == low or low in name.lower()):
+            return name
+    return ""
+
+
+#: The dashboard's faces. Spelt here as well as in `httpapi._DASH_VIEWS`
+#: and `media/cast.DASH_VIEWS` because Interface may not import a domain
+#: (the module-boundary rule) -- three short tuples, one meaning; the
+#: command table above is the thing a person reads.
+_DASH_VIEWS = ("home", "cameras", "markets", "charts", "ambient")
+
 _NO_RESPONSE = "no response -- that subsystem isn't wired up in this build yet"
 _NOT_YET = "not yet available in this build"
 
@@ -990,6 +1019,13 @@ async def _tv(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: st
         if rest and rest[0].lower() in ("tv", "terminal", "tui", "dash", "dashboard"):
             payload["page"] = "tv" if rest[0].lower() in ("tv", "terminal", "tui") else "dash"
             rest = rest[1:]
+        # `tv show cameras` reads as a VIEW, not a Cast device called
+        # "cameras" -- which is what it tried, and refused with "no Cast
+        # device called 'cameras'; found Family Room TV, Pioneer Speaker"
+        # (live, 2026-09-22). The dashboard is cast either way; the word
+        # says which face of it to show.
+        if rest and " ".join(rest).lower() in _DASH_VIEWS:
+            payload["view"], rest = " ".join(rest).lower(), []
         if rest:
             payload["url" if rest[0].startswith(("http://", "https://")) else "device"] = " ".join(rest)
         return await _run("cast_show", payload)
@@ -1355,18 +1391,19 @@ async def _cameras(args: str, *, bus: BusClient, ledger: LedgerClient, session_i
             return Outcome(usage)
         mode = rest[-1].lower() if rest[-1].lower() in ("frame", "grid", "full", "stop", "tiled", "dash", "dashboard") else ""
         camera = " ".join(rest[:-1] if mode else rest) or "all"
-        outcome = await _run("cam_stream", {"camera": camera,
-                                            "mode": {"tiled": "grid", "dashboard": "dash"}.get(mode, mode) or "frame"})
-        # A Ring camera has no RTSP, so ffmpeg cannot relay it and
-        # `cam_stream` says so. But "show me that camera, big" is ONE
-        # intention whichever brand the camera is, and the dashboard can
-        # do it over WebRTC -- so the refusal becomes the other route
-        # rather than a dead end (the creator, 2026-09-22: "how to show
-        # ring camera on tv in fullscreen?"). The tool stays truthful;
-        # the routing lives here, where calling another tool is ordinary.
-        if mode in ("full", "", "frame") and "is a Ring camera" in (outcome.text or ""):
+        # A Ring camera has no RTSP, so ffmpeg cannot relay it and the
+        # dashboard's own zoom is the way to fill the screen with one
+        # (the creator, 2026-09-22: "how to show ring camera on tv in
+        # fullscreen?"). Decided by NAME, before asking the NVR: the
+        # first version read it off cam_stream's refusal, and when the
+        # NVR itself was unreachable the refusal was "the NVR lists no
+        # cameras" -- so the Ring route never ran and the answer was an
+        # error about hardware that had nothing to do with it (live,
+        # same evening).
+        if mode in ("full", "", "frame") and _ring_camera_named(camera):
             return await _run("dash_view", {"camera": camera, "view": "cameras"})
-        return outcome
+        return await _run("cam_stream", {"camera": camera,
+                                         "mode": {"tiled": "grid", "dashboard": "dash"}.get(mode, mode) or "frame"})
     if verb in ("snapshot", "snap", "picture"):
         return await _run("cam_snapshot", {"camera": " ".join(rest)}) if rest else Outcome(usage)
     if verb in ("light", "spotlight", "ir"):
