@@ -94,3 +94,46 @@ hands; over HTTP it is a remote shell on the house. Refused now
   `~/.simorgh/ledger/`; querying it looks like a working query and
   answers from 2026-09-20. The streams under `streams/*.jsonl` are the
   live record.
+
+## What the fixes were worth, and one question still open
+
+After the checkout fix, a three-case run scored **1 resolved** --
+astropy-12907, in five steps, the first real SWE-bench Verified result
+from this system. astropy-13033 was an honest miss (two tests still
+failing, one of them a regression). astropy-13236 was not a miss at all:
+ten steps, a real six-line fix in `astropy/table/table.py`, and then
+
+    run_shell: Saved working directory and index state WIP on main
+
+The model stashed its own change, never restored it, and the scorer read
+an empty diff. `diff_of` now falls back to the newest stash entry, so
+that case should count on a rescore -- the same failure as the committed
+work that vanished from a HEAD-relative diff on 2026-09-10, in the one
+other place git can hold a change.
+
+Measured over an hour of this run (telemetry spans, successes only):
+
+| provider / purpose | n | p50 | p90 | max |
+|---|---|---|---|---|
+| together / draft | 59 | 2.0 s | 7.7 s | 33.3 s |
+| together / review | 42 | 1.4 s | 3.6 s | 25.9 s |
+| together / chat | 23 | 1.5 s | 2.3 s | 3.1 s |
+| gemini / draft | 1 | -- | -- | 78.8 s |
+
+The open question: `review` calls arrive in bursts of about nine per
+case (verification's checklist -- one call to generate it, one per
+item), and the budget visibly SHRINKS across a burst. At 18:36 two calls
+of 25.9 s and 25.5 s succeeded and the next was cut off at `22.4s of
+22.4s`. Each `_think` is supposed to get its own 200 s from
+`verification.think_timeout_seconds`, so nothing here explains a third
+call having less time than the first. It is not guessed at: the failure
+line now carries `slice` and `left`, and the next burst will say.
+
+## A note on reading the log at all
+
+`sim.log` stamped lines `HH:MM:SS` with no date, is a ring several days
+deep, and is written by more than one Sim at once (a trial, a replay,
+the live one). Twice in ten minutes today yesterday's Gemini failures
+read as today's, and a bug fixed at 04:24 was nearly re-fixed at 18:30.
+Lines now carry `MM-DD HH:MM:SS [pid]`. Evidence that cannot be dated is
+not evidence.

@@ -230,8 +230,17 @@ class Router:
                 # skipped). Visible even when this is the last candidate
                 # and the exception is about to surface as `last_error`.
                 if self._logger is not None:
+                    # `slice` and `left` say whether this was the provider
+                    # or this call's own arithmetic: a failure AT its slice
+                    # is the deadline, one well inside it is the provider,
+                    # and `left` says how much of the purpose's deadline
+                    # had already gone -- the question a burst of reviews
+                    # on 2026-09-22 could not answer (25.9s and 25.5s
+                    # succeeded, then 22.4s was cut off, and nothing said
+                    # why the third call had less time than the first).
                     self._logger.warning(
                         "cognition.provider_failed", provider=name, purpose=purpose.value, error=str(exc),
+                        slice=round(share, 1), left=round(remaining, 1),
                     )
                 # Some failures reach here *after* the remote call already
                 # happened and was billed (Together's reasoning-only
