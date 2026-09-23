@@ -79,8 +79,10 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     # are my options?" -- and then, of the answer, "how to change the
     # farsi tts?". A setting nobody can change without editing a file
     # and restarting is not really a choice.
-    "tts_farsi": (str, ("auto", "piper", "mms"), "which engine speaks Farsi: piper (5 voices, 22 kHz) "
-                  "or mms (a different model, 16 kHz); auto prefers piper"),
+    "tts_farsi": (str, ("auto", "pocket", "piper", "mms"), "which engine speaks Farsi: pocket (24 kHz, its "
+                  "voice cloned from tts_farsi_reference), piper (5 voices, 22 kHz) or mms (16 kHz); "
+                  "auto prefers pocket and falls back"),
+    "tts_farsi_reference": (str, None, "the ~5 second clip Pocket clones its Farsi voice from"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),

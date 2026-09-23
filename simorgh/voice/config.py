@@ -54,8 +54,17 @@ class Config:
     # 22.05 kHz and about six times real time. The creator, 2026-09-22:
     # "i don't like the farsi voice model, what are my options?".
     # "auto" keeps Piper and falls back to MMS only if Piper refuses.
-    tts_farsi: str = "auto"            # auto | piper | mms
+    # The creator heard all three on 2026-09-22 and chose: "I like
+    # pocket-farsi-v2.wav, make it as default farsi tts voice and
+    # model." So "auto" reaches for Pocket first and falls back to
+    # Piper, which needs no venv and is always there.
+    tts_farsi: str = "auto"            # auto | pocket | piper | mms
     tts_farsi_mms_model: str = "facebook/mms-tts-fas"
+    #: The five-second clip Pocket-TTS clones its Farsi voice from. Any
+    #: WAV will do, including a family member's -- which is the point of
+    #: choosing an engine that clones rather than one with five fixed
+    #: voices.
+    tts_farsi_reference: str = "workspace/voice/prompts/farsi.wav"
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
     vad_threshold: float = 0.5

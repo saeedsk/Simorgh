@@ -230,6 +230,13 @@ def overview(config: Config, *, width: int = 0) -> str:
             # rather than widening every row -- but it must never run
             # straight into the help: `fa_IR-amir-mediumthe Piper voice`
             # read as one broken word, and the line overran the terminal.
+            # ...and a value that cannot fit the line AT ALL is cut from
+            # the left, keeping its end. A path is the case that made
+            # this necessary (`tts_farsi_reference`), and the end of a
+            # path -- the file name -- is the part that identifies it.
+            most = max(8, width - 4 - key_w)
+            if len(value) > most:
+                value = "..." + value[-(most - 3):]
             cell = value.ljust(val_w) if len(value) < val_w else value + " "
             row = f"    {key.ljust(key_w)}{cell}"
             left = width - len(row)

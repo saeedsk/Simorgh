@@ -362,10 +362,18 @@ class SubprocessSynthesiser:
 
 
 def create_venv(venv_dir: Path | str, engine: str, *, python: str = "", packages: tuple[str, ...] = (),
-                editable: str = "", log=print) -> tuple[Path | None, str]:
+                editable: str = "", system_site_packages: bool = False,
+                log=print) -> tuple[Path | None, str]:
     """Make `<venv_dir>/<engine>` and install `packages` (and an editable
     checkout) into it, with `uv` when present, else `python -m venv` +
-    pip. Returns (python path, problem)."""
+    pip. Returns (python path, problem).
+
+    `system_site_packages` for an engine that wants the torch this
+    repository ALREADY has rather than a second copy of it. Chatterbox
+    and MisoTTS cannot: they pin versions that conflict, which is the
+    whole reason they live out here. Pocket-TTS can, and a private copy
+    of torch is 2.5 GB to say the same words.
+    """
     import subprocess
 
     root = Path(venv_dir).expanduser() / engine
@@ -375,12 +383,13 @@ def create_venv(venv_dir: Path | str, engine: str, *, python: str = "", packages
         if not py.is_file():
             root.parent.mkdir(parents=True, exist_ok=True)
             if uv:
-                cmd = [uv, "venv", str(root)] + (["--python", python] if python else [])
+                cmd = ([uv, "venv", str(root)] + (["--python", python] if python else [])
+                       + (["--system-site-packages"] if system_site_packages else []))
             else:
                 base = shutil.which(f"python{python}") if python else sys.executable
                 if not base:
                     return None, f"needs Python {python} on this machine (brew install python@{python}), or `uv`"
-                cmd = [base, "-m", "venv", str(root)]
+                cmd = [base, "-m", "venv", *(["--system-site-packages"] if system_site_packages else []), str(root)]
             log(f"  creating {root} ...")
             done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if done.returncode != 0:

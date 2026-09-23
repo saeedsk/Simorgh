@@ -141,16 +141,26 @@ def _farsi_synthesiser(config):
     """
     from .mms import MmsSynthesiser
     from .piper import PiperSynthesiser
+    from .pocket import PocketSynthesiser
 
+    named = {
+        "pocket": lambda: PocketSynthesiser(config),
+        "piper": lambda: PiperSynthesiser(config, voice=config.tts_farsi_voice),
+        "mms": lambda: MmsSynthesiser(config, model_id=getattr(config, "tts_farsi_mms_model", "")),
+    }
     choice = (getattr(config, "tts_farsi", "auto") or "auto").strip().lower()
-    if choice == "mms":
-        return MmsSynthesiser(config, model_id=getattr(config, "tts_farsi_mms_model", ""))
-    if choice == "piper":
-        return PiperSynthesiser(config, voice=config.tts_farsi_voice)
-    try:
-        return PiperSynthesiser(config, voice=config.tts_farsi_voice)
-    except ImportError:
-        return MmsSynthesiser(config, model_id=getattr(config, "tts_farsi_mms_model", ""))
+    if choice in named:
+        return named[choice]()
+    # auto: the one the creator chose, then the one that is always
+    # there. Pocket needs a venv and a reference clip, and a house
+    # whose Farsi has gone silent because a model was not downloaded is
+    # worse than a house whose Farsi sounds like Piper.
+    for engine in ("pocket", "piper", "mms"):
+        try:
+            return named[engine]()
+        except ImportError:
+            continue
+    return PiperSynthesiser(config, voice=config.tts_farsi_voice)   # its refusal is the one worth raising
 
 
 def _default_openers() -> dict:

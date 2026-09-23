@@ -66,7 +66,8 @@ _PRODUCES = (
 # 2026-09-16, set `expressive_lane = always`, was told it was saved, and
 # went on hearing Kokoro until an unrelated `voice set tts miso` forced
 # the rebuild: "what hapens i stil hear kokoro model not miso :(".
-_ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "tts", "tts_farsi", "tts_farsi_voice", "vad_sensitivity",
+_ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "tts", "tts_farsi", "tts_farsi_voice",
+                          "tts_farsi_reference", "vad_sensitivity",
                           "microphone", "speaker", "expressive_lane"})
 _SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
                            "max_spoken_sentences", "output"})
@@ -1041,7 +1042,27 @@ class Service:
         model_dir = Path(self.config.model_dir)
         piper_names = {f"piper-{lang}": voice for lang, voice in PIPER_VOICES.items()}
         mms_names = {f"mms-{lang}": model for lang, model in MMS_MODELS.items()}
-        available = [*KNOWN_MODELS, "kokoro", *piper_names, *mms_names, "chatterbox", "styletts2", "miso"]
+        available = [*KNOWN_MODELS, "kokoro", *piper_names, *mms_names, "pocket-fa",
+                     "chatterbox", "styletts2", "miso"]
+        if name in ("pocket", "pocket-fa"):
+            # Farsi at 24 kHz in a cloned voice (the creator's choice,
+            # 2026-09-22). A venv of its own, the package from git, and
+            # the model's own normaliser; the 438 MB of weights and the
+            # G2P download on first use.
+            from .tts import pocket as _pocket
+
+            notes: list[str] = []
+            path, problem = await asyncio.to_thread(_pocket.install, self.config.venv_dir, log=notes.append)
+            if path is None:
+                await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": False, "detail": problem,
+                                                                       "available": available})
+                return
+            detail = (f"pocket is installed at {path.parent.parent}; `voice set tts_farsi pocket` speaks Farsi "
+                      f"with it, cloning the voice in {self.config.tts_farsi_reference} "
+                      f"(the model downloads on first use)")
+            await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": True, "path": str(path), "bytes": 0,
+                                                                   "detail": detail, "available": available})
+            return
         if name in ("chatterbox", "styletts2", "miso"):
             # The expressive engines: a virtual environment of their own
             # (torch 2.6 / Python 3.10 do not fit the repository's), built
