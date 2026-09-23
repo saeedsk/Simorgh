@@ -27,7 +27,7 @@ Voice owns the spoken channel on this laptop: microphone frames, endpointing and
 | `simorgh/voice/backchannel.py` | "aha"/"let me check" sounds; addressed-to-Sim and quiet-reply detection |
 | `simorgh/voice/tts/pocket.py` | Pocket-TTS Farsi v2: 24 kHz, its voice CLONED from a ~5 s reference clip, ~7x real time; a venv of its own, phonemes from a T5 G2P inside its server; CC-BY-NC |
 | `simorgh/voice/tts/mms.py` | Meta's MMS-TTS (`facebook/mms-tts-fas`): a second Farsi voice, 16 kHz, ~6x real time; optional (transformers+torch) and refused by name without them |
-| `simorgh/voice/stt/whisper_server.py` | whisper.cpp kept loaded over HTTP; ends servers a previous Sim orphaned (`reap_orphaned_servers`) before starting one |
+| `simorgh/voice/stt/whisper_server.py` | whisper.cpp kept loaded over HTTP; ends servers a previous Sim orphaned (`reap_orphaned_servers`) before starting one -- by the server's OWN name, never a runtime's (`names_nobody_owns`): matching `python3` SIGTERMed every orphaned python on the machine |
 | `simorgh/voice/commands.py` | "stop", "be quiet", "voice off", "restart" handled without the model |
 | `simorgh/voice/speakers.py` | Speaker embeddings and the household voice book (identify, enrol, refine) |
 | `simorgh/voice/diarize.py` | Who said which words within one turn |

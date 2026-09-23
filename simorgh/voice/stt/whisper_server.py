@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -32,6 +33,22 @@ from ..audio import wav_bytes
 from .whisper_cli import _TEST_MODEL, clean_transcript, find_model
 
 READY_TIMEOUT_S = 90.0
+
+
+#: Basenames that identify a runtime rather than a program: matching on
+#: one selects every unrelated script on the machine that happens to be
+#: written in the same language.
+_NAMES_NOBODY_OWNS = frozenset({
+    "python", "pythonw", "uv", "uvx", "pipx", "poetry",
+    "sh", "bash", "zsh", "dash", "env", "node", "deno", "bun", "ruby", "perl", "java",
+})
+
+
+def names_nobody_owns(name: str) -> bool:
+    """Is `name` a runtime rather than a program? `python3.12` counts:
+    the version is part of the interpreter's name, not of anybody's."""
+    bare = re.sub(r"[0-9.]+$", "", Path(name).name.strip().lower())
+    return bare in _NAMES_NOBODY_OWNS
 
 
 def orphaned_servers(command: str, *, ps: object = None) -> list[int]:
@@ -50,6 +67,16 @@ def orphaned_servers(command: str, *, ps: object = None) -> list[int]:
     Sim's pid. So this never touches a server another Sim is using --
     including the ones a parallel agent or `tools/voice_replay.py`
     booted -- and does not depend on any state written before the crash.
+
+    What it must never do is match on a name that is not the server's.
+    The command can be an interpreter and a script -- the test suite
+    builds exactly that, `[sys.executable, fixture.py]` -- and then the
+    name being matched is `python3`, so every ORPHANED PYTHON ON THE
+    MACHINE was a whisper server to be SIGTERMed. It killed the soak
+    daemon five times over two days, each time silently and each time
+    blamed on memory; it would as happily kill the creator's own
+    background scripts (2026-09-23). An interpreter names nothing, so
+    reaping by one reaps nothing.
     """
     import subprocess
 
@@ -59,6 +86,8 @@ def orphaned_servers(command: str, *, ps: object = None) -> list[int]:
     except Exception:  # noqa: BLE001 -- no ps, no reaping; this is a courtesy, not a requirement
         return []
     name = Path(command).name
+    if names_nobody_owns(name):
+        return []
     found = []
     for line in (out or "").splitlines():
         parts = line.split(None, 2)
