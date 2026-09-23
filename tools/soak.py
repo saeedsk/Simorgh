@@ -364,6 +364,28 @@ async def main_async(args) -> int:
     return 0
 
 
+def detach(log_path: Path) -> None:
+    """Become a session leader of our own, with output in `log_path`.
+
+    `nohup` survives a hangup and not a process group being killed, and
+    the soak died three times that way -- each time a later foreground
+    command in the same session ended and took it with it. An unattended
+    eight-hour run cannot depend on nobody running anything else
+    (2026-09-23).
+    """
+    if os.fork() > 0:                       # the launcher returns immediately
+        os._exit(0)
+    os.setsid()                             # a session of our own: no controlling terminal to lose
+    if os.fork() > 0:                       # never a session leader again, so no terminal can be acquired
+        os._exit(0)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    os.dup2(handle, 1)
+    os.dup2(handle, 2)
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--instances", type=int, default=8)
@@ -374,7 +396,12 @@ def main() -> int:
                     help="rebuild each sandbox from the repo this often, so the soak tests what is committed NOW")
     ap.add_argument("--paid", action="store_true", help="let jobs reach a real model (costs money)")
     ap.add_argument("--report", action="store_true", help="read the findings of a run and stop")
-    return asyncio.run(main_async(ap.parse_args()))
+    ap.add_argument("--detach", action="store_true",
+                    help="run as a session of its own, so another command ending cannot kill it")
+    args = ap.parse_args()
+    if args.detach and not args.report:
+        detach(SOAK_DIR / f"{args.run or 'soak'}.log")
+    return asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
