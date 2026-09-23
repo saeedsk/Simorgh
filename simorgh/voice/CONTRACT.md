@@ -109,7 +109,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `tts_speed` | `1.3` | yes (Kokoro natively; StyleTTS2 by dividing the model's phoneme durations since 2026-09-19) |
 | `tts_by_language` | `True` | yes |
 | `tts_farsi_voice` | `'fa_IR-amir-medium'` | yes |
-| `tts_farsi` | `'auto'` | yes -- which engine speaks Farsi: `auto` prefers Piper and falls back to MMS, and NAMING one means it or nothing (silently swapping the engine somebody chose is how they conclude both sound the same) |
+| `tts_farsi` | `'auto'` | yes, and live (`voice set tts_farsi mms`): it is in `contracts.settings.VOICE_SAFE_KEYS` and in `service._ENGINE_KEYS`, so the engines are reopened rather than waiting for a restart -- which engine speaks Farsi: `auto` prefers Piper and falls back to MMS, and NAMING one means it or nothing (silently swapping the engine somebody chose is how they conclude both sound the same) |
 | `tts_farsi_mms_model` | `'facebook/mms-tts-fas'` | yes |
 | `vad` | `'auto'` | yes |
 | `vad_threshold` | `0.5` | yes |

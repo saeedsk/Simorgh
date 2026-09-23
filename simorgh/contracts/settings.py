@@ -72,7 +72,15 @@ def read_handoff(name: str, home: Path | None = None) -> dict[str, str]:
 VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "enabled": (bool, None, "listen on boot"),
     "tts_voice": (str, None, "the voice for the current engine (`voice voices` lists them, the current one starred)"),
-    "tts_farsi_voice": (str, None, "the Piper voice for Farsi"),
+    "tts_farsi_voice": (str, None, "the Piper voice for Farsi: amir, ganji, ganji_adabi, gyro, reza_ibrahim "
+                        "(as `fa_IR-<name>-medium`)"),
+    # Which ENGINE speaks Farsi, as against which Piper voice it uses.
+    # The creator, 2026-09-22: "i don't like the farsi voice model, what
+    # are my options?" -- and then, of the answer, "how to change the
+    # farsi tts?". A setting nobody can change without editing a file
+    # and restarting is not really a choice.
+    "tts_farsi": (str, ("auto", "piper", "mms"), "which engine speaks Farsi: piper (5 voices, 22 kHz) "
+                  "or mms (a different model, 16 kHz); auto prefers piper"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),

@@ -66,7 +66,7 @@ _PRODUCES = (
 # 2026-09-16, set `expressive_lane = always`, was told it was saved, and
 # went on hearing Kokoro until an unrelated `voice set tts miso` forced
 # the rebuild: "what hapens i stil hear kokoro model not miso :(".
-_ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "tts", "tts_farsi_voice", "vad_sensitivity",
+_ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "tts", "tts_farsi", "tts_farsi_voice", "vad_sensitivity",
                           "microphone", "speaker", "expressive_lane"})
 _SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
                            "max_spoken_sentences", "output"})
