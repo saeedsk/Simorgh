@@ -59,6 +59,12 @@ task = "standing approvals: approve a kind of action once"
 since = "2026-09-22T14:09:20+00:00"
 until = "2026-09-22T22:09:20+00:00"
 
+[locks.kernel]
+by = "opus-main"
+task = "the log says which day and which process a line came from"
+since = "2026-09-23T01:34:51+00:00"
+until = "2026-09-23T09:34:51+00:00"
+
 [locks.memory]
 by = "opus-main"
 task = "consolidation waits long enough for a provider to answer"

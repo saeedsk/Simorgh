@@ -201,7 +201,15 @@ def _log_handler(config):
     import logging
     import logging.handlers
 
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s", "%H:%M:%S")
+    # The date and the pid, not just the clock time. `sim.log` is a
+    # rotating ring several days deep, and more than one Sim writes it --
+    # a trial, a replay, the live one. With `%H:%M:%S` alone, lines from
+    # yesterday sit between lines from today and nothing says which
+    # process wrote which: supervising the SWE-bench run on 2026-09-22 I
+    # read yesterday's Gemini failures as today's twice, and "re-check
+    # whether the fix is live" is the one thing this file is for.
+    formatter = logging.Formatter("%(asctime)s [%(process)d] %(levelname)s %(name)s %(message)s",
+                                  "%m-%d %H:%M:%S")
     if sys.stderr.isatty():
         try:
             folder = Path(config.runtime.data_dir) / "logs"
