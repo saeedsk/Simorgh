@@ -66,10 +66,18 @@ JOBS: dict[str, list[str]] = {
     "arcs": [sys.executable, "-m", "simorgh.evals", "arcs", "--json"],
     "suite": [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-x", "-m", "not live and not slow"],
     "trial": [sys.executable, "tools/trial.py", "--task", "read simorgh/kernel/service.py and say what boots first"],
+    # Shutdown is where this system's live bugs have lived: Ctrl-C
+    # ignored while a tool thread was busy, whisper servers outliving
+    # the process, a ledger left locked. None were found by a test --
+    # they were found by somebody closing the terminal. So close it,
+    # repeatedly, at different moments of the boot (2026-09-23).
+    "boot": [sys.executable, "tools/boot_cycle.py", "--cycles", "2", "--settle", "8", "--grace", "25"],
+    "boot-early": [sys.executable, "tools/boot_cycle.py", "--cycles", "2", "--settle", "3",
+                   "--grace", "25", "--signal", "TERM"],
 }
 #: The order instances take jobs in, so eight instances are not all
 #: doing the same thing at the same moment.
-DEFAULT_ROTATION = ("house-fast", "house", "suite", "house-fast", "arcs", "house", "house-fast", "suite")
+DEFAULT_ROTATION = ("house-fast", "boot", "house", "suite", "boot-early", "arcs", "house-fast", "boot")
 #: A job that has not printed anything for this long is wedged, and a
 #: wedged job is a finding of its own.
 JOB_TIMEOUT_S = 2400.0
