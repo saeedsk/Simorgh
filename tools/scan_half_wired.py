@@ -145,6 +145,13 @@ class _TopicVisitor(ast.NodeVisitor):
         self.dynamic_pub: list[int] = []
         self.handler_table: list[tuple[str, str, int]] = []
         self.topic_table: list[tuple[str, str, int]] = []
+        #: `topic = topics.A if ok else topics.B`, published a line later
+        #: by the variable. Planning does exactly this for
+        #: `project.completed`/`project.failed`, and the scan called both
+        #: of them unpublished until 2026-09-23 -- a false alarm costs
+        #: the next reader the time to prove it is one, and a scanner
+        #: nobody trusts is not a scanner.
+        self.topic_choice: list[tuple[str, str, int]] = []
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         name = node.func.attr if isinstance(node.func, ast.Attribute) else (
@@ -171,6 +178,14 @@ class _TopicVisitor(ast.NodeVisitor):
                 topic = self._first_topic(kw.value)
                 if topic and (_is_publish(name) or name in _EVENT_CTORS):
                     self.pub.append((topic, _rel(self.path), node.lineno))
+        self.generic_visit(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:  # noqa: N802
+        """Both arms of `topics.A if cond else topics.B`."""
+        for arm in (node.body, node.orelse):
+            topic = _topic_of(arm, self.consts)
+            if topic:
+                self.topic_choice.append((topic, _rel(self.path), node.lineno))
         self.generic_visit(node)
 
     def _first_topic(self, arg: ast.AST) -> str | None:
@@ -216,6 +231,8 @@ def scan_topics() -> dict:
             sub[topic].append(f"{f}:{line}")
         for topic, f, line in v.topic_table:
             pub[topic].append(f"{f}:{line} (via table)")
+        for topic, f, line in v.topic_choice:
+            pub[topic].append(f"{f}:{line} (via a conditional)")
         if v.dynamic_sub:
             # A subscribe whose topic is a loop variable. Anything this
             # file maps to a handler is reached by it.
