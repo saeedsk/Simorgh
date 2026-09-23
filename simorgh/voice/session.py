@@ -1413,8 +1413,19 @@ class VoiceSession:
         if self._hushed():
             if wants_to_talk_again(text):
                 await self._unhush(turn_id)
-            else:
-                await self._stay_quiet(turn_id, reason="asked to be quiet")
+                return
+            # A hush silences CHATTER, not the few things said TO the
+            # voice itself. "Sim, restart", "voice off", "mute" are
+            # instructions to this layer, and refusing them would leave
+            # one way back from an indefinite hush -- the keyboard --
+            # for a household that may not be near one. Found reviewing
+            # my own change, 2026-09-23; "stop" is already redundant
+            # while nothing is being said, and harmless.
+            hushed_command = spoken_command(text)
+            if hushed_command is not None and hushed_command != HUSH:
+                await self._obey(turn_id, hushed_command, speaker=speaker, clock=clock, said=text)
+                return
+            await self._stay_quiet(turn_id, reason="asked to be quiet")
             return
         command = spoken_command(text)
         if command is not None:

@@ -77,6 +77,16 @@ class TheSessionKeepsQuiet(unittest.IsolatedAsyncioTestCase):
         await session._unhush(1)                            # noqa: SLF001
         self.assertFalse(session._hushed())                 # noqa: SLF001
 
+    async def test_the_voice_can_still_be_turned_off_while_hushed(self):
+        """A hush silences chatter, not the few things said TO the voice
+        itself. Refusing "Sim, restart" or "voice off" while hushed
+        would leave one way back from an indefinite hush -- the
+        keyboard -- for a household that may not be near one."""
+        from simorgh.voice.commands import MUTE, OFF, RESTART, spoken_command
+
+        for text in ("voice off", "mute", "restart"):
+            self.assertIn(spoken_command(text), (OFF, MUTE, RESTART), text)
+
     async def test_a_timed_hush_ends_by_itself(self):
         session, _bus, _tts = self._session()
         session._hush_until = session._now() - 1.0          # noqa: SLF001 -- ten minutes ago
