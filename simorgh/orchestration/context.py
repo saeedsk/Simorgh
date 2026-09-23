@@ -264,9 +264,18 @@ class Assembler:
             # never snips the question away under a long run of results.
             chat = getattr(session.profile, "scaffold", "") == "chat"
             blocks.append({"role": "user", "content": task, **({"protected": True} if chat else {})})
-        if session.carried:
+        if session.carried or session.uncommitted:
             # A retry continues; it does not start over. Without this the
             # model re-did the first N steps every attempt (2026-09-07).
+            #
+            # `or session.uncommitted`, because a CRASH is the other way
+            # a session inherits a half-done tree, and it carries no
+            # note: the killed attempt never got to write one, and on
+            # the first attempt there is no earlier one to summarise. So
+            # the resumed session saw a file it had no memory of writing,
+            # and wrote it again -- `redone_steps: [2]` in the
+            # kill-and-resume drill, every run (2026-09-23). The edits
+            # themselves are the fact; the note about them is optional.
             if session.uncommitted:
                 tree = (
                     "Their uncommitted edits to " + ", ".join(sorted(session.uncommitted))
@@ -274,11 +283,14 @@ class Assembler:
                 )
             else:
                 tree = "Edits they left uncommitted were discarded; anything they committed is in the tree."
+            how = ("Earlier attempts ran out of steps or were blocked; here is what they did, so you "
+                   "continue rather than repeat it." if session.carried else
+                   "This work was interrupted -- the process was stopped mid-task and started again, so "
+                   "there is no record of what it was thinking, only what it left behind.")
             blocks.append({"role": "user", "content": (
-                f"This is attempt {session.attempt} at the task. Earlier attempts ran out of steps or "
-                f"were blocked; here is what they did, so you continue rather than repeat it. {tree}\n\n"
+                f"This is attempt {session.attempt} at the task. {how} {tree}\n\n"
                 + session.carried
-            )})
+            ).strip()})
 
         blocks.extend(session.messages)
         return blocks
