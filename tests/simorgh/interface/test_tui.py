@@ -143,7 +143,7 @@ class TestLongLinesDoNotFreezeCompletionOrLexing(unittest.TestCase):
         def offered(line: str) -> list[str]:
             doc = Document(line, cursor_position=len(line))
             return [c.text for c in completer.get_completions(doc, _FakeCompleteEvent())]
-        self.assertEqual(offered("tasks "), ["all", "work", "clear"])
+        self.assertEqual(offered("tasks "), ["all", "work", "wake", "clear"])
         self.assertEqual(offered("tasks c"), ["clear"])
         self.assertEqual(offered("/voice "), ["status", "on", "off", "mute", "unmute", "barge", "listen", "test",
                                               "enroll", "people", "whois", "forget", "tidy", "relearn",

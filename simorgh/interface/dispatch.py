@@ -362,6 +362,19 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
                 f"cleared {p.get('cleared', 0)} task(s)"
                 + (f"; {p['cancelled']} running were told to stop" if p.get("cancelled") else "")
                 + " -- the ledger keeps their history"))
+        words = args.strip().split()
+        if words and words[0] in ("wake", "resume", "unpark"):
+            # `task.wake` is one of the three ways a WAITING task goes
+            # back to AVAILABLE, and the only MANUAL one -- the other two
+            # are its moment passing and its topic being heard. Nothing
+            # in `simorgh/` published it (`tools/scan_half_wired.py`,
+            # 2026-09-23), so a task waiting on an event that never comes
+            # had no way back at all: no command, no tool, nothing.
+            if len(words) < 2:
+                return Outcome("usage: tasks wake <task_id>   (`tasks all` shows which are waiting)")
+            await bus.publish(bus.new(topics.TASK_WAKE, {
+                "task_id": words[1], "why": f"woken by cli:{session_id}"}))
+            return Outcome(f"asked {words[1]} to wake; it goes back in the queue if it was waiting")
         if args.strip() == "work":
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (
                 f"working: {p['task_id']}" if p.get("task_id") else f"nothing to work on ({p.get('reason', 'idle')})"
