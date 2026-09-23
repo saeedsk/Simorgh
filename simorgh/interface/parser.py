@@ -155,7 +155,8 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
                 ("state [camera]", "what a camera sees right now, and what it has on"),
                 ("show <camera>", "one camera live, framed beside Sim's page"),
                 ("show <a>, <b>, ... | all", "several cameras tiled across the TV"),
-                ("show <camera> full", "one camera full screen on the TV"),
+                ("show <camera> full", "one camera full screen on the TV -- a Ring camera goes to the "
+                                       "dashboard's zoomed tile instead, since ffmpeg cannot relay it"),
                 ("show all dash", "every camera live in the dashboard's camera strip; the TV's page is left alone"),
                 ("show stop", "end the live streams"),
                 ("snapshot <camera>", "a still, saved under workspace/cameras/"),
@@ -167,6 +168,8 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
                 ("watch on|off", "events pushed from the NVR onto the screen as they happen"),
                 ("setup <host> <user>", "the NVR's address and login; the password is asked for hidden, never on the line")),
     "ring": (("list", "every Ring camera: kind, battery, light/siren"),
+             ("live <camera>|off", "one Ring camera full screen on the TV (Ring has no RTSP, so this is the "
+                                   "dashboard's own live tile, zoomed); off goes back to the wall"),
              ("snapshot <camera|all>", "a fresh still, saved under workspace/cameras/ring/ -- the dashboard shows it"),
              ("events [camera] [n]", "recent rings and motions, newest first"),
              ("light <camera> on|off", "the camera's light"),

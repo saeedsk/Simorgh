@@ -184,8 +184,14 @@ async function loadData(){
     if(!warm&&warmRetries<12){warmRetries++;setTimeout(loadData,6000);}
   }catch(e){if(warmRetries<12){warmRetries++;setTimeout(loadData,6000);}}
 }
+let BUILD=0;   // which dash.html this page IS; the server says which it now serves
 function applyState(st){
-  if(!st||!st.since||st.since<=appliedSince) return;
+  if(!st) return;
+  // A new dash.html on disk means this page is stale. Nobody walks to
+  // the television to press refresh, and re-casting is not something a
+  // household thinks of -- so the page notices and reloads itself.
+  if(st.build){ if(!BUILD) BUILD=st.build; else if(st.build!==BUILD){ location.reload(); return; } }
+  if(!st.since||st.since<=appliedSince) return;
   appliedSince=st.since;
   if(st.timeframe) TF=st.timeframe;
   if(st.symbol!=null) {SEL=st.symbol||""; if(SEL) PIN=SEL;}

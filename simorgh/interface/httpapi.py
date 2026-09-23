@@ -179,12 +179,16 @@ class HttpApi:
         self._logs_default_limit = logs_default_limit
         self._logs_max_limit = max(1, logs_max_limit)
         self._server: asyncio.base_events.Server | None = None
-        self._page = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
+        self._page_cache: dict[str, tuple[float, str]] = {}
         # Sim on the TV (interface/static/tv.html): a replica of the
         # terminal, and what to frame in it (`tv.state`, published by the
         # cast tools in execution/media/cast.py).
-        self._tv_page = (_STATIC_DIR / "tv.html").read_text(encoding="utf-8")
-        self._dash_page = (_STATIC_DIR / "dash.html").read_text(encoding="utf-8")
+        # Read on every request, not once at boot. The creator changed
+        # the dashboard, re-cast it, and still saw the old page -- twice,
+        # because the fix was in a string this process had read at
+        # startup and would hold until it restarted (2026-09-22). A
+        # `stat` per page load is nothing; a page nobody can refresh
+        # without a restart is a day of "it didn't work".
         self._tv_state: dict = {"mode": "none", "url": "", "title": "", "since": 0.0}
         self._tv_sub = None
         self._tv_speech: deque = deque(maxlen=40)   # (seq, ref, seconds, at): Sim's voice for the page
@@ -258,7 +262,7 @@ class HttpApi:
 
     def _register_builtin_routes(self) -> None:
         async def _page(_query, _body, _headers):
-            return 200, self._page.encode("utf-8"), "text/html; charset=utf-8"
+            return 200, self._static_page("dashboard.html").encode("utf-8"), "text/html; charset=utf-8"
 
         def _json_route(fn):
             async def _handler(query, _body, _headers):
@@ -282,7 +286,7 @@ class HttpApi:
             return 200, await self._status_json(public_only=bool(full)), "application/json"
 
         async def _tv(_query, _body, _headers):
-            return 200, self._tv_page.encode("utf-8"), "text/html; charset=utf-8"
+            return 200, self._static_page("tv.html").encode("utf-8"), "text/html; charset=utf-8"
 
         async def _tv_state(_query, _body, _headers):
             now = self._now()
@@ -306,7 +310,7 @@ class HttpApi:
         self.register_route("GET", "/tv", _tv, auth=False)
 
         async def _dash(_query, _body, _headers):
-            return 200, self._dash_page.encode("utf-8"), "text/html; charset=utf-8"
+            return 200, self._static_page("dash.html").encode("utf-8"), "text/html; charset=utf-8"
 
         async def _wallpapers(_query, _body, _headers):
             names = []
@@ -333,7 +337,13 @@ class HttpApi:
             return 200, json.dumps(body, default=str).encode("utf-8"), "application/json"
 
         async def _dash_state_get(_query, _body, _headers):
-            return 200, json.dumps({"now": self._now(), **self._dash_state}).encode("utf-8"), "application/json"
+            # `build` is when dash.html itself last changed. The page
+            # compares it with its own and reloads: a Cast receiver in a
+            # living room is the last screen anybody thinks to refresh,
+            # and a fix that only reaches the TV when somebody re-casts
+            # it is a fix the household never sees (2026-09-22).
+            return 200, json.dumps({"now": self._now(), "build": self._page_build(),
+                                    **self._dash_state}).encode("utf-8"), "application/json"
 
         async def _dash_state_post(query, body, headers):
             # The phone remote (`/remote?token=`): gated like every other
@@ -781,6 +791,35 @@ class HttpApi:
     _DASH_VIEWS = ("home", "cameras", "markets", "charts", "ambient")
     #: News, Discover, Terminal and Media were folded into Home (2026-09-14); the old names still land somewhere
     _VIEW_ALIASES = {"news": "home", "discover": "home", "terminal": "home", "deck": "home", "media": "home"}
+
+    def _static_page(self, name: str) -> str:
+        """A static page, re-read when the file on disk has changed."""
+        path = _STATIC_DIR / name
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            return self._page_cache.get(name, (0.0, ""))[1]
+        cached = self._page_cache.get(name)
+        if cached is None or cached[0] != stamp:
+            try:
+                cached = (stamp, path.read_text(encoding="utf-8"))
+            except OSError:
+                return cached[1] if cached else ""
+            self._page_cache[name] = cached
+        return cached[1]
+
+    def _page_build(self) -> float:
+        """When the dashboard's own source last changed, so a page that
+        is ALREADY on the TV can notice and reload itself.
+
+        Without it, a fix to `dash.html` reaches the television only
+        when somebody re-casts it, and a Cast receiver in a living room
+        is the last screen anybody thinks to refresh.
+        """
+        try:
+            return round((_STATIC_DIR / "dash.html").stat().st_mtime, 3)
+        except OSError:
+            return 0.0
 
     def _apply_dash_state(self, payload: dict) -> None:
         view = str(payload.get("view") or "").strip().lower()
