@@ -243,8 +243,16 @@ async def main_async(args) -> int:
             raise SystemExit(f"no job called {job!r}; have {', '.join(JOBS)}")
     print(f"soak {run_dir.name}: {args.instances} instance(s), {args.hours:g}h, "
           f"{'paid' if args.paid else 'free'}, jobs {', '.join(rotation)}")
-    instances = [make_instance(run_dir, n, rotation) for n in range(args.instances)]
+    # The start line BEFORE the copies, and one line per sandbox as it
+    # lands. Eight copy-on-write clones still take minutes, and with the
+    # log written afterwards a watcher saw an empty directory and no way
+    # to tell "still starting" from "died" -- the same silence this
+    # evening's fixes were mostly about (2026-09-23).
     _log(run_dir, "start", instances=args.instances, hours=args.hours, paid=args.paid, jobs=list(rotation))
+    instances = []
+    for n in range(args.instances):
+        instances.append(make_instance(run_dir, n, rotation))
+        _log(run_dir, "sandbox", instance=n, of=args.instances)
     until = time.monotonic() + args.hours * 3600.0
     await asyncio.gather(*(drive(i, run_dir, until=until, paid=args.paid) for i in instances))
     _log(run_dir, "end", runs=sum(i.runs for i in instances), failures=sum(i.failures for i in instances))
