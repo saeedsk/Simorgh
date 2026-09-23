@@ -113,7 +113,22 @@ def make_instance(run_dir: Path, number: int, rotation: tuple[str, ...]) -> Inst
     if workspace.is_dir():
         shutil.rmtree(workspace, ignore_errors=True)
     (workspace / "scratch").mkdir(parents=True, exist_ok=True)
-    (workspace / "README.md").write_text("A sandbox's workspace: empty on purpose (tools/soak.py).\n")
+    (workspace / "README.md").write_text("A sandbox's workspace: shared models, nothing else (tools/soak.py).\n")
+    # ...except the models, which the scenarios DO need: stripping the
+    # whole directory broke every voice beat with `kokoro model files
+    # not found` -- the soak catching its own regression within the
+    # hour (2026-09-23). Symlinked, not copied: they are read-only and
+    # several gigabytes, and a link cannot diverge.
+    for shared in ("voice/models", "voice/venvs", "voice/references", "voice/prompts", "voice/engines"):
+        source = REPO / "workspace" / shared
+        if not source.exists():
+            continue
+        link = workspace / shared
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link.symlink_to(source, target_is_directory=True)
+        except OSError:
+            pass
     data = root / "sandbox-home"
     (data / ".simorgh").mkdir(parents=True, exist_ok=True)
     # Half the instances run the CREATOR'S OWN settings, not the
