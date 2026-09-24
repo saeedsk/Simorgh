@@ -94,3 +94,9 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "sentence streamer spins forever on a short sentence"
+since = "2026-09-24T03:20:44+00:00"
+until = "2026-09-24T11:20:44+00:00"
