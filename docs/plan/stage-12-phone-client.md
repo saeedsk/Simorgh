@@ -82,11 +82,29 @@ Five tabs. The first is the one people open; the other four are why this is not 
 
 `getUserMedia` requires a secure context, so **no browser will give a page the microphone over `http://`** -- this blocks the voice work and nothing else can be tested honestly without it. The HTTP server has no TLS at all (`asyncio.start_server`, no `ssl` anywhere).
 
-Tailscale is the recommended route and the one this plan assumes: a stable hostname, real certificates, works away from the house, and no port opened on the router. It also retires the `0.0.0.0` LAN bind that the 2026-09-18 evaluation flagged (S15/V2) -- Sim can go back to binding loopback and let the tailnet carry it.
+**Sim is not moving to AWS.** It holds the Reolink NVR at 192.168.50.42, Music.app through `osascript`, the Cast device, the microphone, and 6 GB of local models. This decision is about the DOOR, not the house: wherever the endpoint lives, Sim still runs on the Mac.
 
-Alternatives, for the record: a self-signed certificate with a trust profile on the phone (LAN only, Safari nags), or a Cloudflare tunnel (household audio transits a third party).
+The creator's constraint decides it, 2026-09-24: "many times practically I forgot to [have] Tailscale working on all sides". **A security control you have to remember to switch on is not one.** That rules out any client VPN as the primary path, whatever its merits. So the shape is: Sim dials OUT to an always-on public endpoint, the phone dials IN to the same one. No port opened at home, and nothing on the phone to toggle.
 
-Done when: the dashboard loads over `https://` on the phone, off the home network, with no certificate warning.
+| | availability | who can read the traffic | cost | ops |
+|---|---|---|---|---|
+| **AWS ingress (recommended)** | always; nothing to remember | infra the creator owns | ~$3-5/mo, a t4g.nano or Lightsail | a box to patch |
+| Tailscale | only when up on both ends -- the stated failure | nobody but the two ends | free | none |
+| API Gateway WebSocket + Lambda | always | AWS | ~$0 idle, ~$0.04 per 10-min call | 2-hour connection cap, 10-min idle timeout, 128 KB frames, Lambda in the audio path |
+| Cloudflare Tunnel | always | **Cloudflare** -- TLS terminates there | free | none |
+| port forward at home | always | nobody in the middle | free | Sim's own socket on the open internet |
+
+The recommendation: **a tiny AWS instance as a TLS ingress, with Sim holding a persistent outbound tunnel to it.** Real certificate from Let's Encrypt, WebSocket-native so the voice socket needs no special handling, no per-message billing, and the whole path inside infrastructure the creator owns. API Gateway is more elegant for text and awkward for 33 audio frames a second; Cloudflare is free and puts the household's audio through somebody else.
+
+**"Only available to Sim and its mobile app"** is the creator's own wording and it wants enforcing at the transport, not only in the application:
+
+- **Mutual TLS.** The ingress requires a client certificate; anything without one is refused before a byte of HTTP is parsed. iOS handles client certs from the keychain, and a native app (item 7) gets one at pairing. This is the literal form of the requirement.
+- **Per-device tokens above it** (item 2), so a certificate alone is not authority and a lost device is revoked in one line.
+- **The relay is never trusted.** Even inside the creator's own account, a box that terminates TLS can read and could forge. So an `approve` answer is **signed with a device key held in the iPhone's Secure Enclave** and verified by Sim at home: a compromised ingress can then read traffic, and still cannot authorise an irreversible action. This is the one place in the design where defence in depth is worth its complexity, because `approve` is the capability that spends money and unlocks doors.
+
+**Both, eventually.** They are not exclusive: the client can try the tailnet name first -- direct, lowest latency, nobody in the middle -- and fall back to the public endpoint when it is not up. That is a few lines in the client and it is the honest answer to "secure but at the same time available". Build the AWS path first, because it is the one that works when nothing was remembered.
+
+Done when: the dashboard loads over `https://` on the phone, off the home network, with no certificate warning, with no port opened at home, and with a client certificate required; and Sim's own listening socket is back on loopback, retiring the `0.0.0.0` bind the 2026-09-18 evaluation flagged (S15/V2).
 
 ### 2. Per-device tokens, before anything can approve
 
