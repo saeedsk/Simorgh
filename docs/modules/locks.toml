@@ -17,6 +17,12 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
+[locks.contracts]
+by = "opus-main"
+task = "a chat turn can remember on purpose; overheard_note stops claiming to be memory"
+since = "2026-09-24T07:41:11+00:00"
+until = "2026-09-24T15:41:11+00:00"
+
 [locks.docs]
 by = "opus-main"
 task = "findings: native vs markers on Gemini"
@@ -34,6 +40,12 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
+
+[locks.execution]
+by = "opus-main"
+task = "a chat turn can remember on purpose; overheard_note stops claiming to be memory"
+since = "2026-09-24T07:41:11+00:00"
+until = "2026-09-24T15:41:11+00:00"
 
 [locks.growth]
 by = "opus-main"
@@ -58,6 +70,12 @@ by = "opus-main"
 task = "consolidation waits long enough for a provider to answer"
 since = "2026-09-22T20:46:27+00:00"
 until = "2026-09-23T04:46:27+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "a chat turn can remember on purpose; overheard_note stops claiming to be memory"
+since = "2026-09-24T07:41:11+00:00"
+until = "2026-09-24T15:41:11+00:00"
 
 [locks.planning]
 by = "opus-main"
