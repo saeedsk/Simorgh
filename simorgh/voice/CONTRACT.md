@@ -22,6 +22,7 @@ Voice owns the spoken channel on this laptop: microphone frames, endpointing and
 | `simorgh/voice/aec.py` | NLMS echo canceller (constructed only on the `Pipeline` path, V7) |
 | `simorgh/voice/audio.py` | Microphone and speaker backends (sounddevice, ffmpeg, afplay), WAV helpers |
 | `simorgh/voice/playback.py` | `StreamingPlayer`: interruptible chunked playback under one speech lock |
+| `simorgh/voice/remote.py` | A phone as a microphone and speaker over one WebSocket (RFC 6455, stdlib): `handshake_response`, `frame`/`read_frame`, `token_ok`, `RemoteMicrophone` (the same `name`/`capture`/`stream` interface the local microphones implement), `RemoteSpeaker` (sends the voice AND keeps the turn's time, as `SilentSpeaker` does for the TV). Audio deliberately never crosses the Bus: 16 kHz mono at 30 ms a frame is 33 messages a second per listener, the wrong shape for a typed-message bus and for blob storage alike, and Voice already owns microphones, the endpointer and the turn manager |
 | `simorgh/voice/planner.py` | Spoken-response planner: speakable text, chunking, connectors, leaked-marker removal |
 | `simorgh/voice/delivery.py` | Pace, loudness and pauses chosen from the situation and mood |
 | `simorgh/voice/backchannel.py` | "aha"/"let me check" sounds; addressed-to-Sim and quiet-reply detection |
