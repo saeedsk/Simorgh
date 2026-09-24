@@ -1124,6 +1124,23 @@ class Service:
         if record.started_at is not None:
             elapsed = time.monotonic() - record.started_at
         detail = p.get("result_summary") or p.get("reason") or ""
+        if record.origin == "voice" and record.status == "completed":
+            # A SPOKEN turn's answer is not the tree's to print. Voice
+            # already owns it twice over: it goes into the live rows while
+            # Sim is saying it, and `_on_turn_completed`/`_voice_reply_settled`
+            # commits it as the green `🔊 sim: ...` line. Printing
+            # `result_summary` here as well put the whole answer on screen
+            # twice for every spoken turn -- the creator, 2026-09-23:
+            # "seeing two copies of sim's response, then hearing the voice".
+            #
+            # It reaches this branch at all because a voice turn is in
+            # neither `_pending_turns` (nothing typed it) nor
+            # `_watched_tasks`, so this handler treats the household's own
+            # conversation as somebody else's background work. The
+            # headline still prints -- `⎿ ✅ completed in 5.8s` is worth
+            # having -- only the duplicated answer goes. A failure keeps
+            # its `reason`: nothing else would say why.
+            detail = ""
         colour = "green" if record.status == "completed" else "yellow"
         self._reopen_tree_if_needed(record, unicode=unicode)
         self._out(render_mod.style(panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),

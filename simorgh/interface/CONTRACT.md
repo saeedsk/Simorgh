@@ -108,7 +108,7 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 | `color` | `'auto'` | yes |
 | `unicode` | `'auto'` | yes |
 | `narrate` | `True` | yes |
-| `narrate_autonomous` | `True` | yes |
+| `narrate_autonomous` | `True` | yes. It decides whether a task this REPL did not ask for is narrated as a tree. A SPOKEN turn arrives here as one of those -- it is in neither `_pending_turns` (nothing typed it) nor `_watched_tasks` (no command dispatched it) -- so the household's own conversation goes down `_narrate_autonomous`, which prints `result_summary` because for a real background task nothing else ever would. Since 2026-09-23 a record with `origin == "voice"` that completed has its detail dropped: Voice owns that text, in the live rows while it is being said and as the green `🔊 sim:` line when speech ends. Printing it here too put every spoken answer on screen twice (the creator: "seeing two copies of sim's response, then hearing the sim's voice"). Only `completed` loses its detail -- a failure keeps its `reason`, because nothing else would say why |
 | `tidy_input` | `True` | yes |
 | `narrate_steps` | `True` | yes |
 | `narrate_heartbeat_s` | `10.0` | yes |
