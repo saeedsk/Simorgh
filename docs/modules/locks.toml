@@ -47,12 +47,6 @@ task = "standing approvals: approve a kind of action once"
 since = "2026-09-22T14:09:20+00:00"
 until = "2026-09-22T22:09:20+00:00"
 
-[locks.interface]
-by = "opus-main"
-task = "a quiet turn says WHICH rule kept it quiet"
-since = "2026-09-24T07:54:49+00:00"
-until = "2026-09-24T15:54:49+00:00"
-
 [locks.kernel]
 by = "opus-main"
 task = "the log says which day and which process a line came from"
