@@ -156,10 +156,15 @@ class HttpApi:
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
         token: str = "", max_body_bytes: int = 1_000_000, logger=None, feeds=None,
         cameras_live: bool = False, cameras_live_delay_s: float = 20.0, cameras_live_every_s: float = 120.0,
+        devices=None,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
         self._token = (token or "").strip()
+        #: The paired devices (`interface/devices.py`), or None for a server
+        #: that has none -- in which case only the legacy shared token works,
+        #: which is every deployment that predates stage 12 item 2.
+        self._devices = devices
         self._max_body_bytes = max(1, int(max_body_bytes))
         self._logger = logger
         self._routes: dict[tuple[str, str], Route] = {}
@@ -650,12 +655,53 @@ class HttpApi:
             # gated route is refused rather than served to the whole
             # LAN. Set SIM_API_TOKEN to serve them (2026-09-19).
             return self.loopback_bind
+        return self.caller(headers, query) is not None
+
+    def caller(self, headers: dict[str, str], query: dict | None = None):
+        """Who is asking: a paired `Device`, the string `"legacy"` for the
+        shared token, or None.
+
+        Routes that only read need `_authorized`. A route that DOES
+        something needs to know which capabilities the caller holds, and
+        that is what this returns -- stage 12 items 3 and 3a check
+        `approve` and `control` against it.
+
+        The device book is tried FIRST, so revoking a phone takes effect
+        even in a household that still has the shared token set. The legacy
+        token keeps working because the TV page, the dashboard and every
+        existing script hold it; it resolves as a caller with every
+        capability, and a household that has paired its devices can unset
+        it.
+        """
+        offered = self._offered_token(headers, query)
+        if not offered:
+            return None
+        if self._devices is not None:
+            device = self._devices.resolve(offered)
+            if device is not None:
+                return device
+        if self._token and hmac.compare_digest(offered, self._token):
+            return "legacy"
+        return None
+
+    def _offered_token(self, headers: dict[str, str], query: dict | None = None) -> str:
+        """The token this request carries: a bearer header, or `?token=` for
+        a page that cannot set one (the TV, handed a URL)."""
         supplied = headers.get("authorization", "")
         scheme, _, value = supplied.partition(" ")
-        if scheme.lower() == "bearer" and hmac.compare_digest(value.strip(), self._token):
+        if scheme.lower() == "bearer" and value.strip():
+            return value.strip()
+        return (self._q1(query or {}, "token", "") or "").strip()
+
+    @staticmethod
+    def may(who, capability: str) -> bool:
+        """Whether `caller()`'s answer holds `capability`. The legacy shared
+        token holds every one of them -- it always did, and narrowing it
+        here would break the TV to no benefit; pairing devices is the way
+        out of it."""
+        if who == "legacy":
             return True
-        from_query = self._q1(query or {}, "token", "") or ""
-        return bool(from_query) and hmac.compare_digest(from_query.strip(), self._token)
+        return bool(who is not None and getattr(who, "may", None) and who.may(capability))
 
     @staticmethod
     def _local_viewer(writer: asyncio.StreamWriter, headers: dict[str, str]) -> bool:

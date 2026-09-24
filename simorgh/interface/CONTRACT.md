@@ -16,6 +16,7 @@ Interface owns every typed or remote surface a person uses: the terminal REPL/TU
 | `simorgh/interface/dispatch.py` | Every operator command: task, system, benchmark, voice, tool, mcp, skills, schedule, config, alerts |
 | `simorgh/interface/parser.py` | Command grammar, the one command table, autocorrect |
 | `simorgh/interface/httpapi.py` | Stdlib HTTP server: routes, token boundary, chat, TV and dashboard APIs, webhooks, camera media |
+| `simorgh/interface/devices.py` | One token per device with capabilities (`read`, `chat`, `control`, `approve`) and pairing by barcode: `DeviceBook` (hashes only -- a token is shown once and never stored), `begin_pairing`/`redeem` (single use, 120 s, one outstanding, minted locally and never over HTTP), `revoke` (kept as a record, not deleted), `barcode` (qrencode, then the `qrcode` package, then None so the caller prints the URL instead). `HttpApi.caller()` resolves a request to a `Device`, to `"legacy"` for the shared `SIM_API_TOKEN`, or to None; `HttpApi.may()` asks it for a capability. Stage 12 item 2 |
 | `simorgh/interface/dashfeeds.py` | Dashboard collector: polls weather, markets, news and other web feeds; lists camera stills and relays |
 | `simorgh/interface/telegram.py` | Telegram long-poll channel with an allow-list |
 | `simorgh/interface/whatsapp.py` | WhatsApp Cloud API webhook channel: signature check and allow-list |
