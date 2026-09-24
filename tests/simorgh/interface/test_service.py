@@ -240,8 +240,12 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self._pump()
         text = out.getvalue()
         self.assertEqual(text.count("Yes, I'm here!"), 1)
-        self.assertNotIn("Yes, I'm here!  (not spoken)", text)
-        self.assertIn("Nothing, sorry.  (not spoken)", text)
+        # Which LINE is marked is the subject here, not the wording of the
+        # mark: since 2026-09-24 it also carries the turn manager's reason
+        # ("moved on" here), so match the prefix rather than pinning it.
+        self.assertNotIn("Yes, I'm here!  (not spoken", text)
+        self.assertIn("Nothing, sorry.  (not spoken", text)
+        self.assertIn("(not spoken -- moved on)", text)
 
     async def test_a_quiet_voice_reply_never_reaches_the_screen(self):
         """Live 2026-09-19: "🔊 sim: QUIET" printed by the fallback timer."""

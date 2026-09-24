@@ -263,7 +263,10 @@ class Service:
         # Voice's turn number -> the chat session id (`voice.transcript`).
         self._turn_sessions: dict = {}
         # Sessions whose reply Voice dropped before the reply was finished.
-        self._voice_dropped: set = set()
+        #: turns whose reply was dropped, and WHY (turns.py: "a later turn
+        #: was asked", "the session is listening"). A reply the household
+        #: never heard is the one moment the reason matters most.
+        self._voice_dropped: dict[str, str] = {}
         # A reply still being written, per session id (`session.delta`).
         self._streaming: dict[str, str] = {}
         self._color = render_mod.color_enabled(self.config.color)
@@ -1437,10 +1440,21 @@ class Service:
             # fallback timer prints it. Settling the oldest marked "Yes, I'm
             # here!" as not spoken, and it was then spoken and printed again
             # (live 2026-09-19).
-            if owner and self._voice_reply_settled(owner, tail="  (not spoken)"):
+            why = " ".join(str(message.payload.get("reason") or "").split())
+            tail = f"  (not spoken -- {why})" if why else "  (not spoken)"
+            if owner and self._voice_reply_settled(owner, tail=tail):
                 return
             if owner:
-                self._voice_dropped.add(owner)      # its reply is still being written
+                # Its reply is still being written; remember the reason so
+                # the line that finally prints it can say why nobody heard
+                # it. Both of these paths used to print a bare "(not
+                # spoken)" while the branch below already printed the
+                # reason -- so whether the household was told depended on
+                # whether the turn happened to be known yet. The creator,
+                # 2026-09-24, twice in one conversation: "you didn't reply
+                # to me. I didn't hear anything." Sim apologised and
+                # repeated itself, having no idea either.
+                self._voice_dropped[owner] = why
                 return
             if self._voice_speaking:
                 return
@@ -1894,9 +1908,10 @@ class Service:
                     fut.set_result(p.get("text", ""))
                 return
             if session_id in self._voice_dropped:
-                self._voice_dropped.discard(session_id)
+                why = self._voice_dropped.pop(session_id, "")
                 self._streaming.pop(session_id, None)
-                self._out(render_mod.style(f"🔊 sim: {text}  (not spoken)", "green", enabled=self._color))
+                tail = f"  (not spoken -- {why})" if why else "  (not spoken)"
+                self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
                 self._invalidate()
                 fut = self._pending_turns.get(p.get("session_id", ""))
                 if fut is not None and not fut.done():
