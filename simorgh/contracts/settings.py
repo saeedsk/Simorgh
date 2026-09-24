@@ -119,6 +119,15 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                         "when Chatterbox/Miso speaks: auto = typed replies, tests and long answers only (spoken turns stay quick); always; off"),
     "expressive_min_chars": (int, (0, 5000), "0 = never (default); else a spoken reply at least this long goes to the slow engine -- it can hold the floor a minute"),
     "stt_partials": (bool, None, "show what is heard while you are still talking"),
+    "stt_partial_every_ms": (int, (200, 5000),
+                             "how often the draft on screen is redone while you talk. For whisper a "
+                             "draft is a WHOLE decode, so a cadence shorter than one costs makes the "
+                             "turn give up on drafts altogether (`stt/streaming.py`, outpaced); "
+                             "measured 2026-09-23, large-v3-turbo answers a 4 s buffer in ~630 ms, so "
+                             "the 1500 default asks for far fewer drafts than it can afford"),
+    "aec": (bool, None,
+            "subtract Sim's own voice from the microphone before deciding you spoke (experimental). "
+            "`voice barge aec on|off` sets this same key"),
     "barge_in_speech_ms": (int, (80, 1500),
                           "how long you must keep talking before it counts as cutting Sim off. "
                           "350 plus the loudness bar meant a stop landed only after the sentence "

@@ -66,9 +66,17 @@ _PRODUCES = (
 # 2026-09-16, set `expressive_lane = always`, was told it was saved, and
 # went on hearing Kokoro until an unrelated `voice set tts miso` forced
 # the rebuild: "what hapens i stil hear kokoro model not miso :(".
+# `microphone` and `speaker` were here from the first version and could
+# never be reached: neither is in `VOICE_SAFE_KEYS`, so `_set` refuses
+# them while parsing, before any reopen is considered (found 2026-09-23,
+# see `test_every_reopen_key_is_settable.py`). They stay unsettable on
+# purpose -- they are picked from `simorgh.toml` at boot, and `fake` is a
+# value among them, which `_set`'s "a pick that cannot open is not kept"
+# net would NOT catch: a fake microphone opens perfectly and hears
+# nothing, so `voice set microphone fake` would deafen the house and
+# report success.
 _ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "tts", "tts_farsi", "tts_farsi_voice",
-                          "tts_farsi_reference", "vad_sensitivity",
-                          "microphone", "speaker", "expressive_lane"})
+                          "tts_farsi_reference", "vad_sensitivity", "expressive_lane"})
 _SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
                            "max_spoken_sentences", "output"})
 
@@ -534,22 +542,24 @@ class Service:
         elif action == "set":
             ok, detail = await self._set(str(message.payload.get("key") or ""), str(message.payload.get("value") or ""))
         elif action in ("barge_on", "barge_off", "aec_on", "aec_off"):
-            from dataclasses import replace
-            if action in ("barge_on", "barge_off"):
-                want = action == "barge_on"
-                self.config = replace(self.config, barge_in=want)
-                detail = f"barge-in {'on -- speak to interrupt' if want else 'off -- Sim finishes before it listens'}"
-            else:
-                from .aec import available as _aec_available
-                ok_aec, why = _aec_available()
-                if action == "aec_on" and not ok_aec:
-                    detail, ok = f"echo cancellation needs {why}", False
-                else:
-                    self.config = replace(self.config, aec=(action == "aec_on"))
-                    detail = ("echo cancellation on -- Sim's own voice is subtracted before deciding you "
-                              "spoke (experimental)" if action == "aec_on" else "echo cancellation off -- back to the level gate")
-            if self._pipeline is not None:
-                self._pipeline._config = self.config  # noqa: SLF001 -- the live pipeline reads it
+            # Through `_set`: the one path that WRITES a setting and rebuilds
+            # whatever was built from it. This branch used to `replace()` the
+            # config in memory and nothing else, so `voice barge on` was
+            # reported on, was gone at the next boot (the creator, 2026-09-23
+            # -- "barge_in doesn't persist over sim restarts"), and inside the
+            # session it was only HALF applied: the pipeline reads `barge_in`
+            # per reply, but the turn manager's Policy took
+            # `interrupt_on_user_speech` once at construction (`session.py`),
+            # so the flag turn-taking decides with never moved. Both are why
+            # `barge_in` is in `_SESSION_KEYS`.
+            key = "barge_in" if action.startswith("barge") else "aec"
+            want = action.endswith("_on")
+            said = ((f"barge-in {'on -- speak to interrupt' if want else 'off -- Sim finishes before it listens'}")
+                    if key == "barge_in" else
+                    ("echo cancellation on -- Sim's own voice is subtracted before deciding you "
+                     "spoke (experimental)" if want else "echo cancellation off -- back to the level gate"))
+            ok, written = await self._set(key, "on" if want else "off")
+            detail = f"{said}; {written}" if ok else written
         elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn", "calibrate"):
             ok, detail = await self._people_action(action, message.payload)
         else:
@@ -776,6 +786,15 @@ class Service:
             problem = await self._unknown_voice(str(value))
             if problem:
                 return False, problem
+        if key == "aec" and value:
+            # The guard lives HERE, not in the `aec_on` control branch, so
+            # `voice set aec on` cannot turn on what `voice barge aec on`
+            # refuses. One key, one gate.
+            from .aec import available as _aec_available
+
+            ok_aec, why = _aec_available()
+            if not ok_aec:
+                return False, f"echo cancellation needs {why}"
         previous = self.config
         self.config = settings.apply(self.config, key, value)
         if self._pipeline is not None:

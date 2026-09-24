@@ -57,7 +57,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/schemagen.py` | generates and checks `schema/*.v1.json` from the registry |
 | `simorgh/contracts/scratch.py` | `is_scratch(path)`: which paths are scratch |
 | `simorgh/contracts/security.py` | HMAC approval tokens, `ReplayGuard`, subsystem identity tokens |
-| `simorgh/contracts/settings.py` | settings home, `config_path()`, `persist()` to `simorgh.toml`, secret hand-off files, `conversation_key` |
+| `simorgh/contracts/settings.py` | settings home, `config_path()`, `persist()` to `simorgh.toml`, secret hand-off files, `conversation_key`, and `VOICE_SAFE_KEYS`: the one table deciding which `[voice]` keys `voice set` will accept at all. Read by `voice/settings.py` (parse, apply, the settings screen) and `interface/tui.py:181` (completion). A `[voice]` config field absent from it is READ but unsettable and unshown -- 60 of 109 were on 2026-09-23, and `stt_partial_every_ms` was one the creator went looking for in `voice` help. A key here that `voice/service.py` must reopen or rebuild for must also be in its `_ENGINE_KEYS`/`_SESSION_KEYS`, and the reverse, or the branch is unreachable |
 | `simorgh/contracts/skills.py` | parses `SKILL.md` folders, reviews skill contents, the skills catalogue text |
 | `simorgh/contracts/streamnames.py` | the stream-name grammar `[a-z0-9_.:-]{1,128}` |
 | `simorgh/contracts/tidy.py` | fixing typos and mishearings in a line before it is answered |

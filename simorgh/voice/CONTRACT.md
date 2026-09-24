@@ -93,7 +93,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 
 ## Config
 
-`[voice]` in simorgh.toml; dataclass in `simorgh/voice/config.py`. `voice set` persists the safe subset (`settings.py`); `_ENGINE_KEYS` reopen engines and `_SESSION_KEYS` rebuild the session (`service.py:67-70`).
+`[voice]` in simorgh.toml; dataclass in `simorgh/voice/config.py`. `voice set` persists the safe subset (`settings.py`); `_ENGINE_KEYS` reopen engines and `_SESSION_KEYS` rebuild the session (`service.py:67-70`). Every member of both sets must be in `VOICE_SAFE_KEYS` or the branch is unreachable -- `voice set` refuses an unknown key while parsing, before any reopen is considered. `microphone` and `speaker` sat in `_ENGINE_KEYS` unreachable from the first version and were removed on 2026-09-23; they stay unsettable on purpose, because `fake` is one of their values and a fake microphone OPENS perfectly and hears nothing, so the "a pick that cannot open is not kept" net would not catch it. `test_every_reopen_key_is_settable.py` holds the two tables against each other.
 
 | Key | Default | Read in the package |
 |---|---|---|
@@ -119,12 +119,12 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `max_utterance_s` | `30.0` | yes |
 | `wake_word` | `''` | NO (declared, never read) |
 | `follow_up_window_s` | `6.0` | NO (declared, never read) |
-| `barge_in` | `True` | yes |
+| `barge_in` | `True` | yes. `voice barge on|off` and `voice set barge_in on|off` are ONE path since 2026-09-23 -- the control verb used to `replace()` the config in memory and nothing else, so it was reported, never written, and gone at the next boot (the creator: "barge_in doesn't persist over sim restarts"). It was not even wholly applied in the session: the pipeline reads `barge_in` per reply, but `TurnManager`'s `Policy` takes `interrupt_on_user_speech` once at construction (`session.py`), which is why the key is in `_SESSION_KEYS` and why the fix had to go through `_set` rather than just add a write |
 | `barge_in_speech_ms` | `350` | yes |
 | `barge_in_calibrate_ms` | `1200` | yes |
 | `barge_in_ratio` | `2.8` | yes |
 | `barge_in_known_voice` | `False` | yes |
-| `aec` | `True` | yes (only by `Pipeline`'s capture path, which the live `VoiceSession` never runs: V7) |
+| `aec` | `True` | yes (only by `Pipeline`'s capture path, which the live `VoiceSession` never runs: V7), and settable since 2026-09-23 -- `voice barge aec on|off` and `voice set aec on|off` are now ONE path through `_set`, which also holds the single availability guard, so neither spelling can turn on what the other refuses |
 | `aec_taps` | `1024` | yes (Pipeline path only, V7) |
 | `aec_mu` | `0.3` | yes (Pipeline path only, V7) |
 | `aec_residual_threshold` | `0.02` | yes (Pipeline path only, V7) |
@@ -139,7 +139,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `hold_unprompted_max_s` | `8.0` | yes |
 | `semantic_silence_factor` | `0.75` | yes |
 | `stt_partials` | `True` | yes |
-| `stt_partial_every_ms` | `1500` | yes |
+| `stt_partial_every_ms` | `1500` | yes, and live since 2026-09-23: it is in `contracts.settings.VOICE_SAFE_KEYS` and grouped under "Listening", so `voice set stt_partial_every_ms 800` works and the settings screen shows it. It was readable and unsettable before, and therefore invisible -- the creator asked why it was not in `voice` help. The value that matters: a whisper draft is a WHOLE decode, and when one takes longer than this cadence the turn stops asking for drafts (`stt/streaming.py`, `partials_outpaced`). large-v3-turbo answers a 4 s buffer in ~630 ms through `whisper-server` on the M3 Pro (measured 2026-09-23), so 1500 asks for far fewer drafts than it can afford |
 | `connectors` | `True` | yes |
 | `max_spoken_sentences` | `3` | yes |
 | `tts_lookahead` | `2` | yes |

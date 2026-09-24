@@ -548,6 +548,58 @@ class BargeToggleTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("barge-in on", on.payload["detail"])
         self.assertTrue(svc.config.barge_in)
 
+    async def test_barge_survives_a_restart_and_reaches_the_turn_policy(self):
+        """The creator, 2026-09-23: "barge_in doesn't persist over sim
+        restarts". `voice barge on|off` only `replace()`d the config in
+        memory: it was reported, it was never written, and it was gone at
+        the next boot. It was not even wholly applied in the session --
+        the turn manager's Policy took `interrupt_on_user_speech` once, at
+        construction, so what turn-taking decides with stayed behind.
+
+        The assertion is on the FILE and on the Policy, not on
+        `svc.config`: the in-memory flag was always right, and that is
+        exactly what made this invisible.
+        """
+        import tempfile
+        import tomllib
+        from pathlib import Path
+        from simorgh.contracts import topics
+        from simorgh.kernel.config import LoadedConfig
+        from simorgh.kernel.secrets import EnvSecretStore
+        from simorgh.kernel.service import Kernel
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data_dir = Path(tmp.name) / "data"
+        kernel = Kernel(LoadedConfig({
+            "runtime": {"data_dir": str(data_dir)},
+            "growth": {"explore": {"autonomy_on_boot": False}},
+            "voice": {"stt": "fake", "tts": "fake", "microphone": "fake", "speaker": "fake",
+                      "vad": "fake", "enabled": "on", "barge_in": True},
+        }, None), secrets=EnvSecretStore({}))
+        await kernel.boot()
+        self.addAsyncCleanup(kernel.shutdown)
+        svc = kernel._supervisor.services["voice"].service  # noqa: SLF001
+
+        reply = await kernel.bus.request(
+            kernel.bus.new(topics.VOICE_CONTROL_REQUEST, {"action": "barge_off"}), timeout=10)
+        self.assertTrue(reply.payload["ok"], reply.payload)
+
+        # The runtime data dir, which is where the Kernel READS
+        # `simorgh.toml` from; `ctx.data_dir` is the subsystem's own
+        # folder under it, so `_set` writes to its parent.
+        written = data_dir / "simorgh.toml"
+        self.assertTrue(written.is_file(), f"{written} was never written ({reply.payload.get('detail')})")
+        with written.open("rb") as handle:
+            saved = tomllib.load(handle)
+        self.assertIs(saved["voice"]["barge_in"], False)
+        self.assertIn("saved to", reply.payload["detail"])
+
+        session = svc._session  # noqa: SLF001
+        if session is not None:
+            self.assertFalse(session.turns.policy.interrupt_on_user_speech,
+                             "the turn policy kept the flag it was built with")
+
 
 class BargeInWithAecTestCase(unittest.IsolatedAsyncioTestCase):
     """The whole loop with AEC on: a reply plays, its echo comes back
