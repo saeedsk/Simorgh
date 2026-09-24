@@ -88,3 +88,9 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "stt_partial_every_ms must rebuild the session"
+since = "2026-09-24T05:15:59+00:00"
+until = "2026-09-24T13:15:59+00:00"
