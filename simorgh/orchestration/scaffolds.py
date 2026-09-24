@@ -211,7 +211,14 @@ _TOOL_NOTES: dict[str, str] = {
     "camera_describe": "what a camera can see right now, in words: `<camera>` (NVR or Ring)",
     "remember_place": "keep what a place is called so it survives a restart: `house <name>`, `network <name> is <place>`, `forget network <name>`, or `places` to list",
     "overheard": "what was said near you that was not said TO you, and kept memos: `2 hours`, `from Ira`, `memos`; kept two days then gone",
-    "overheard_note": "`memo <text>` keeps something on purpose; `wipe` forgets all overheard speech now",
+    "overheard_note": "`memo <text>` pins one line of overheard speech for 48 hours -- a voice memo, "
+                      "NOT memory; for something that must last, use `remember`. `wipe` forgets all "
+                      "overheard speech now",
+    "remember": "keep a fact for good: `remember <the fact>`. This is the tool for \"remember that ...\" "
+                "-- it writes semantic memory, which outranks ordinary chatter and survives "
+                "consolidation. You do NOT need it to remember a conversation: every turn is recorded "
+                "automatically, so `memory_search` can already find what was said. Use it for something "
+                "you worked out or fetched that would otherwise be one line in a transcript",
     "console_tail": "the last lines Sim printed on its own console, the only way to answer a question about its own screen or output: `<count>` or `<count> <word to filter>`, e.g. `30 error`",
     "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`. "
                   "The house rule (the creator, 2026-09-19): ONE named camera asked for on the TV/screen is `<camera> full`; "

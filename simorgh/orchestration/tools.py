@@ -74,6 +74,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "list_tasks": ("read_only", False),
     "cancel_task": ("reversible", False),
     "memory_forget": ("irreversible", False),
+    "remember": ("reversible", False),
     # `voice set` over the bus: the service validates, the change is live
     # and undone by setting it back.
     "voice_setting": ("reversible", False),

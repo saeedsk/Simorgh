@@ -56,7 +56,7 @@ tools = [
     # The escape hatch from a one-shot reply into work that
     # resumes. Chat only: a task that starts tasks is a fork
     # bomb, and the tool refuses from inside one anyway.
-    "start_task", "list_tasks", "cancel_task", "memory_forget", "memory_search", "voice_setting",
+    "start_task", "list_tasks", "cancel_task", "memory_forget", "remember", "memory_search", "voice_setting",
     "propose_mcp_server",
     # The TV (execution/media/cast.py): "put yourself on the TV",
     # "play this on the TV" are chat requests too.

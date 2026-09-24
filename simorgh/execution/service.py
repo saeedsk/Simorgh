@@ -220,7 +220,8 @@ class Service:
         topics.CAMERA_EVENT, topics.TV_STATE, topics.DASH_STATE, topics.UI_DASH_KEY,
         topics.SYSTEM_SCHEDULE_ADD, topics.WORLD_ENV_QUERY, topics.WORLD_PEOPLE_UPDATE,
         topics.TASK_CREATE, topics.TASK_LIST_REQUEST, topics.TASK_CANCEL, topics.UI_COMMAND_REQUEST,
-        topics.MEMORY_FORGET, topics.VOICE_VOICES_REQUEST, topics.VOICE_CONTROL_REQUEST,
+        topics.MEMORY_FORGET, topics.MEMORY_STORE, topics.VOICE_VOICES_REQUEST,
+        topics.VOICE_CONTROL_REQUEST,
     )
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,

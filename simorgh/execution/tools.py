@@ -2208,6 +2208,87 @@ class MemoryForgetTool:
                           side_effects=("memory_forget",), metadata={"forgotten": count})
 
 
+class RememberTool:
+    """Keeping one fact on purpose, for good.
+
+    The missing half of `memory_forget`. Sim could be told to forget
+    something forever and had no way to be told to remember something
+    forever: a chat turn's tools were `memory_search` (read),
+    `memory_forget` (delete), and `kb_search`/`kb_ask`/`kb_open` (read).
+    Nothing stored.
+
+    That gap is invisible most of the time, because Memory records every
+    turn by itself -- `Memory._on_turn_completed` is the only thing in
+    the system that writes episodic memory, and it needs no tool, so the
+    model cannot forget to remember a conversation. It bites on a fact
+    Sim WORKED OUT or FETCHED: the creator, 2026-09-24, asked Sim to keep
+    his son's school calendar after reading it off the school's website.
+    Sim reached for `overheard_note` -- the 48-hour voice-memo store,
+    whose description said it "keeps something on purpose" -- then
+    offered to queue a whole task to write a file. The calendar was in
+    episodic memory the entire time, as the words of one turn among
+    hundreds, with no more standing than small talk.
+
+    So this writes `semantic` memory, the kind consolidation keeps and
+    ranks, with a high confidence: a fact asked for on purpose should
+    outlive the transcript it was said in. It is additive -- nothing is
+    overwritten, and `memory_forget` remains the way back.
+    """
+
+    name = "remember"
+    description = ("Keep a fact for good: `remember <the fact>`. This is what \"remember that ...\" "
+                   "means. It writes semantic memory, which is ranked above ordinary chatter and kept "
+                   "through consolidation. You do NOT need it to remember a conversation -- every turn "
+                   "is recorded automatically and `memory_search` finds it. Use it for something you "
+                   "worked out or looked up that would otherwise survive only as one line of "
+                   "transcript. Write the fact so it still makes sense a year from now: no \"tomorrow\" "
+                   "or \"he\", and say where it came from.")
+    args_schema = {"type": "object", "properties": {"fact": {"type": "string"}, "tags": {"type": "string"}}}
+    read_only = False
+    #: Additive, and `memory_forget` takes it back out -- so not irreversible.
+    reversibility = "reversible"
+
+    #: Above the 1.0 an ordinary turn carries no explicit confidence with,
+    #: so a fact asked for on purpose wins a tie against chatter that
+    #: happens to match the same words.
+    CONFIDENCE = 1.0
+    MAX_CHARS = 4_000
+
+    def __init__(self, config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        fact = " ".join(str(args.get("fact") or "").split())
+        if not fact:
+            return ToolResult.refused("refused: `fact` is required -- say what to remember")
+        if len(fact) > self.MAX_CHARS:
+            return ToolResult.refused(
+                f"refused: that is {len(fact)} characters and the limit is {self.MAX_CHARS}. "
+                "A fact this long is a document: write it to a file and add it to the knowledge base.")
+        bus = getattr(ctx, "bus", None)
+        if bus is None:
+            return ToolResult.unconfigured("refused: no bus to reach memory")
+        raw = str(args.get("tags") or "")
+        tags = ["remembered"] + [t for t in (x.strip() for x in raw.replace(",", " ").split()) if t]
+        from simorgh.contracts.envelope import Message as _Message
+
+        try:
+            await bus.publish(_Message.new(topics.MEMORY_STORE, source="execution", payload={
+                "kind": "semantic", "content": fact, "tags": tags,
+                "source_ref": str(getattr(ctx, "task_id", "") or "remember"),
+                "confidence": self.CONFIDENCE,
+            }))
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult.transient(f"refused: memory did not take it ({exc.__class__.__name__}: {exc})")
+        # `publish`, not `request`: MEMORY_STORE has no reply in the
+        # catalogue. So this says it was HANDED OVER, which is what
+        # actually happened -- claiming it is "saved" would be a promise
+        # about somebody else's subsystem.
+        return ToolResult(ok=True, output=f"handed to memory to keep: {fact}",
+                          side_effects=("remembered a fact",),
+                          metadata={"kind": "semantic", "chars": len(fact), "tags": tags})
+
+
 class CancelTaskTool:
     """Stop tasks: one by id, every waiting task of an origin, or all but one.
 
@@ -3161,9 +3242,11 @@ class OverheardNoteTool:
     """
 
     name = "overheard_note"
-    description = ("`memo <what to keep>` saves something the person asked you to remember from what "
-                   "was said; `wipe` forgets ALL overheard speech and memos now, and `wipe <name>` "
-                   "only that person's. Say how many lines went.")
+    description = ("`memo <what to keep>` pins one line of speech in the OVERHEARD store, which "
+                   "purges itself after 48 hours -- it is a voice memo, NOT memory, and it is the "
+                   "wrong tool for anything that must outlive the week (use `remember` for that). "
+                   "`wipe` forgets ALL overheard speech and memos now, and `wipe <name>` only that "
+                   "person's. Say how many lines went.")
     read_only = False
     reversibility = "irreversible"
     args_schema = {"type": "object", "properties": {"request": {"type": "string"}}}
@@ -3318,7 +3401,7 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         GitHistoryTool(config),
         GitDiscardTool(config),
         ReplaceInFileTool(config), StartTaskTool(config), ListTasksTool(config), CancelTaskTool(config),
-        VoiceSettingTool(config), MemoryForgetTool(config), SimCommandTool(config),
+        VoiceSettingTool(config), MemoryForgetTool(config), RememberTool(config), SimCommandTool(config),
         SpeakTool(config),
         PeopleTool(config),
         ApplySkillTool(config), WebFetchTool(config), WebSearchTool(config), RenderPageTool(config),

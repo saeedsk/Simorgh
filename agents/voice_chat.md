@@ -2,7 +2,7 @@
 name = "chat"
 extends = "chat"
 tools = [
-    "self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task", "list_tasks", "cancel_task", "memory_forget", "memory_search",
+    "self_map", "read_file", "search_code", "web_search", "web_fetch", "start_task", "list_tasks", "cancel_task", "memory_forget", "remember", "memory_search",
     # The Mac's own Music app. "Play jazz on the Mac on Apple Music" by
     # voice got "I can't start Apple Music on your Mac from here" -- true
     # of this profile and of nothing else: the typed chat had these all
