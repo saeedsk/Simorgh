@@ -94,3 +94,9 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "voice set says when the open engine cannot hear that language"
+since = "2026-09-24T03:51:42+00:00"
+until = "2026-09-24T11:51:42+00:00"
