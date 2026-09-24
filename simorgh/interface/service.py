@@ -387,6 +387,7 @@ class Service:
                 logger=ctx.logger,
                 feeds=feeds,
                 cameras_live=self.config.dash_cameras_live,
+                devices=self._device_book(ctx),
             )
             # A dashboard on 127.0.0.1 is reachable only by this
             # machine's own user, which is the posture this server was
@@ -975,7 +976,8 @@ class Service:
 
             outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
                                       session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger,
-                                      shell_timeout_s=self.config.shell_timeout_s)
+                                      shell_timeout_s=self.config.shell_timeout_s,
+                                      devices=self._device_book())
             if outcome.text:
                 self._out(outcome.text)
             if outcome.task_id:
@@ -1028,7 +1030,8 @@ class Service:
         try:
             outcome = await dispatch(command, bus=self._ctx.bus, clock=self._ctx.clock,
                                       session_id=self.session_id, vitals=self.vitals, ledger=self._ctx.ledger,
-                                      shell_timeout_s=self.config.shell_timeout_s)
+                                      shell_timeout_s=self.config.shell_timeout_s,
+                                      devices=self._device_book())
         except Exception as exc:  # noqa: BLE001 -- a failed command is a result, not a crashed handler
             await _refused(f"{command.name} failed: {exc!r}", code="command_failed")
             return
@@ -1149,6 +1152,26 @@ class Service:
         self._out(render_mod.style(panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
                                    colour, enabled=self._color))
         self._tree_owner = ""
+
+    def _device_book(self, ctx=None):
+        """The paired devices (`devices.py`), beside the settings and the vault.
+
+        ONE book per process, held here, so `pair` and `devices` act on the
+        same object the HTTP auth reads. Two books would mean a phone
+        paired in the terminal that the server had never heard of -- the
+        shape of bug this file has been bitten by before.
+        """
+        if getattr(self, "_devices", None) is None:
+            from .devices import DeviceBook
+
+            ctx = ctx if ctx is not None else self._ctx
+            data_dir = getattr(ctx, "data_dir", None) if ctx is not None else None
+            home = Path(data_dir).parent if data_dir else Path(".")
+            book = DeviceBook(home / "devices.json")
+            clock = getattr(ctx, "clock", None) if ctx is not None else None
+            book.clock = clock.now if clock is not None else time.time
+            self._devices = book
+        return self._devices
 
     def _refresh_activity_footer(self) -> None:
         """Keep the line under the prompt current: what is running, and

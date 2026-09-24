@@ -212,8 +212,13 @@ async def run_shell(command: str, *, timeout: float) -> str:
 
 
 async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, vitals: VitalsCache,
-                    ledger: LedgerClient, shell_timeout_s: float = 120.0) -> Outcome:
-    """`shell_timeout_s` bounds a `!<command>` (`[interface] shell_timeout_s`)."""
+                    ledger: LedgerClient, shell_timeout_s: float = 120.0, devices=None) -> Outcome:
+    """`shell_timeout_s` bounds a `!<command>` (`[interface] shell_timeout_s`).
+
+    `devices` is the paired-device book (`devices.py`), which only the
+    Service can supply -- it must be the SAME object the HTTP auth reads,
+    or a phone paired here would be one the server never heard of. None
+    means `pair` and `devices` say so rather than pretending."""
     name, args = command.name, command.args
     now = clock.now()
 
@@ -437,6 +442,12 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "config":
         return await _config_command(ledger, args)
+
+    if name == "pair":
+        return _pair_command(devices, args)
+
+    if name == "devices":
+        return _devices_command(devices, args)
 
     if name == "domains":
         return await _domains_command(ledger, args)
@@ -2670,3 +2681,79 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
 
 
 __all__ = ["dispatch", "run_shell", "Outcome"]
+
+
+def _pair_command(book, args: str = "") -> Outcome:
+    """`pair [name] [with approve[,control]]` -- a code, drawn as a barcode.
+
+    The QR carries the pairing code, never a token: single use, 120
+    seconds, one outstanding. A photograph of this screen is worth nothing
+    a minute later, where a token in the barcode would make a screen-share
+    permanent control of the house.
+
+    `approve` has to be typed. The ability to authorise an irreversible
+    action should always be a sentence somebody said, not a default that
+    arrived with a scan.
+    """
+    from .devices import DEFAULT_CAPABILITIES, PAIRING_TTL_S, barcode, normalise, pairing_url
+
+    if book is None:
+        return Outcome("pairing is not available here: this Sim has no device book "
+                       "(it needs a data dir -- `[runtime] data_dir`)")
+    text = " ".join(args.split())
+    name, _, granted = text.partition(" with ")
+    extra = normalise(granted.replace(",", " ").split()) if granted.strip() else ()
+    capabilities = normalise(tuple(DEFAULT_CAPABILITIES) + tuple(extra))
+    pending = book.begin_pairing(name=name or "phone", capabilities=capabilities)
+
+    base = _pairing_base()
+    url = pairing_url(base, pending.code)
+    drawn = barcode(url)
+    lines = [f"pairing \"{pending.name}\" with {', '.join(pending.capabilities)} "
+             f"-- scan within {PAIRING_TTL_S:.0f}s:"]
+    if drawn:
+        lines.append(drawn)
+    else:
+        # Never impossible for want of a drawing tool.
+        lines.append("  (no qrencode or qrcode package here -- open this on the phone instead)")
+    lines.append(f"  {url}")
+    lines.append(f"  code: {pending.code}")
+    if "approve" in pending.capabilities:
+        lines.append("  this device will be able to ANSWER Guardian's questions")
+    return Outcome("\n".join(lines))
+
+
+def _pairing_base() -> str:
+    """Where the phone should reach Sim. The rendezvous when one is set,
+    else this machine -- and it is deliberately NOT guessed from the
+    request, because a pairing URL that only works on the LAN is a phone
+    that stops working at the front door."""
+    import os
+
+    return (os.environ.get("SIMORGH_PUBLIC_URL") or "http://127.0.0.1:8765").rstrip("/")
+
+
+def _devices_command(book, args: str = "") -> Outcome:
+    """`devices` lists them; `devices revoke <name|id>` ends one."""
+    import time as _time
+
+    if book is None:
+        return Outcome("no device book here")
+    what, _, which = " ".join(args.split()).partition(" ")
+    if what == "revoke":
+        if not which:
+            return Outcome("usage: devices revoke <name|id>")
+        gone = book.revoke(which)
+        if gone is None:
+            return Outcome(f"no device called {which!r}; `devices` lists them")
+        return Outcome(f"revoked {gone.name} ({gone.id}) -- its token stops working now")
+    rows = book.devices(include_revoked=what == "all")
+    if not rows:
+        return Outcome("no devices paired. `pair <name>` shows a barcode to scan.")
+    lines = []
+    for device in rows:
+        seen = ("never" if not device.last_seen
+                else f"{(_time.time() - device.last_seen) / 60:.0f} min ago")
+        mark = " REVOKED" if device.revoked else ""
+        lines.append(f"  {device.name}{mark}  [{device.id}]  {', '.join(device.capabilities)}  last seen {seen}")
+    return Outcome(f"{len(rows)} device(s):\n" + "\n".join(lines))

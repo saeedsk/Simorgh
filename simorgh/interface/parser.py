@@ -45,6 +45,8 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("tv", "[setup|devices|use <device>|show [tv|dash] [device]|view <name>|rotate <s>|scale <f>|live <n>|quality <q>|sound on|off|remote|link|pair [code]|app <name>|key <key>|nav <key>|charts [kpop|us]|video <url> [full|frame]|stop [frame]|volume <0-100>]", "Sim on the TV over Chromecast: its terminal or its glass dashboard on screen, a video framed in it or full screen"),
     ("schedule", "[every] <15m> <label> | cancel <id>", "fire a reminder later, or on a repeat"),
     ("mcp", "[list|approve|deny]", "review external tools Sim has proposed"),
+    ("pair", "[name] [with approve]", "show a barcode a phone scans to pair itself; the code lives 120s"),
+    ("devices", "[all|revoke <name|id>]", "the phones and tablets paired with Sim, and what each may do"),
     ("skills", "[list|show <name>|review <folder>|install <git-url>|approve <name>|remove <name>]",
      "Agent Skills: folders of instructions Sim can load; a trusted org installs clean, anything else waits"),
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
@@ -91,7 +93,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
     ("Voice, screen and cameras", ("voice", "pronounce", "tv", "next", "cameras", "ring")),
-    ("Control", ("auto", "approvals", "schedule", "mcp", "skills", "pause", "resume")),
+    ("Control", ("auto", "approvals", "schedule", "mcp", "pair", "devices", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
 SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {

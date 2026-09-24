@@ -43,6 +43,7 @@ import os
 import re
 import hmac
 import ipaddress
+import contextlib
 import json
 import time
 import uuid
@@ -417,6 +418,47 @@ class HttpApi:
         self.register_route("GET", "/api/dash/state", _dash_state_get, auth=False)
         self.register_route("GET", "/api/dash/keys", _dash_keys_get, auth=False)
         self.register_route("POST", "/api/dash/key", _dash_key_post, max_body=512, rate=(300, 60.0))
+        async def _pair(_query, body, _headers):
+            """POST /api/pair -- spend a pairing code, get this device's own token.
+
+            THE ONLY UNAUTHENTICATED WRITE ROUTE IN THIS SERVER, and it is
+            only safe because of what it cannot do: it can SPEND a code and
+            it cannot create one. Codes are minted by `pair` in the terminal
+            or a spoken turn, never over HTTP, so somebody who reaches this
+            with no code in hand has nothing to call. It is rate-limited on
+            top, and the book itself kills a code after ten attempts.
+
+            The token comes back ONCE. Nothing stores it, here or anywhere;
+            only its hash is kept (`devices.py`).
+            """
+            if self._devices is None:
+                return 404, b'{"error":{"code":"no_pairing","detail":"this Sim has no device book"}}', "application/json"
+            try:
+                parsed = json.loads(body or b"{}")
+                code = str(parsed.get("code") or "").strip()
+            except (json.JSONDecodeError, AttributeError):
+                return 400, b'{"error":{"code":"invalid_json"}}', "application/json"
+            got = self._devices.redeem(code)
+            if isinstance(got, str):
+                # The reason is deliberately specific -- an expired code and
+                # a wrong code are different problems for the person holding
+                # the phone, and neither tells an attacker what a clock
+                # would not.
+                return 403, json.dumps({"error": {"code": "pairing_refused", "detail": got}}).encode("utf-8"), \
+                    "application/json"
+            device, token = got
+            if self._logger is not None:
+                # On the record: a pairing nobody saw is the one worth
+                # noticing.
+                with contextlib.suppress(Exception):
+                    self._logger.info("interface.device_paired", device=device.id, name=device.name,
+                                      capabilities=list(device.capabilities))
+            return 200, json.dumps({
+                "token": token, "device_id": device.id, "name": device.name,
+                "capabilities": list(device.capabilities),
+            }).encode("utf-8"), "application/json"
+
+        self.register_route("POST", "/api/pair", _pair, auth=False, max_body=512, rate=(20, 60.0))
         self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
         self.register_route("GET", "/remote", _remote, auth=False)
         self.register_route("GET", "/logo.png", _logo, auth=False)

@@ -208,7 +208,9 @@ class HelpPanelTestCase(unittest.TestCase):
             self.assertIn(f"  {name}", text, name)
         self.assertNotIn("tv charts", text)
         self.assertIn("help tv:", text)
-        self.assertLess(len(text.splitlines()), 52)   # 50 with `approvals` (2026-09-22)
+        # The cap exists because the full manual had grown to 120 lines; it
+        # moves for a real command and not for a subcommand.
+        self.assertLess(len(text.splitlines()), 54)   # 52 with `pair` and `devices` (2026-09-24)
 
     def test_every_section_names_only_real_commands(self):
         from simorgh.interface.parser import SECTIONS, SUBCOMMANDS

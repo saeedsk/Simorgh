@@ -289,3 +289,146 @@ class TheHttpAuthUsesTheBook(unittest.TestCase):
         self._pair(name="iPhone")
         server = self._server(devices=self.book)
         self.assertFalse(server._authorized(self._bearer("guessed")))     # noqa: SLF001
+
+
+class ThePairAndDevicesCommands(DeviceBookCase):
+    """`pair` draws the barcode; `devices` lists and revokes. Both act on
+    the SAME book the HTTP auth reads -- two books would mean a phone
+    paired in the terminal that the server had never heard of.
+    """
+
+    def _pair_cmd(self, args: str = ""):
+        from simorgh.interface.dispatch import _pair_command
+
+        return _pair_command(self.book, args)
+
+    def _devices_cmd(self, args: str = ""):
+        from simorgh.interface.dispatch import _devices_command
+
+        return _devices_command(self.book, args)
+
+    def test_pair_opens_a_code_and_shows_the_url_and_the_code(self):
+        out = self._pair_cmd("Saeed iPhone").text
+        pending = self.book.pending()
+        self.assertIsNotNone(pending)
+        self.assertIn(pending.code, out)
+        self.assertIn("/pair#", out)
+        self.assertIn("Saeed iPhone", out)
+        self.assertIn("read, chat", out)
+
+    def test_pair_grants_approve_only_when_it_is_typed(self):
+        self.assertNotIn("approve", self._pair_cmd("phone").text)
+        out = self._pair_cmd("phone with approve").text
+        self.assertIn("approve", out)
+        self.assertIn("Guardian's questions", out)
+        self.assertIn("approve", self.book.pending().capabilities)
+
+    def test_pair_takes_several_grants(self):
+        self._pair_cmd("ipad with approve,control")
+        self.assertEqual(self.book.pending().capabilities, ("read", "chat", "control", "approve"))
+
+    def test_the_url_carries_the_code_in_the_fragment(self):
+        out = self._pair_cmd("phone").text
+        line = next(l for l in out.splitlines() if "/pair#" in l)
+        self.assertNotIn("?", line)
+
+    def test_devices_says_when_there_are_none(self):
+        self.assertIn("no devices paired", self._devices_cmd().text)
+
+    def test_devices_lists_what_each_may_do(self):
+        self._pair()
+        out = self._devices_cmd().text
+        self.assertIn("1 device(s)", out)
+        self.assertIn("read, chat", out)
+
+    def test_devices_revoke_ends_a_token(self):
+        device, token = self._pair(name="old phone")
+        self.assertIsNotNone(self.book.resolve(token))
+        out = self._devices_cmd(f"revoke {device.id}").text
+        self.assertIn("stops working now", out)
+        self.assertIsNone(self.book.resolve(token))
+
+    def test_devices_revoke_needs_a_name(self):
+        self.assertIn("usage:", self._devices_cmd("revoke").text)
+        self.assertIn("no device called", self._devices_cmd("revoke nope").text)
+
+    def test_devices_all_shows_the_revoked_ones_too(self):
+        device, _ = self._pair(name="old phone")
+        self.book.revoke(device.id)
+        self.assertIn("no devices paired", self._devices_cmd().text)
+        self.assertIn("REVOKED", self._devices_cmd("all").text)
+
+    def test_without_a_book_both_say_so_rather_than_pretending(self):
+        from simorgh.interface.dispatch import _devices_command, _pair_command
+
+        self.assertIn("not available", _pair_command(None, "phone").text)
+        self.assertIn("no device book", _devices_command(None).text)
+
+    def test_both_verbs_are_in_the_command_table(self):
+        """A command that does not autocomplete reads like one that does
+        not exist (test_command_table.py's own lesson)."""
+        from simorgh.interface.parser import COMMAND_NAMES, SECTIONS
+
+        for verb in ("pair", "devices"):
+            self.assertIn(verb, COMMAND_NAMES)
+            self.assertTrue(any(verb in names for _, names in SECTIONS), verb)
+
+
+class ThePairRoute(unittest.IsolatedAsyncioTestCase):
+    """`POST /api/pair` -- the only unauthenticated write route, safe only
+    because it can SPEND a code and cannot create one."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.book = DeviceBook(Path(self._tmp.name) / "devices.json")
+        from simorgh.interface.httpapi import HttpApi
+
+        self.api = HttpApi(bus=None, ledger=None, token="shared", devices=self.book)
+
+    def _route(self):
+        return self.api._routes[("POST", "/api/pair")]        # noqa: SLF001
+
+    async def _post(self, payload: dict):
+        status, body, _ = await self._route().handler({}, json.dumps(payload).encode("utf-8"), {})
+        return status, json.loads(body)
+
+    def test_it_is_registered_unauthenticated_and_rate_limited(self):
+        route = self._route()
+        self.assertFalse(route.auth, "the pairing route must not require a token")
+        self.assertIsNotNone(route.rate, "the only open write route must be rate-limited")
+
+    def test_no_other_write_route_is_unauthenticated(self):
+        """The claim the design rests on, held from the table itself."""
+        open_writes = [(m, path) for (m, path), route in self.api._routes.items()   # noqa: SLF001
+                       if m != "GET" and not route.auth]
+        self.assertEqual(open_writes, [("POST", "/api/pair")])
+
+    async def test_a_good_code_returns_a_token_once(self):
+        pending = self.book.begin_pairing(name="iPhone", capabilities=["read", "approve"])
+        status, body = await self._post({"code": pending.code})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["name"], "iPhone")
+        self.assertIn("approve", body["capabilities"])
+        self.assertIsNotNone(self.book.resolve(body["token"]))
+        # and the code is spent
+        status, body = await self._post({"code": pending.code})
+        self.assertEqual(status, 403)
+
+    async def test_a_wrong_code_is_refused_with_a_reason(self):
+        self.book.begin_pairing(name="iPhone")
+        status, body = await self._post({"code": "nope"})
+        self.assertEqual(status, 403)
+        self.assertIn("not the code", body["error"]["detail"])
+
+    async def test_it_cannot_create_a_pairing(self):
+        """With nothing open there is nothing to spend -- which is the whole
+        reason an unauthenticated route is acceptable here."""
+        status, body = await self._post({"code": "anything"})
+        self.assertEqual(status, 403)
+        self.assertIn("run `pair`", body["error"]["detail"])
+        self.assertEqual(self.book.devices(), [])
+
+    async def test_rubbish_is_a_400_not_a_crash(self):
+        status, _, _ = await self._route().handler({}, b"{not json", {})
+        self.assertEqual(status, 400)
