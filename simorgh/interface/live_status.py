@@ -124,6 +124,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "mail_read"): "Reading mail",
     ("act", "remind"): "Setting a reminder",
     ("act", "memory_forget"): "Forgetting",
+    ("act", "remember"): "Remembering",
     ("act", "kb_search"): "Searching documents",
     ("act", "kb_ask"): "Reading documents",
     ("act", "kb_open"): "Reading documents",

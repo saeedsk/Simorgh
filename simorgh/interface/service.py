@@ -1411,7 +1411,21 @@ class Service:
     async def _on_voice_spoken(self, message: Message) -> None:
         text = str(message.payload.get("text") or "").strip()
         if message.payload.get("quiet"):
-            self._out(render_mod.style("  🤫 not for me -- staying quiet", "dim", enabled=self._color))
+            # WHICH rule kept it quiet. Voice writes a specific `reason`
+            # on every one of these -- "the same question again", "an
+            # unknown voice keeps talking without naming Sim: the TV, a
+            # podcast or the radio", "heard Turkish, not a language of
+            # this house", "Saeed was talking to Iris" -- and this line
+            # used to throw all of it away and print the same four words.
+            # The reason then existed for exactly one bus hop: not on
+            # screen, not on the ledger, not in the log. So a quiet turn
+            # in the middle of a dense conversation was undiagnosable,
+            # even afterwards (the creator, 2026-09-24: "why sim says not
+            # for me in middle of 15 minutes dense conversation?" -- and
+            # the honest answer was that nothing had kept it).
+            why = " ".join(str(message.payload.get("reason") or "").split())
+            said = f"  🤫 quiet -- {why}" if why else "  🤫 not for me -- staying quiet"
+            self._out(render_mod.style(said, "dim", enabled=self._color))
             return
         if message.payload.get("command"):
             what = {"stop": "stopped", "off": "voice off", "mute": "muted"}.get(message.payload["command"], "stopped")
