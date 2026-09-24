@@ -22,7 +22,11 @@ repository, so landing is a fast-forward rather than a copy back.
     land   refuse a dirty tree; rebase onto main's HEAD (a conflict is
            the model's to resolve on the next attempt, never ours to
            guess at); run the gate -- the whole suite -- in a copy of
-           the rebased tree; fast-forward main; remove the worktree
+           the rebased tree; rebase again if main moved WHILE the gate
+           ran (it takes minutes, and a human landing in the meantime
+           used to throw the whole suite away with only git's own
+           "Not possible to fast-forward" to show for it); fast-forward
+           main; remove the worktree
     close  remove the worktree and its branch, for a task that failed
            or gave up
 
@@ -240,6 +244,42 @@ class WorktreeManager:
                              f"when run alone ({', '.join(excused[:5])})")
 
         landed_from = _git(path, "rev-parse", "HEAD").stdout.strip()
+        # Main can move WHILE the gate runs, and the gate is the slow part:
+        # 8.1 minutes on 2026-09-24, during which a human landed five
+        # commits. The rebase above was onto the main of eight minutes ago,
+        # so `--ff-only` refused, and every minute of that suite was thrown
+        # away with nothing kept and nothing explained beyond git's own
+        # "Not possible to fast-forward, aborting." Sim had done the work
+        # correctly and had no way to tell that from having broken
+        # something.
+        #
+        # So: notice, rebase onto where main actually is, and land. The
+        # suite result still belongs to this branch's own changes -- it is
+        # not re-run, and the note says so rather than implying the tree
+        # that lands is the tree that was tested.
+        moved = ""
+        now_main = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        if now_main and now_main != main_sha:
+            arrived = _git(self.repo, "rev-list", "--count", f"{main_sha}..{now_main}").stdout.strip() or "?"
+            again = _git(path, "-c", "user.name=Simorgh", "-c", "user.email=simorgh@localhost",
+                         "rebase", now_main)
+            if again.returncode != 0:
+                conflicts = _git(path, "diff", "--name-only", "--diff-filter=U")
+                names = tuple(n for n in conflicts.stdout.split() if n)
+                _git(path, "rebase", "--abort")
+                return Landed(
+                    False,
+                    f"refused: main moved on while the suite ran ({main_sha[:12]} -> "
+                    f"{now_main[:12]}, {arrived} commit(s)) and rebasing onto it now conflicts in "
+                    f"{', '.join(names) or 'an unknown file'} -- resolve against the current main "
+                    f"and commit again",
+                    conflicts=names,
+                )
+            landed_from = _git(path, "rev-parse", "HEAD").stdout.strip()
+            moved = (f"; main moved on while the suite ran ({arrived} commit(s) arrived), so this was "
+                     f"rebased onto {now_main[:12]} after the gate rather than before it")
+            main_sha = now_main
+
         merge = _git(self.repo, "merge", "--ff-only", landed_from)
         if merge.returncode != 0:
             return Landed(False, f"refused: main could not fast-forward -- {_err(merge)}")
@@ -247,7 +287,7 @@ class WorktreeManager:
         count = _git(self.repo, "rev-list", "--count", f"{main_sha}..{new_main}")
         landed = int(count.stdout.strip() or 0) if count.returncode == 0 else 0
         self._remove(path, branch)
-        return Landed(True, f"landed {landed} commit(s) on main: {main_sha[:12]} -> {new_main[:12]}{gate_note}",
+        return Landed(True, f"landed {landed} commit(s) on main: {main_sha[:12]} -> {new_main[:12]}{gate_note}{moved}",
                       commit=new_main, landed=landed)
 
     def _attribute(self, path: Path, gate: ToolResult) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
