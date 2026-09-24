@@ -61,9 +61,9 @@ until = "2026-09-23T04:46:27+00:00"
 
 [locks.orchestration]
 by = "opus-main"
-task = "a swebench case works in its checkout, not a worktree of this repo"
-since = "2026-09-22T20:59:38+00:00"
-until = "2026-09-23T04:59:38+00:00"
+task = "a chat turn that floors says why, instead of going quiet"
+since = "2026-09-24T06:46:35+00:00"
+until = "2026-09-24T14:46:35+00:00"
 
 [locks.planning]
 by = "opus-main"
