@@ -48,6 +48,21 @@ class SentencesFromAStream(unittest.TestCase):
         stream.finish("No stream at all here. Just the reply.")
         self.assertEqual(_drain(stream), ["No stream at all here.", "Just the reply."])
 
+    def test_a_short_first_sentence_joins_the_next_one(self):
+        # Live 2026-09-23: one chunk holding a short sentence and more text
+        # after it spun `feed` for ever -- the short one went back to the
+        # front of the buffer and matched at the same place again.
+        stream = SentenceStream()
+        stream.feed("Okay. The lights in the living room are on now. ")
+        stream.finish("Okay. The lights in the living room are on now.")
+        self.assertEqual(_drain(stream), ["Okay. The lights in the living room are on now."])
+
+    def test_a_short_sentence_alone_is_said_on_its_own(self):
+        stream = SentenceStream()
+        stream.feed("Okay. ")
+        stream.finish("Okay.")
+        self.assertEqual(_drain(stream), ["Okay."])
+
     def test_pronunciation_reaches_the_synthesiser_and_not_the_echo_guard(self):
         heard = []
         stream = SentenceStream(on_sentence=heard.append, transform=lambda t: t.replace("Ira", "Ay-raa"))

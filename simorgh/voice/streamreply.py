@@ -54,15 +54,22 @@ class SentenceStream:
             return
         self._since_reset += text
         self._buffer += text
+        at = 0
         while True:
-            match = _SENTENCE_END.search(self._buffer)
+            match = _SENTENCE_END.search(self._buffer, at)
             if match is None:
                 return
-            sentence, self._buffer = self._buffer[:match.end()].strip(), self._buffer[match.end():]
-            if len(sentence) < MIN_SENTENCE and self._buffer:
-                self._buffer = sentence + " " + self._buffer
+            sentence = self._buffer[:match.end()].strip()
+            if len(sentence) < MIN_SENTENCE and match.end() < len(self._buffer):
+                # "Dr." or "1." on its own: look on to the next sentence end
+                # and say the two together.  Putting the short one back at the
+                # front of the buffer would match here again for ever (live
+                # 2026-09-23: "Okay. The lights..." wedged the whole process).
+                at = match.end()
                 continue
+            self._buffer = self._buffer[match.end():]
             self._put(sentence)
+            at = 0
 
     def _put(self, sentence: str) -> None:
         if not sentence or self._capped:
