@@ -76,9 +76,37 @@ Five tabs. The first is the one people open; the other four are why this is not 
 
 **The read surface is largely built. The control surface is one route away.** Every write in that table is a *tool*, and tools are reachable today only from a conversation or the REPL -- so the four control tabs have nothing to call. What they need is not twenty bespoke routes but one, and the mechanism already exists: `httpapi.py::_run_for_page` proposes a tool "the way the terminal does: a proposal Guardian sees, the result read back". It is wired to a handful of hardcoded camera and Ring routes and is not exposed generically. Item 3a makes it so.
 
+## The architecture, in the creator's words
+
+2026-09-24: "I like sim to be mostly local in my house but it can have a secure endpoint in internet which would be accessible to sim and its client like mobile app to communicate with each other".
+
+That is a **rendezvous**, not a host, and the distinction is the whole design:
+
+    house (everything)                internet (a letterbox)         pocket
+    ------------------                ----------------------         ------
+    the Kernel, the Bus,         <->  one endpoint both sides   <->   the app
+    Guardian, the models,             dial OUT to; it forwards        (dials out)
+    the NVR, the mic, the TV,         and remembers nothing
+    the ledger, the vault
+
+Nothing moves out of the house. No decision, no model, no credential, no recording. The endpoint's entire job is to let two things that both dial outward find each other, because neither can accept an inbound connection -- Sim will not open a port on the router, and a phone on a carrier network has no address to open.
+
+Three consequences worth stating, because they constrain every item below:
+
+1. **The endpoint holds no state worth stealing.** No token store, no ledger, no config. If it is rebuilt from scratch on a Tuesday, nothing is lost but the two connections, which reconnect.
+2. **It is replaceable.** AWS today, a VPS tomorrow, a friend's box in a pinch. Nothing in `simorgh/` may name it; it is reached through `[interface] ingress` the way the ledger reaches DynamoDB through a lazy backend import.
+3. **It should not be trusted, even though the creator owns it.** A box that terminates TLS can read what passes and forge what it likes. mTLS keeps strangers out; it does nothing about the box itself.
+
+Which points at the target, and it is a better answer to "accessible to sim and its client" than mTLS alone: **encrypt end to end between Sim and the app, and let the rendezvous forward opaque frames.** The QR pairing already establishes a channel only those two see (item 2), so it can carry a shared key as easily as a bearer token. Then a compromised endpoint leaks timing and sizes, never the household's audio, mail or an approval -- and the endpoint becomes genuinely interchangeable, since trusting it is no longer part of the design.
+
+Staged honestly, because end-to-end encryption is real complexity -- key rotation, replay windows, a web client doing it in WebCrypto: ship mTLS and per-device tokens first (items 1-2), add the end-to-end layer with the native client, where the Secure Enclave makes key custody natural rather than bolted on.
+
 ## Items
 
-### 1. Remote reach, with TLS
+**Build order: 2, 1, 3, 3a, 4, 5, 6, 7.** Item 2 comes first even though item 1 unblocks the testing, because per-device tokens are needed whether or not the phone ever happens: today one shared 32-character bearer admits every caller to a system that holds cameras, door hardware, the family's mail and a model budget, and `[interface] http_host` is `0.0.0.0`. That is defensible on a home LAN and is not something to hand to anyone else, which makes item 2 a prerequisite for releasing this package at all, not a phone feature.
+
+
+### 1. The rendezvous, and TLS
 
 `getUserMedia` requires a secure context, so **no browser will give a page the microphone over `http://`** -- this blocks the voice work and nothing else can be tested honestly without it. The HTTP server has no TLS at all (`asyncio.start_server`, no `ssl` anywhere).
 
