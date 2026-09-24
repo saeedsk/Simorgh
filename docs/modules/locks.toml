@@ -49,9 +49,9 @@ until = "2026-09-22T22:09:20+00:00"
 
 [locks.interface]
 by = "opus-main"
-task = "standing approvals: approve a kind of action once"
-since = "2026-09-22T14:09:20+00:00"
-until = "2026-09-22T22:09:20+00:00"
+task = "a spoken reply is printed once, and speech does not wait for the screen"
+since = "2026-09-24T05:21:35+00:00"
+until = "2026-09-24T13:21:35+00:00"
 
 [locks.kernel]
 by = "opus-main"
