@@ -35,12 +35,6 @@ task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
 
-[locks.execution]
-by = "opus-main"
-task = "landing survives main moving while the gate runs"
-since = "2026-09-24T08:03:02+00:00"
-until = "2026-09-24T16:03:02+00:00"
-
 [locks.growth]
 by = "opus-main"
 task = "diagnose sees real task failures"
