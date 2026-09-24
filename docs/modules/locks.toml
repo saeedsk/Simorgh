@@ -17,12 +17,6 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
-[locks.contracts]
-by = "opus-main"
-task = "barge_in_known_voice settable"
-since = "2026-09-24T04:48:03+00:00"
-until = "2026-09-24T12:48:03+00:00"
-
 [locks.docs]
 by = "opus-main"
 task = "findings: native vs markers on Gemini"
@@ -94,9 +88,3 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "sim interrupts itself: known-voice gate settable, aec tells the truth"
-since = "2026-09-24T04:48:03+00:00"
-until = "2026-09-24T12:48:03+00:00"
