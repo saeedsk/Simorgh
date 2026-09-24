@@ -58,6 +58,24 @@ Worth knowing before building anything, because most of the read surface is done
 
 What does not exist: TLS, a prompt-answer route, per-device identity, a voice session for a second listener, reply routing to a phone, and push registration.
 
+## What the app is, screen by screen
+
+The creator's shape, 2026-09-24: "act like chat gpt or gemini mobile app, which provide both text and interactive voice chat, in addition it will allow me to control home remotely, observe and monitor through different pages, something similar to dashboard will be available on mobile app, will have separate tab to control video feeds, separate tab for home automation stuff, separate tab for settings, admin stuff".
+
+Five tabs. The first is the one people open; the other four are why this is not a chat app.
+
+| tab | what it is | reads | writes |
+|---|---|---|---|
+| **Ask** | The ChatGPT/Gemini shape: a thread, text in, and a microphone button for live voice | `POST /api/chat` ✓, `/api/history` ✓ | the voice socket (item 5) |
+| **Home** | Lights, switches, scenes, thermostats. Tiles from Sim's own view of the house, not Home Assistant's | `home_find`, `home_state`, `home_describe` | `home_call`, `home_undo` |
+| **Cameras** | Live feeds, stills, and the controls: pan, light, siren, record | `/api/dash/streams` ✓, `/cameras/snap/` ✓, `/tv/hls/` ✓, `/api/dash/ring/live` ✓ | `cam_ptz`, `cam_light`, `cam_ir`, `cam_siren`, `cam_watch` |
+| **House** | The monitor page: what Sim is doing, energy, tasks in flight, alerts, the activity feed | `/api/dash/data` ✓, `/api/status` ✓, `/api/activity` ✓, `/api/logs` ✓, `energy_status` | `cancel_task` |
+| **Settings** | Admin: paired devices, voice settings, config, alerts, the cast target | `/api/status` ✓, `devices` (item 2) | `voice_setting`, `sim_command`, device revocation |
+
+**Video is nearly free on iOS.** `/tv/hls/` already serves HLS, and iOS plays HLS natively in an `AVPlayer` or a `<video>` tag -- no library, no transcoding, no WebRTC. This is the one place the phone is a *better* client than the TV, where in-page video and YouTube embeds both came back blank on the Cast receiver (2026-09-19).
+
+**The read surface is largely built. The control surface is one route away.** Every write in that table is a *tool*, and tools are reachable today only from a conversation or the REPL -- so the four control tabs have nothing to call. What they need is not twenty bespoke routes but one, and the mechanism already exists: `httpapi.py::_run_for_page` proposes a tool "the way the terminal does: a proposal Guardian sees, the result read back". It is wired to a handful of hardcoded camera and Ring routes and is not exposed generically. Item 3a makes it so.
+
 ## Items
 
 ### 1. Remote reach, with TLS
@@ -115,6 +133,17 @@ Rules that matter more than the routes:
 - The question text reaching a phone is the same text the terminal box shows. No summarising, and no "Sim wants to do something" -- the whole point is that the person can judge it.
 
 Done when: an irreversible action proposed while nobody is at the terminal is approved from the phone and runs; and the same action, answered after its timeout, is refused with the reason.
+
+### 3a. One action route, so the control tabs have something to call
+
+`POST /api/action` -- `{tool, args}` -- through the existing `_run_for_page` path: a proposal Guardian sees, on the same footing as a tool call from a spoken turn. The phone gains no privilege the voice channel does not already have, and Guardian is not touched.
+
+Two rules carry this, and the second is the one that is easy to get wrong:
+
+1. It needs a `control` capability (item 2), separate from `read` and from `chat`.
+2. **A server-side allowlist of tool names**, not "whatever Guardian permits". Guardian gates *effects*; this gates *surface*. `_run_for_page` is safe today only because the server itself chooses every tool name it passes; the moment the CLIENT names the tool, a stolen phone token could ask for `run_shell`, `apply_source_patch` or `install_package` and Guardian would evaluate it as a legitimate request. The allowlist is the house's remote control -- home, cameras, media, cast, tasks, voice settings -- and nothing that writes code or runs a shell. A tool not on it is refused by name, so the failure is legible rather than mysterious.
+
+Done when: a light goes on from the phone; `cancel_task` works; `run_shell` is refused with "not a tool the phone may ask for" and no proposal is made at all.
 
 ### 4. Push, so a question finds the person
 
