@@ -77,8 +77,16 @@ _PRODUCES = (
 # report success.
 _ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "tts", "tts_farsi", "tts_farsi_voice",
                           "tts_farsi_reference", "vad_sensitivity", "expressive_lane"})
-_SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials", "connectors",
-                           "max_spoken_sentences", "output"})
+# `stt_partial_every_ms` belongs here for the same reason `expressive_lane`
+# belongs in `_ENGINE_KEYS`: `VoiceSession.__init__` passes it to
+# `IncrementalRecogniser(partial_every_ms=...)` (`session.py:401`), so it
+# decides how that object is BUILT, not what it does per turn. It was made
+# settable without this on 2026-09-23 (f4058850) and went stale exactly as
+# `expressive_lane` had: `voice set stt_partial_every_ms 800` was accepted,
+# saved, shown -- and the running recogniser kept asking every 1500 ms
+# until an unrelated `voice set stt_partials on` forced the rebuild.
+_SESSION_KEYS = frozenset({"barge_in", "endpoint_silence_ms", "min_speech_ms", "stt_partials",
+                           "stt_partial_every_ms", "connectors", "max_spoken_sentences", "output"})
 
 
 def _spoken_by(synthesiser, default: str) -> str:

@@ -64,6 +64,66 @@ class EveryReopenKeyIsSettableTestCase(unittest.TestCase):
         self.assertNotIn("barge_in_known_voice", _ENGINE_KEYS)
         self.assertNotIn("barge_in_known_voice", _SESSION_KEYS)
 
+    def test_a_settable_key_the_session_is_BUILT_from_rebuilds_the_session(self):
+        """The other direction, and the one that bites.
+
+        `VoiceSession.__init__` hands some config values to objects it
+        constructs -- `IncrementalRecogniser(partial_every_ms=...)`,
+        `TurnManager(Policy(...))`, `EchoTracker(...)`. Those values are
+        read ONCE. A settable key among them that is in neither
+        `_ENGINE_KEYS` nor `_SESSION_KEYS` takes `_set`'s "applied in
+        place" branch, and the object built from it survives with the old
+        value: accepted, saved, shown on the settings screen, and inert.
+
+        `expressive_lane` did this in 2026-09-16 and
+        `test_a_setting_that_rebuilds_the_engines.py` was written for it,
+        but that test inspects `open_synthesiser` only. So the same
+        mistake was made again on 2026-09-23, by the commit that made
+        `stt_partial_every_ms` settable, and the creator found it at the
+        microphone: "did you leave the word-by-word feature half baked?"
+
+        The guard is the source of `__init__`, not a list: any settable
+        key it reads must be in one of the two sets.
+        """
+        import inspect
+        import re
+
+        from simorgh.voice.session import VoiceSession
+
+        body = inspect.getsource(VoiceSession.__init__)
+        rebuilt = _ENGINE_KEYS | _SESSION_KEYS
+        stale = sorted({
+            key for key in VOICE_SAFE_KEYS
+            if key not in rebuilt and re.search(rf"\bconfig\.{re.escape(key)}\b", body)
+        })
+        # A ratchet, not a clean sheet: these seven were already in this
+        # state on 2026-09-23, and the audit of each is recorded here
+        # rather than in a doc nobody opens.
+        #   auto_listen         -- APPLIED: `_set` has an explicit
+        #                          `session.turns.auto_listen = ...` handler.
+        #   barge_in_speech_ms  -- APPLIED for the decision that matters:
+        #                          `_identify_barge` reads it off `_config`
+        #                          per interruption. The `Policy` copy is
+        #                          stale, which only shifts when the turn
+        #                          manager first calls something an
+        #                          interruption.
+        #   speaker_threshold   -- APPLIED: two live reads off `_config`.
+        #   barge_in_calibrate_ms, speaker_margin, speaker_lean, speaker_id
+        #                       -- GENUINELY STALE: no live read, no
+        #                          handler, not in either set. Changing one
+        #                          is accepted, saved, shown, and does
+        #                          nothing until the session is rebuilt for
+        #                          some other reason. Not fixed here: each
+        #                          would start restarting the listen loop on
+        #                          change, which wants its own verifying.
+        KNOWN_STALE = ["auto_listen", "barge_in_calibrate_ms", "barge_in_speech_ms", "speaker_id",
+                       "speaker_lean", "speaker_margin", "speaker_threshold"]
+        self.assertEqual(stale, KNOWN_STALE,
+                         "a settable key the session is BUILT from, that no `voice set` rebuilds it "
+                         "for. Either add it to _SESSION_KEYS, apply it explicitly in `_set`, read it "
+                         "live off `_config`, or -- having checked which -- add it to KNOWN_STALE "
+                         f"with the reason. Got: {stale}")
+
     def test_a_setting_shown_on_the_screen_is_a_setting_that_exists(self):
         from simorgh.voice.config import Config
 
