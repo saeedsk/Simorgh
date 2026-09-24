@@ -21,7 +21,19 @@ def parse_accounts(rows) -> list[Account]:
         if isinstance(row, Account):
             out.append(row)
             continue
-        data = dict(row)
+        # A row that is not a mapping is SKIPPED, not fatal. `dict("...")`
+        # raises `ValueError: dictionary update sequence element #0 has
+        # length 1` on a string, and that came out of every `mail_search`
+        # for a day after the settings writer rewrote a working
+        # `[[execution.pim_accounts]]` block as one quoted Python dict
+        # (2026-09-24). The writer is fixed, but the first rule in
+        # `contracts/connector.py` holds here too: one bad line in
+        # simorgh.toml must not stop the tool that reads it, and a hand-
+        # typed row is always possible.
+        try:
+            data = dict(row)
+        except (TypeError, ValueError):
+            continue
         name = str(data.get("name") or "").strip()
         kind = str(data.get("kind") or "").strip().lower()
         if not name or kind not in ("imap", "caldav"):

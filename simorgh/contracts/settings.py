@@ -231,15 +231,37 @@ def _dump(data: dict) -> str:
     than one that refuses, because nothing says so until something
     downstream is mysteriously off.
     """
+    def is_table_array(value: object) -> bool:
+        """A list of tables -- TOML's `[[a.b]]`. It needs its own block per
+        element, and it is the shape `_toml_value` cannot express: a dict
+        reaching it falls through to `str(value)`, which is how a working
+        `[[execution.pim_accounts]]` became the single string
+        `"{'name': 'gmail', ...}"` the moment an unrelated `voice set`
+        rewrote the file (live 2026-09-24; Gmail then failed with
+        `ValueError: dictionary update sequence element #0 has length 1`
+        on every mail search, and nothing said the config had been eaten).
+        An empty list is NOT one: `[]` is a fine scalar value.
+        """
+        return bool(value) and isinstance(value, (list, tuple)) and all(isinstance(x, dict) for x in value)
+
     def table(value: dict, path: tuple[str, ...]) -> list[str]:
         lines: list[str] = []
         if path:
             lines.append("")
             lines.append("[" + ".".join(path) + "]")
-        lines += [f"{k} = {_toml_value(v)}" for k, v in value.items() if not isinstance(v, dict)]
+        lines += [f"{k} = {_toml_value(v)}" for k, v in value.items()
+                  if not isinstance(v, dict) and not is_table_array(v)]
         for k, v in value.items():
             if isinstance(v, dict):
                 lines += table(v, (*path, k))
+            elif is_table_array(v):
+                # Every element its own `[[path.k]]`, after this table's
+                # own scalars -- a scalar written after one of these would
+                # belong to the last element, not to the table.
+                for element in v:
+                    lines.append("")
+                    lines.append("[[" + ".".join((*path, k)) + "]]")
+                    lines += table(element, ())
         return lines
 
     return "\n".join(table(data, ())).strip() + "\n"

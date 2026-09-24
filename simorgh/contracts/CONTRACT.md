@@ -82,7 +82,7 @@ None. The package writes no ledger stream (the `corrected:` string in `tidy.py:1
 
 ## Config
 
-No `[contracts]` section and no config dataclass. `settings.py::config_path()` resolves which `simorgh.toml` other packages should write to, and `settings.persist()`/`places.py` rewrite keys in it.
+No `[contracts]` section and no config dataclass. `settings.py::config_path()` resolves which `simorgh.toml` other packages should write to, and `settings.persist()`/`places.py` rewrite keys in it. `persist` rewrites the WHOLE file through `_dump`, so every shape the file can hold has to be a shape `_dump` can write: nested tables since 2026-09-15 (the cameras went blind twice when `[cognition.providers.ollama]` came back as a quoted Python dict), and ARRAYS of tables since 2026-09-24, when an unrelated `voice set` turned a working `[[execution.pim_accounts]]` into the single string `"{'name': 'gmail', ...}"` and every `mail_search` then died on `ValueError: dictionary update sequence element #0 has length 1`. An empty list stays a scalar; only a non-empty list of dicts is an array of tables.
 
 ## Public Python surface
 
