@@ -161,6 +161,50 @@ class ContextTooLarge(unittest.TestCase):
             self.assertNotIn("no real provider", outcome.reason)
             await cognition.stop(); await gx.stop()
 
+    @run
+    async def test_a_chat_turn_that_floors_says_why_out_loud(self):
+        """The creator, 2026-09-23, having asked for tomorrow's weather:
+        "What happened? Why you didn't tell me about the weather?"
+
+        Three web pages blew the context budget, `context_too_large` went
+        on the task's own stream, and the turn ended `completed` with an
+        empty `result_summary` and NO reason -- so `worker._turn_text` had
+        nothing to build a sentence from and the household heard the
+        filler ("Let me check.") and then silence, under a green tick.
+
+        A chat turn stays `completed` rather than `blocked`: nothing
+        should retry a sentence somebody said out loud. But the branch
+        one line above this one already knew the true reason and reported
+        it for every OTHER kind of task, so the only participant who
+        could ask "what happened?" was the only one not told.
+        """
+        from simorgh.orchestration.worker import _turn_text
+
+        async with Harness() as h:
+            cognition = _ErroringCognition(h.client("cognition"), script=[
+                _tool("a.md"), {"error": "context_too_large"}, {"text": NOTE},
+                {"error": "context_too_large"}])
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start(); await gx.start()
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now,
+                                   assemble_timeout_s=0.05)
+            session = Session(task_id="t-chat-floor", kind="chat", mode="execute",
+                              profile=replace(profiles.CHAT, verify=False, max_steps=10),
+                              budget=Budget(max_steps=10))
+            outcome = await runner.run(session, user_text="What is the weather tomorrow?")
+
+            self.assertEqual(outcome.kind, "completed")   # never retried at a person
+            self.assertTrue(outcome.floor)
+            self.assertEqual(outcome.result_summary, "")  # there really was no answer
+            self.assertTrue(outcome.reason, "a floored chat turn must carry why")
+
+            # The whole point: the person is told something true.
+            said = _turn_text(outcome, False)
+            self.assertTrue(said.strip(), "a floored chat turn said nothing at all")
+            self.assertIn("could not finish", said)
+            self.assertIn("too long", said)
+            await cognition.stop(); await gx.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,26 @@ class _CheckpointProposal:
             object.__setattr__(self, "reversibility", _TOOL_POLICY.get(self.tool, ("irreversible", False))[0])
 
 
+#: Why a spoken or typed conversation turn came back with no answer, in
+#: words meant to be SAID. `worker._turn_text` puts "I could not finish
+#: this one: " in front of whichever of these it gets, so each reads on
+#: from that. A code with no entry here still beats silence: the raw code
+#: is at least true, and the turn is no longer mute.
+_CHAT_FLOOR_REASONS = {
+    "context_too_large": "what I read back was too long for me to think about, even after "
+                         "setting the older results aside",
+    "": "no model answered in time",
+}
+
+
+def _chat_floor_reason(error: str) -> str:
+    """What to say when a chat turn floors. Never "" -- that is the bug
+    this exists to close (the creator, 2026-09-23: "Why you didn't tell
+    me about the weather?")."""
+    code = (error or "").strip()
+    return _CHAT_FLOOR_REASONS.get(code) or (_CHAT_FLOOR_REASONS[""] if not code else code.replace("_", " "))
+
+
 def _args_hash(args: dict) -> str:
     import hashlib
     import json as _json
@@ -1177,7 +1197,22 @@ class SessionRunner:
                     think_reply = await self._think(session, "", last_step=is_last)
             if think_reply is None:  # provider unavailable / timeout -- honest floor
                 if session.profile.name == "chat":
-                    return Outcome("completed", result_summary="", floor=True)
+                    # A chat turn ends as `completed` rather than `blocked`:
+                    # nothing should retry a sentence somebody said out loud.
+                    # But it must still SAY why. It used to return here with
+                    # no reason at all, dropping the very error the two
+                    # branches below report -- so the one participant who
+                    # can ask "what happened?" was the only one told
+                    # nothing. Live 2026-09-23, the creator asked for
+                    # tomorrow's weather: three web pages blew the context
+                    # budget, `context_too_large` was recorded on the task's
+                    # own stream, and the household heard the filler ("Let
+                    # me check.") and then silence, under a green tick. He
+                    # had to ask "Why you didn't tell me about the weather?"
+                    # `_turn_text` (worker.py) turns a reason into the
+                    # spoken line, so a reason here is the whole fix.
+                    return Outcome("completed", result_summary="", floor=True,
+                                   reason=_chat_floor_reason(session.last_think_error))
                 if session.last_think_error == "context_too_large":
                     return Outcome("blocked", reason="context too large for the model, even after re-grounding")
                 return Outcome("blocked", reason="no real provider")
