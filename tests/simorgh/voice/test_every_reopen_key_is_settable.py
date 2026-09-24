@@ -43,6 +43,27 @@ class EveryReopenKeyIsSettableTestCase(unittest.TestCase):
         for key in ("barge_in", "aec"):
             self.assertIn(key, VOICE_SAFE_KEYS)
 
+    def test_the_guard_against_sim_interrupting_itself_can_be_turned_on(self):
+        """The creator, 2026-09-23, with barge-in on: "sim voice gets
+        interrupted even when I'm not talking at all". Sim was hearing its
+        own reply -- it said "It's Wednesday, September 23rd, 2026." and
+        transcribed "23rd, 2000." -- and the level gate cut it off
+        (`voice.barge_in stop_s=0.0`, three times).
+
+        `barge_in_known_voice` is the guard written for exactly that ("or
+        any family voice ... like my voice basically"), and it was READ
+        live and settable NOWHERE, so the one switch that answers the
+        complaint could only be reached by hand-editing simorgh.toml.
+        `aec` is not that switch: nothing on the live path reads it (V7).
+        """
+        self.assertIn("barge_in_known_voice", VOICE_SAFE_KEYS)
+        # And it must NOT be an engine or session key: it is consulted per
+        # interruption (`session._identify_barge`), so `_set`'s in-place
+        # branch is what applies it -- tearing the engines down to change
+        # it would put the microphone away mid-conversation for nothing.
+        self.assertNotIn("barge_in_known_voice", _ENGINE_KEYS)
+        self.assertNotIn("barge_in_known_voice", _SESSION_KEYS)
+
     def test_a_setting_shown_on_the_screen_is_a_setting_that_exists(self):
         from simorgh.voice.config import Config
 

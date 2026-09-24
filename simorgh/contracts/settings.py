@@ -127,7 +127,14 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                              "the 1500 default asks for far fewer drafts than it can afford"),
     "aec": (bool, None,
             "subtract Sim's own voice from the microphone before deciding you spoke (experimental). "
-            "`voice barge aec on|off` sets this same key"),
+            "`voice barge aec on|off` sets this same key. It is read ONLY by `Pipeline`'s own capture "
+            "path, which the live `VoiceSession` does not run (evaluation V7), so setting it changes "
+            "nothing about how a spoken turn is heard today"),
+    "barge_in_known_voice": (bool, None,
+                             "only a voice the house knows may cut Sim off -- the guard against Sim "
+                             "interrupting ITSELF on its own echo. Off by default because it can only "
+                             "be as good as the speaker book, and a thinly enrolled house would find "
+                             "Sim could not be interrupted at all. Fails OPEN at every step"),
     "barge_in_speech_ms": (int, (80, 1500),
                           "how long you must keep talking before it counts as cutting Sim off. "
                           "350 plus the loudness bar meant a stop landed only after the sentence "

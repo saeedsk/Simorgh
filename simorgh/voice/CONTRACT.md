@@ -123,7 +123,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `barge_in_speech_ms` | `350` | yes |
 | `barge_in_calibrate_ms` | `1200` | yes |
 | `barge_in_ratio` | `2.8` | yes |
-| `barge_in_known_voice` | `False` | yes |
+| `barge_in_known_voice` | `False` | yes, and settable since 2026-09-23 (`voice set barge_in_known_voice on`), applied in place -- it is consulted per interruption in `session._identify_barge`, so it is deliberately NOT an engine or session key. It is the guard against Sim interrupting ITSELF: with barge-in on, the creator's Sim said "It's Wednesday, September 23rd, 2026." and cut itself off on its own echo, transcribed "23rd, 2000." (`voice.barge_in stop_s=0.0`, three times in two minutes). The level gate cannot help there -- the words only exist after the bar has already been crossed -- and `aec` cannot either, because nothing on the live path reads it (V7). This key was READ live and settable nowhere, so the one switch that answers the complaint needed a hand-edit of simorgh.toml |
 | `aec` | `True` | yes (only by `Pipeline`'s capture path, which the live `VoiceSession` never runs: V7), and settable since 2026-09-23 -- `voice barge aec on|off` and `voice set aec on|off` are now ONE path through `_set`, which also holds the single availability guard, so neither spelling can turn on what the other refuses |
 | `aec_taps` | `1024` | yes (Pipeline path only, V7) |
 | `aec_mu` | `0.3` | yes (Pipeline path only, V7) |

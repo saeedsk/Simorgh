@@ -554,10 +554,19 @@ class Service:
             # `barge_in` is in `_SESSION_KEYS`.
             key = "barge_in" if action.startswith("barge") else "aec"
             want = action.endswith("_on")
+            # The aec wording says what it does NOT do. `aec` is read only by
+            # `Pipeline._play_stream_interruptibly`; the live `VoiceSession`
+            # plays through its own `_play`, which uses the `EchoTracker`
+            # level gate and never builds an `EchoCanceller` (evaluation V7).
+            # Saying "Sim's own voice is subtracted before deciding you spoke"
+            # to somebody whose Sim keeps interrupting itself sends them to
+            # the one switch that cannot help them (the creator, 2026-09-23).
             said = ((f"barge-in {'on -- speak to interrupt' if want else 'off -- Sim finishes before it listens'}")
                     if key == "barge_in" else
-                    ("echo cancellation on -- Sim's own voice is subtracted before deciding you "
-                     "spoke (experimental)" if want else "echo cancellation off -- back to the level gate"))
+                    ("echo cancellation on -- but NOT on the live listening path: only `Pipeline`'s own "
+                     "capture path reads it, and a spoken turn does not go through that (V7). For Sim "
+                     "interrupting itself, raise `barge_in_ratio` or set `barge_in_known_voice on`"
+                     if want else "echo cancellation off -- the level gate was the only gate anyway"))
             ok, written = await self._set(key, "on" if want else "off")
             detail = f"{said}; {written}" if ok else written
         elif action in ("enroll", "forget", "people", "whois", "pronounce", "tidy", "relearn", "calibrate"):
