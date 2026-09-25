@@ -27,6 +27,8 @@ struct RootView: View {
                 .tabItem { Label("Ask", systemImage: "bubble.left.and.bubble.right") }
             HouseView()
                 .tabItem { Label("House", systemImage: "house") }
+            ConsoleView()
+                .tabItem { Label("Console", systemImage: "terminal") }
             CamerasView()
                 .tabItem { Label("Cameras", systemImage: "video") }
             SettingsView()

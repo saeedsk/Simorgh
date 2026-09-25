@@ -47,11 +47,62 @@ struct Api {
         let session_id: String?
     }
 
+    /// One line of `/api/activity`. The server's key is `events`, not
+    /// `activity` -- decoding the wrong one returned an empty list forever
+    /// and the House tab looked idle while Sim worked (found 2026-09-25 by
+    /// reading `httpapi.py:1149` rather than the screen).
     struct ActivityRow: Identifiable, Decodable {
         let ts: Double?
-        let kind: String?
+        let type: String?
+        let summary: String?
+        let tool: String?
+        let ok: Bool?
+        let task_id: String?
+        var id: String { "\(ts ?? 0)-\(type ?? "")-\(summary ?? "")" }
+
+        /// What to show: the summary when there is one, else the event
+        /// type, which is at least true.
+        var line: String {
+            let said = (summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return said.isEmpty ? (type ?? "") : said
+        }
+
+        var detail: String? {
+            let bits = [tool, type].compactMap { $0 }.filter { !$0.isEmpty }
+            return bits.isEmpty ? nil : bits.joined(separator: " · ")
+        }
+    }
+
+    /// One event from `/api/logs` -- a tail of any ledger stream, which is
+    /// what "structured logs are Ledger events" means in practice.
+    struct LogEvent: Identifiable, Decodable {
+        let seq: Int?
+        let ts: Double?
+        let type: String?
+        let payload: [String: AnyCodable]?
+        var id: String { "\(seq ?? 0)-\(ts ?? 0)" }
+
+        var summary: String {
+            guard let payload else { return "" }
+            for key in ["summary", "detail", "text", "result_summary", "reason", "message", "error"] {
+                if let found = payload[key]?.text, !found.isEmpty { return found }
+            }
+            return payload.keys.sorted().prefix(4).joined(separator: ", ")
+        }
+    }
+
+    /// Ledger payloads are free-form, so decode them loosely and render
+    /// what is readable rather than refusing the whole event.
+    struct AnyCodable: Decodable {
         let text: String?
-        var id: String { "\(ts ?? 0)-\(text ?? "")" }
+        init(from decoder: Decoder) throws {
+            let single = try decoder.singleValueContainer()
+            if let value = try? single.decode(String.self) { text = value }
+            else if let value = try? single.decode(Bool.self) { text = String(value) }
+            else if let value = try? single.decode(Double.self) {
+                text = value == value.rounded() ? String(Int(value)) : String(value)
+            } else { text = nil }
+        }
     }
 
     // MARK: - Calls
@@ -81,9 +132,24 @@ struct Api {
     }
 
     func activity() async throws -> [ActivityRow] {
-        struct Wrapper: Decodable { let activity: [ActivityRow]? }
-        let wrapped: Wrapper = try await send("/api/activity", method: "GET")
-        return wrapped.activity ?? []
+        struct Wrapper: Decodable { let events: [ActivityRow]? }
+        let wrapped: Wrapper = try await send("/api/activity?limit=60", method: "GET")
+        return wrapped.events ?? []
+    }
+
+    /// A tail of one ledger stream. `system` is Sim's own console; every
+    /// other stream is reachable by name, which is what `/api/streams`
+    /// lists.
+    func logs(stream: String = "system", limit: Int = 100) async throws -> [LogEvent] {
+        struct Wrapper: Decodable { let events: [LogEvent]? }
+        let wrapped: Wrapper = try await send("/api/logs?stream=\(stream)&limit=\(limit)", method: "GET")
+        return wrapped.events ?? []
+    }
+
+    func streams() async throws -> [String] {
+        struct Wrapper: Decodable { let streams: [String]? }
+        let wrapped: Wrapper = try await send("/api/streams", method: "GET")
+        return wrapped.streams ?? []
     }
 
     /// A camera's live HLS stream, for AVPlayer. The token rides in the
