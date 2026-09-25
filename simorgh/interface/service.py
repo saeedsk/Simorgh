@@ -388,6 +388,8 @@ class Service:
                 feeds=feeds,
                 cameras_live=self.config.dash_cameras_live,
                 devices=self._device_book(ctx),
+                prompts=self.open_prompts,
+                answer_prompt=self.answer_prompt,
             )
             # A dashboard on 127.0.0.1 is reachable only by this
             # machine's own user, which is the posture this server was
@@ -1616,7 +1618,17 @@ class Service:
             return
         asyncio.ensure_future(self._resolve_prompt(prompt_id, answer, note="(picked)"))
 
-    async def _resolve_prompt(self, prompt_id: str, answer: str, *, note: str = "") -> None:
+    async def _resolve_prompt(self, prompt_id: str, answer: str, *, note: str = "") -> bool:
+        """True when THIS call resolved it, False when it was already gone.
+
+        The terminal and a phone can both be looking at the same question
+        (stage 12 item 3), so the second answer must be told it lost rather
+        than quietly publishing a second `ui.prompt.answered` -- Guardian
+        has acted on the first by then, and a second answer that prints as
+        though it worked is the honest-failure rule broken.
+        """
+        if prompt_id not in self._pending_prompts:
+            return False
         self._pending_prompts.pop(prompt_id, None)
         task = self._prompt_timeouts.pop(prompt_id, None)
         if task is not None and not task.done():
@@ -1625,6 +1637,44 @@ class Service:
             "prompt_id": prompt_id, "answer": answer,
         }))
         self._out(f"[prompt] answered {answer!r} {note}".rstrip())
+        return True
+
+    def open_prompts(self) -> list[dict]:
+        """The questions waiting for a person, for `GET /api/prompts`.
+
+        The question text is passed through UNCHANGED: the whole point of
+        answering from a phone is that the person can judge the thing
+        Guardian escalated, and a summary would be Sim deciding what
+        matters about its own request.
+        """
+        now = self._ctx.clock.now() if self._ctx is not None else time.time()
+        out = []
+        for prompt_id, payload in self._pending_prompts.items():
+            asked = float(payload.get("asked_at") or 0.0)
+            timeout = float(payload.get("timeout_s") or 0.0)
+            left = max(0.0, asked + timeout - now) if asked and timeout else timeout
+            out.append({"prompt_id": prompt_id, "question": str(payload.get("question") or ""),
+                        "options": list(payload.get("options") or ()),
+                        "default": payload.get("default") or "",
+                        "seconds_left": round(left, 1)})
+        return out
+
+    async def answer_prompt(self, prompt_id: str, answer: str) -> str:
+        """"" when the answer was applied, else why it was not.
+
+        The prompt's OWN timeout still governs: a phone answer that arrives
+        after the watchdog has defaulted is refused, never applied late,
+        because Guardian's decision has already been made by then.
+        """
+        payload = self._pending_prompts.get(prompt_id)
+        if payload is None:
+            return "that question has already been answered or has timed out"
+        options = [str(o) for o in (payload.get("options") or ())]
+        if options and answer not in options:
+            return f"answer must be one of: {', '.join(options)}"
+        if not await self._resolve_prompt(prompt_id, answer, note="(from a paired device)"):
+            return "that question has already been answered or has timed out"
+        return ""
 
     async def _on_needs_human(self, message: Message) -> None:
         # `_on_prompt` (`ui.prompt`, fired by Guardian for the exact same

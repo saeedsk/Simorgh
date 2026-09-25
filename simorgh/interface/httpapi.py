@@ -157,7 +157,7 @@ class HttpApi:
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
         token: str = "", max_body_bytes: int = 1_000_000, logger=None, feeds=None,
         cameras_live: bool = False, cameras_live_delay_s: float = 20.0, cameras_live_every_s: float = 120.0,
-        devices=None,
+        devices=None, prompts=None, answer_prompt=None,
     ) -> None:
         self._bus = bus
         self._ledger = ledger
@@ -166,6 +166,11 @@ class HttpApi:
         #: that has none -- in which case only the legacy shared token works,
         #: which is every deployment that predates stage 12 item 2.
         self._devices = devices
+        #: The open `ui.prompt`s and how to answer one (stage 12 item 3).
+        #: Callables rather than the Service itself: this file knows what a
+        #: question looks like and nothing about who is holding them.
+        self._prompts = prompts
+        self._answer_prompt = answer_prompt
         self._max_body_bytes = max(1, int(max_body_bytes))
         self._logger = logger
         self._routes: dict[tuple[str, str], Route] = {}
@@ -459,6 +464,64 @@ class HttpApi:
             }).encode("utf-8"), "application/json"
 
         self.register_route("POST", "/api/pair", _pair, auth=False, max_body=512, rate=(20, 60.0))
+
+        async def _prompts_get(_query, _body, headers):
+            """GET /api/prompts -- what Sim is waiting to be told.
+
+            `read` is enough to SEE a question; answering needs `approve`.
+            Seeing one matters even without the grant: it is how somebody
+            at home knows Sim is stuck rather than slow.
+            """
+            if self._prompts is None:
+                return 200, b'{"prompts":[]}', "application/json"
+            return 200, json.dumps({"prompts": self._prompts()}).encode("utf-8"), "application/json"
+
+        self.register_route("GET", "/api/prompts", _prompts_get, rate=(120, 60.0))
+
+        async def _prompt_answer(query, body, headers):
+            """POST /api/prompts/<id> -- answer one. Needs `approve`.
+
+            This is why the phone exists. `ui.prompt` and
+            `ui.prompt.answered` have been on the Bus since Guardian could
+            escalate, and until now only the REPL published the answer -- so
+            every irreversible action waited for somebody at that terminal
+            and Sim's autonomy ended at the desk.
+            """
+            if self._answer_prompt is None:
+                return 404, b'{"error":{"code":"no_prompts"}}', "application/json"
+            who = self.caller(headers, query)
+            if not self.may(who, "approve"):
+                # Named, so the failure is legible: a device paired without
+                # the grant should be told which word it is missing rather
+                # than left guessing at a 403.
+                return 403, json.dumps({"error": {
+                    "code": "capability_required", "capability": "approve",
+                    "detail": "this device may not answer Guardian's questions -- "
+                              "pair it again `with approve`",
+                }}).encode("utf-8"), "application/json"
+            prompt_id = str(query.get("rest") or "").strip("/") if isinstance(query, dict) else ""
+            try:
+                parsed = json.loads(body or b"{}")
+                answer = str(parsed.get("answer") or "").strip()
+            except (json.JSONDecodeError, AttributeError):
+                return 400, b'{"error":{"code":"invalid_json"}}', "application/json"
+            if not prompt_id or not answer:
+                return 400, json.dumps({"error": {
+                    "code": "invalid_request",
+                    "detail": "POST /api/prompts/<prompt_id> with {\"answer\": \"...\"}"}}).encode("utf-8"), \
+                    "application/json"
+            why = await self._answer_prompt(prompt_id, answer)
+            if why:
+                return 409, json.dumps({"error": {"code": "not_answerable", "detail": why}}).encode("utf-8"), \
+                    "application/json"
+            if self._logger is not None:
+                with contextlib.suppress(Exception):
+                    self._logger.info("interface.prompt_answered_remotely", prompt=prompt_id, answer=answer,
+                                      device=getattr(who, "name", "legacy"))
+            return 200, json.dumps({"ok": True, "prompt_id": prompt_id, "answer": answer}).encode("utf-8"), \
+                "application/json"
+
+        self._prefixes.append(("POST", "/api/prompts/", _prompt_answer))
         self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
         self.register_route("GET", "/remote", _remote, auth=False)
         self.register_route("GET", "/logo.png", _logo, auth=False)
