@@ -1,122 +1,149 @@
 import SwiftUI
 
-/// Sim's console: a tail of a ledger stream.
+/// Sim's terminal, mirrored.
 ///
-/// "Structured logs are Ledger events" -- so there is no separate log file
-/// to read, and `system` is the stream that reads as a console. Every other
-/// stream is reachable by name, which is what makes this more useful than
-/// a log viewer: `task:<id>` is one turn's whole story, and that is where
-/// the answer usually is.
+/// Not a log viewer and not the activity feed: the lines Sim actually
+/// PRINTED, glyphs and all -- the same `⏺ 💬 chat`, `⎿ ✅ completed in
+/// 3.2s`, `🎤 listening…` that are on the screen at home. `contracts/
+/// console.py` has been capturing them all along so `console_tail` could
+/// answer a question about Sim's own output; `GET /api/console` serves
+/// them.
+///
+/// And a prompt, because a console you cannot type into is a window.
+/// `POST /api/command` runs the line through `_handle_line` -- the
+/// keyboard's own path -- so Guardian gates whatever it starts exactly as
+/// it does at the terminal. It answers COMMANDS only; a line that parses
+/// as chat is refused and pointed at the Ask tab, which is the right
+/// answer rather than a second quiet way to talk to Sim.
 struct ConsoleView: View {
     @EnvironmentObject var store: Store
-    @State private var events: [Api.LogEvent] = []
-    @State private var streams: [String] = []
-    @State private var stream = "system"
+    @State private var lines: [String] = []
+    @State private var typed = ""
     @State private var problem: String?
     @State private var following = true
+    @State private var running = false
+    @State private var filter = ""
+    @FocusState private var writing: Bool
 
     private var api: Api { Api(baseURL: store.baseURL, token: store.token) }
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { scroll in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if events.isEmpty {
-                            Text(problem ?? "Nothing on this stream yet.")
-                                .font(.footnote)
-                                .foregroundStyle(problem == nil ? Color.secondary : Color.red)
-                                .padding()
-                        }
-                        ForEach(events) { event in
-                            row(event).id(event.id)
-                        }
-                    }
-                    .padding(.vertical, 8)
-                }
-                .onChange(of: events.count) {
-                    guard following, let last = events.last else { return }
-                    withAnimation { scroll.scrollTo(last.id, anchor: .bottom) }
-                }
+            VStack(spacing: 0) {
+                screen
+                Divider()
+                prompt
             }
-            .background(Color(.systemBackground))
+            .background(Brand.night)
             .navigationTitle("Console")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        // `system` first, then whatever Sim has. A picker
-                        // that has to be typed into is a picker nobody uses
-                        // on a phone.
-                        Button("system") { stream = "system"; Task { await load() } }
-                        ForEach(streams.filter { $0 != "system" }, id: \.self) { name in
-                            Button(name) { stream = name; Task { await load() } }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(stream).lineLimit(1)
-                            Image(systemName: "chevron.down").font(.caption2)
-                        }
-                        .font(.subheadline)
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        following.toggle()
-                    } label: {
-                        Image(systemName: following ? "arrow.down.to.line.compact" : "pause")
+                    Button { following.toggle() } label: {
+                        Image(systemName: following ? "arrow.down.to.line.compact" : "pause.fill")
                     }
-                    .tint(following ? .accentColor : .secondary)
+                    .tint(following ? Brand.gold : .secondary)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { writing = false }
                 }
             }
-            .refreshable { await load() }
-            .task { await first() }
+            .searchable(text: $filter, prompt: "filter")
+            .onChange(of: filter) { Task { await load() } }
+            .task { await load() }
             .task { await poll() }
         }
     }
 
-    private func row(_ event: Api.LogEvent) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            if let ts = event.ts, ts > 0 {
-                Text(Date(timeIntervalSince1970: ts), format: .dateTime.hour().minute().second())
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(event.type ?? "")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(Self.tint(event.type))
-                let said = event.summary
-                if !said.isEmpty {
-                    Text(said).font(.footnote).textSelection(.enabled)
+    private var screen: some View {
+        ScrollViewReader { scroll in
+            ScrollView([.vertical, .horizontal]) {
+                VStack(alignment: .leading, spacing: 1) {
+                    if lines.isEmpty {
+                        Text(problem ?? "Sim has not printed anything yet.")
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(problem == nil ? Color.secondary : Brand.crimson)
+                            .padding()
+                    }
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        // Monospaced and UNWRAPPED, inside a horizontal
+                        // scroll: the tree's rails only line up if a long
+                        // line stays one line.
+                        Text(line)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Self.tint(line))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .id(index)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 0)
+            .onChange(of: lines.count) {
+                guard following, !lines.isEmpty else { return }
+                withAnimation { scroll.scrollTo(lines.count - 1, anchor: .bottom) }
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
     }
 
-    /// Colour by what the event IS, not by a level: the ledger has no
-    /// levels, and inventing one would be a guess drawn as a fact.
-    private static func tint(_ type: String?) -> Color {
-        guard let type else { return .secondary }
-        if type.contains("failed") || type.contains("denied") || type.contains("error") { return Brand.crimson }
-        if type.contains("blocked") || type.contains("needs_human") { return Brand.gold }
-        if type.contains("completed") { return Brand.emerald }
-        return .secondary
+    /// Sim's own colours, by the glyph it already prints. Nothing is
+    /// invented: a line with no marker stays plain, because guessing a
+    /// level the console does not have would be a colour that lies.
+    private static func tint(_ line: String) -> Color {
+        if line.contains("❌") || line.contains("[error]") { return Brand.crimson }
+        if line.contains("⏸") || line.contains("[warn") { return Brand.gold }
+        if line.contains("✅") { return Brand.emerald }
+        if line.contains("⏺") || line.contains("❯") { return Brand.goldLight }
+        if line.contains("🔊") || line.contains("🎤") { return Brand.amethyst }
+        if line.contains("[info]") || line.contains("⎿") { return Color(white: 0.62) }
+        return Color(white: 0.80)
     }
 
-    private func first() async {
-        streams = (try? await api.streams()) ?? []
-        await load()
+    private var prompt: some View {
+        HStack(spacing: 8) {
+            Text("❯").font(.system(size: 15, design: .monospaced)).foregroundStyle(Brand.gold)
+            TextField("", text: $typed, prompt: Text("status, voice on, restart…")
+                .foregroundColor(.gray))
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundStyle(.white)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($writing)
+                .submitLabel(.go)
+                .onSubmit { run() }
+            if running { ProgressView().controlSize(.small).tint(.white) }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(white: 0.10))
+    }
+
+    private func run() {
+        let line = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, !running else { return }
+        typed = ""
+        running = true
+        Task {
+            defer { running = false }
+            do {
+                _ = try await api.command(line)
+            } catch {
+                problem = error.localizedDescription
+            }
+            // Whatever it printed is on Sim's console, which is what this
+            // screen already shows -- so there is nothing to render here
+            // beyond asking again.
+            await load()
+        }
     }
 
     private func load() async {
         do {
-            // Oldest first, so it reads downward like a console and the
-            // newest line is the one at the bottom.
-            events = try await api.logs(stream: stream, limit: 200)
+            lines = try await api.console(limit: 400, contains: filter)
             problem = nil
         } catch {
             problem = error.localizedDescription
@@ -125,7 +152,7 @@ struct ConsoleView: View {
 
     private func poll() async {
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: .seconds(3))
             if Task.isCancelled { return }
             if following { await load() }
         }

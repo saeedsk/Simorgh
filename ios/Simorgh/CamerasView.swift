@@ -16,6 +16,7 @@ struct CamerasView: View {
     @State private var problem: String?
     @State private var watching: Api.Feeds.Live?
     @State private var refreshed = Date()
+    @State private var starting: Set<String> = []
 
     private var api: Api { Api(baseURL: store.baseURL, token: store.token) }
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
@@ -69,11 +70,18 @@ struct CamerasView: View {
                 .clipped()
 
                 if feed?.live == true {
-                    Label("LIVE", systemImage: "dot.radiowaves.left.and.right")
+                    Label(feed?.quality == "main" ? "LIVE HD" : "LIVE",
+                          systemImage: "dot.radiowaves.left.and.right")
                         .font(.caption2.bold())
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background(Brand.crimson, in: Capsule())
                         .foregroundStyle(.white)
+                        .padding(6)
+                } else if starting.contains(still.name) {
+                    ProgressView().controlSize(.small).padding(8)
+                } else if store.may("control") {
+                    Image(systemName: "play.circle.fill")
+                        .font(.title3).foregroundStyle(.white.opacity(0.85))
                         .padding(6)
                 }
             }
@@ -86,7 +94,10 @@ struct CamerasView: View {
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .contentShape(Rectangle())
-        .onTapGesture { if let feed, feed.live == true { watching = feed } }
+        .onTapGesture {
+            if let feed, feed.live == true { watching = feed }
+            else if store.may("control") { Task { await goLive(still) } }
+        }
     }
 
     private func subtitle(_ still: Api.Feeds.Still) -> String {
@@ -100,9 +111,31 @@ struct CamerasView: View {
     }
 
     /// A live relay for this camera, matched by name -- the only field the
-    /// two lists share.
+    /// two lists share. MAIN is preferred: a phone shows one camera at a
+    /// time, so it should have the camera's full resolution, where the
+    /// dashboard's seven-up strip wants the light one.
     private func liveFor(_ still: Api.Feeds.Still) -> Api.Feeds.Live? {
-        live.first { ($0.name ?? "").caseInsensitiveCompare(still.name) == .orderedSame }
+        let mine = live.filter { ($0.name ?? "").caseInsensitiveCompare(still.name) == .orderedSame }
+        return mine.first { $0.quality == "main" } ?? mine.first
+    }
+
+    /// Ask Sim to relay this camera at full resolution. `cam_stream` is on
+    /// the action allowlist, so this is a proposal Guardian sees like any
+    /// other -- the phone is not starting ffmpeg, it is asking Sim to.
+    private func goLive(_ still: Api.Feeds.Still) async {
+        starting.insert(still.name)
+        defer { starting.remove(still.name) }
+        do {
+            _ = try await api.action("cam_stream", ["camera": still.name, "mode": "dash", "quality": "main"])
+            // The relay takes a few seconds to write its first playlist.
+            for _ in 0..<8 {
+                try? await Task.sleep(for: .seconds(2))
+                await load()
+                if liveFor(still)?.live == true { return }
+            }
+        } catch {
+            problem = error.localizedDescription
+        }
     }
 
     private func load() async {

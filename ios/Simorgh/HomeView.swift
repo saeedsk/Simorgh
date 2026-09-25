@@ -17,6 +17,7 @@ struct HomeView: View {
     @State private var problem: String?
     @State private var busy: Set<String> = []
     @State private var loading = true
+    @State private var showingHA = false
 
     private var api: Api { Api(baseURL: store.baseURL, token: store.token) }
     private let columns = [GridItem(.adaptive(minimum: 160), spacing: 12)]
@@ -47,6 +48,15 @@ struct HomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Home")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingHA = true } label: {
+                        Image(systemName: "house.badge.wifi")
+                    }
+                    .tint(Brand.lapis)
+                }
+            }
+            .sheet(isPresented: $showingHA) { HomeAssistantView() }
             .refreshable { await load() }
             .task { await load() }
         }

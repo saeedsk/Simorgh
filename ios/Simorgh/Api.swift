@@ -225,6 +225,27 @@ struct Api {
         return wrapped.events ?? []
     }
 
+    /// The lines Sim actually printed -- its terminal, glyphs and all.
+    func console(limit: Int = 300, contains: String = "") async throws -> [String] {
+        struct Wrapper: Decodable { let lines: [String]? }
+        let escaped = contains.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let filter = contains.isEmpty ? "" : "&contains=\(escaped)"
+        let wrapped: Wrapper = try await send("/api/console?limit=\(limit)\(filter)", method: "GET")
+        return wrapped.lines ?? []
+    }
+
+    /// One typed line, through `_handle_line` -- the keyboard's own path,
+    /// so Guardian gates whatever it starts exactly as it does at the
+    /// terminal. It answers only COMMANDS; a line that parses as chat is
+    /// refused and pointed at `/api/chat`.
+    @discardableResult
+    func command(_ line: String) async throws -> String {
+        struct Reply: Decodable { let text: String? }
+        let reply: Reply = try await send("/api/command", method: "POST",
+                                          body: ["line": line], timeout: 120)
+        return reply.text ?? ""
+    }
+
     func streams() async throws -> [String] {
         struct Wrapper: Decodable { let streams: [String]? }
         let wrapped: Wrapper = try await send("/api/streams", method: "GET")
@@ -249,6 +270,9 @@ struct Api {
             let url: String?
             let live: Bool?
             let at: Double?
+            /// "sub" or "main". A phone showing ONE camera wants main; the
+            /// dashboard's seven-up strip wants sub.
+            let quality: String?
         }
         let cameras: [Still]?
         let streams: [Live]?

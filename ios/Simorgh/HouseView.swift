@@ -15,6 +15,7 @@ struct HouseView: View {
     @State private var problem: String?
     @State private var answering: String?
     @State private var reachable = true
+    @State private var showingSettings = false
 
     private var api: Api { Api(baseURL: store.baseURL, token: store.token) }
 
@@ -34,6 +35,13 @@ struct HouseView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("House")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                        .tint(.secondary)
+                }
+            }
+            .sheet(isPresented: $showingSettings) { SettingsView() }
             .refreshable { await load() }
             .task { await load() }
             .task { await poll() }
