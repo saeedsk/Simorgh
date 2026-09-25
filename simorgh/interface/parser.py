@@ -29,7 +29,8 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
     ("tasks", "[all|work|wake <id>|clear]", "see the backlog (all of it), advance the next item, wake a waiting one, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
-    ("forget", "[minutes] [words]", "forget what Sim remembered in the last minutes (default 2), optionally only records with those words"),
+    ("forget", "[kind] [minutes] [words]", "forget what Sim remembered in the last minutes (default 2), optionally only records with those words; kind is episodic (the default), semantic, facts, procedural or all "
+     "-- a wrong FACT is only reachable by naming it, which is why `forget facts` exists"),
     ("improve", "[path] <description>", "change something, tested before it lands"),
     ("skill", "<topic>", "draft a new reusable skill, audited before it lands"),
     ("plan", "<goal>", "break a goal into tracked steps"),

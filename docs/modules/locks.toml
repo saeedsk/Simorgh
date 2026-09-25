@@ -17,6 +17,12 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
+[locks.domains]
+by = "opus-main"
+task = "go2rtc: WebRTC camera streaming, the way Home Assistant does it"
+since = "2026-09-25T15:25:11+00:00"
+until = "2026-09-25T23:25:11+00:00"
+
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
@@ -34,6 +40,12 @@ by = "opus-main"
 task = "standing approvals: approve a kind of action once"
 since = "2026-09-22T14:09:20+00:00"
 until = "2026-09-22T22:09:20+00:00"
+
+[locks.interface]
+by = "opus-main"
+task = "forget can reach a wrong consolidated FACT, not only episodic turns"
+since = "2026-09-25T15:40:35+00:00"
+until = "2026-09-25T23:40:35+00:00"
 
 [locks.memory]
 by = "opus-main"

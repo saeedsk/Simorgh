@@ -345,12 +345,35 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return await _benchmark(bus, args)
 
     if name == "forget":
+        # `forget [kind] [minutes] [words]`. The KIND matters: `memory.forget`
+        # defaults to episodic, so for a year this command could not touch a
+        # wrong FACT -- and a wrong fact is the thing most worth removing,
+        # because consolidation states it flatly and retrieval trusts it.
+        #
+        # Live, 2026-09-25: the creator's typed English "what time is it"
+        # kept being answered in Farsi. Four `forget` sweeps over the
+        # episodic turns changed nothing, because the cause was a
+        # consolidated fact -- {subject: Saeed, predicate: interest, object:
+        # "speaking Farsi", confidence: 1.0, valid_to: null} -- distilled
+        # from one voice session spent DEBUGGING Farsi recognition. The
+        # command named "forget" could not reach it and said nothing about
+        # the kinds it was skipping.
+        kinds_by_word = {"episodic": ["episodic"], "semantic": ["semantic"], "facts": ["facts"],
+                         "fact": ["facts"], "procedural": ["procedural"],
+                         "all": ["episodic", "semantic", "facts", "procedural"]}
         words = (args or "").split()
+        kinds: list[str] = []
+        if words and words[0].lower() in kinds_by_word:
+            kinds = kinds_by_word[words[0].lower()]
+            words = words[1:]
         minutes = 2.0
         if words and re.fullmatch(r"\d+(?:\.\d+)?", words[0]):
             minutes, words = float(words[0]), words[1:]
+        asked = {"minutes": minutes, "containing": " ".join(words)}
+        if kinds:
+            asked["kinds"] = kinds
         return await _run_tool(bus=bus, ledger=ledger, tool="memory_forget", session_id=session_id, timeout=30.0,
-                               raw=json.dumps({"minutes": minutes, "containing": " ".join(words)}))
+                               raw=json.dumps(asked))
     if name == "cancel":
         # Until 2026-09-08 there was no way to stop anything. A task that
         # had stopped being useful ran to its step budget while holding
