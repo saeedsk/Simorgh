@@ -388,6 +388,10 @@ class Service:
                 feeds=feeds,
                 cameras_live=self.config.dash_cameras_live,
                 devices=self._device_book(ctx),
+                # The address only. Interface may read `HOME_ASSISTANT_URL`
+                # and not the token (kernel/registry.py): the phone's HA
+                # tab is a web view and signs in with HA's own login.
+                home_assistant_url=(ctx.secrets.get("HOME_ASSISTANT_URL") or ""),
                 prompts=self.open_prompts,
                 answer_prompt=self.answer_prompt,
             )

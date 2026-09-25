@@ -285,6 +285,19 @@ struct Api {
     /// A URL on Sim with the token in the QUERY -- an `AVPlayer` and an
     /// `AsyncImage` cannot set a header, which is the whole reason
     /// `?token=` exists on this server.
+    struct HomeAssistant: Decodable {
+        let url: String?
+        let configured: Bool?
+        let detail: String?
+    }
+
+    /// Where Home Assistant is, according to Sim. The app does not ask the
+    /// person: Sim already has the right address, because that is what its
+    /// own `home_*` tools call.
+    func homeAssistant() async throws -> HomeAssistant {
+        try await send("/api/house/assistant", method: "GET")
+    }
+
     // MARK: - Sim's own voice and ears
 
     /// What `/api/say` gives back: Kokoro's WAV, and whose voice it is.

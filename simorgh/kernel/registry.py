@@ -80,9 +80,17 @@ DEFAULT_SECRETS: dict[str, frozenset[str]] = {
     # verify token for Meta's subscription handshake, and the app
     # secret the webhook checks every body against. Absent, the
     # channel is off and says which one is missing.
+    # `HOME_ASSISTANT_URL` and NOT `HOME_ASSISTANT_TOKEN`: the phone's
+    # Home Assistant tab is a web view, so it needs the address and signs
+    # in with HA's own login and its own cookie. The creator, 2026-09-25:
+    # "in the home tab, automatically make ha available to me (don't like
+    # the idea that i have to manually enter ha address)" -- and the app
+    # was asking him to type an address Sim already had, correctly, in
+    # secrets.toml. An address is not a credential; the token stays where
+    # it is used, which is Execution.
     "interface": frozenset({"SIM_API_TOKEN", "SIM_TELEGRAM_TOKEN", "SIM_WHATSAPP_TOKEN",
                             "SIM_WHATSAPP_PHONE_ID", "SIM_WHATSAPP_VERIFY_TOKEN",
-                            "SIM_WHATSAPP_APP_SECRET"}),
+                            "SIM_WHATSAPP_APP_SECRET", "HOME_ASSISTANT_URL"}),
     # Execution is where credentials are actually used: every
     # account-backed tool runs here. `vault:*` covers the encrypted
     # store's own namespace (`vault:imap:fastmail:password`) and nothing

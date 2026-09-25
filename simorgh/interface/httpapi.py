@@ -224,7 +224,7 @@ class HttpApi:
         history_max_points: int = 500, logs_default_limit: int = 100, logs_max_limit: int = 500,
         token: str = "", max_body_bytes: int = 1_000_000, logger=None, feeds=None,
         cameras_live: bool = False, cameras_live_delay_s: float = 20.0, cameras_live_every_s: float = 120.0,
-        devices=None, prompts=None, answer_prompt=None,
+        devices=None, prompts=None, answer_prompt=None, home_assistant_url: str = "",
     ) -> None:
         self._bus = bus
         self._ledger = ledger
@@ -233,6 +233,10 @@ class HttpApi:
         #: that has none -- in which case only the legacy shared token works,
         #: which is every deployment that predates stage 12 item 2.
         self._devices = devices
+        #: Where Home Assistant is, so a client need not be told (13f).
+        #: The URL only -- never the token, which Interface is not allowed
+        #: to read and would have no use for.
+        self._home_assistant_url = (home_assistant_url or "").strip().rstrip("/")
         #: The open `ui.prompt`s and how to answer one (stage 12 item 3).
         #: Callables rather than the Service itself: this file knows what a
         #: question looks like and nothing about who is holding them.
@@ -772,6 +776,35 @@ class HttpApi:
                 "language": out.get("language") or "", "seconds": out.get("seconds"),
                 "engine": out.get("engine") or "", "ok": True}).encode("utf-8"), "application/json"
 
+        async def _home_assistant(_query, _body, headers):
+            """Where Home Assistant is.
+
+            The app's Home Assistant tab is a web view and needs an
+            address; Sim already has the right one, in `HOME_ASSISTANT_URL`,
+            because that is what its own `home_*` tools call. Asking the
+            person to type it into the phone as well was asking them to
+            keep two copies of one fact in step -- "automatically make ha
+            available to me (don't like the idea that i have to manually
+            enter ha address)" (the creator, 2026-09-25).
+
+            The URL, never the token: this is a browser, so it is HA's own
+            login and its own cookie. `read` is the gate, because a LAN
+            address is less than this server already hands a paired device.
+            """
+            who = self.caller(headers, _query)
+            if not self.may(who, "read"):
+                return 403, json.dumps({"error": {
+                    "code": "capability_required", "capability": "read"}}).encode("utf-8"), "application/json"
+            url = self._home_assistant_url
+            body = {"url": url, "configured": bool(url)}
+            if not url:
+                # Said plainly, with the fix, rather than an empty string
+                # the app would have to guess the meaning of.
+                body["detail"] = ("Home Assistant is not configured on Sim: set HOME_ASSISTANT_URL "
+                                  "(and HOME_ASSISTANT_TOKEN) in secrets.toml or the vault")
+            return 200, json.dumps(body).encode("utf-8"), "application/json"
+
+        self.register_route("GET", "/api/house/assistant", _home_assistant)
         self.register_route("POST", "/api/say", _say, max_body=16384, rate=(120, 60.0))
         # A minute of 16 kHz mono int16 is under 2 MiB; the cap is that
         # with room, and nothing like the server-wide one.

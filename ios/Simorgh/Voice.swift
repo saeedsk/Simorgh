@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import SwiftUI
+import UIKit
 
 /// Talking to Sim from the phone, with Sim's own ears and Sim's own voice.
 ///
@@ -9,10 +10,19 @@ import SwiftUI
 /// and a typed one are one conversation -- and Sim's Kokoro speaks the
 /// answer back as a WAV this app plays.
 ///
+/// Two ways in:
+///
+///  - **Press to talk.** Tap the microphone, say a thing, and a pause ends
+///    the turn. The engine stops afterwards.
+///  - **Conversation.** The microphone stays open: Sim answers, and then
+///    listens again, with nothing to press. "every time I want to speak to
+///    sim i have to click on mic icon, i'd like to have a mode where i can
+///    do interactive voice chat with sim without needing to press any
+///    button" (the creator, 2026-09-25).
+///
 /// It used Apple's `SFSpeechRecognizer` and `AVSpeechSynthesizer` until
-/// 2026-09-24: "why the voice on sim app sounds robotic, I want to have
-/// same voice chat experience as I have on mac with same stt and tts
-/// engines" (the creator). Three things follow from doing it Sim's way:
+/// 2026-09-24: "why the voice on sim app sounds robotic ... same stt and
+/// tts engines" (the creator). Three things follow from doing it Sim's way:
 ///
 ///  - The recording is made at 16 kHz mono int16, which is what
 ///    `voice/api.py::Audio` means by audio and what `/api/listen` reads
@@ -29,9 +39,24 @@ import SwiftUI
 /// Apple's synthesiser stays as a fallback for one case: Sim answered but
 /// could not synthesise (no Kokoro, no ledger, house unreachable). A robot
 /// voice beats silence when somebody is holding the phone waiting.
+///
+/// ## Not hearing itself
+///
+/// In conversation mode the microphone is open while Sim is speaking, so
+/// the obvious failure is Sim answering its own voice. The Mac solves this
+/// with an `EchoTracker` and a level gate it took the creator two attempts
+/// to get right. This does the simple total thing instead: input frames are
+/// DISCARDED unless the state is `waiting` or `listening`, and after
+/// playback there is a short hold before listening resumes, so the tail of
+/// a reply in a reverberant room is not heard as somebody starting to
+/// speak. The cost is no barge-in -- talking over Sim does not stop it,
+/// there is a Stop button -- and barge-in needs the engine's own voice
+/// processing, which is a separate piece of work.
 @MainActor
 final class VoiceChat: NSObject, ObservableObject {
-    enum State: Equatable { case idle, listening, hearing, thinking, speaking }
+    /// `waiting` exists only in conversation mode: the microphone is open
+    /// and nobody has started speaking yet.
+    enum State: Equatable { case idle, waiting, listening, hearing, thinking, speaking }
 
     @Published private(set) var state: State = .idle
     /// The live preview from the phone's own recogniser while somebody
@@ -46,6 +71,8 @@ final class VoiceChat: NSObject, ObservableObject {
     @Published private(set) var engine = ""
     /// How loud the room is right now, 0...1, for the button to breathe.
     @Published private(set) var level: Double = 0
+    /// The microphone stays open and the conversation continues by itself.
+    @Published private(set) var conversing = false
 
     /// How Sim is reached. Set by the view; without it there is no voice
     /// at all, which is the honest state for an unpaired phone.
@@ -60,22 +87,50 @@ final class VoiceChat: NSObject, ObservableObject {
     // MARK: - Recording
 
     private let audio = AVAudioEngine()
-    private var converter: AVAudioConverter?
+    private var sink: AVAudioFormat?
     private var pcm = Data()
     private var speechSeen = false
-    private var quietFrames = 0
-    private var frames = 0
 
-    /// One 16 kHz mono int16 frame is 10 ms of audio here; these are in
-    /// frames so they read as time. A pause of 1.2 s ends a turn -- Sim's
-    /// own `endpoint_silence_ms` default territory, and short enough that
-    /// nobody thinks the phone has stopped listening.
+    /// Everything below is counted in 10 ms units, because that is what one
+    /// 16 kHz mono frame of 160 samples is, and time is the thing being
+    /// reasoned about.
+    private var quietUnits = 0
+    private var loudUnits = 0
+    private var spokenUnits = 0
+    private var holdUnits = 0
+    private var calibrateUnits = 0
+
+    /// A pause of 1.2 s ends a turn -- Sim's own `endpoint_silence_ms`
+    /// territory, and short enough that nobody thinks the phone stopped
+    /// listening.
     private let silenceEnds = 120
-    private let maxFrames = 3_000            // 30 s: a turn, not a recording
-    /// Below this RMS (of full scale) a frame is silence. Deliberately low:
-    /// a phone held at arm's length in a kitchen is quiet, and cutting
-    /// somebody off mid-sentence is worse than a second of trailing hiss.
-    private let speechAbove: Double = 0.012
+    /// 80 ms above the bar before a turn STARTS. A door closing is loud and
+    /// brief; a syllable is not.
+    private let onsetNeeds = 8
+    private let maxUnits = 3_000             // 30 s: a turn, not a recording
+    /// The room is measured for 1.2 s before conversation mode will hear a
+    /// turn in it -- the same span as the Mac's `barge_in_calibrate_ms`.
+    private let calibrateFor = 120
+    /// After Sim finishes speaking, 400 ms of not listening. A reply's tail
+    /// in a hard-surfaced kitchen is otherwise an onset.
+    private let settleFor = 40
+
+    /// Speech sits this far above the measured floor, as a ratio. Sim's
+    /// `EnergyDetector` works the same way and for the same reason: a fixed
+    /// threshold is deaf in a quiet room and jumpy in a loud one.
+    private let ratio = 4.0
+    /// However quiet the room measures, never treat anything below this as
+    /// speech. A phone on a desk at night measures almost zero, and without
+    /// a floor under the floor the room's own hum becomes a turn.
+    private let atLeast = 0.008
+    private var floor = 0.006
+
+    /// The last 300 ms of audio, kept so the first syllable is not lost to
+    /// the 80 ms it takes to notice somebody has started.
+    private var preRoll = Data()
+    private let preRollBytes = 300 * 32       // 32 bytes per ms at 16 kHz int16
+
+    private var bar: Double { max(atLeast, floor * ratio) }
 
     // MARK: - The phone's own recogniser, for the preview only
 
@@ -87,8 +142,8 @@ final class VoiceChat: NSObject, ObservableObject {
 
     private var player: AVAudioPlayer?
     private let fallback = AVSpeechSynthesizer()
-    /// The reply being spoken, so a failure part-way can still be said by
-    /// the phone rather than dropped.
+    /// The reply being spoken, so a reply overtaken by a newer one is not
+    /// played over the top of it.
     private var speaking = ""
 
     override init() {
@@ -114,14 +169,85 @@ final class VoiceChat: NSObject, ObservableObject {
         return true
     }
 
-    // MARK: - Listening
+    // MARK: - Conversation mode
 
+    /// Open the microphone and keep it open: Sim answers, then listens
+    /// again, with nothing to press.
+    func converse() async {
+        guard !conversing else { return }
+        guard await ask() else { return }
+        guard api != nil else {
+            problem = "This phone is not paired with Sim yet."
+            return
+        }
+        conversing = true
+        // A conversation is worth keeping the screen awake for; locking
+        // mid-sentence is how a hands-free mode stops being hands-free.
+        UIApplication.shared.isIdleTimerDisabled = true
+        guard startEngine() else {
+            conversing = false
+            UIApplication.shared.isIdleTimerDisabled = false
+            return
+        }
+        // Measure the room before hearing a turn in it.
+        calibrateUnits = calibrateFor
+        armWaiting()
+    }
+
+    /// Close the microphone and stop the conversation.
+    func endConverse() {
+        conversing = false
+        UIApplication.shared.isIdleTimerDisabled = false
+        stopSpeaking()
+        stopEngine()
+        // Hand the audio session back, so whatever was ducked comes back up
+        // and nothing holds the microphone after the conversation is over.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        heard = ""
+        state = .idle
+    }
+
+    /// The app left the screen. This app has the `audio` background mode --
+    /// it needs it to finish speaking a reply -- so nothing would otherwise
+    /// close an open microphone, and a hands-free mode that keeps listening
+    /// after somebody has put the phone away is not one anybody asked for.
+    func leftTheScreen() {
+        guard conversing else { return }
+        endConverse()
+    }
+
+    // MARK: - Press to talk
+
+    /// One turn, because somebody pressed the button. The engine stops when
+    /// the turn is over.
     func start() async {
         guard state == .idle || state == .speaking else { return }
         stopSpeaking()
         guard await ask() else { return }
+        guard startEngine() else { return }
+        // No calibration and no onset wait: the button IS the onset. A
+        // person who has just pressed it is already talking.
+        beginUtterance()
+    }
+
+    /// Stop listening and throw the recording away. In conversation mode
+    /// this returns to waiting rather than closing the microphone.
+    func cancel() {
+        previewStop()
+        pcm.removeAll(keepingCapacity: true)
+        heard = ""
+        if conversing { armWaiting() } else { stopEngine(); state = .idle }
+    }
+
+    // MARK: - The audio engine
+
+    private func startEngine() -> Bool {
+        guard !audio.isRunning else { return true }
         do {
             let session = AVAudioSession.sharedInstance()
+            // ONE category for the whole conversation, capture and
+            // playback together: switching to `.playback` to speak would
+            // tear down the running input and the next turn would be deaf.
             try session.setCategory(.playAndRecord, mode: .spokenAudio,
                                     options: [.duckOthers, .defaultToSpeaker, .allowBluetooth])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -132,55 +258,121 @@ final class VoiceChat: NSObject, ObservableObject {
                                           channels: 1, interleaved: true),
                   let converter = AVAudioConverter(from: source, to: sim) else {
                 problem = "This phone will not record at 16 kHz mono, which is the audio Sim reads."
-                return
+                return false
             }
-            self.converter = converter
-
-            startPreview()
-            pcm.removeAll(keepingCapacity: true)
-            speechSeen = false; quietFrames = 0; frames = 0
-            heard = ""; engine = ""; level = 0
-
+            sink = sim
             input.removeTap(onBus: 0)
             input.installTap(onBus: 0, bufferSize: 2_048, format: source) { [weak self] buffer, _ in
                 guard let self else { return }
+                // The preview wants the hardware's own format.
                 self.previewRequest?.append(buffer)
                 guard let converted = Self.convert(buffer, with: converter, to: sim) else { return }
                 Task { @MainActor in self.took(converted) }
             }
             audio.prepare()
             try audio.start()
-            state = .listening
+            return true
         } catch {
             problem = error.localizedDescription
             state = .idle
+            return false
         }
     }
 
-    /// One converted buffer: keep the bytes, watch the energy, and decide
-    /// whether the turn is over.
+    private func stopEngine() {
+        previewStop()
+        audio.inputNode.removeTap(onBus: 0)
+        if audio.isRunning { audio.stop() }
+        sink = nil
+        level = 0
+        preRoll.removeAll(keepingCapacity: false)
+    }
+
+    /// Back to an open microphone with nobody speaking, after a reply or a
+    /// cancelled turn.
+    private func armWaiting() {
+        pcm.removeAll(keepingCapacity: true)
+        preRoll.removeAll(keepingCapacity: true)
+        speechSeen = false
+        quietUnits = 0; loudUnits = 0; spokenUnits = 0
+        holdUnits = settleFor
+        level = 0
+        state = .waiting
+    }
+
+    private func beginUtterance() {
+        pcm.removeAll(keepingCapacity: true)
+        // The pre-roll first, so the first syllable survives the time it
+        // took to notice it.
+        pcm.append(preRoll)
+        preRoll.removeAll(keepingCapacity: true)
+        speechSeen = false
+        quietUnits = 0; spokenUnits = 0
+        heard = ""; engine = ""
+        previewStart()
+        state = .listening
+    }
+
+    /// One converted buffer: watch the energy, and decide what it means for
+    /// the state we are in.
     private func took(_ buffer: AVAudioPCMBuffer) {
-        guard state == .listening, let samples = buffer.int16ChannelData else { return }
+        guard let samples = buffer.int16ChannelData else { return }
         let count = Int(buffer.frameLength)
         guard count > 0 else { return }
+        let units = max(1, count / 160)
         var sum = 0.0
         for i in 0..<count {
             let value = Double(samples[0][i]) / 32_768.0
             sum += value * value
         }
         let rms = (sum / Double(count)).squareRoot()
-        level = min(1.0, rms * 12)
-        pcm.append(UnsafeBufferPointer(start: samples[0], count: count))
-        frames += 1
 
-        if rms >= speechAbove {
-            speechSeen = true
-            quietFrames = 0
-        } else if speechSeen {
-            quietFrames += count / 160          // 160 samples = 10 ms at 16 kHz
-            if quietFrames >= silenceEnds { finish() }
+        switch state {
+        case .waiting:
+            level = min(1.0, rms * 12)
+            keepPreRoll(samples, count)
+            // Settling after Sim spoke, or still measuring the room. Both
+            // are learning time, not listening time.
+            if holdUnits > 0 { holdUnits -= units; learnFloor(rms); return }
+            if calibrateUnits > 0 { calibrateUnits -= units; learnFloor(rms); return }
+            if rms >= bar {
+                loudUnits += units
+                if loudUnits >= onsetNeeds { loudUnits = 0; beginUtterance() }
+            } else {
+                loudUnits = 0
+                learnFloor(rms)
+            }
+
+        case .listening:
+            level = min(1.0, rms * 12)
+            pcm.append(UnsafeBufferPointer(start: samples[0], count: count))
+            spokenUnits += units
+            if rms >= bar {
+                speechSeen = true
+                quietUnits = 0
+            } else {
+                quietUnits += units
+                if quietUnits >= silenceEnds { finish(); return }
+            }
+            if spokenUnits >= maxUnits { finish() }
+
+        case .idle, .hearing, .thinking, .speaking:
+            // Sim is transcribing, thinking, or TALKING. Nothing the
+            // microphone hears now is a turn -- which is also how Sim
+            // avoids answering its own voice here.
+            return
         }
-        if frames * (count / 160) >= maxFrames { finish() }
+    }
+
+    /// The floor follows the room: down quickly, up slowly, so a passing
+    /// lorry does not leave Sim deaf for the next minute.
+    private func learnFloor(_ rms: Double) {
+        floor = rms < floor ? (floor * 0.7 + rms * 0.3) : (floor * 0.97 + rms * 0.03)
+    }
+
+    private func keepPreRoll(_ samples: UnsafePointer<UnsafeMutablePointer<Int16>>, _ count: Int) {
+        preRoll.append(UnsafeBufferPointer(start: samples[0], count: count))
+        if preRoll.count > preRollBytes { preRoll.removeFirst(preRoll.count - preRollBytes) }
     }
 
     /// The tap's format is the hardware's; Sim reads 16 kHz mono int16.
@@ -201,12 +393,15 @@ final class VoiceChat: NSObject, ObservableObject {
         return error == nil && out.frameLength > 0 ? out : nil
     }
 
+    // MARK: - Handing the turn over
+
     /// Stop recording and send what was said to Sim's recogniser.
     func finish() {
         guard state == .listening else { return }
-        stopRecording()
+        previewStop()
+        if !conversing { stopEngine() }
         guard speechSeen, pcm.count > 3_200 else {       // under 0.1 s is a tap, not a turn
-            state = .idle
+            settle()
             return
         }
         state = .hearing
@@ -214,7 +409,7 @@ final class VoiceChat: NSObject, ObservableObject {
         let language = self.language
         guard let api else {
             problem = "This phone is not paired with Sim yet."
-            state = .idle
+            settle()
             return
         }
         Task { @MainActor in
@@ -222,11 +417,12 @@ final class VoiceChat: NSObject, ObservableObject {
                 let got = try await api.listen(wav: wav, language: language)
                 let said = (got.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !said.isEmpty else {
-                    // Whisper heard nothing in it. Say so rather than
+                    // Whisper heard nothing in it -- a cough, a chair, the
+                    // room. Say nothing and listen again rather than
                     // sending the preview: what reaches Sim is what Sim
                     // heard, always.
                     heard = ""
-                    state = .idle
+                    settle()
                     return
                 }
                 heard = said
@@ -234,30 +430,85 @@ final class VoiceChat: NSObject, ObservableObject {
                 onHeard?(said)
             } catch {
                 problem = (error as? Api.Failure)?.detail ?? error.localizedDescription
-                state = .idle
+                settle()
             }
         }
     }
 
-    /// Stop listening and throw the recording away.
-    func cancel() {
-        stopRecording()
-        pcm.removeAll(keepingCapacity: false)
-        heard = ""
-        state = .idle
+    /// The end of a turn, however it ended: listening again in a
+    /// conversation, idle otherwise.
+    private func settle() {
+        if conversing { armWaiting() } else { state = .idle }
     }
 
-    private func stopRecording() {
-        audio.inputNode.removeTap(onBus: 0)
-        if audio.isRunning { audio.stop() }
-        previewRequest?.endAudio()
-        previewTask?.cancel()
-        previewRequest = nil; previewTask = nil
-        converter = nil
-        level = 0
+    /// Sim was asked and could not answer.
+    func failed() { settle() }
+
+    // MARK: - Speaking
+
+    /// Sim's own voice, fetched as audio and played here. Apple's
+    /// synthesiser only if that fails.
+    func say(_ text: String) {
+        guard speaks, !text.isEmpty else {
+            settle()
+            return
+        }
+        speaking = text
+        state = .speaking
+        guard let api else { sayWithThePhone(text); return }
+        Task { @MainActor in
+            do {
+                let spoken = try await api.say(text)
+                guard state == .speaking, speaking == text else { return }   // stopped meanwhile
+                try play(spoken.wav)
+                engine = spoken.engine.isEmpty ? "sim" : spoken.engine
+            } catch {
+                // Not shown as a problem: the sentence is still said, and
+                // a banner every time Kokoro is cold would be noise.
+                sayWithThePhone(text)
+            }
+        }
     }
 
-    private func startPreview() {
+    private func play(_ wav: Data) throws {
+        // The category is NOT changed here. In a conversation the engine is
+        // running under `.playAndRecord` and switching it would deafen the
+        // next turn; outside one there is nothing recording to disturb.
+        if !audio.isRunning {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try? session.setActive(true)
+        }
+        let player = try AVAudioPlayer(data: wav)
+        player.delegate = self
+        self.player = player
+        player.prepareToPlay()
+        player.play()
+    }
+
+    private func sayWithThePhone(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.postUtteranceDelay = 0.1
+        if !audio.isRunning {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+        engine = "phone"
+        state = .speaking
+        fallback.speak(utterance)
+    }
+
+    func stopSpeaking() {
+        player?.stop(); player = nil
+        if fallback.isSpeaking { fallback.stopSpeaking(at: .immediate) }
+        speaking = ""
+        if state == .speaking { settle() }
+    }
+
+    // MARK: - The preview recogniser
+
+    private func previewStart() {
         guard let preview, preview.isAvailable,
               SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
         let request = SFSpeechAudioBufferRecognitionRequest()
@@ -275,62 +526,12 @@ final class VoiceChat: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Speaking
-
-    /// Sim's own voice, fetched as audio and played here. Apple's
-    /// synthesiser only if that fails.
-    func say(_ text: String) {
-        guard speaks, !text.isEmpty else {
-            state = .idle
-            return
-        }
-        speaking = text
-        state = .speaking
-        guard let api else { sayWithThePhone(text); return }
-        Task { @MainActor in
-            do {
-                let spoken = try await api.say(text)
-                guard state == .speaking, speaking == text else { return }   // barged in meanwhile
-                try play(spoken.wav)
-                engine = spoken.engine.isEmpty ? "sim" : spoken.engine
-            } catch {
-                // Not shown as a problem: the sentence is still said, and
-                // a banner every time Kokoro is cold would be noise.
-                sayWithThePhone(text)
-            }
-        }
+    private func previewStop() {
+        previewRequest?.endAudio()
+        previewTask?.cancel()
+        previewRequest = nil
+        previewTask = nil
     }
-
-    private func play(_ wav: Data) throws {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        try? session.setActive(true)
-        let player = try AVAudioPlayer(data: wav)
-        player.delegate = self
-        self.player = player
-        player.prepareToPlay()
-        player.play()
-    }
-
-    private func sayWithThePhone(_ text: String) {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        utterance.postUtteranceDelay = 0.1
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
-        engine = "phone"
-        state = .speaking
-        fallback.speak(utterance)
-    }
-
-    func stopSpeaking() {
-        player?.stop(); player = nil
-        if fallback.isSpeaking { fallback.stopSpeaking(at: .immediate) }
-        speaking = ""
-        if state == .speaking { state = .idle }
-    }
-
-    func failed() { state = .idle }
 
     // MARK: - WAV
 
@@ -353,7 +554,7 @@ final class VoiceChat: NSObject, ObservableObject {
 extension VoiceChat: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in if self.state == .speaking { self.state = .idle } }
+        Task { @MainActor in if self.state == .speaking { self.settle() } }
     }
 }
 
@@ -361,7 +562,7 @@ extension VoiceChat: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully: Bool) {
         Task { @MainActor in
             self.player = nil
-            if self.state == .speaking { self.state = .idle }
+            if self.state == .speaking { self.settle() }
         }
     }
 }

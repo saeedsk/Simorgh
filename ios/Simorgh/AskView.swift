@@ -10,6 +10,7 @@ struct AskView: View {
     @State private var session = "iphone-" + UUID().uuidString.prefix(8).lowercased()
     @FocusState private var writing: Bool
     @StateObject private var voice = VoiceChat()
+    @Environment(\.scenePhase) private var phase
 
     struct Turn: Identifiable {
         let id = UUID()
@@ -26,6 +27,9 @@ struct AskView: View {
                 composer
             }
             .background(Color(.systemGroupedBackground))
+            .onChange(of: phase) { _, now in
+                if now != .active { voice.leftTheScreen() }
+            }
             .navigationTitle("Ask")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -123,7 +127,7 @@ struct AskView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
-            if voice.state != .idle { voiceBar }
+            if voice.state != .idle || voice.conversing { voiceBar }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $typed, axis: .vertical)
@@ -136,6 +140,25 @@ struct AskView: View {
                     .submitLabel(.send)
                     .onSubmit(send)
                 if typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Hands free: the microphone stays open and Sim
+                    // listens again after every answer. Separate from the
+                    // microphone button on purpose -- one is "I want to say
+                    // one thing", the other is "let us talk" -- and the
+                    // creator asked for the second: "I'd like to have a
+                    // mode where i can do interactive voice chat with sim
+                    // without needing to press any button" (2026-09-25).
+                    Button {
+                        if voice.conversing { voice.endConverse() } else { Task { await converse() } }
+                    } label: {
+                        Image(systemName: voice.conversing
+                              ? "waveform.circle.fill" : "waveform.circle")
+                            .font(.system(size: 30))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(voice.conversing ? Brand.gold : .secondary)
+                    }
+                    .disabled(waiting)
+                    .accessibilityLabel(voice.conversing ? "End the conversation" : "Start a conversation")
+
                     Button {
                         Task { await talk() }
                     } label: {
@@ -151,7 +174,7 @@ struct AskView: View {
                             .scaleEffect(voice.state == .listening ? 1 + 0.12 * voice.level : 1)
                             .animation(.easeOut(duration: 0.12), value: voice.level)
                     }
-                    .disabled(waiting || voice.state == .hearing)
+                    .disabled(waiting || voice.state == .hearing || voice.conversing)
                 } else {
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
@@ -185,6 +208,17 @@ struct AskView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Stop") { voice.cancel() }.font(.footnote)
+            case .waiting:
+                // The microphone is open and nobody is talking. A live
+                // level, not a spinner: the thing being waited for is the
+                // person, and a spinner would suggest Sim is busy.
+                Image(systemName: "ear")
+                    .foregroundStyle(Brand.gold)
+                    .scaleEffect(1 + 0.25 * voice.level)
+                    .animation(.easeOut(duration: 0.12), value: voice.level)
+                Text("Listening — just talk").font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                Button("End") { voice.endConverse() }.font(.footnote)
             case .hearing:
                 // Sim's whisper has the recording. Named separately from
                 // "thinking" because it is a different wait, and the word
@@ -209,6 +243,19 @@ struct AskView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Color(.secondarySystemBackground))
+    }
+
+    /// Start a hands-free conversation. Same plumbing as `talk()` -- the
+    /// difference is that `VoiceChat` reopens the microphone after each
+    /// answer instead of going idle.
+    private func converse() async {
+        writing = false
+        voice.api = Api(baseURL: store.baseURL, token: store.token)
+        voice.onHeard = { said in
+            turns.append(Turn(mine: true, text: said))
+            Task { await ask(said) }
+        }
+        await voice.converse()
     }
 
     private func talk() async {

@@ -199,6 +199,14 @@ that was mysteriously short. Until 2026-09-24 the app used Apple's `AVSpeechSynt
 as I have on mac with same stt and tts engines" (the creator).
 
 13b. `GET /api/console` serves the lines Sim actually PRINTED -- `contracts/console.py`'s capture, glyphs and all -- so a client can mirror the terminal rather than approximate it with a ledger tail. Token-gated: Sim's own output is not open to the LAN. `?contains=` filters, which is what makes a long tail usable on a phone. `POST /api/command` is the other half, and already existed.
+13f. `GET /api/house/assistant` tells a paired device where Home Assistant is -- the URL only, from
+`HOME_ASSISTANT_URL`, which `kernel/registry.py` now lets Interface read and does NOT let it read the token.
+The app's HA tab is a web view and signs in with HA's own login and its own cookie, so the address is all it
+needs; asking the person to type it into the phone as well was asking them to keep two copies of one fact in
+step, and the address Sim already had was the right one. `read` is the gate, a LAN address being less than
+this server already hands a paired device. An unconfigured house answers 200 with `configured: false` and the
+line that fixes it, not an error.
+
 13e. `GET /tv/hls/<...>.m3u8` REWRITES the playlist it serves, appending the caller's `?token=` to every
 segment URI in it (tags and comments untouched). A player fetches `index.m3u8?token=X`, reads `index59.ts`
 out of it and resolves that against the playlist's URL -- which drops the query string -- so every segment
