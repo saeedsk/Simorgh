@@ -79,10 +79,9 @@ struct AskView: View {
 
     private var empty: some View {
         VStack(spacing: 10) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text("Ask Sim anything").font(.headline)
+            Feather(size: 72)
+            Text("Ask Sim anything")
+                .font(.system(.title3, design: .serif, weight: .semibold))
             Text("It can see the house, read your mail, and start work for you.")
                 .font(.footnote).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -111,8 +110,8 @@ struct AskView: View {
     }
 
     private func background(for turn: Turn) -> Color {
-        if turn.failed { return Color.red.opacity(0.85) }
-        return turn.mine ? Color.accentColor : Color(.secondarySystemBackground)
+        if turn.failed { return Brand.crimson.opacity(0.9) }
+        return turn.mine ? Brand.lapis : Color(.secondarySystemBackground)
     }
 
     private var composer: some View {

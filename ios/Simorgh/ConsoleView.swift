@@ -101,9 +101,9 @@ struct ConsoleView: View {
     /// levels, and inventing one would be a guess drawn as a fact.
     private static func tint(_ type: String?) -> Color {
         guard let type else { return .secondary }
-        if type.contains("failed") || type.contains("denied") || type.contains("error") { return .red }
-        if type.contains("blocked") || type.contains("needs_human") { return .orange }
-        if type.contains("completed") { return .green }
+        if type.contains("failed") || type.contains("denied") || type.contains("error") { return Brand.crimson }
+        if type.contains("blocked") || type.contains("needs_human") { return Brand.gold }
+        if type.contains("completed") { return Brand.emerald }
         return .secondary
     }
 

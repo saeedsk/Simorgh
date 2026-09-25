@@ -47,7 +47,7 @@ struct HouseView: View {
                 Text(problem ?? store.baseURL).font(.caption).foregroundStyle(.secondary)
             }
         } icon: {
-            Image(systemName: "wifi.exclamationmark").foregroundStyle(.orange)
+            Image(systemName: "wifi.exclamationmark").foregroundStyle(Brand.crimson)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,7 +59,7 @@ struct HouseView: View {
     private func promptCard(_ prompt: Api.Prompt) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                Image(systemName: "hand.raised.fill").foregroundStyle(Brand.gold)
                 Text("Sim is waiting for you").font(.subheadline).bold()
                 Spacer()
                 if prompt.seconds_left > 0 {
@@ -80,7 +80,7 @@ struct HouseView: View {
                             Text(option).frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(Self.isNo(option) ? .gray : .accentColor)
+                        .tint(Self.isNo(option) ? Color.secondary : Brand.lapis)
                         .disabled(answering != nil)
                     }
                 }
@@ -93,7 +93,7 @@ struct HouseView: View {
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(Color.orange.opacity(0.35), lineWidth: 1))
+            .stroke(Brand.gold.opacity(0.45), lineWidth: 1))
         .padding(.horizontal, 16)
     }
 

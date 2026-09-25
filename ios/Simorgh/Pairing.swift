@@ -17,38 +17,58 @@ struct PairingView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                VStack(spacing: 10) {
+                    Feather(size: 76)
+                    Text("Simorgh")
+                        .font(.system(.largeTitle, design: .serif, weight: .semibold))
+                        .foregroundStyle(Brand.goldLight)
+                    Text("the bird that answers")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.65))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 26)
+                .background(Brand.deep)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
                 if scanning {
                     ScannerView { scanned in
                         guard !busy else { return }
                         scanning = false
                         Task { await pair(with: Self.code(in: scanned) ?? scanned) }
                     }
-                    .frame(height: 300)
+                    .frame(height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(.secondary.opacity(0.3)))
                 } else {
-                    ProgressView().frame(height: 300)
+                    ProgressView().frame(height: 220)
                 }
 
-                Text("On Sim, type  pair my phone")
-                    .font(.headline)
-                Text("Add  with approve  if this phone should be able to answer Guardian's questions.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                VStack(spacing: 4) {
+                    Text("On Sim, type  pair my phone").font(.headline)
+                    Text("Add  with approve  so this phone can answer Guardian's questions.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
 
-                LabeledContent("Sim's address") {
-                    TextField("http://…", text: $store.baseURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing)
+                VStack(spacing: 12) {
+                    LabeledContent("Sim's address") {
+                        TextField("http://…", text: $store.baseURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Divider()
+                    HStack {
+                        TextField("or type the code", text: $typed)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("Pair") { Task { await pair(with: typed) } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Brand.lapis)
+                            .disabled(typed.isEmpty || busy)
+                    }
                 }
-                HStack {
-                    TextField("or type the code", text: $typed)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Button("Pair") { Task { await pair(with: typed) } }
-                        .disabled(typed.isEmpty || busy)
-                }
+                .card()
                 if let said = problem {
                     Text(said).font(.footnote).foregroundStyle(.red)
                         .multilineTextAlignment(.center)
@@ -57,7 +77,7 @@ struct PairingView: View {
                 Spacer()
             }
             .padding()
-            .navigationTitle("Pair with Sim")
+            .navigationBarHidden(true)
         }
     }
 
