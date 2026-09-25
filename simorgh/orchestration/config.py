@@ -28,10 +28,15 @@ What each field really does once adopted:
   sized for the 600s default.
 - `max_depth` -- read by `SessionRunner` when `delegation` is on: a
   helper task may not be delegated deeper than this.
-- `max_children_concurrent`, `needs_human_timeout_s` -- declared so the
-  config surface matches the original spec, but **no code path reads
-  them**: nothing bounds concurrent helpers, and nothing times out a
-  `needs_human` wait here. Changing them changes nothing.
+- `max_children_concurrent` -- read since 2026-09-19: `service.py`
+  passes it to the session runner and `session.py` caps the helpers one
+  task may run at once with it, refusing the next with the cap in the
+  message.
+- There is no `needs_human_timeout_s` here any more: nothing ever read
+  it -- the planner's own `needs_human` flow does any timing -- and it
+  was removed on 2026-09-25 so this surface only holds fields that
+  change behavior. Writing it in `[orchestration]` is reported by
+  `kernel/configcheck.py` as a key that changed nothing.
 - There is no `lease_seconds` here. The lease is Planning's: `[planning]
   lease_seconds` goes out on every `task.available`, and the Worker reads
   it from that payload. This section's copy was never read and was
@@ -143,7 +148,6 @@ class Config:
     # voice: those are bounded by `[cognition.purposes] chat.max_seconds`
     # (90 s), which is the smaller of the two and still wins.
     think_timeout_s: float = 320.0
-    needs_human_timeout_s: float = 600.0
     # A patch or skill task works in its own git worktree and lands on
     # main through `worktree_land` (execution/worktree.py) instead of
     # editing the live checkout. Needs Execution's worktree tools; a
