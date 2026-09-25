@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var store: Store
     @State private var reachable: String?
+    @State private var haURL = UserDefaults.standard.string(forKey: "sim.haURL") ?? ""
+    @State private var haFromSim: String?
 
     var body: some View {
         NavigationStack {
@@ -23,6 +25,32 @@ struct SettingsView: View {
                     Button("Check") { Task { await check() } }
                     if let reachable { Text(reachable).font(.footnote).foregroundStyle(.secondary) }
                 }
+                // `Section(_ title:)` has no `footer:` overload; a header
+                // closure does.
+                Section {
+                    LabeledContent("Address") {
+                        TextField("from Sim", text: haOverride)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Button("Use Sim's address") {
+                        UserDefaults.standard.removeObject(forKey: "sim.haURL")
+                        haURL = ""
+                        Task { await fromSim() }
+                    }
+                    if let said = haFromSim {
+                        Text(said).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Home Assistant")
+                } footer: {
+                    // Where this belongs: the Home tab is the house itself
+                    // now, and an address field on top of it was chrome in
+                    // the way (the creator, 2026-09-25).
+                    Text("Sim supplies this from HOME_ASSISTANT_URL. Leave it empty to use Sim's.")
+                }
                 Section {
                     Button("Forget this pairing", role: .destructive) { store.forget() }
                 } footer: {
@@ -33,6 +61,29 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task { await fromSim() }
+        }
+    }
+
+    /// Writes through as it is typed, so there is no Done button to forget.
+    /// Empty means "use whatever Sim says", which is the default and the
+    /// thing that should need no action at all.
+    private var haOverride: Binding<String> {
+        Binding(get: { haURL }, set: { typed in
+            haURL = typed
+            let clean = typed.trimmingCharacters(in: .whitespaces)
+            if clean.isEmpty { UserDefaults.standard.removeObject(forKey: "sim.haURL") }
+            else { UserDefaults.standard.set(clean, forKey: "sim.haURL") }
+        })
+    }
+
+    private func fromSim() async {
+        do {
+            let found = try await Api(baseURL: store.baseURL, token: store.token).homeAssistant()
+            let url = (found.url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            haFromSim = url.isEmpty ? (found.detail ?? "Sim does not know.") : "Sim says \(url)"
+        } catch {
+            haFromSim = nil
         }
     }
 

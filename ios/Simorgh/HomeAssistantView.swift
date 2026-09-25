@@ -32,27 +32,27 @@ struct HomeAssistantView: View {
     @State private var editing = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let url = URL(string: address), !address.isEmpty, url.scheme != nil {
-                    Web(url: url).ignoresSafeArea(edges: .bottom)
-                } else if asking {
-                    ProgressView("Finding Home Assistant…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    unavailable
-                }
+        Group {
+            if let url = URL(string: address), !address.isEmpty, url.scheme != nil {
+                // FULL SCREEN, and no navigation bar: Home Assistant draws
+                // its own header and sidebar, so a title bar above it is a
+                // second one saying less. Only the tab bar remains, because
+                // that is how you leave.
+                Web(url: url)
+                    .ignoresSafeArea(edges: .bottom)
+            } else if asking {
+                ProgressView("Finding Home Assistant…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemGroupedBackground))
+            } else {
+                // Chrome only when there is something to fix. The address
+                // otherwise lives in Settings (House › gear), not on top of
+                // the house.
+                NavigationStack { unavailable.navigationTitle("Home Assistant") }
             }
-            .navigationTitle("Home Assistant")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { editing = true } label: { Image(systemName: "gearshape") }
-                }
-            }
-            .sheet(isPresented: $editing) { editor }
-            .task { await find() }
         }
+        .sheet(isPresented: $editing) { editor }
+        .task { await find() }
     }
 
     /// Ask Sim. An address already remembered is still refreshed, quietly,
@@ -132,16 +132,26 @@ private struct Web: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        // Its own cookie jar: signing in here must not touch anything else,
-        // and signing out of it must not sign out of anything else.
+        // `.default()` and NOT `.nonPersistent()`: Home Assistant's "keep me
+        // logged in" is a refresh token in local storage, and a
+        // non-persistent store would throw it away at every launch and ask
+        // for the password again for ever. Its own jar all the same --
+        // signing in here touches nothing else the app does.
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
         let view = WKWebView(frame: .zero, configuration: config)
         view.allowsBackForwardNavigationGestures = true
+        // The panel is a full-bleed app; a bounce reveals a white band under
+        // it that looks like a rendering fault.
+        view.scrollView.bounces = false
         view.load(URLRequest(url: url))
         return view
     }
 
+    /// Only ever loads when there is nothing loaded. Reloading on every
+    /// SwiftUI update would throw away where somebody had navigated to --
+    /// and, on Home Assistant, the dialog they were part way through.
     func updateUIView(_ view: WKWebView, context: Context) {
         if view.url == nil { view.load(URLRequest(url: url)) }
     }

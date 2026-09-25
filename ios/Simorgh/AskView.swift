@@ -156,7 +156,14 @@ struct AskView: View {
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(voice.conversing ? Brand.gold : .secondary)
                     }
-                    .disabled(waiting)
+                    // NEVER disabled while conversing. `waiting` is true
+                    // for the whole of a turn and a conversation is mostly
+                    // inside one, so `.disabled(waiting)` meant the button
+                    // that ends it could not be pressed -- the creator,
+                    // 2026-09-25: "I cannot exit from this mode by clicking
+                    // again on second icon you created". Getting out is not
+                    // something to be busy for.
+                    .disabled(waiting && !voice.conversing)
                     .accessibilityLabel(voice.conversing ? "End the conversation" : "Start a conversation")
 
                     Button {
@@ -198,16 +205,6 @@ struct AskView: View {
     private var voiceBar: some View {
         HStack(spacing: 10) {
             switch voice.state {
-            case .listening:
-                Image(systemName: "waveform").foregroundStyle(Brand.crimson).symbolEffect(.variableColor)
-                Text(voice.heard.isEmpty ? "Listening…" : voice.heard)
-                    .font(.footnote).lineLimit(2)
-                    // A preview from the phone's own recogniser. What
-                    // reaches Sim is what Sim's whisper hears, which
-                    // arrives a moment later and replaces this.
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Stop") { voice.cancel() }.font(.footnote)
             case .waiting:
                 // The microphone is open and nobody is talking. A live
                 // level, not a spinner: the thing being waited for is the
@@ -217,8 +214,14 @@ struct AskView: View {
                     .scaleEffect(1 + 0.25 * voice.level)
                     .animation(.easeOut(duration: 0.12), value: voice.level)
                 Text("Listening — just talk").font(.footnote).foregroundStyle(.secondary)
-                Spacer()
-                Button("End") { voice.endConverse() }.font(.footnote)
+            case .listening:
+                Image(systemName: "waveform").foregroundStyle(Brand.crimson).symbolEffect(.variableColor)
+                Text(voice.heard.isEmpty ? "Listening…" : voice.heard)
+                    .font(.footnote).lineLimit(2)
+                    // A preview from the phone's own recogniser. What
+                    // reaches Sim is what Sim's whisper hears, which
+                    // arrives a moment later and replaces this.
+                    .foregroundStyle(.secondary)
             case .hearing:
                 // Sim's whisper has the recording. Named separately from
                 // "thinking" because it is a different wait, and the word
@@ -226,19 +229,33 @@ struct AskView: View {
                 ProgressView().controlSize(.small)
                 Text(voice.heard.isEmpty ? "Sim is listening back…" : "Sim is listening back…  \u{201c}\(voice.heard)\u{201d}")
                     .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
             case .thinking:
                 ProgressView().controlSize(.small)
                 Text("Sim is thinking…").font(.footnote).foregroundStyle(.secondary)
-                Spacer()
             case .speaking:
                 Image(systemName: "speaker.wave.2.fill").foregroundStyle(Brand.gold)
                 Text(voice.engine == "phone" ? "Speaking (this phone's voice)" : "Sim is speaking")
                     .font(.footnote).foregroundStyle(.secondary)
-                Spacer()
-                Button("Stop") { voice.stopSpeaking() }.font(.footnote)
             case .idle:
                 EmptyView()
+            }
+
+            Spacer()
+
+            // The way out, in EVERY state. It used to be drawn only in the
+            // `waiting` case, which is the brief gap between turns, so for
+            // most of a conversation the bar offered nothing and the
+            // toolbar button was disabled: no way out at all (the creator,
+            // 2026-09-25).
+            if voice.state == .speaking {
+                Button("Stop") { voice.stopSpeaking() }.font(.footnote)
+            } else if voice.state == .listening && !voice.conversing {
+                Button("Stop") { voice.cancel() }.font(.footnote)
+            }
+            if voice.conversing {
+                Button("End") { voice.endConverse() }
+                    .font(.footnote.weight(.semibold))
+                    .tint(Brand.crimson)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)

@@ -7,6 +7,11 @@ import SwiftUI
 /// turn does. The phone gains no privilege the voice channel has not
 /// already got.
 ///
+/// Reached from House since 2026-09-25, when the Home TAB became Home
+/// Assistant itself. It survives the move because it does something HA's
+/// own UI does not: every tap here is a proposal Guardian sees, and the
+/// state is Sim's answer rather than the panel's.
+///
 /// The state shown is Sim's, not a guess: after a call it asks again
 /// rather than assuming the light obeyed. `home_call`'s own description
 /// says it "reports what actually changed, which is not always what was
@@ -17,7 +22,6 @@ struct HomeView: View {
     @State private var problem: String?
     @State private var busy: Set<String> = []
     @State private var loading = true
-    @State private var showingHA = false
 
     private var api: Api { Api(baseURL: store.baseURL, token: store.token) }
     private let columns = [GridItem(.adaptive(minimum: 160), spacing: 12)]
@@ -47,16 +51,7 @@ struct HomeView: View {
                 if !rest.isEmpty { section("Everything else", rest) }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Home")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingHA = true } label: {
-                        Image(systemName: "house.badge.wifi")
-                    }
-                    .tint(Brand.lapis)
-                }
-            }
-            .sheet(isPresented: $showingHA) { HomeAssistantView() }
+            .navigationTitle("Controls")
             .refreshable { await load() }
             .task { await load() }
         }

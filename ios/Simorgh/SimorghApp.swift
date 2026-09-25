@@ -17,20 +17,27 @@ struct SimorghApp: App {
     }
 }
 
-/// Ask, Home, House, Cameras, Console, Settings. Home arrived with stage 12
-/// item 3a (`POST /api/action`); until that route existed a control tab
-/// would have been a button that lies.
+/// Ask, Home, Cameras, House, Console.
+///
+/// **Home is Home Assistant itself**, full screen. It used to be Sim's own
+/// tiles with a small Home Assistant button in the corner, which put the
+/// thing people actually want one tap and one sheet away -- the creator,
+/// 2026-09-25: "why showing ha icon on top of the page, let's cut the
+/// intermediate action and show ha page directly in sim app home tab
+/// (preferably in full screen)". HA's UI is the whole house; Sim's tiles
+/// are a convenience over part of it, so the tiles are what moved (to
+/// House), not the other way round.
 struct RootView: View {
     var body: some View {
         // FIVE. iOS folds a sixth into a "More" list, and the two that
-        // would end up there -- Home Assistant and Settings -- are the two
-        // nobody opens daily. They live one tap inside Home and House
-        // instead, where a person already is when they want them.
+        // would end up there -- Sim's own controls and Settings -- are the
+        // two nobody opens daily. They live one tap inside House instead,
+        // where a person already is when they want them.
         TabView {
             AskView()
                 .tabItem { Label("Ask", systemImage: "bubble.left.and.bubble.right") }
-            HomeView()
-                .tabItem { Label("Home", systemImage: "lightbulb") }
+            HomeAssistantView()
+                .tabItem { Label("Home", systemImage: "house.fill") }
             CamerasView()
                 .tabItem { Label("Cameras", systemImage: "video") }
             HouseView()

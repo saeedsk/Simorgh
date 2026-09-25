@@ -29,6 +29,32 @@ struct HouseView: View {
                         Text(problem).font(.footnote).foregroundStyle(.red)
                             .padding(.horizontal, 16)
                     }
+                    // Sim's own controls. They were the Home TAB until
+                    // 2026-09-25, when Home became Home Assistant itself;
+                    // they live here because every tap in them is a
+                    // proposal Guardian sees, which HA's own UI is not.
+                    NavigationLink {
+                        HomeView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundStyle(Brand.gold)
+                                .frame(width: 26)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Sim's controls").font(.subheadline.weight(.medium))
+                                Text("Lights and switches, through Guardian")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                        .padding(14)
+                        .background(Color(.secondarySystemGroupedBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+
                     lately
                 }
                 .padding(.vertical, 12)
