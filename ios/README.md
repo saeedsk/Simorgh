@@ -52,6 +52,20 @@ app works on the house wifi today and a rendezvous on the internet still
 has to be `https`. Voice needs no TLS on a native client, which is the one
 real advantage native has over a web app here.
 
+## Checking a change before handing it over
+
+`BUILD SUCCEEDED` is not enough: a simulator build never validates the
+bundle, so an app with no `CFBundleIdentifier` compiles happily and cannot
+be installed anywhere (2026-09-25). Install it:
+
+    xcrun simctl boot 'iPhone 15 Pro'
+    xcrun simctl install booted <path>/Simorgh.app
+    xcrun simctl launch booted house.simorgh.app
+
+`Info.plist` is supplied rather than generated (the local-network exception
+needs it), which means EVERY key Xcode would have generated has to be in
+it. Leave one out and the failure appears at install time, on a phone.
+
 ## Building it without Xcode open
 
     xcodebuild -project ios/Simorgh.xcodeproj -target Simorgh \
