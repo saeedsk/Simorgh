@@ -199,6 +199,19 @@ that was mysteriously short. Until 2026-09-24 the app used Apple's `AVSpeechSynt
 as I have on mac with same stt and tts engines" (the creator).
 
 13b. `GET /api/console` serves the lines Sim actually PRINTED -- `contracts/console.py`'s capture, glyphs and all -- so a client can mirror the terminal rather than approximate it with a ledger tail. Token-gated: Sim's own output is not open to the LAN. `?contains=` filters, which is what makes a long tail usable on a phone. `POST /api/command` is the other half, and already existed.
+13e. `GET /tv/hls/<...>.m3u8` REWRITES the playlist it serves, appending the caller's `?token=` to every
+segment URI in it (tags and comments untouched). A player fetches `index.m3u8?token=X`, reads `index59.ts`
+out of it and resolves that against the playlist's URL -- which drops the query string -- so every segment
+arrived unauthenticated, was refused, and the player showed a BLACK RECTANGLE and no error, because a 401 on
+a segment is not something HLS can report. The creator, 2026-09-25: "in the camera page, when I click on
+camera feed icon, the live view only shows a black screen and no live feed is actually happening", with
+ffmpeg relaying that camera throughout. The dash page's `<video>`, the TV's and iOS `AVPlayer` all resolve
+relative URIs the same way, so all three had it and the one rewrite fixes all three. Rewriting rather than
+opening the route: `/tv/hls/` was open until 2026-09-19 and that let anyone on the LAN watch the house
+(S15/V2). A header-authenticated caller gets the playlist byte for byte, because it will send the same header
+for the segments. Verified against a live relay: playlist 200 with six rewritten segments, the first segment
+200 with 565 KB of MPEG-TS, and the same segment without a token still 401.
+
 13c. `dashfeeds.streams()` reports BOTH qualities with a `quality` field: `hls/<channel>` is the sub stream, `hls/<channel>-main` the camera's full resolution. It required `isdigit()` until 2026-09-25, so every `-main` relay was invisible to every client -- the creator's only running relay was one, and his dashboard and his phone both showed nothing live while ffmpeg was relaying. The dashboard strip still prefers `sub` (it draws seven at once) but falls back to `main` rather than showing a blank tile for a camera that is live.
 13a. `POST /api/action` -- `{tool, args}` -- is how a paired device asks the house to do one thing, through `_run_for_page`, so it is the same proposal Guardian sees from any other caller and no privilege the voice channel lacks. TWO gates: the `control` capability, and `ACTION_TOOLS`, a server-side ALLOWLIST. Guardian gates EFFECTS; the allowlist gates SURFACE. `_run_for_page` was safe only because the server itself chose every tool name it passed -- once a client names the tool, a stolen token could ask for `run_shell` and Guardian would weigh it as legitimate, because from its side it is. So: lights, scenes, cameras, media, the TV, tasks and voice settings; nothing that writes code, runs a shell, installs a package or sends a message. A tool off the list is refused BY NAME (`not_over_the_wire`).
 13. `GET /api/prompts` lists the questions waiting for a person and `POST /api/prompts/<id>` answers one, through the Service's own `_resolve_prompt` rather than a second path to `ui.prompt.answered`. `read` sees them, `approve` answers them and is NAMED when refused. The prompt's own timeout still governs -- a late answer is refused, never applied, because the watchdog has defaulted it and Guardian has acted -- and the FIRST answer wins, the loser getting 409 rather than a second publish. The question text passes through unchanged: a summary would be Sim deciding what matters about its own request, when the point is that a person judges it. Stage 12 item 3: until this existed both topics were on the Bus and only the REPL published the answer, so Sim's autonomy ended at the desk.

@@ -911,8 +911,48 @@ class HttpApi:
             target = (self._hls_root / rest).resolve()
             if not rest or not str(target).startswith(str(self._hls_root) + os.sep) or not target.is_file():
                 return 404, b"no such stream", "text/plain; charset=utf-8"
-            kind = "application/vnd.apple.mpegurl" if target.suffix == ".m3u8" else "video/mp2t"
-            return 200, target.read_bytes(), kind
+            if target.suffix == ".m3u8":
+                return 200, _playlist(target, self._q1(query, "token", "") or ""), "application/vnd.apple.mpegurl"
+            return 200, target.read_bytes(), "video/mp2t"
+
+        def _playlist(target: Path, token: str) -> bytes:
+            """The playlist, with the caller's token carried onto every
+            segment it names.
+
+            A player asks for `index.m3u8?token=X`, reads `index59.ts` out
+            of it, and resolves that against the playlist's URL -- which
+            drops the query string. So every segment arrived with no token,
+            this route refused it, and the player showed a BLACK RECTANGLE
+            and no error, because a 401 on a segment is not something HLS
+            has a way to say out loud. The creator, 2026-09-25: "in the
+            camera page, when I click on camera feed icon, the live view
+            only shows a black screen and no live feed is actually
+            happening" -- with ffmpeg relaying that camera the whole time.
+
+            Rewriting here rather than opening the route: `/tv/hls/` was
+            open until 2026-09-19 and that let anyone on the LAN watch the
+            house (S15/V2). Rewriting here rather than in each client: the
+            dash page's `<video>`, the TV's and `AVPlayer` all resolve
+            relative URLs the same way, so all three had the same bug and
+            all three are fixed by the one change.
+            """
+            raw = target.read_bytes()
+            if not token:
+                # Header-authenticated caller (or no token configured):
+                # it will send the same header for the segments, and
+                # there is nothing here to append anyway.
+                return raw
+            out: list[bytes] = []
+            add = b"token=" + token.encode("utf-8")
+            for line in raw.split(b"\n"):
+                bare = line.strip()
+                # Comments, tags and blank lines are left alone; a URI
+                # line is anything else. `#EXT-X-KEY:URI=".."` would need
+                # the same treatment, which this relay never writes.
+                if bare and not bare.startswith(b"#"):
+                    line = line + (b"&" if b"?" in bare else b"?") + add
+                out.append(line)
+            return b"\n".join(out)
 
         async def _media(_query, _body, headers, *, rest: str = ""):
             # A framed YouTube video as a file (media/tvmedia.py). The
