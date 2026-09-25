@@ -101,9 +101,59 @@ Which points at the target, and it is a better answer to "accessible to sim and 
 
 Staged honestly, because end-to-end encryption is real complexity -- key rotation, replay windows, a web client doing it in WebCrypto: ship mTLS and per-device tokens first (items 1-2), add the end-to-end layer with the native client, where the Secure Enclave makes key custody natural rather than bolted on.
 
+## The client, architected
+
+The creator, 2026-09-24: "I don't want to pay 99 for apple development program, instead I'd like to use the sim app in developer mode on my personal iphone". That decides the client, and not the way it first looks.
+
+**Free provisioning cannot do the two things native was for.** Checked, not remembered: the Push Notifications capability is unavailable to a free Personal Team, and a free provisioning profile expires after **7 days**, after which the app will not launch until it is rebuilt and reinstalled from Xcode. Meanwhile a Home Screen web app gets **Web Push on iOS 16.4+ for free** -- a `manifest.json`, an install to the Home Screen, permission asked on a tap.
+
+    native, free-provisioned  ->  no notifications, dies every 7 days
+    Home Screen web app       ->  notifications work, never expires
+
+So the web app IS the client. Swift returns only if the $99 is ever paid, and then only for background always-listening, which is the one thing a web app genuinely cannot do. Nothing already built is wasted: the rendezvous, per-device tokens, QR pairing, the prompt routes, the action route and the voice socket are server work, which was always the bulk of it.
+
+### No build step, no framework, no CDN
+
+Plain HTML and ES modules, served from `interface/static/app/` by the static route that already serves `dash.html`, `tv.html` and `remote.html`.
+
+Three reasons, in order of weight. This repository has no npm toolchain and should not gain one to ship a client -- a stdlib-only Python core with a webpack build beside it is two projects wearing one name. A Home Screen web app must cache every asset to work offline anyway, so a CDN buys nothing and costs the household's app being served from somebody else's machine. And the three pages that exist are each a single file, which is a precedent worth keeping until it hurts.
+
+    interface/static/app/
+      index.html          the shell: the tab bar and one <main> per tab
+      manifest.json       name, icons, display:standalone -- what makes it installable
+      sw.js               the service worker: the shell cache, and push
+      app.js              routing between tabs, the poll loop, the token
+      api.js              every call to Sim in one place
+      voice.js            AudioWorklet capture, the socket, PCM playback
+      tabs/*.js           one module per tab: ask, home, cameras, house, settings
+
+### The token, and where it lives
+
+Pairing (item 2) hands the app its own token; it goes in `localStorage`. One origin, no third-party script and no CDN, so the usual objection -- an injected script reading it -- has no way in. The mitigation that matters is not storage anyway: the token is **per device and revocable**, so a phone that is lost or a token that leaks is one `devices revoke` away from useless. That is precisely why item 2 came before the client rather than after it.
+
+### Data: poll what is visible, and nothing else
+
+No SSE, no long poll, no socket for the read surface. The visible tab polls its own endpoints on a timer and an invisible tab polls nothing, because a phone in a pocket refreshing five tabs is a battery complaint that reads as "the app is broken". `document.visibilitychange` starts and stops it. The voice socket opens when voice is asked for and closes when it ends -- it is the only long-lived connection, and it carries no data the read surface needs.
+
+### Push: a ninth provider, not a special case
+
+Web Push needs a VAPID JWT (ES256) and a payload encrypted with ECDH P-256, HKDF and AES-128-GCM -- none of which the Python standard library has. `cryptography` does, and is already installed here, so the sender is ~80 lines behind an optional import and becomes `notify.py`'s ninth provider (`webpush`), switched on by the presence of its keys exactly as the other eight are. It is not a new subsystem; an unanswered `ui.prompt` already knows how to reach a person (item 4) and this gives it one more way.
+
+The service worker is what receives it, and it is the only reason `sw.js` exists beyond the offline shell.
+
+### Voice, and Safari's rules
+
+`AudioWorklet` captures, downsamples to 16 kHz mono int16, and posts binary frames to the socket `voice/remote.py` already serves; playback is an `AudioContext` queue fed by the frames coming back. Two Safari facts shape it: `getUserMedia` needs a secure context, which is item 1 again, and an `AudioContext` starts suspended until a user gesture -- the microphone button is that gesture, so voice is press-to-start and never auto-opens.
+
+### The invariant that keeps it a client
+
+**The app renders and asks. Every decision stays on Sim.** It holds no copy of the tool allowlist, no capability logic beyond hiding a button it knows will be refused, and no rules about what may be approved. The server refuses on its own authority whatever the client believes, so the two can never drift into disagreeing about what is permitted -- and a client written by somebody else, or a curl command, meets exactly the same answers.
+
+Offline it shows what it last knew and says so, rather than a browser error page. It never guesses at state it has not been told.
+
 ## Items
 
-**Build order: 2, 1, 3, 3a, 4, 5, 6, 7.** Item 2 comes first even though item 1 unblocks the testing, because per-device tokens are needed whether or not the phone ever happens: today one shared 32-character bearer admits every caller to a system that holds cameras, door hardware, the family's mail and a model budget, and `[interface] http_host` is `0.0.0.0`. That is defensible on a home LAN and is not something to hand to anyone else, which makes item 2 a prerequisite for releasing this package at all, not a phone feature.
+**Build order: 2, 3, 3a, 1, 4, 5, 6; item 7 only if the $99 is ever paid.** Item 2 comes first even though item 1 unblocks the testing, because per-device tokens are needed whether or not the phone ever happens: today one shared 32-character bearer admits every caller to a system that holds cameras, door hardware, the family's mail and a model budget, and `[interface] http_host` is `0.0.0.0`. That is defensible on a home LAN and is not something to hand to anyone else, which makes item 2 a prerequisite for releasing this package at all, not a phone feature.
 
 
 ### 1. The rendezvous, and TLS
@@ -217,19 +267,21 @@ Done when: an unanswered prompt reaches the phone within five seconds, and tappi
 
 Done when: speech into the phone is answered in the phone's ear, with the laptop session still listening and unaffected, and barge-in works on both independently.
 
-### 6. The web client, to prove the server
+### 6. The client
 
-One page, added to the Home Screen: console, approvals, chat, the house, and push-to-talk voice. `AudioWorklet` capture downsampled to 16 kHz mono int16, binary frames out, PCM frames in.
+**This is the client, not a stepping stone** -- see "The client, architected" above for why free provisioning ruled out the native one. The five tabs, the pairing scan, Web Push through the service worker, and press-to-start voice.
 
-The first thing to test on a real iPhone, before building on it: whether `getUserMedia` works in **standalone** Home Screen mode on the creator's iOS version. It was broken for years and fixed somewhere around iOS 15-16. Assume nothing; the answer decides whether push-to-talk lives in the web client or waits for item 7.
+The first thing to test on a real iPhone, before building on it: whether `getUserMedia` works in **standalone** Home Screen mode on the creator's iOS version. It was broken for years and fixed somewhere around iOS 15-16. Assume nothing; the answer decides whether voice lives in the installed app or only in Safari.
 
-Done when: every server item above has been exercised from the phone.
+Done when: it is on the Home Screen, it pairs by itself, it answers a Guardian question, and a notification arrives with the app closed.
 
-### 7. The native client
+### 7. The native client -- ONLY if the $99 is ever paid
 
-A sibling project, not a package here. Swift/SwiftUI, one target, consuming the documented API.
+Deferred, 2026-09-24, and not for the reason it looks. Without the paid program a native app has **no push notifications at all** and **expires every 7 days**; the web client has notifications and never expires. Native would be a downgrade bought with Swift.
 
-What it adds over item 6, and only this: background and always-on voice; actionable approve/deny on the notification; a Live Activity while a task runs; a widget with the house state; Siri intents so "ask Sim" works from anywhere.
+If the membership is ever taken out, the one thing it adds that a web app cannot is **background always-listening** -- and then actionable approve/deny on the notification, a Live Activity while a task runs, a widget, and Siri intents. A sibling project, not a package here, consuming the same documented API item 6 proves.
+
+The table under "The decision" above still holds; only the cost row changed, and it changed the answer.
 
 ## Security, stated plainly
 
