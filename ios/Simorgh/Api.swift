@@ -114,8 +114,9 @@ struct Api {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             // Said plainly, because "could not connect" with no address is
-            // the least useful thing an app can say.
-            throw Failure(status: 0, detail: "could not reach Sim at \(baseURL) -- \(error.localizedDescription)")
+            // the least useful thing an app can say -- and on a LOCAL
+            // address the usual cause is not the network at all.
+            throw Failure(status: 0, detail: Self.unreachable(baseURL, error))
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
@@ -126,6 +127,38 @@ struct Api {
     }
 
     struct Empty: Decodable {}
+
+    /// Why Sim could not be reached, in words that say what to DO.
+    ///
+    /// iOS asks once for Local Network permission and, if that prompt is
+    /// dismissed, blocks every local address from then on with an ordinary
+    /// connection error -- indistinguishable from the house being down.
+    /// An app cannot detect the denial or ask again, so the only help it
+    /// can give is to name it (the creator, 2026-09-25: "could not reach
+    /// sim at http://192.168.50.33:8765", with Sim running and answering
+    /// on that exact address).
+    static func unreachable(_ baseURL: String, _ error: Error) -> String {
+        var said = "could not reach Sim at \(baseURL) -- \(error.localizedDescription)"
+        if isLocal(baseURL) {
+            said += "\n\nIf Sim is running, this is usually iOS Local Network permission: "
+            said += "Settings -> Privacy & Security -> Local Network -> Sim. "
+            said += "Check by opening \(baseURL)/api/status in Safari: if that works and this does not, "
+            said += "it is the permission."
+        }
+        return said
+    }
+
+    /// A private address, where the Local Network prompt applies.
+    static func isLocal(_ baseURL: String) -> Bool {
+        guard let host = URLComponents(string: baseURL)?.host else { return false }
+        if host == "localhost" || host.hasSuffix(".local") { return true }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        if parts[0] == 10 || (parts[0] == 127) { return true }
+        if parts[0] == 192 && parts[1] == 168 { return true }
+        if parts[0] == 172 && (16...31).contains(parts[1]) { return true }
+        return false
+    }
 
     /// Sim's errors are `{"error": {"code": ..., "detail": ...}}`. The
     /// detail is written for a person, so show it rather than a status.
