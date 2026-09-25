@@ -432,3 +432,54 @@ class ThePairRoute(unittest.IsolatedAsyncioTestCase):
     async def test_rubbish_is_a_400_not_a_crash(self):
         status, _, _ = await self._route().handler({}, b"{not json", {})
         self.assertEqual(status, 400)
+
+
+class ThePairPage(unittest.IsolatedAsyncioTestCase):
+    """The barcode's URL leads somewhere.
+
+    `http://host/pair#CODE` looks like a link and people tap links. It was
+    a 404 (the creator, 2026-09-25, opening it in Chrome), which reads as
+    "Sim is broken" rather than "this is for the app".
+
+    The code is in the FRAGMENT, which a browser never sends, so the server
+    cannot be given it and the page reads `location.hash` itself. That is
+    the property worth keeping: the code reaches this server exactly once,
+    when it is spent at `POST /api/pair`, and never in a request line a
+    proxy or a log could hold.
+    """
+
+    def setUp(self) -> None:
+        from simorgh.interface.httpapi import HttpApi
+
+        self.api = HttpApi(bus=None, ledger=None, token="shared")
+
+    async def test_it_is_served_without_a_token(self):
+        """Nobody has a token yet -- that is what pairing is for."""
+        route = self.api._routes[("GET", "/pair")]                  # noqa: SLF001
+        self.assertFalse(route.auth)
+        status, body, kind = await route.handler({}, b"", {})
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", kind)
+        self.assertIn(b"Pair with Sim", body)
+
+    async def test_the_page_reads_the_code_from_the_fragment(self):
+        _, body, _ = await self.api._routes[("GET", "/pair")].handler({}, b"", {})   # noqa: SLF001
+        text = body.decode("utf-8")
+        self.assertIn("location.hash", text)
+        # And says what to do when there is no code, rather than showing an
+        # empty box.
+        self.assertIn("pair my phone", text)
+
+    async def test_it_carries_no_secret_of_its_own(self):
+        _, body, _ = await self.api._routes[("GET", "/pair")].handler({}, b"", {})   # noqa: SLF001
+        self.assertNotIn(b"shared", body, "the page must not contain the server's token")
+
+    def test_the_page_is_open_but_is_not_a_write_route(self):
+        """Being open is fine for a GET that holds nothing; the invariant
+        that matters is that no WRITE route joined it."""
+        from simorgh.interface.httpapi import _OPEN_ROUTES
+
+        self.assertIn("/pair", _OPEN_ROUTES)
+        open_writes = [(m, path) for (m, path), route in self.api._routes.items()    # noqa: SLF001
+                       if m != "GET" and not route.auth]
+        self.assertEqual(open_writes, [("POST", "/api/pair")])

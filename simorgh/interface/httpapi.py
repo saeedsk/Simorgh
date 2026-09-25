@@ -83,7 +83,43 @@ _MAX_BODY_BYTES = 16 * 1024  # a chat message, not a file upload
 #: LAN could watch the house on a `0.0.0.0` bind (2026-09-18 evaluation,
 #: S15/V2). The dash and TV pages already append `?token=` to those URLs.
 _OPEN_ROUTES: frozenset[str] = frozenset({"/", "/api/status", "/tv", "/dash", "/api/wallpapers", "/api/dash/data",
-                                          "/api/dash/state", "/api/dash/keys", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner"})
+                                          "/api/dash/state", "/api/dash/keys", "/remote", "/logo.png", "/favicon.ico", "/api/dash/banner",
+                                          # The barcode's own URL. It carries no secret: the code is in the
+                                          # fragment, which never reaches this server.
+                                          "/pair"})
+#: The `/pair` page. Small enough to live here rather than in `static/`,
+#: and deliberately self-contained: a phone that has just scanned a
+#: barcode may not be able to fetch anything else yet.
+_PAIR_PAGE = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pair with Sim</title>
+<style>
+ body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:2rem 1.25rem;
+      background:#111;color:#eee;text-align:center}
+ h1{font-size:1.3rem;margin:0 0 1.5rem}
+ code{display:block;font-size:2rem;letter-spacing:.06em;margin:1.5rem 0;padding:1rem;
+      background:#1e1e1e;border-radius:.6rem;word-break:break-all;-webkit-user-select:all;user-select:all}
+ p{color:#aaa;max-width:32rem;margin:1rem auto}
+ .none{color:#e88}
+</style></head><body>
+<h1>Pair with Sim</h1>
+<div id="out"><p>Reading the code&hellip;</p></div>
+<p>Type this into the Sim app, or scan the barcode again with it.</p>
+<p>It works once, and only for about two minutes.</p>
+<script>
+ // The code is in the fragment, so the server never saw it and neither
+ // did any proxy or log on the way here. This page is the only thing that
+ // can read it.
+ var code = decodeURIComponent((location.hash || '').replace(/^#/, '')).trim();
+ document.getElementById('out').innerHTML = code
+   ? '<code>' + code.replace(/[&<>"]/g, function (c) {
+       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }) + '</code>'
+   : '<p class="none">No code in this link. On Sim, type <b>pair my phone</b> for a new barcode.</p>';
+</script>
+</body></html>
+"""
+
 #: What `/api/dash/data` withholds from a request without the token.
 _HOUSE_KEYS: tuple[str, ...] = ("cameras", "streams", "ring_cameras", "events")
 
@@ -464,6 +500,25 @@ class HttpApi:
             }).encode("utf-8"), "application/json"
 
         self.register_route("POST", "/api/pair", _pair, auth=False, max_body=512, rate=(20, 60.0))
+
+        async def _pair_page(_query, _body, _headers):
+            """GET /pair -- what the barcode's URL leads to.
+
+            The code rides in the FRAGMENT, which a browser never sends, so
+            this page cannot be given it and reads it from `location.hash`
+            itself. Which is the point: the server never sees the code
+            except when it is spent at `POST /api/pair`.
+
+            It exists because the barcode's URL LOOKS like a link and people
+            tap links. Before this it was a 404 (the creator, 2026-09-25),
+            which reads as "Sim is broken" rather than "this is for the
+            app". Now it shows the code big enough to type into the app's
+            own field -- so pairing works from a phone with no camera, or
+            one that refused the camera.
+            """
+            return 200, _PAIR_PAGE.encode("utf-8"), "text/html; charset=utf-8"
+
+        self.register_route("GET", "/pair", _pair_page, auth=False, rate=(60, 60.0))
 
         async def _prompts_get(_query, _body, headers):
             """GET /api/prompts -- what Sim is waiting to be told.
