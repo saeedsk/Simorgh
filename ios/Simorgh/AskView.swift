@@ -9,6 +9,7 @@ struct AskView: View {
     @State private var waiting = false
     @State private var session = "iphone-" + UUID().uuidString.prefix(8).lowercased()
     @FocusState private var writing: Bool
+    @StateObject private var voice = VoiceChat()
 
     struct Turn: Identifiable {
         let id = UUID()
@@ -34,6 +35,12 @@ struct AskView: View {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { writing = false }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { voice.speaks.toggle(); if !voice.speaks { voice.stopSpeaking() } } label: {
+                        Image(systemName: voice.speaks ? "speaker.wave.2" : "speaker.slash")
+                    }
+                    .tint(voice.speaks ? Brand.gold : .secondary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if !turns.isEmpty {
@@ -82,7 +89,7 @@ struct AskView: View {
             Feather(size: 72)
             Text("Ask Sim anything")
                 .font(.system(.title3, design: .serif, weight: .semibold))
-            Text("It can see the house, read your mail, and start work for you.")
+            Text("Type, or tap the microphone and just talk.")
                 .font(.footnote).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -116,6 +123,7 @@ struct AskView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
+            if voice.state != .idle { voiceBar }
             Divider()
             HStack(alignment: .bottom, spacing: 8) {
                 TextField("Message", text: $typed, axis: .vertical)
@@ -127,17 +135,88 @@ struct AskView: View {
                     .focused($writing)
                     .submitLabel(.send)
                     .onSubmit(send)
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
-                        .symbolRenderingMode(.hierarchical)
+                if typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        Task { await talk() }
+                    } label: {
+                        Image(systemName: voice.state == .listening ? "stop.circle.fill" : "mic.circle.fill")
+                            .font(.system(size: 30))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(voice.state == .listening ? Brand.crimson : Brand.lapis)
+                    }
+                    .disabled(waiting)
+                } else {
+                    Button(action: send) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Brand.lapis)
+                    }
+                    .disabled(sendable == false)
+                    .opacity(sendable ? 1 : 0.4)
                 }
-                .disabled(sendable == false)
-                .opacity(sendable ? 1 : 0.4)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.bar)
+        }
+    }
+
+    /// What the microphone is doing, in words rather than a pulsing dot:
+    /// "listening" and "thinking" are different waits and a person who
+    /// cannot tell them apart will talk over the answer.
+    private var voiceBar: some View {
+        HStack(spacing: 10) {
+            switch voice.state {
+            case .listening:
+                Image(systemName: "waveform").foregroundStyle(Brand.crimson).symbolEffect(.variableColor)
+                Text(voice.heard.isEmpty ? "Listening…" : voice.heard)
+                    .font(.footnote).lineLimit(2)
+                Spacer()
+                Button("Stop") { voice.cancel() }.font(.footnote)
+            case .thinking:
+                ProgressView().controlSize(.small)
+                Text("Sim is thinking…").font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+            case .speaking:
+                Image(systemName: "speaker.wave.2.fill").foregroundStyle(Brand.gold)
+                Text("Sim is speaking").font(.footnote).foregroundStyle(.secondary)
+                Spacer()
+                Button("Stop") { voice.stopSpeaking() }.font(.footnote)
+            case .idle:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
+    }
+
+    private func talk() async {
+        writing = false
+        if voice.state == .listening { voice.finish(); return }
+        voice.onHeard = { said in
+            turns.append(Turn(mine: true, text: said))
+            Task { await ask(said) }
+        }
+        await voice.start()
+    }
+
+    /// One turn, however it arrived. Typing and talking are the same
+    /// conversation -- the same `session_id`, so Sim's memory groups them
+    /// as one rather than two strangers.
+    private func ask(_ text: String) async {
+        waiting = true
+        defer { waiting = false }
+        do {
+            let reply = try await Api(baseURL: store.baseURL, token: store.token)
+                .chat(text, session: session)
+            let said = (reply.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let shown = said.isEmpty ? "Sim had nothing to say." : said
+            turns.append(Turn(mine: false, text: shown))
+            if said.isEmpty { voice.failed() } else { voice.say(said) }
+        } catch {
+            turns.append(Turn(mine: false, text: error.localizedDescription, failed: true))
+            voice.failed()
         }
     }
 
@@ -150,20 +229,9 @@ struct AskView: View {
         guard !text.isEmpty, !waiting else { return }
         typed = ""
         turns.append(Turn(mine: true, text: text))
-        waiting = true
-        Task {
-            defer { waiting = false }
-            do {
-                let reply = try await Api(baseURL: store.baseURL, token: store.token)
-                    .chat(text, session: session)
-                let said = (reply.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                // An empty reply is Sim choosing silence (QUIET) or a
-                // floored turn. Saying nothing here would look like the app
-                // losing the message.
-                turns.append(Turn(mine: false, text: said.isEmpty ? "Sim had nothing to say." : said))
-            } catch {
-                turns.append(Turn(mine: false, text: error.localizedDescription, failed: true))
-            }
-        }
+        // An empty reply is Sim choosing silence (QUIET) or a floored turn,
+        // and `ask` says so rather than leaving the screen looking as
+        // though the app lost the message.
+        Task { await ask(text) }
     }
 }
