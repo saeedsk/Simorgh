@@ -51,3 +51,7 @@ images/wallpapers/
 # editor and R leftovers
 .Rhistory
 .obsidian/
+ios/build/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/
+DerivedData/
