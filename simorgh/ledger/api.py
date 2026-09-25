@@ -50,7 +50,15 @@ class BackendUnavailable(LedgerError):
 
 
 class BlobNotFound(LedgerError):
-    pass
+    """A blob ref does not resolve to stored data -- expired from the
+    blob store, deleted, or corrupted. Carries the missing `ref` and
+    the `stream` context so callers can log and match on the ref
+    instead of parsing the message string."""
+
+    def __init__(self, ref: str, stream: str | None = None) -> None:
+        detail = f"{ref} (stream {stream})" if stream else ref
+        super().__init__(f"blob not found: {detail}")
+        self.ref, self.stream = ref, stream
 
 
 @runtime_checkable
