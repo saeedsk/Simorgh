@@ -683,6 +683,99 @@ class HttpApi:
                                       device=getattr(who, "name", "legacy"), status=status)
             return status, payload, kind
 
+        # -------------------------------------------------- Sim's own voice
+        #
+        # The phone used Apple's `SFSpeechRecognizer` and
+        # `AVSpeechSynthesizer` until 2026-09-24 -- "why the voice on sim
+        # app sounds robotic, I want to have same voice chat experience
+        # as I have on mac with same stt and tts engines" (the creator).
+        # These two hand the phone the real engines: Kokoro's WAV back
+        # from `/api/say`, whisper's words back from `/api/listen`.
+        #
+        # Neither goes through `_run_for_page`: no tool is being asked
+        # for, no effect proposed, nothing for Guardian to weigh. Saying
+        # a sentence out loud to the person holding the phone is what the
+        # `chat` capability already means, and that is the gate.
+
+        async def _say(_query, body, headers):
+            who = self.caller(headers, _query)
+            if not self.may(who, "chat"):
+                return 403, json.dumps({"error": {
+                    "code": "capability_required", "capability": "chat",
+                    "detail": "this device may not ask Sim to speak"}}).encode("utf-8"), "application/json"
+            try:
+                asked = json.loads(body or b"{}")
+                text = str(asked.get("text") or "").strip()
+            except (json.JSONDecodeError, AttributeError):
+                return 400, b'{"error":{"code":"invalid_json"}}', "application/json"
+            if not text:
+                return 400, b'{"error":{"code":"nothing_to_say"}}', "application/json"
+            payload = {"text": text}
+            for key in ("voice", "lane"):
+                if asked.get(key):
+                    payload[key] = str(asked[key])
+            if isinstance(asked.get("speed"), (int, float)):
+                payload["speed"] = float(asked["speed"])
+            req = Message.new(topics.VOICE_SYNTHESISE_REQUEST, source="interface", payload=payload, clock=self._clock)
+            try:
+                reply = await self._bus.request_or_error(req, timeout=max(self._timeout, 60.0))
+            except Exception as exc:  # noqa: BLE001 -- a silent voice is an answer the phone can act on
+                return 503, json.dumps({"error": {"code": "voice_unavailable", "detail": str(exc)}}).encode("utf-8"), "application/json"
+            ref = str(reply.payload.get("ref") or "")
+            if not ref or self._ledger is None:
+                detail = str(reply.payload.get("detail") or "the voice subsystem returned no audio")
+                return 503, json.dumps({"error": {"code": "not_spoken", "detail": detail}}).encode("utf-8"), "application/json"
+            try:
+                data = await self._ledger.get_blob(ref)
+            except Exception as exc:  # noqa: BLE001
+                return 503, json.dumps({"error": {"code": "audio_gone", "detail": str(exc)}}).encode("utf-8"), "application/json"
+            # The WAV itself, not a ref: one request, and the phone can
+            # hand the bytes straight to its player. The engine's name
+            # rides in a header so the app can show whose voice this is
+            # without a second round trip.
+            # Header LINES, not a dict: `_try_respond` joins them as
+            # written (the video route's Content-Range does the same).
+            return 200, data, "audio/wav", (
+                f"X-Sim-Engine: {reply.payload.get('engine') or ''}",
+                f"X-Sim-Seconds: {reply.payload.get('seconds') or ''}",
+            )
+
+        async def _listen(_query, body, headers):
+            who = self.caller(headers, _query)
+            if not self.may(who, "chat"):
+                return 403, json.dumps({"error": {
+                    "code": "capability_required", "capability": "chat",
+                    "detail": "this device may not send Sim audio"}}).encode("utf-8"), "application/json"
+            if not body:
+                return 400, b'{"error":{"code":"no_audio"}}', "application/json"
+            if self._ledger is None:
+                return 503, b'{"error":{"code":"no_ledger"}}', "application/json"
+            try:
+                ref = await self._ledger.put_blob(body, content_type="audio/wav")
+            except Exception as exc:  # noqa: BLE001
+                return 503, json.dumps({"error": {"code": "audio_not_stored", "detail": str(exc)}}).encode("utf-8"), "application/json"
+            payload = {"ref": ref}
+            language = self._q1(_query, "language", "") or ""
+            if language:
+                payload["language"] = language
+            req = Message.new(topics.VOICE_TRANSCRIBE_REQUEST, source="interface", payload=payload, clock=self._clock)
+            try:
+                reply = await self._bus.request_or_error(req, timeout=max(self._timeout, 120.0))
+            except Exception as exc:  # noqa: BLE001
+                return 503, json.dumps({"error": {"code": "voice_unavailable", "detail": str(exc)}}).encode("utf-8"), "application/json"
+            out = reply.payload
+            if out.get("ok") is False:
+                return 503, json.dumps({"error": {
+                    "code": "not_heard", "detail": str(out.get("detail") or "")}}).encode("utf-8"), "application/json"
+            return 200, json.dumps({
+                "text": out.get("text") or "", "confidence": out.get("confidence"),
+                "language": out.get("language") or "", "seconds": out.get("seconds"),
+                "engine": out.get("engine") or "", "ok": True}).encode("utf-8"), "application/json"
+
+        self.register_route("POST", "/api/say", _say, max_body=16384, rate=(120, 60.0))
+        # A minute of 16 kHz mono int16 is under 2 MiB; the cap is that
+        # with room, and nothing like the server-wide one.
+        self.register_route("POST", "/api/listen", _listen, max_body=4 * 1024 * 1024, rate=(120, 60.0))
         self.register_route("POST", "/api/action", _action, max_body=8192, rate=(120, 60.0))
         self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
         self.register_route("GET", "/remote", _remote, auth=False)

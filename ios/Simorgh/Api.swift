@@ -285,6 +285,86 @@ struct Api {
     /// A URL on Sim with the token in the QUERY -- an `AVPlayer` and an
     /// `AsyncImage` cannot set a header, which is the whole reason
     /// `?token=` exists on this server.
+    // MARK: - Sim's own voice and ears
+
+    /// What `/api/say` gives back: Kokoro's WAV, and whose voice it is.
+    struct Spoken {
+        let wav: Data
+        let engine: String
+    }
+
+    /// Sim synthesises the sentence with its OWN engine and hands back the
+    /// audio. The app plays those bytes, so the voice on the phone is the
+    /// voice in the kitchen -- "I want to have same voice chat experience
+    /// as I have on mac with same stt and tts engines" (the creator,
+    /// 2026-09-24). A throw here is not fatal: `VoiceChat` falls back to
+    /// the phone's own synthesiser rather than going silent.
+    ///
+    /// 60 s, not the usual 20: Kokoro is fast but the first call after a
+    /// boot loads the model, and a timeout there would make Sim's real
+    /// voice look broken exactly once per restart -- the one time a person
+    /// is listening for it.
+    func say(_ text: String, voice: String = "", speed: Double = 0) async throws -> Spoken {
+        var body: [String: Any] = ["text": text]
+        if !voice.isEmpty { body["voice"] = voice }
+        if speed > 0 { body["speed"] = speed }
+        let (data, response) = try await raw("/api/say", method: "POST",
+                                            json: body, timeout: 60)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw Failure(status: status, detail: Self.reason(from: data) ?? "Sim answered \(status)")
+        }
+        guard !data.isEmpty else { throw Failure(status: 502, detail: "Sim sent no audio") }
+        return Spoken(wav: data, engine: http?.value(forHTTPHeaderField: "X-Sim-Engine") ?? "")
+    }
+
+    struct Heard: Decodable {
+        let text: String?
+        let confidence: Double?
+        let language: String?
+        let engine: String?
+    }
+
+    /// The phone's recording, transcribed by Sim's own recogniser -- the
+    /// same whisper.cpp the Mac listens with, so Farsi and English behave
+    /// the same way in both rooms. 120 s: a long turn through a large
+    /// model on a busy Mac is slow, and the alternative to waiting is
+    /// losing what somebody said.
+    func listen(wav: Data, language: String = "") async throws -> Heard {
+        let path = language.isEmpty ? "/api/listen" : "/api/listen?language=\(language)"
+        let (data, response) = try await raw(path, method: "POST", bytes: wav,
+                                             contentType: "audio/wav", timeout: 120)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw Failure(status: status, detail: Self.reason(from: data) ?? "Sim answered \(status)")
+        }
+        return try JSONDecoder().decode(Heard.self, from: data)
+    }
+
+    /// `send` decodes JSON; these two routes carry audio in one direction
+    /// or the other, so they need the bytes and the headers themselves.
+    private func raw(_ path: String, method: String,
+                     json: [String: Any]? = nil,
+                     bytes: Data? = nil,
+                     contentType: String = "application/json",
+                     timeout: TimeInterval) async throws -> (Data, URLResponse) {
+        guard let url = URL(string: baseURL + path) else {
+            throw Failure(status: 0, detail: "that is not a usable address for Sim")
+        }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = method
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let json { request.httpBody = try JSONSerialization.data(withJSONObject: json) }
+        if let bytes { request.httpBody = bytes }
+        do {
+            return try await URLSession.shared.data(for: request)
+        } catch {
+            throw Failure(status: 0, detail: Self.unreachable(baseURL, error))
+        }
+    }
+
     func url(_ path: String) -> URL? {
         guard let token else { return URL(string: baseURL + path) }
         let join = path.contains("?") ? "&" : "?"

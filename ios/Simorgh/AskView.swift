@@ -143,8 +143,15 @@ struct AskView: View {
                             .font(.system(size: 30))
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(voice.state == .listening ? Brand.crimson : Brand.lapis)
+                            // Breathes with the room, so somebody can see
+                            // the phone is hearing them before any words
+                            // appear -- the recording is sent to Sim in
+                            // one piece, so there is a beat with nothing
+                            // on screen and a still button reads as dead.
+                            .scaleEffect(voice.state == .listening ? 1 + 0.12 * voice.level : 1)
+                            .animation(.easeOut(duration: 0.12), value: voice.level)
                     }
-                    .disabled(waiting)
+                    .disabled(waiting || voice.state == .hearing)
                 } else {
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
@@ -172,15 +179,28 @@ struct AskView: View {
                 Image(systemName: "waveform").foregroundStyle(Brand.crimson).symbolEffect(.variableColor)
                 Text(voice.heard.isEmpty ? "Listening…" : voice.heard)
                     .font(.footnote).lineLimit(2)
+                    // A preview from the phone's own recogniser. What
+                    // reaches Sim is what Sim's whisper hears, which
+                    // arrives a moment later and replaces this.
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("Stop") { voice.cancel() }.font(.footnote)
+            case .hearing:
+                // Sim's whisper has the recording. Named separately from
+                // "thinking" because it is a different wait, and the word
+                // on screen is the only way to tell them apart.
+                ProgressView().controlSize(.small)
+                Text(voice.heard.isEmpty ? "Sim is listening back…" : "Sim is listening back…  \u{201c}\(voice.heard)\u{201d}")
+                    .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
             case .thinking:
                 ProgressView().controlSize(.small)
                 Text("Sim is thinking…").font(.footnote).foregroundStyle(.secondary)
                 Spacer()
             case .speaking:
                 Image(systemName: "speaker.wave.2.fill").foregroundStyle(Brand.gold)
-                Text("Sim is speaking").font(.footnote).foregroundStyle(.secondary)
+                Text(voice.engine == "phone" ? "Speaking (this phone's voice)" : "Sim is speaking")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Spacer()
                 Button("Stop") { voice.stopSpeaking() }.font(.footnote)
             case .idle:
@@ -194,6 +214,9 @@ struct AskView: View {
     private func talk() async {
         writing = false
         if voice.state == .listening { voice.finish(); return }
+        // Sim's own recogniser and Sim's own voice, which means the voice
+        // chat needs the connection the rest of this screen uses.
+        voice.api = Api(baseURL: store.baseURL, token: store.token)
         voice.onHeard = { said in
             turns.append(Turn(mine: true, text: said))
             Task { await ask(said) }

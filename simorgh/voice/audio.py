@@ -42,6 +42,28 @@ def wav_bytes(audio: Audio) -> bytes:
     return buf.getvalue()
 
 
+def read_wav_bytes(data: bytes) -> Audio:
+    """A WAV file already in memory as `Audio`. The phone records at 16
+    kHz mono int16 on purpose (stage 12) so this is a header parse and a
+    slice; anything else goes out to ffmpeg through a temporary file,
+    because a piped m4a has its index at the end and ffmpeg cannot seek
+    a pipe."""
+    import io
+
+    try:
+        with wave.open(io.BytesIO(data), "rb") as w:
+            if w.getnchannels() == CHANNELS and w.getsampwidth() == SAMPLE_WIDTH and w.getframerate() == SAMPLE_RATE:
+                return Audio(w.readframes(w.getnframes()))
+    except wave.Error:
+        pass                      # not a WAV at all; ffmpeg may still know it
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".audio") as tmp:
+        tmp.write(data)
+        tmp.flush()
+        return read_wav(Path(tmp.name))
+
+
 def read_wav(path: Path) -> Audio:
     """A WAV file as `Audio`, resampled to 16 kHz mono through ffmpeg
     when it is anything else."""
@@ -425,5 +447,5 @@ def open_speaker(preferred: str = "auto") -> tuple[object | None, str]:
 
 
 __all__ = ["CommandSpeaker", "FFMPEG_FRAME_BYTES" if False else "FRAME_BYTES", "FRAME_MS", "FfmpegMicrophone",
-           "SounddeviceMicrophone", "SounddeviceSpeaker", "open_microphone", "open_speaker", "read_wav",
+           "SounddeviceMicrophone", "SounddeviceSpeaker", "open_microphone", "open_speaker", "read_wav", "read_wav_bytes",
            "wav_bytes", "write_wav"]

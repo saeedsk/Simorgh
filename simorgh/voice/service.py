@@ -39,6 +39,7 @@ _CONSUMES = (
     topics.VOICE_STATUS_REQUEST, topics.VOICE_CONTROL_REQUEST, topics.VOICE_SPEAK_REQUEST,
     topics.VOICE_LISTEN_REQUEST, topics.VOICE_VOICES_REQUEST, topics.VOICE_DEVICES_REQUEST,
     topics.VOICE_MODELS_REQUEST, topics.VOICE_BENCH_REQUEST,
+    topics.VOICE_SYNTHESISE_REQUEST, topics.VOICE_TRANSCRIBE_REQUEST,
     topics.TURN_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
     topics.PERSONA_STATE_CHANGED, topics.TV_STATE, topics.SESSION_DELTA,
@@ -195,6 +196,8 @@ class Service:
             topics.VOICE_DEVICES_REQUEST: self._on_devices,
             topics.VOICE_MODELS_REQUEST: self._on_models,
             topics.VOICE_BENCH_REQUEST: self._on_bench,
+            topics.VOICE_SYNTHESISE_REQUEST: self._on_synthesise,
+            topics.VOICE_TRANSCRIBE_REQUEST: self._on_transcribe,
         }
         for topic, handler in handlers.items():
             self._subs.append(await ctx.bus.subscribe(topic, handler))
@@ -930,7 +933,7 @@ class Service:
 
         pipeline, why = await self._pipeline_ready()
         if pipeline is None:
-            await self._reply(message, topics.VOICE_BENCH_REPLY, {"ok": False, "detail": why})
+            await self._reply(message, topics.VOICE_BENCH_REPLY, self._refused("refused", why))
             return
         play = bool(message.payload.get("play", True))
         try:
@@ -938,23 +941,136 @@ class Service:
                 synthesiser=pipeline._tts, recogniser=pipeline._stt, speaker=pipeline._speaker,  # noqa: SLF001
                 config=self.config, play=play)
         except Exception as exc:  # noqa: BLE001 -- a benchmark that fails is a result too
-            await self._reply(message, topics.VOICE_BENCH_REPLY, {"ok": False, "detail": f"benchmark failed: {exc!r}"})
+            await self._reply(message, topics.VOICE_BENCH_REPLY, self._refused("refused", f"benchmark failed: {exc!r}"))
             return
         await self._reply(message, topics.VOICE_BENCH_REPLY, {"ok": True, "result": result})
+
+    # ------------------------------------------ audio for somebody else
+    #
+    # The phone (stage 12) has its own speaker and its own microphone and
+    # neither of them is here. Apple's `AVSpeechSynthesizer` is what it
+    # used until 2026-09-24 -- "why the voice on sim app sounds robotic,
+    # I want to have same voice chat experience as I have on mac with
+    # same stt and tts engines" (the creator). So: synthesise WITHOUT
+    # playing, and transcribe audio recorded elsewhere, with the audio
+    # itself travelling as a ledger blob. `_ship_to_tv` in session.py
+    # has shipped Kokoro's voice off this machine the same way since the
+    # TV work; this is that mechanism asked for on purpose instead of as
+    # a side effect of speaking aloud in the room.
+    #
+    # Neither touches the session, the echo tracker or the turn state
+    # machine: a phone turn is not a turn in the room, and must not make
+    # Sim think it is talking here.
+
+    @staticmethod
+    def _refused(code: str, detail: str) -> dict:
+        """A refusal that PASSES its own contract. `{"ok": False,
+        "detail": ...}` does not: the failure branch of every `*.reply`
+        requires an `error` object, so a reply shaped that way is thrown
+        out by `validate` and the caller waits out its timeout instead of
+        being told why (found writing these two handlers, 2026-09-24 --
+        `voice.speak.reply` has the same hole on every failure path).
+        `detail` rides along too, because that is the key this
+        subsystem's callers already read."""
+        from ..contracts.registry import error_reply_payload
+
+        return {**error_reply_payload(code, detail), "detail": detail}
+
+    async def _engines(self):
+        """The opened synthesiser and recogniser, or a reason."""
+        pipeline, why = await self._pipeline_ready()
+        if pipeline is None:
+            return None, None, why
+        return pipeline._tts, pipeline._stt, ""  # noqa: SLF001
+
+    async def _on_synthesise(self, message) -> None:
+        text = str(message.payload.get("text") or "").strip()
+        if not text:
+            await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("nothing_to_say", "nothing to say"))
+            return
+        tts, _, why = await self._engines()
+        if tts is None:
+            await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("engines_unavailable", why))
+            return
+        ledger = self._ctx.ledger if self._ctx else None
+        if ledger is None:
+            await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("no_ledger", "no ledger to put the audio in"))
+            return
+        speed = message.payload.get("speed")
+        # `_with_tone` is the one place that knows which engine takes a
+        # lane and which takes a tone, and respells the IPA marks for an
+        # engine that reads letters. Calling `synthesise` directly here
+        # would be a second, drifting copy of that knowledge.
+        from .tts import _with_tone
+
+        try:
+            audio = await _with_tone(
+                tts, text,
+                voice=str(message.payload.get("voice") or self.config.tts_voice or ""),
+                speed=float(speed) if isinstance(speed, (int, float)) and speed > 0 else float(self.config.tts_speed or 1.0),
+                tone="", lane=str(message.payload.get("lane") or ""))
+        except Exception as exc:  # noqa: BLE001 -- an engine failure is an answer, not a crash
+            await self._reply(message, topics.VOICE_SYNTHESISE_REPLY,
+                              self._refused("engine_failed", f"could not synthesise: {exc!r}"))
+            return
+        from .audio import wav_bytes
+
+        try:
+            ref = await ledger.put_blob(wav_bytes(audio), content_type="audio/wav")
+        except Exception as exc:  # noqa: BLE001
+            await self._reply(message, topics.VOICE_SYNTHESISE_REPLY,
+                              self._refused("engine_failed", f"could not store the audio: {exc!r}"))
+            return
+        await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, {
+            "ok": True, "ref": ref, "seconds": round(audio.seconds, 3), "sample_rate": audio.sample_rate,
+            "engine": _spoken_by(tts, self._engine_names["tts"])})
+
+    async def _on_transcribe(self, message) -> None:
+        ref = str(message.payload.get("ref") or "").strip()
+        if not ref:
+            await self._reply(message, topics.VOICE_TRANSCRIBE_REPLY, self._refused("no_audio", "no audio to transcribe"))
+            return
+        ledger = self._ctx.ledger if self._ctx else None
+        if ledger is None:
+            await self._reply(message, topics.VOICE_TRANSCRIBE_REPLY, self._refused("no_ledger", "no ledger to read the audio from"))
+            return
+        _, stt, why = await self._engines()
+        if stt is None:
+            await self._reply(message, topics.VOICE_TRANSCRIBE_REPLY, self._refused("engines_unavailable", why))
+            return
+        from .audio import read_wav_bytes
+
+        try:
+            audio = read_wav_bytes(await ledger.get_blob(ref))
+        except Exception as exc:  # noqa: BLE001
+            await self._reply(message, topics.VOICE_TRANSCRIBE_REPLY,
+                              self._refused("engine_failed", f"could not read the audio: {exc!r}"))
+            return
+        language = str(message.payload.get("language") or self.config.stt_language or "")
+        try:
+            heard = await stt.transcribe(audio, language=language)
+        except Exception as exc:  # noqa: BLE001
+            await self._reply(message, topics.VOICE_TRANSCRIBE_REPLY,
+                              self._refused("engine_failed", f"could not transcribe: {exc!r}"))
+            return
+        await self._reply(message, topics.VOICE_TRANSCRIBE_REPLY, {
+            "ok": True, "text": heard.text, "confidence": float(getattr(heard, "confidence", 1.0)),
+            "language": getattr(heard, "language", "") or language, "seconds": round(audio.seconds, 3),
+            "engine": getattr(stt, "name", "")})
 
     async def _on_speak(self, message) -> None:
         text = str(message.payload.get("text") or "").strip()
         if not text:
-            await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": "nothing to say"})
+            await self._reply(message, topics.VOICE_SPEAK_REPLY, self._refused("refused", "nothing to say"))
             return
         pipeline, why = await self._pipeline_ready()
         if pipeline is None:
-            await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": why})
+            await self._reply(message, topics.VOICE_SPEAK_REPLY, self._refused("refused", why))
             return
         try:
             said = await self._say(text, lane="expressive")   # `voice test`: the expressive engine, on purpose
         except Exception as exc:  # noqa: BLE001 -- an engine failure is an answer, not a crash
-            await self._reply(message, topics.VOICE_SPEAK_REPLY, {"ok": False, "detail": f"could not speak: {exc!r}"})
+            await self._reply(message, topics.VOICE_SPEAK_REPLY, self._refused("refused", f"could not speak: {exc!r}"))
             return
         # WHICH engine spoke, not which are open. `_engine_names["tts"]`
         # is the synthesiser's own name, and for two lanes that is the
@@ -976,14 +1092,14 @@ class Service:
     async def _on_listen(self, message) -> None:
         pipeline, why = await self._pipeline_ready()
         if pipeline is None:
-            await self._reply(message, topics.VOICE_LISTEN_REPLY, {"ok": False, "detail": why})
+            await self._reply(message, topics.VOICE_LISTEN_REPLY, self._refused("refused", why))
             return
         seconds = float(message.payload.get("seconds") or 0) or None
         respond = bool(message.payload.get("respond", True))
         try:
             utterance, said = await pipeline.listen_once(max_seconds=seconds, respond=respond)
         except Exception as exc:  # noqa: BLE001
-            await self._reply(message, topics.VOICE_LISTEN_REPLY, {"ok": False, "detail": f"could not listen: {exc!r}"})
+            await self._reply(message, topics.VOICE_LISTEN_REPLY, self._refused("refused", f"could not listen: {exc!r}"))
             return
         if utterance is None:
             await self._reply(message, topics.VOICE_LISTEN_REPLY, {"ok": True, "heard": "", "detail": "heard nothing"})
@@ -1090,8 +1206,7 @@ class Service:
             notes: list[str] = []
             path, problem = await asyncio.to_thread(_pocket.install, self.config.venv_dir, log=notes.append)
             if path is None:
-                await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": False, "detail": problem,
-                                                                       "available": available})
+                await self._reply(message, topics.VOICE_MODELS_REPLY, dict(self._refused("refused", problem), available=available))
                 return
             detail = (f"pocket is installed at {path.parent.parent}; `voice set tts_farsi pocket` speaks Farsi "
                       f"with it, cloning the voice in {self.config.tts_farsi_reference} "
@@ -1109,7 +1224,7 @@ class Service:
             notes: list[str] = []
             path, problem = await asyncio.to_thread(installer, self.config.venv_dir, log=notes.append)
             if path is None:
-                await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": False, "detail": problem, "available": available})
+                await self._reply(message, topics.VOICE_MODELS_REPLY, dict(self._refused("refused", problem), available=available))
                 return
             detail = (f"{name} is installed at {path.parent.parent}; `voice set tts {name}` speaks with it "
                       f"(the model's weights download on first use" + (" -- 16 GB for miso" if name == "miso" else "") + ")")
@@ -1132,8 +1247,7 @@ class Service:
         else:
             path, problem = await asyncio.to_thread(download_model, name, model_dir)
         if path is None:
-            await self._reply(message, topics.VOICE_MODELS_REPLY, {"ok": False, "detail": problem,
-                                                                   "available": available})
+            await self._reply(message, topics.VOICE_MODELS_REPLY, dict(self._refused("refused", problem), available=available))
             return
         if self._pipeline is not None:
             await self._pipeline.stop()

@@ -356,6 +356,17 @@ VOICE_CONTROL_REQUEST = "voice.control.request"    # on | off | mute | unmute
 VOICE_CONTROL_REPLY = "voice.control.reply"
 VOICE_SPEAK_REQUEST = "voice.speak.request"        # say this
 VOICE_SPEAK_REPLY = "voice.speak.reply"
+# Speech for somebody else's ears and somebody else's microphone: the
+# phone (stage 12) has neither Sim's speaker nor Sim's mic, and Apple's
+# own engines sounded nothing like Kokoro -- "why the voice on sim app
+# sounds robotic" (the creator, 2026-09-24). These two carry the audio
+# itself through the ledger, as a blob ref, the way TV_SPEECH already
+# does: synthesise WITHOUT playing, and transcribe audio recorded
+# elsewhere.
+VOICE_SYNTHESISE_REQUEST = "voice.synthesise.request"
+VOICE_SYNTHESISE_REPLY = "voice.synthesise.reply"
+VOICE_TRANSCRIBE_REQUEST = "voice.transcribe.request"
+VOICE_TRANSCRIBE_REPLY = "voice.transcribe.reply"
 VOICE_LISTEN_REQUEST = "voice.listen.request"      # one push-to-talk turn
 VOICE_LISTEN_REPLY = "voice.listen.reply"
 VOICE_VOICES_REQUEST = "voice.voices.request"

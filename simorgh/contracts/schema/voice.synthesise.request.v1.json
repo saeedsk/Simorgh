@@ -1,0 +1,34 @@
+{
+  "$id": "https://simorgh.local/schema/voice.synthesise.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Synthesise and return the audio as a ledger blob ref; do NOT play it here. For a client with its own speaker (the phone, stage 12). lane: \"expressive\" picks the expressive engine, \"\" the everyday one.",
+  "properties": {
+    "lane": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "speed": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "voice": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "title": "voice.synthesise.request",
+  "type": "object"
+}

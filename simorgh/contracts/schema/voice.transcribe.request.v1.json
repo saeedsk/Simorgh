@@ -1,0 +1,22 @@
+{
+  "$id": "https://simorgh.local/schema/voice.transcribe.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Transcribe a WAV blob recorded somewhere else (the phone's microphone). language: \"\" means the configured stt_language.",
+  "properties": {
+    "language": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ref": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ref"
+  ],
+  "title": "voice.transcribe.request",
+  "type": "object"
+}

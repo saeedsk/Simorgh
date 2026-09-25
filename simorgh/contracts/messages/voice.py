@@ -34,6 +34,18 @@ VoiceControlRequest = define(t.VOICE_CONTROL_REQUEST, [
 VoiceControlReply = define(t.VOICE_CONTROL_REPLY, [O("detail", Str), *_STATE])
 VoiceSpeakRequest = define(t.VOICE_SPEAK_REQUEST, [F("text", Str), O("voice", Str)])
 VoiceSpeakReply = define(t.VOICE_SPEAK_REPLY, [O("seconds", Float), O("engine", Str), O("detail", Str)])
+VoiceSynthesiseRequest = define(t.VOICE_SYNTHESISE_REQUEST, [F("text", Str), O("voice", Str), O("speed", Float), O("lane", Str)],
+                                doc="Synthesise and return the audio as a ledger blob ref; do NOT play it here. "
+                                    "For a client with its own speaker (the phone, stage 12). lane: \"expressive\" "
+                                    "picks the expressive engine, \"\" the everyday one.")
+VoiceSynthesiseReply = define(t.VOICE_SYNTHESISE_REPLY, [
+    O("ref", Str), O("seconds", Float), O("engine", Str), O("sample_rate", Int), O("detail", Str)],
+    doc="ref: a `audio/wav` blob in the ledger, fetched with `ledger.get_blob`.")
+VoiceTranscribeRequest = define(t.VOICE_TRANSCRIBE_REQUEST, [F("ref", Str), O("language", Str)],
+                               doc="Transcribe a WAV blob recorded somewhere else (the phone's microphone). "
+                                   "language: \"\" means the configured stt_language.")
+VoiceTranscribeReply = define(t.VOICE_TRANSCRIBE_REPLY, [
+    O("text", Str), O("confidence", Float), O("language", Str), O("seconds", Float), O("engine", Str), O("detail", Str)])
 VoiceListenRequest = define(t.VOICE_LISTEN_REQUEST, [O("seconds", Float), O("respond", Bool)],
                             doc="respond=false transcribes only; the default asks Sim and speaks the reply.")
 VoiceListenReply = define(t.VOICE_LISTEN_REPLY, [

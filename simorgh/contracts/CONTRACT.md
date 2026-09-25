@@ -46,7 +46,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/tool.py` | `tool.*` (4) |
 | `simorgh/contracts/messages/ui.py` | `ui.*` (11) |
 | `simorgh/contracts/messages/verify.py` | `verify.*` (2) |
-| `simorgh/contracts/messages/voice.py` | `voice.*` (19) |
+| `simorgh/contracts/messages/voice.py` | `voice.*` (23) |
 | `simorgh/contracts/messages/world.py` | `world.*` (4) |
 | `simorgh/contracts/people.py` | `Person` (identities, role, `permissions`, `interests`), `PERMISSIONS`, the role gates `may_check_in` / `may_share_interest`, `household_people()` (stage 6 item 4, stage 10 item 1) |
 | `simorgh/contracts/overheard.py` | the store of speech not addressed to Sim, grouped into conversations (file IO under a lock) |
@@ -182,5 +182,9 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `world.wellbeing.changed{person, state: unknown|usual|low|high, mean, evidence, since?}` and `world.env.query.what` gains `wellbeing` (stage 10 item 2, 2026-09-20). Publisher: worldmodel (flips only, consented adults only, never a person's words). Consumer: initiative (stage 10 item 3: a `low` state is weighed as a `check_in`). Additive.
 
 - Stage 6 item 4 follow-ups (2026-09-22): `persona.user_model.updated` declares optional `person` (household name, "" for the console) and `channel`, which Persona has sent since the fold earlier today (schema regenerated; additive). `channels.CONSOLE_CHANNELS = ("", "cli")` and `channels.is_console(channel)` (exact match, `None` is not the console) are the one answer to "is this the owner's keyboard"; the three private copies are gone. Consumers: persona (`user_model.attribute`; produces the two fields), worldmodel (`facets/people.py::PeopleFacet.speaker`; consumes the two fields), guardian (`tiers.py::role_of`). No behaviour change.
+- 2026-09-24: `voice.synthesise.request|reply` and `voice.transcribe.request|reply`. Speech for a client that
+  has its own speaker and its own microphone: synthesise WITHOUT playing (the reply carries an `audio/wav`
+  ledger blob `ref`), and transcribe audio recorded elsewhere. Producer: interface (`POST /api/say`,
+  `POST /api/listen`); consumer: voice. The phone used Apple's engines until then and sounded like it.
 - 2026-09-22: `voice.control.request` gains the action `calibrate` (`value` is the calibration verb: start [options] | status | stop | keep | accept | skip; `name` the person). Interface sends it, Voice handles it (`voice/calibration.py`). It first travelled as `enroll` + key=calibrate while the enum had no word for it.
 - 2026-09-22: `guardian.standing.request{action: list|revoke, key?}` and `guardian.standing.reply{standing: [obj], revoked?}` (Interface asks, Guardian answers). `action.needs_human`/`ui.prompt` `options` may now include `always`.
