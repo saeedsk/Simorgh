@@ -283,6 +283,9 @@ class Service:
         # a correctness bug.
         self._input_pending = False
         self._http: HttpApi | None = None
+        #: Holds the `_simorgh._tcp` registration for as long as Sim is up
+        #: (`announce.py`); None when nothing here can publish one.
+        self._announcer = None
         self._telegram = None
         self._whatsapp = None
 
@@ -411,6 +414,11 @@ class Service:
                 )
             try:
                 await self._http.start()
+                # Announce on the LAN, so a client need never be TOLD an
+                # address (the creator, 2026-09-25). Best effort: a house
+                # with no mDNS publisher still works, the phone just has to
+                # be given an address once.
+                self._announcer = self._announce(ctx)
                 line = f"dashboard: {self._http.url}"
                 # Same reason as the splash: printing this from `start()`
                 # lands it in the middle of the Kernel's boot progress.
@@ -588,8 +596,27 @@ class Service:
             "accepted": command.name, "finished": bool(done), "said": said,
         }).encode("utf-8"), "application/json"
 
+    def _announce(self, ctx):
+        """`_simorgh._tcp` on the local network, carrying every address Sim
+        answers on -- including the tailnet one, which is the only one that
+        works away from the house, and which mDNS itself cannot reach."""
+        from .addresses import reachable
+        from .announce import Announcer
+
+        def log(level, event, **fields):
+            getattr(ctx.logger, level)(event, **fields)
+
+        announcer = Announcer(self.config.http_port, reachable(self.config.http_port), log=log)
+        if not announcer.start():
+            ctx.logger.info("interface.not_announced", detail=announcer.detail)
+            return None
+        return announcer
+
     async def stop(self) -> None:
         self._stop_repl.set()
+        if self._announcer is not None:
+            self._announcer.stop()
+            self._announcer = None
         if self._seed_task is not None:
             self._seed_task.cancel()
             try:

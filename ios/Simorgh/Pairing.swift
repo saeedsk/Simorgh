@@ -95,6 +95,10 @@ struct PairingView: View {
         defer { busy = false }
         do {
             let paired = try await Api(baseURL: store.baseURL, token: nil).pair(code: code)
+            // Learn every address BEFORE saving, so the very first launch
+            // after pairing already knows the tailnet one.
+            store.adopt(paired.addresses ?? [])
+            store.working(store.baseURL)
             store.save(token: paired.token, name: paired.name, capabilities: paired.capabilities)
         } catch {
             problem = error.localizedDescription

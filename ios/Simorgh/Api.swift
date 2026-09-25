@@ -40,6 +40,10 @@ struct Api {
         let device_id: String
         let name: String
         let capabilities: [String]
+        /// Every address Sim answers on, handed over at the one moment the
+        /// phone is certainly talking to it. Pairing on the LAN and then
+        /// leaving the house used to end the app's usefulness.
+        let addresses: [String]?
     }
 
     struct ChatReply: Decodable {
@@ -285,6 +289,15 @@ struct Api {
     /// A URL on Sim with the token in the QUERY -- an `AVPlayer` and an
     /// `AsyncImage` cannot set a header, which is the whole reason
     /// `?token=` exists on this server.
+    private struct Addresses: Decodable { let addresses: [String]? }
+
+    /// Every address Sim answers on, best first -- the tailnet before the
+    /// LAN, because it reaches Sim in both places.
+    func addresses() async throws -> [String] {
+        let got: Addresses = try await send("/api/addresses", method: "GET", timeout: 6)
+        return got.addresses ?? []
+    }
+
     struct HomeAssistant: Decodable {
         let url: String?
         let configured: Bool?

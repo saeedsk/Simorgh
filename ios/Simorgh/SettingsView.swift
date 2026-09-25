@@ -23,7 +23,22 @@ struct SettingsView: View {
                             .multilineTextAlignment(.trailing)
                     }
                     Button("Check") { Task { await check() } }
+                    Button("Find Sim") { Task { await find() } }
                     if let reachable { Text(reachable).font(.footnote).foregroundStyle(.secondary) }
+                    if store.candidates.count > 1 {
+                        // Worth showing: "which of these is it using" is the
+                        // first question when the app works at home and not
+                        // outside it.
+                        ForEach(store.candidates, id: \.self) { address in
+                            HStack {
+                                Image(systemName: address == store.baseURL
+                                      ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(address == store.baseURL ? Brand.gold : Color.secondary)
+                                Text(address).font(.caption2).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
+                            }
+                        }
+                    }
                 }
                 // `Section(_ title:)` has no `footer:` overload; a header
                 // closure does.
@@ -84,6 +99,17 @@ struct SettingsView: View {
             haFromSim = url.isEmpty ? (found.detail ?? "Sim does not know.") : "Sim says \(url)"
         } catch {
             haFromSim = nil
+        }
+    }
+
+    /// Bonjour on this network, then race everything Sim has ever said it
+    /// answers on.
+    private func find() async {
+        reachable = "looking…"
+        if let found = await Finding.settle(store) {
+            reachable = "using \(found)"
+        } else {
+            reachable = "no Sim answered on any known address"
         }
     }
 

@@ -17,8 +17,20 @@ final class Store: ObservableObject {
     @Published private(set) var deviceName: String?
     @Published private(set) var capabilities: [String] = []
 
+    /// Every address Sim is known to answer on, best first. Sim reports
+    /// these itself (`/api/addresses`, and in the pairing reply), and
+    /// Bonjour adds whatever it finds on the LAN.
+    ///
+    /// It was ONE address, typed at pairing time, and it was a LAN address
+    /// -- so the app stopped working the moment the creator left the house
+    /// ("I turned on tailscale on both mac and iphone and went outside, sim
+    /// app didn't work", 2026-09-25). Sim had been listening on the tailnet
+    /// all along.
+    @Published private(set) var candidates: [String] = []
+
     private enum Keys {
         static let baseURL = "sim.baseURL"
+        static let candidates = "sim.candidates"
         static let name = "sim.deviceName"
         static let caps = "sim.capabilities"
         static let keychain = "sim.deviceToken"
@@ -29,6 +41,32 @@ final class Store: ObservableObject {
         deviceName = UserDefaults.standard.string(forKey: Keys.name)
         capabilities = UserDefaults.standard.stringArray(forKey: Keys.caps) ?? []
         token = Self.readKeychain(Keys.keychain)
+        candidates = UserDefaults.standard.stringArray(forKey: Keys.candidates) ?? []
+        if candidates.isEmpty && !baseURL.isEmpty { candidates = [baseURL] }
+    }
+
+    /// Learn addresses without forgetting the working one. Sim's own order
+    /// is kept (it puts the tailnet first, which reaches Sim both at home
+    /// and away) except that whatever is working NOW stays first.
+    func adopt(_ addresses: [String]) {
+        var merged = candidates
+        for address in addresses {
+            let clean = address.trimmingCharacters(in: .whitespaces).trimmingSuffix("/")
+            if !clean.isEmpty && !merged.contains(clean) { merged.append(clean) }
+        }
+        candidates = merged
+        UserDefaults.standard.set(merged, forKey: Keys.candidates)
+    }
+
+    /// This one answered; try it first from now on.
+    func working(_ address: String) {
+        let clean = address.trimmingCharacters(in: .whitespaces).trimmingSuffix("/")
+        guard !clean.isEmpty else { return }
+        if baseURL != clean { baseURL = clean }
+        var rest = candidates.filter { $0 != clean }
+        rest.insert(clean, at: 0)
+        candidates = rest
+        UserDefaults.standard.set(rest, forKey: Keys.candidates)
     }
 
     var paired: Bool { token != nil }
@@ -91,5 +129,16 @@ final class Store: ObservableObject {
 
     private static func deleteKeychain(_ account: String) {
         SecItemDelete(query(account) as CFDictionary)
+    }
+}
+
+extension String {
+    /// `trimmingSuffix("/")` rather than `hasSuffix` twice at every call
+    /// site: a trailing slash is the difference between a working address
+    /// and a double-slashed 404.
+    func trimmingSuffix(_ suffix: String) -> String {
+        var out = self
+        while out.hasSuffix(suffix) { out.removeLast(suffix.count) }
+        return out
     }
 }

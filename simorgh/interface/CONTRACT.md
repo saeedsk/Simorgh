@@ -199,6 +199,21 @@ that was mysteriously short. Until 2026-09-24 the app used Apple's `AVSpeechSynt
 as I have on mac with same stt and tts engines" (the creator).
 
 13b. `GET /api/console` serves the lines Sim actually PRINTED -- `contracts/console.py`'s capture, glyphs and all -- so a client can mirror the terminal rather than approximate it with a ledger tail. Token-gated: Sim's own output is not open to the LAN. `?contains=` filters, which is what makes a long tail usable on a phone. `POST /api/command` is the other half, and already existed.
+13g. A client is never required to be TOLD an address. Sim announces `_simorgh._tcp` on the local network
+for as long as it is up (`announce.py`, a supervised `dns-sd -R` / `avahi-publish-service` child, else the
+optional `zeroconf` package, else nothing and `interface.not_announced` says which is missing -- the same
+"optional, probed, named when absent" rule `devices.barcode()` follows). `GET /api/addresses` and the
+`POST /api/pair` reply both carry every address Sim answers on (`addresses.py`), and the mDNS TXT record
+carries them too -- because mDNS is MULTICAST and multicast is not routed, so discovery works on the LAN and
+finds nothing over a tailnet, and the record has to hand over the address that does work away from home.
+Ordered tailnet-first: that one reaches Sim at home as well as away, so preferring it costs a home user
+nothing and saves an away user the whole app. The creator, 2026-09-25: "I turned on tailscale on both mac and
+iphone and went outside, sim app didn't work" -- the app had one LAN address and no way to learn a second,
+while Sim had been answering on the tailnet throughout, `http_host` being `0.0.0.0`. `_pairing_base()` had
+the same bug with its own docstring already describing it ("a pairing URL that only works on the LAN is a
+phone that stops working at the front door") and then returning `127.0.0.1`; it now returns the best
+discovered address. Discovery never raises: a machine with no network still boots.
+
 13f. `GET /api/house/assistant` tells a paired device where Home Assistant is -- the URL only, from
 `HOME_ASSISTANT_URL`, which `kernel/registry.py` now lets Interface read and does NOT let it read the token.
 The app's HA tab is a web view and signs in with HA's own login and its own cookie, so the address is all it

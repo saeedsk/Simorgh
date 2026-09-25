@@ -3,15 +3,24 @@ import SwiftUI
 @main
 struct SimorghApp: App {
     @StateObject private var store = Store()
+    @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
         WindowGroup {
-            if store.paired {
-                RootView()
-                    .environmentObject(store)
-            } else {
-                PairingView()
-                    .environmentObject(store)
+            Group {
+                if store.paired {
+                    RootView()
+                } else {
+                    PairingView()
+                }
+            }
+            .environmentObject(store)
+            // Find Sim before anything asks for it, and again whenever the
+            // app comes back -- coming back is usually what happened after
+            // walking out of the house or in through the door.
+            .task { _ = await Finding.settle(store) }
+            .onChange(of: phase) { _, now in
+                if now == .active { Task { _ = await Finding.settle(store) } }
             }
         }
     }

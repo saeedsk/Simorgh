@@ -2725,12 +2725,26 @@ def _pair_command(book, args: str = "") -> Outcome:
 
 def _pairing_base() -> str:
     """Where the phone should reach Sim. The rendezvous when one is set,
-    else this machine -- and it is deliberately NOT guessed from the
-    request, because a pairing URL that only works on the LAN is a phone
-    that stops working at the front door."""
+    else the best address this machine answers on.
+
+    This said the right thing and did not do it: "a pairing URL that only
+    works on the LAN is a phone that stops working at the front door", and
+    then it returned `127.0.0.1`, which does not even work on the LAN. The
+    creator scanned it, typed his LAN address in by hand, and the app
+    stopped at the front door exactly as the comment predicted
+    (2026-09-25). `addresses.reachable` puts the tailnet first for that
+    reason -- it reaches Sim at home as well as away.
+    """
     import os
 
-    return (os.environ.get("SIMORGH_PUBLIC_URL") or "http://127.0.0.1:8765").rstrip("/")
+    from .addresses import reachable
+
+    given = os.environ.get("SIMORGH_PUBLIC_URL")
+    if given:
+        return given.rstrip("/")
+    port = int(os.environ.get("SIMORGH_HTTP_PORT") or 8765)
+    found = reachable(port)
+    return found[0] if found else f"http://127.0.0.1:{port}"
 
 
 def _devices_command(book, args: str = "") -> Outcome:

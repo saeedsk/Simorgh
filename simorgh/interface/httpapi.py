@@ -529,9 +529,16 @@ class HttpApi:
                 with contextlib.suppress(Exception):
                     self._logger.info("interface.device_paired", device=device.id, name=device.name,
                                       capabilities=list(device.capabilities))
+            from .addresses import reachable
+
+            # Every address Sim answers on, at the one moment the phone is
+            # certainly listening. Pairing over the LAN and then walking out
+            # of the house used to end the app's day; now it leaves knowing
+            # the tailnet address too.
             return 200, json.dumps({
                 "token": token, "device_id": device.id, "name": device.name,
                 "capabilities": list(device.capabilities),
+                "addresses": reachable(self._port),
             }).encode("utf-8"), "application/json"
 
         self.register_route("POST", "/api/pair", _pair, auth=False, max_body=512, rate=(20, 60.0))
@@ -775,6 +782,26 @@ class HttpApi:
                 "text": out.get("text") or "", "confidence": out.get("confidence"),
                 "language": out.get("language") or "", "seconds": out.get("seconds"),
                 "engine": out.get("engine") or "", "ok": True}).encode("utf-8"), "application/json"
+
+        async def _addresses(_query, _body, headers):
+            """Every address Sim answers on, best first.
+
+            The app kept ONE, from pairing, and it was a LAN address -- so
+            it stopped working at the front door ("I turned on tailscale on
+            both mac and iphone and went outside, sim app didn't work", the
+            creator, 2026-09-25). Sim was on the tailnet throughout,
+            because `http_host` is `0.0.0.0`; nothing had told the phone.
+            """
+            who = self.caller(headers, _query)
+            if not self.may(who, "read"):
+                return 403, json.dumps({"error": {
+                    "code": "capability_required", "capability": "read"}}).encode("utf-8"), "application/json"
+            from .addresses import reachable
+
+            found = reachable(self._port)
+            return 200, json.dumps({"addresses": found}).encode("utf-8"), "application/json"
+
+        self.register_route("GET", "/api/addresses", _addresses)
 
         async def _home_assistant(_query, _body, headers):
             """Where Home Assistant is.
