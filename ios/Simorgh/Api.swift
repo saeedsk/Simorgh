@@ -152,11 +152,40 @@ struct Api {
         return wrapped.streams ?? []
     }
 
-    /// A camera's live HLS stream, for AVPlayer. The token rides in the
-    /// query because a player cannot set a header.
-    func hlsURL(camera: String) -> URL? {
-        guard let token else { return nil }
-        return URL(string: "\(baseURL)/tv/hls/\(camera)/index.m3u8?token=\(token)")
+    /// What `/api/dash/streams` really returns, read off the server rather
+    /// than guessed: `cameras` are STILLS (`/cameras/snap/...`) and
+    /// `streams` are live HLS relays, which exist only while something has
+    /// started one. Guessing `channel`/`id` here showed an empty tab.
+    struct Feeds: Decodable {
+        struct Still: Decodable {
+            let name: String
+            let safe: String?
+            let kind: String?
+            let url: String?
+            let at: Double?
+        }
+        struct Live: Decodable {
+            let channel: Int?
+            let name: String?
+            let url: String?
+            let live: Bool?
+            let at: Double?
+        }
+        let cameras: [Still]?
+        let streams: [Live]?
+    }
+
+    func feeds() async throws -> Feeds {
+        try await send("/api/dash/streams", method: "GET")
+    }
+
+    /// A URL on Sim with the token in the QUERY -- an `AVPlayer` and an
+    /// `AsyncImage` cannot set a header, which is the whole reason
+    /// `?token=` exists on this server.
+    func url(_ path: String) -> URL? {
+        guard let token else { return URL(string: baseURL + path) }
+        let join = path.contains("?") ? "&" : "?"
+        return URL(string: "\(baseURL)\(path)\(join)token=\(token)")
     }
 
     // MARK: - Transport

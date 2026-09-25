@@ -1,83 +1,136 @@
 import AVKit
 import SwiftUI
 
-/// The cameras. iOS plays HLS natively, and Sim already serves it at
-/// `/tv/hls/<n>/index.m3u8` -- so this is the one place a phone is a better
-/// client than the television, where in-page video came back blank on the
-/// Cast receiver.
+/// The cameras: a still from each, and live video where a relay is running.
+///
+/// The two are different things on Sim and the tab says so. `cameras` are
+/// stills refreshed as Sim takes them; `streams` are HLS relays that exist
+/// only while something has started one -- so "no live view" here means
+/// nothing is relaying, not that the camera is down. Asking Sim to START a
+/// relay is `cam_stream`, which needs the action route (stage 12 item 3a);
+/// until then this offers what exists rather than a button that fails.
 struct CamerasView: View {
     @EnvironmentObject var store: Store
-    @State private var cameras: [Camera] = []
+    @State private var stills: [Api.Feeds.Still] = []
+    @State private var live: [Api.Feeds.Live] = []
     @State private var problem: String?
-    @State private var watching: Camera?
+    @State private var watching: Api.Feeds.Live?
+    @State private var refreshed = Date()
 
-    struct Camera: Identifiable, Hashable {
-        let id: String
-        let name: String
-    }
+    private var api: Api { Api(baseURL: store.baseURL, token: store.token) }
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
 
     var body: some View {
         NavigationStack {
-            Group {
+            ScrollView {
                 if let problem {
+                    Text(problem).font(.footnote).foregroundStyle(Brand.crimson)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .card(tint: Brand.crimson).padding(.horizontal, 16).padding(.top, 12)
+                } else if stills.isEmpty {
                     ContentUnavailableView("No cameras", systemImage: "video.slash",
-                                           description: Text(problem))
-                } else if cameras.isEmpty {
-                    ProgressView().task { await load() }
-                } else {
-                    List(cameras) { camera in
-                        Button { watching = camera } label: {
-                            HStack {
-                                Image(systemName: "video")
-                                Text(camera.name)
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(.secondary)
-                            }
-                        }
+                                           description: Text("Sim has not taken a still yet."))
+                        .padding(.top, 60)
+                }
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(stills, id: \.name) { still in
+                        tile(still)
                     }
                 }
+                .padding(16)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Cameras")
             .refreshable { await load() }
-            .sheet(item: $watching) { camera in
-                LiveView(url: Api(baseURL: store.baseURL, token: store.token).hlsURL(camera: camera.id),
-                         title: camera.name)
+            .task { await load() }
+            .task { await poll() }
+            .sheet(item: $watching) { feed in
+                LiveSheet(url: api.url(feed.url ?? ""), title: feed.name ?? "Camera")
             }
         }
     }
 
+    private func tile(_ still: Api.Feeds.Still) -> some View {
+        let feed = liveFor(still)
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                // `refreshed` in the id makes AsyncImage refetch rather
+                // than show a cached still for ever.
+                AsyncImage(url: api.url(still.url ?? "")) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    case .failure: Color(.secondarySystemBackground)
+                            .overlay(Image(systemName: "photo").foregroundStyle(.tertiary))
+                    default: Color(.secondarySystemBackground).overlay(ProgressView())
+                    }
+                }
+                .id("\(still.name)-\(refreshed.timeIntervalSince1970)")
+                .frame(height: 110)
+                .clipped()
+
+                if feed?.live == true {
+                    Label("LIVE", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(Brand.crimson, in: Capsule())
+                        .foregroundStyle(.white)
+                        .padding(6)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(still.name).font(.subheadline.weight(.medium)).lineLimit(1)
+                Text(subtitle(still)).font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(10)
+        }
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { if let feed, feed.live == true { watching = feed } }
+    }
+
+    private func subtitle(_ still: Api.Feeds.Still) -> String {
+        var bits: [String] = []
+        if let kind = still.kind, !kind.isEmpty { bits.append(kind) }
+        if let at = still.at, at > 0 {
+            let ago = Date().timeIntervalSince1970 - at
+            bits.append(ago < 90 ? "just now" : "\(Int(ago / 60)) min ago")
+        }
+        return bits.joined(separator: " · ")
+    }
+
+    /// A live relay for this camera, matched by name -- the only field the
+    /// two lists share.
+    private func liveFor(_ still: Api.Feeds.Still) -> Api.Feeds.Live? {
+        live.first { ($0.name ?? "").caseInsensitiveCompare(still.name) == .orderedSame }
+    }
+
     private func load() async {
         do {
-            let rows = try await Self.fetchCameras(baseURL: store.baseURL, token: store.token)
-            cameras = rows
-            problem = rows.isEmpty ? "Sim reported no cameras with a ready stream." : nil
+            let feeds = try await api.feeds()
+            stills = feeds.cameras ?? []
+            live = feeds.streams ?? []
+            refreshed = Date()
+            problem = nil
         } catch {
             problem = error.localizedDescription
         }
     }
 
-    /// `/api/dash/streams` is the dashboard's own list of cameras with a
-    /// stream ready. Parsed loosely on purpose: it is a page's payload, not
-    /// a contract, and a shape change should cost a camera rather than the
-    /// whole tab.
-    static func fetchCameras(baseURL: String, token: String?) async throws -> [Camera] {
-        guard let url = URL(string: baseURL + "/api/dash/streams") else { return [] }
-        var request = URLRequest(url: url, timeoutInterval: 15)
-        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        let (data, _) = try await URLSession.shared.data(for: request)
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
-        let rows = (root["streams"] as? [[String: Any]]) ?? (root["cameras"] as? [[String: Any]]) ?? []
-        return rows.compactMap { row in
-            let id = (row["channel"] as? Int).map(String.init)
-                ?? (row["id"] as? String)
-                ?? (row["channel"] as? String)
-            guard let id else { return nil }
-            return Camera(id: id, name: (row["name"] as? String) ?? "camera \(id)")
+    private func poll() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(20))
+            if Task.isCancelled { return }
+            await load()
         }
     }
 }
 
-private struct LiveView: View {
+extension Api.Feeds.Live: Identifiable {
+    public var id: Int { channel ?? 0 }
+}
+
+private struct LiveSheet: View {
     let url: URL?
     let title: String
 
@@ -92,6 +145,7 @@ private struct LiveView: View {
                 }
             }
             .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
             .ignoresSafeArea(edges: .bottom)
         }
     }
