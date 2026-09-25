@@ -17,14 +17,16 @@ struct SimorghApp: App {
     }
 }
 
-/// Four tabs today. Home (lights, scenes, thermostats) arrives with stage
-/// 12 item 3a, `POST /api/action` -- a tab with nothing to call would be a
-/// button that lies.
+/// Ask, Home, House, Cameras, Console, Settings. Home arrived with stage 12
+/// item 3a (`POST /api/action`); until that route existed a control tab
+/// would have been a button that lies.
 struct RootView: View {
     var body: some View {
         TabView {
             AskView()
                 .tabItem { Label("Ask", systemImage: "bubble.left.and.bubble.right") }
+            HomeView()
+                .tabItem { Label("Home", systemImage: "lightbulb") }
             HouseView()
                 .tabItem { Label("House", systemImage: "house") }
             ConsoleView()

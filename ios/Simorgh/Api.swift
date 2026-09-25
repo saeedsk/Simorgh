@@ -115,6 +115,85 @@ struct Api {
 
     func status() async throws -> Status { try await send("/api/status", method: "GET") }
 
+    /// One thing in the house, as `home_find` reports it.
+    struct Entity: Identifiable, Decodable, Hashable {
+        let entity_id: String
+        let name: String?
+        let state: String?
+        let domain: String?
+        let unit: String?
+        var available: Bool = true
+        var id: String { entity_id }
+
+        var label: String { name ?? entity_id }
+        var on: Bool { (state ?? "").lowercased() == "on" }
+        /// Something with an on/off service, as opposed to a reading.
+        var switchable: Bool {
+            ["light", "switch", "fan", "media_player", "input_boolean", "siren"].contains(domain ?? "")
+        }
+        var reading: String {
+            let value = state ?? ""
+            guard let unit, !unit.isEmpty else { return value }
+            return "\(value) \(unit)"
+        }
+    }
+
+    struct ActionResult: Decodable {
+        let text: String?
+        let rows: [Entity]?
+        let error: String?
+    }
+
+    /// Ask Sim to do one thing. It goes through Guardian exactly as a tool
+    /// call from a spoken turn does -- this is not a back door, it is the
+    /// same door.
+    @discardableResult
+    func action(_ tool: String, _ args: [String: Any] = [:]) async throws -> ActionResult {
+        try await send("/api/action", method: "POST", body: ["tool": tool, "args": args], timeout: 60)
+    }
+
+    /// Everything in the house.
+    ///
+    /// `home_find`'s structured rows live on the tool's `metadata`, and the
+    /// HTTP path carries only the tool's TEXT -- `_run_tool` builds its
+    /// Outcome from `stdout_preview` and drops the rest. So this parses
+    /// what `Entity.render()` writes:
+    ///
+    ///     light.kitchen  on  (Kitchen)
+    ///     sensor.hall_temp  21.5 °C
+    ///     lock.front  locked  (Front door)  [unavailable]
+    ///
+    /// Parsing text is not the shape I would choose. It is honest about
+    /// what the server offers today, and the alternative -- carrying
+    /// `metadata` through `action.result` -- is a contracts change, not an
+    /// app one.
+    func house() async throws -> [Entity] {
+        let result = try await action("home_find", ["query": ""])
+        if let rows = result.rows, !rows.isEmpty { return rows }
+        return (result.text ?? "").split(separator: "\n").compactMap(Self.entity)
+    }
+
+    static func entity(from line: any StringProtocol) -> Entity? {
+        var rest = line.trimmingCharacters(in: .whitespaces)
+        guard !rest.isEmpty, rest.contains(".") else { return nil }
+        let available = !rest.contains("[unavailable]")
+        rest = rest.replacingOccurrences(of: "[unavailable]", with: "")
+                   .trimmingCharacters(in: .whitespaces)
+
+        var name: String?
+        if rest.hasSuffix(")"), let open = rest.lastIndex(of: "(") {
+            name = String(rest[rest.index(after: open)..<rest.index(before: rest.endIndex)])
+            rest = String(rest[rest.startIndex..<open]).trimmingCharacters(in: .whitespaces)
+        }
+        let parts = rest.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard let id = parts.first, id.contains(".") else { return nil }
+        let value = parts.dropFirst().first
+        let unit = parts.count > 2 ? parts.dropFirst(2).joined(separator: " ") : nil
+        return Entity(entity_id: id, name: name, state: value,
+                      domain: String(id.split(separator: ".").first ?? ""),
+                      unit: unit, available: available)
+    }
+
     func prompts() async throws -> [Prompt] {
         struct Wrapper: Decodable { let prompts: [Prompt] }
         let wrapped: Wrapper = try await send("/api/prompts", method: "GET")

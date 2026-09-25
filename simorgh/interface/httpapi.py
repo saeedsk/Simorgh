@@ -120,6 +120,37 @@ _PAIR_PAGE = """<!doctype html>
 </body></html>
 """
 
+#: The tools a paired device may ask for through `POST /api/action`.
+#:
+#: An ALLOWLIST, not "whatever Guardian permits", and the distinction is
+#: the whole safety of that route. Guardian gates EFFECTS: it weighs a
+#: proposal on its merits and this house auto-approves the irreversible
+#: ones. This gates SURFACE: what a network request is allowed to propose
+#: in the first place. `_run_for_page` was safe only because the server
+#: itself chose every tool name it passed; the moment a client names the
+#: tool, a stolen phone token could ask for `run_shell` and Guardian would
+#: weigh it as a legitimate request, because from its side it is one.
+#:
+#: So: the house's remote control -- lights, scenes, cameras, media, the
+#: TV, tasks, voice settings -- and nothing that writes code, runs a
+#: shell, installs a package or spends money. A tool not here is refused
+#: BY NAME, so the failure is legible rather than a mystery 403.
+ACTION_TOOLS: frozenset[str] = frozenset({
+    # the house
+    "home_find", "home_state", "home_describe", "home_call", "home_undo",
+    "energy_status", "energy_report",
+    # what it can see
+    "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren",
+    "cam_ptz", "cam_recordings", "cam_watch", "camera_describe",
+    "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch", "ring_live",
+    # what it can play
+    "media_now", "media_control", "media_play", "music_now", "music_control", "music_play",
+    "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume",
+    "tv_app", "tv_key", "tv_charts", "dash_view", "dash_key",
+    # its own work, and its own voice
+    "list_tasks", "cancel_task", "voice_setting", "remind", "overheard", "memory_search",
+})
+
 #: What `/api/dash/data` withholds from a request without the token.
 _HOUSE_KEYS: tuple[str, ...] = ("cameras", "streams", "ring_cameras", "events")
 
@@ -577,6 +608,51 @@ class HttpApi:
                 "application/json"
 
         self._prefixes.append(("POST", "/api/prompts/", _prompt_answer))
+
+        async def _action(query, body, headers):
+            """POST /api/action -- ask Sim to do one thing.
+
+            Through `_run_for_page`, which proposes a tool "the way the
+            terminal does: a proposal Guardian sees, the result read back".
+            So a phone gains no privilege the voice channel has not already
+            got, and Guardian is untouched.
+
+            Two gates, and the second is the one that is easy to miss:
+            the `control` capability, and `ACTION_TOOLS`. Guardian decides
+            whether an effect may happen; this decides what may be ASKED.
+            """
+            if self._run_for_page is None:
+                return 404, b'{"error":{"code":"no_tools"}}', "application/json"
+            who = self.caller(headers, query)
+            if not self.may(who, "control"):
+                return 403, json.dumps({"error": {
+                    "code": "capability_required", "capability": "control",
+                    "detail": "this device may not control the house -- pair it again `with control`",
+                }}).encode("utf-8"), "application/json"
+            try:
+                parsed = json.loads(body or b"{}")
+                tool = str(parsed.get("tool") or "").strip()
+                args = parsed.get("args") or {}
+            except (json.JSONDecodeError, AttributeError):
+                return 400, b'{"error":{"code":"invalid_json"}}', "application/json"
+            if not isinstance(args, dict):
+                return 400, b'{"error":{"code":"invalid_args","detail":"args must be an object"}}', "application/json"
+            if tool not in ACTION_TOOLS:
+                # By name, so somebody reading the failure knows whether
+                # they mistyped or asked for something this door does not
+                # open.
+                return 403, json.dumps({"error": {
+                    "code": "not_over_the_wire",
+                    "detail": f"{tool!r} is not a tool a device may ask for",
+                }}).encode("utf-8"), "application/json"
+            status, payload, kind = await self._run_for_page(tool, args, 60.0)
+            if self._logger is not None:
+                with contextlib.suppress(Exception):
+                    self._logger.info("interface.device_action", tool=tool,
+                                      device=getattr(who, "name", "legacy"), status=status)
+            return status, payload, kind
+
+        self.register_route("POST", "/api/action", _action, max_body=8192, rate=(120, 60.0))
         self.register_route("POST", "/api/dash/state", _dash_state_post, max_body=4096, rate=(120, 60.0))
         self.register_route("GET", "/remote", _remote, auth=False)
         self.register_route("GET", "/logo.png", _logo, auth=False)
