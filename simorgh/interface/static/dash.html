@@ -483,7 +483,14 @@ function imgSrc(t){return t.img?(t.img.startsWith("data:")?t.img:esc(t.img)+"?t=
 function tileHTML(t,i,style){const playing=t.live||t.rtc;
   return '<div class="ctile'+(playing?" on":"")+'"'+(style?' style="'+style+'"':'')+' data-i="'+i+'" data-name="'+esc(t.name)+'" data-nav="cam:'+esc(t.name)+'">'+(playing?'<video muted autoplay playsinline'+(t.img?' poster="'+imgSrc(t)+'"':'')+'></video>':(t.img?'<img src="'+imgSrc(t)+'" alt="">':''))
     +'<div class="cap"><span style="overflow:hidden;text-overflow:ellipsis;">'+esc(t.name)+'</span><span class="tag'+(playing?' live':'')+'">'+(t.live?"● live":t.rtc?"● ring live":t.frame?(ago(t.at)==="now"?"just now":ago(t.at)+" ago"):t.can?"waiting for its turn":(t.kind==="ring"?"ring · "+ago(t.at):"still · "+ago(t.at)))+'</span></div></div>';}
-function stripTiles(){const streams=((DATA&&DATA.streams)||[]).filter(s=>s.live);const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
+function stripTiles(){const live=((DATA&&DATA.streams)||[]).filter(s=>s.live);
+  /* One tile per CHANNEL. Since 2026-09-25 a channel can relay at both
+     qualities and these tiles are keyed by channel, so two would collide.
+     The strip draws seven at once and prefers the sub stream for that
+     reason -- but a channel relaying ONLY at main must still appear, or
+     the strip is blank while a camera is live. */
+  const byChannel=new Map();live.forEach(s=>{const had=byChannel.get(s.channel);if(!had||(had.quality==="main"&&s.quality!=="main"))byChannel.set(s.channel,s);});
+  const streams=Array.from(byChannel.values());const stills=(DATA&&DATA.cameras)||[];const ring=(DATA&&DATA.ring_cameras)||[];
   const tiles=[];const named=new Set();
   streams.forEach(s=>{const st=stills.find(c=>c.name.toLowerCase()===s.name.toLowerCase());tiles.push({key:"cam:"+s.channel,name:s.name,can:"hls",url:s.url,img:st?st.url:null,at:st?st.at:0});named.add(s.name.toLowerCase());});
   ring.forEach(c=>{const st=stills.find(x=>x.kind==="ring"&&x.name.toLowerCase()===c.name.toLowerCase());tiles.push({key:"ring:"+c.name,name:c.name,can:window.RTCPeerConnection?"rtc":"",kind:"ring",img:st?st.url:null,at:st?st.at:0});named.add(c.name.toLowerCase());});

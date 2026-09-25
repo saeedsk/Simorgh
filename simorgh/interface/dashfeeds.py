@@ -1001,19 +1001,31 @@ class DashFeeds:
         out: list[dict] = []
         for folder in sorted(root.iterdir(), key=lambda f: f.name):
             playlist = folder / "index.m3u8"
-            if not folder.name.isdigit() or not playlist.is_file():
+            # `<channel>` is the sub stream, `<channel>-main` the camera's
+            # full resolution. Both are reported, with `quality`, and the
+            # DASHBOARD strip keeps taking the sub one -- it draws seven at
+            # once and seven full streams is not what a strip is for. A
+            # phone showing one camera wants the good one, and until
+            # 2026-09-25 a `-main` relay was invisible to every client
+            # because this loop required `isdigit()`: the creator's only
+            # running relay was one, and both his dashboard and his phone
+            # showed nothing live.
+            channel, _, suffix = folder.name.partition("-")
+            if not channel.isdigit() or suffix not in ("", "main") or not playlist.is_file():
                 continue
             try:
                 at = playlist.stat().st_mtime
             except OSError:
                 continue
-            name = f"Camera {int(folder.name) + 1}"
+            name = f"Camera {int(channel) + 1}"
             try:
                 meta = json.loads((folder / "camera.json").read_text(encoding="utf-8"))
                 name = str(meta.get("name") or name)
             except (OSError, ValueError):
                 pass
-            out.append({"channel": int(folder.name), "name": name, "url": f"/tv/hls/{folder.name}/index.m3u8",
+            out.append({"channel": int(channel), "name": name,
+                        "url": f"/tv/hls/{folder.name}/index.m3u8",
+                        "quality": "main" if suffix == "main" else "sub",
                         "live": (now - at) <= self.LIVE_WITHIN_S, "at": at})
         return out
 

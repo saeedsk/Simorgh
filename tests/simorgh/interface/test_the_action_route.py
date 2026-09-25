@@ -117,3 +117,57 @@ class TheActionRoute(unittest.IsolatedAsyncioTestCase):
         open_writes = [(m, path) for (m, path), route in self.api._routes.items()   # noqa: SLF001
                        if m != "GET" and not route.auth]
         self.assertEqual(open_writes, [("POST", "/api/pair")])
+
+
+class TheConsoleAndHighResStreams(unittest.TestCase):
+    """Two things a phone needs that the server was not offering.
+
+    The console: Sim already captures what it prints (`contracts/console.py`
+    writes `interface/console.log` so `console_tail` can answer a question
+    about its own screen), but nothing served it -- so a client could show a
+    ledger tail and call it a console, which is not the same thing. The
+    creator, 2026-09-25: "I meant seeing exact same sim tui with same
+    unicode and messages, command line everything".
+
+    High-res streams: a relay at full quality writes to `hls/<channel>-main`
+    and `streams()` required `isdigit()`, so every `-main` relay was
+    invisible to EVERY client. The creator's only running relay was one of
+    those, which is why his dashboard and his phone both showed nothing
+    live while ffmpeg was busy.
+    """
+
+    def test_the_console_route_is_registered_and_gated(self):
+        from simorgh.interface.httpapi import HttpApi
+
+        api = HttpApi(bus=None, ledger=None, token="shared")
+        route = api._routes[("GET", "/api/console")]         # noqa: SLF001
+        self.assertTrue(route.auth, "Sim's own output is not open to the LAN")
+
+    def test_a_main_relay_is_reported_with_its_quality(self):
+        import json as _json
+        import tempfile
+        from pathlib import Path as _Path
+
+        from simorgh.interface.dashfeeds import DashFeeds
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = _Path(folder) / "hls"
+            for name, camera in (("6", "Office"), ("6-main", "Office"), ("7", "Garden")):
+                (root / name).mkdir(parents=True)
+                (root / name / "index.m3u8").write_text("#EXTM3U\n", encoding="utf-8")
+                (root / name / "camera.json").write_text(_json.dumps({"name": camera}), encoding="utf-8")
+            # A folder that is neither shape must still be ignored.
+            (root / "scratch").mkdir()
+            (root / "scratch" / "index.m3u8").write_text("#EXTM3U\n", encoding="utf-8")
+
+            feeds = DashFeeds(snapshot_root=_Path(folder))
+            rows = feeds.streams()
+
+        by = {(r["channel"], r["quality"]) for r in rows}
+        self.assertIn((6, "sub"), by)
+        self.assertIn((6, "main"), by, "a full-quality relay was invisible")
+        self.assertIn((7, "sub"), by)
+        self.assertEqual(len(rows), 3, "something that is not a channel was listed")
+        main = next(r for r in rows if r["quality"] == "main")
+        self.assertEqual(main["url"], "/tv/hls/6-main/index.m3u8")
+        self.assertEqual(main["name"], "Office")

@@ -564,6 +564,37 @@ class HttpApi:
 
         self.register_route("GET", "/api/prompts", _prompts_get, rate=(120, 60.0))
 
+        async def _console(query, _body, _headers):
+            """GET /api/console -- the lines Sim actually printed.
+
+            Not the ledger and not the activity feed: the CONSOLE, glyphs
+            and all, exactly as it reads on the creator's screen. It is
+            already captured (`contracts/console.py` writes
+            `interface/console.log` for `console_tail`, the only way Sim
+            can answer a question about its own output), so a client can
+            mirror the terminal rather than approximate it.
+
+            `?contains=` filters, which is what makes a long tail usable
+            on a phone.
+            """
+            from simorgh.contracts import console as console_log
+
+            try:
+                limit = int(self._q1(query, "limit", "200") or 200)
+            except ValueError:
+                limit = 200
+            limit = max(1, min(limit, 2000))
+            contains = self._q1(query, "contains", "") or ""
+            try:
+                lines = console_log.tail(limit=limit, contains=contains)
+            except Exception as exc:  # noqa: BLE001 -- a bad read is data for the page
+                return 200, json.dumps({"lines": [], "error": {"code": "console_unavailable",
+                                                                "detail": str(exc)}}).encode("utf-8"), \
+                    "application/json"
+            return 200, json.dumps({"lines": lines}).encode("utf-8"), "application/json"
+
+        self.register_route("GET", "/api/console", _console, rate=(120, 60.0))
+
         async def _prompt_answer(query, body, headers):
             """POST /api/prompts/<id> -- answer one. Needs `approve`.
 
