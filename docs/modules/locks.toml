@@ -17,12 +17,6 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
-[locks.docs]
-by = "opus-main"
-task = "stage 13 plan: room satellites (XVF3800 over ESPHome)"
-since = "2026-09-26T20:34:35+00:00"
-until = "2026-09-27T04:34:35+00:00"
-
 [locks.domains]
 by = "opus-main"
 task = "go2rtc: WebRTC camera streaming, the way Home Assistant does it"
@@ -82,9 +76,3 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "whisper prompt names Sim so the name is heard (AC/same)"
-since = "2026-09-26T20:43:51+00:00"
-until = "2026-09-27T04:43:51+00:00"
