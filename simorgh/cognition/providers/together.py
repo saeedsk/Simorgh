@@ -134,12 +134,14 @@ class TogetherProvider:
 
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
+        reasoning_effort: str | None = None,
     ) -> ProviderResponse:
-        return await asyncio.to_thread(self._complete_sync, messages, max_tokens, timeout, tools)
+        return await asyncio.to_thread(self._complete_sync, messages, max_tokens, timeout, tools,
+                                       reasoning_effort)
 
     # -- the call ---------------------------------------------------------------
     def _complete_sync(self, messages: list[dict], max_tokens: int, timeout: float | None,
-                       tools: list[dict] | None = None) -> ProviderResponse:
+                       tools: list[dict] | None = None, reasoning_effort: str | None = None) -> ProviderResponse:
         if not self._api_key:
             raise ProviderUnavailable("no Together API key configured (TOGETHER_API_KEY)")
         body = {"model": self._model, "messages": native.openai_messages(messages)}
@@ -150,8 +152,9 @@ class TogetherProvider:
             body["tool_choice"] = "auto"
         if max_tokens:
             body["max_tokens"] = self._room_to_answer(int(max_tokens))
-        if self._reasoning_effort:
-            body["reasoning_effort"] = self._reasoning_effort
+        effort = reasoning_effort if reasoning_effort is not None else self._reasoning_effort
+        if effort:
+            body["reasoning_effort"] = effort
 
         raw = self._post(
             f"{self._base_url}/chat/completions", body,
@@ -164,7 +167,7 @@ class TogetherProvider:
         return self._to_response(data, native.names_back(tools))
 
     async def stream(self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int,
-                     timeout: float | None = None):
+                     timeout: float | None = None, reasoning_effort: str | None = None):
         """Stage 3 item 1: the reply as it is generated (see streaming.py).
         The HTTP read runs on a thread and hands lines over a queue, so the
         event loop never blocks on the network."""
@@ -179,8 +182,9 @@ class TogetherProvider:
             body["tool_choice"] = "auto"
         if max_tokens:
             body["max_tokens"] = self._room_to_answer(int(max_tokens))
-        if self._reasoning_effort:
-            body["reasoning_effort"] = self._reasoning_effort
+        effort = reasoning_effort if reasoning_effort is not None else self._reasoning_effort
+        if effort:
+            body["reasoning_effort"] = effort
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         done = object()
