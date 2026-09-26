@@ -50,6 +50,24 @@ class WhisperServerTestCase(unittest.IsolatedAsyncioTestCase):
             await eng.close()
         self.assertFalse(eng.running)
 
+    async def test_the_prompt_travels_with_every_request_and_none_is_sent_when_empty(self):
+        # Without a prompt whisper wrote "Sim" as "AC" and "same" and Sim
+        # stayed quiet (live 2026-09-26); the prompt is the fix.
+        self.assertEqual(Config().stt_prompt, "Sim, Simorgh.", "short: a long prompt invents the name")
+        self.config = Config(stt="whisper_server", stt_model="base.en", model_dir=self.config.model_dir,
+                             stt_prompt="probe-prompt")
+        eng = self._engine()
+        try:
+            self.assertEqual((await eng.transcribe(Audio(b"\0\0" * 16000, 16000))).text, "prompted")
+        finally:
+            await eng.close()
+        self.config = Config(stt="whisper_server", stt_model="base.en", model_dir=self.config.model_dir, stt_prompt="")
+        eng = self._engine()
+        try:
+            self.assertEqual((await eng.transcribe(Audio(b"\0\0" * 16000, 16000))).text, "Hello there.")
+        finally:
+            await eng.close()
+
     async def test_a_server_that_never_listens_is_an_error_not_a_hang(self):
         from simorgh.voice.stt import whisper_server
 

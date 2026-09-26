@@ -166,6 +166,7 @@ class WhisperServerRecogniser:
                               f"(run `voice models base.en` to download one)")
         self._model = model
         self._language = config.stt_language or "auto"
+        self._prompt = str(getattr(config, "stt_prompt", "") or "")
         self._port = int(port or getattr(config, "stt_server_port", 0) or 0)
         self._by_word = bool(getattr(config, "diarize_words", False))
         self._proc: asyncio.subprocess.Process | None = None
@@ -256,8 +257,10 @@ class WhisperServerRecogniser:
         if audio.seconds < 0.1:
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=language or self._language)
-        body, content_type = _multipart({"response_format": "verbose_json", "language": language or self._language,
-                                         "temperature": "0.0"}, "file", "turn.wav", wav_bytes(audio))
+        fields = {"response_format": "verbose_json", "language": language or self._language, "temperature": "0.0"}
+        if self._prompt:
+            fields["prompt"] = self._prompt     # the name, so it is heard as a name (config.stt_prompt)
+        body, content_type = _multipart(fields, "file", "turn.wav", wav_bytes(audio))
         started = time.monotonic()
         async with self._lock:
             reply: dict = {}

@@ -38,6 +38,15 @@ class Config:
     # heard in a language outside this list is most likely noise and is
     # not answered. "" allows any.
     stt_languages: str = "en,fa"
+    # A few words whisper is told to expect before it hears the turn.
+    # With no prompt it wrote Sim's name as "AC", "same", "Zim", "see
+    # him" and Sim stayed quiet (live 2026-09-26). Measured over the
+    # creator's 67 calibration takes: the name came through in 17 of 22
+    # with none, 22 of 22 with "Sim, Simorgh.", and no false wakes on the
+    # 45 without it; English WER 0.055 -> 0.037, Farsi 1.20 -> 0.69. KEEP
+    # IT SHORT: a sentence about Sim made whisper hear the name in 17 of
+    # those 45. whisper_server only; "" sends none.
+    stt_prompt: str = "Sim, Simorgh."
     stt_compute: str = "auto"          # faster_whisper: int8 | float16 | auto
     tts: str = "auto"                  # auto | kokoro | piper | say | chatterbox | miso | fake
     tts_voice: str = "af_jessica"      # Kokoro voice id (the creator's pick); a `say -v` name for `say`
