@@ -145,15 +145,29 @@ class CompetenceTable(_Projection):
             return          # out-of-order replay: never age backwards
         stats.n = _aged(stats.n, elapsed, self.half_life_s)
         stats.successes_w = _aged(stats.successes_w, elapsed, self.half_life_s)
+        stats.refusals = _aged(getattr(stats, "refusals", 0.0), elapsed, self.half_life_s)
         stats.cost_sum = _aged(stats.cost_sum, elapsed, self.half_life_s)
         if hasattr(stats, "dur_sum"):
             stats.dur_sum = _aged(stats.dur_sum, elapsed, self.half_life_s)
         stats.at = at
 
     def _record(self, *, task_type: str, succeeded: bool, weight: float, cost_usd: float, duration_s: float,
-                strategy: str | None, stated_confidence: float | None, at: float = 0.0) -> None:
+                strategy: str | None, stated_confidence: float | None, at: float = 0.0,
+                refused: bool = False) -> None:
         stats = self._by_type.setdefault(task_type, TaskTypeStats())
         self._age(stats, at)
+        if refused:
+            # A correct refusal (error_kind refused/unconfigured) is the tool
+            # working as designed: neither a success nor a failure. Kept as
+            # its own bucket and out of the success-rate denominator so it
+            # cannot read as competence loss. Genuine failures/transients
+            # are scored exactly as before.
+            stats.refusals += 1.0
+            if strategy:
+                s = stats.strategies.setdefault(strategy, StrategyStats())
+                self._age(s, at)
+                s.refusals += 1.0
+            return
         stats.n += 1
         stats.successes_w += weight if succeeded else 0.0
         stats.cost_sum += cost_usd
