@@ -47,7 +47,19 @@ def route(message: Message, registered: list[Registered]) -> list[Registered]:
     registered member stands in for the group; the backend picks the
     actual member at dispatch time)."""
     if is_reply_routed(message):
-        return [r for r in registered if r.spec.pattern == message.reply_to]
+        # Point-to-point, but still one delivery per competing group:
+        # a plain pattern loop would fan a reply out to every member.
+        out: list[Registered] = []
+        seen_groups: set[str] = set()
+        for r in registered:
+            if r.spec.pattern != message.reply_to:
+                continue
+            if r.spec.group is None:
+                out.append(r)
+            elif r.spec.group not in seen_groups:
+                seen_groups.add(r.spec.group)
+                out.append(r)
+        return out
     out: list[Registered] = []
     seen_groups: set[str] = set()
     for r in registered:
