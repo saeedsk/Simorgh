@@ -25,6 +25,15 @@ class _Handler(BaseHTTPRequestHandler):
             text = " salam"
         if b"name=\"prompt\"\r\n\r\nprobe-prompt" in body:
             text = " prompted"
+        # An echo of the prompt, and what the same audio gives without it:
+        # a word when the audio carries samples of 7 (someone spoke),
+        # filler when it is silence.
+        if b"name=\"prompt\"\r\n\r\nprobe echo" in body:
+            text = " Probe echo."
+        elif b"\x07\x00\x07\x00" in body and b"name=\"prompt\"" not in body:
+            text = " AC"
+        elif b"name=\"response_format\"\r\n\r\njson\r\n" in body:
+            text = " Thank you."          # the unprompted second pass over silence
         words = [w for w in text.split(" ") if w]
         step = 0.4
         segments = [{"id": i, "text": " " + w, "start": round(i * step, 2), "end": round((i + 1) * step, 2)}

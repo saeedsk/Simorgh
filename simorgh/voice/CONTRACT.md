@@ -107,7 +107,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `stt_model` | `'large-v3-turbo'` | yes |
 | `stt_language` | `''` | yes |
 | `stt_languages` | `'en,fa'` | yes -- a final whose detected language is none of these is discarded as noise, but FIRST the audio is offered back once per house language and believed if it returns in another script (`session.ask_again`): whisper called two of the creator's Farsi takes Armenian and Icelandic and they were deleted every run (2026-09-23) |
-| `stt_prompt` | `'Sim, Simorgh.'` | yes -- sent as whisper's `prompt` on every `whisper_server` request (other engines ignore it); without it the name came back as "AC"/"same" and Sim stayed quiet (2026-09-26). Measured on the 67 calibration takes: name heard 17/22 -> 22/22, 0 false wakes; a longer prompt invented the name in 17 of 45 takes without it, so keep it short. `""` sends none |
+| `stt_prompt` | `'Sim, Simorgh.'` | yes -- sent as whisper's `prompt` on every `whisper_server` request (other engines ignore it); without it the name came back as "AC"/"same" and Sim stayed quiet (2026-09-26). Measured on the 67 calibration takes: name heard 17/22 -> 22/22, 0 false wakes; a longer prompt invented the name in 17 of 45 takes without it, so keep it short. A transcript made ONLY of the prompt's words is re-decoded once without it and dropped when that pass hears only filler: with the prompt, silence, hiss, noise and a cough all came back as "Simorgh." (2026-09-26); guarded, all five are empty and the 67 takes still give 22/22 and 0 false wakes. `""` sends none |
 | `stt_compute` | `'auto'` | yes |
 | `tts` | `'auto'` | yes |
 | `tts_voice` | `'af_jessica'` | yes |

@@ -68,6 +68,20 @@ class WhisperServerTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             await eng.close()
 
+    async def test_the_prompt_read_back_from_silence_is_dropped_but_a_spoken_name_is_kept(self):
+        # Told to expect "Sim, Simorgh.", whisper wrote "Simorgh." for
+        # silence, hiss and a cough (2026-09-26): an echo, not the name.
+        self.config = Config(stt="whisper_server", stt_model="base.en", model_dir=self.config.model_dir,
+                             stt_prompt="probe echo")
+        eng = self._engine()
+        try:
+            silence = await eng.transcribe(Audio(b"\0\0" * 16000, 16000))
+            self.assertEqual(silence.text, "", "the prompt read back from silence is nothing heard")
+            spoken = await eng.transcribe(Audio(b"\x07\x00" * 16000, 16000))
+            self.assertEqual(spoken.text, "Probe echo.", "a word was there without the prompt: the name stands")
+        finally:
+            await eng.close()
+
     async def test_a_server_that_never_listens_is_an_error_not_a_hang(self):
         from simorgh.voice.stt import whisper_server
 

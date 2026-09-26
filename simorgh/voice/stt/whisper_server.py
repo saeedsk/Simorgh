@@ -291,8 +291,45 @@ class WhisperServerRecogniser:
         text = "".join(str(s.get("text") or "") for s in (reply.get("segments") or [])) if reply.get("segments") \
             else str(reply.get("text") or "")
         heard_language = str(reply.get("detected_language") or reply.get("language") or "") or (language or self._language)
-        return Utterance(text=clean_transcript(text), confidence=1.0, seconds=audio.seconds,
+        cleaned = clean_transcript(text)
+        if self._prompt and _only_prompt_words(cleaned, self._prompt) and not await self._speech_without_prompt(audio, language):
+            # The prompt read back to us: silence, hiss, a cough all came
+            # back as "Simorgh." once whisper was told to expect the name,
+            # and a quiet Sim would have woken to it (measured 2026-09-26).
+            return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
+                             language=heard_language)
+        return Utterance(text=cleaned, confidence=1.0, seconds=audio.seconds,
                          engine=self.name, language=heard_language, words=words)
+
+    async def _speech_without_prompt(self, audio: Audio, language: str) -> bool:
+        """Was there a word in this audio at all? Asked only when the
+        prompted transcript is nothing but the prompt's own words. Without
+        the prompt, noise comes back as filler ("." / "Thank you." /
+        "*BOOM*"), while a spoken "Sim" still comes back as SOME word
+        ("AC", "same") -- so the name is kept exactly when a word was
+        there. A failed second pass counts as no word: a missed lone
+        "Sim" is said again, a phantom one is answered aloud."""
+        body, content_type = _multipart({"response_format": "json", "language": language or self._language,
+                                         "temperature": "0.0"}, "file", "turn.wav", wav_bytes(audio))
+        try:
+            async with self._lock:
+                await self._start()
+                reply = await asyncio.to_thread(self._post, body, content_type)
+        except (OSError, RuntimeError, ValueError, urllib.error.HTTPError):
+            return False
+        heard = clean_transcript(str(reply.get("text") or "")).strip().lower().rstrip(".!?")
+        return bool(heard) and heard not in _FILLER
+
+
+#: What whisper writes for a clip with no words in it, once annotations
+#: are stripped (measured on silence, hiss, noise and a burst, 2026-09-26).
+_FILLER = frozenset({"thank you", "thanks for watching", "you", "bye", "okay"})
+
+
+def _only_prompt_words(text: str, prompt: str) -> bool:
+    """Is every word of `text` one of the prompt's own words?"""
+    words = re.findall(r"\w+", text.lower())
+    return bool(words) and set(words) <= set(re.findall(r"\w+", prompt.lower()))
 
 
 __all__ = ["WhisperServerRecogniser", "free_port"]
