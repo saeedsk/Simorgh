@@ -53,6 +53,12 @@ class StrategyStats:
 class TaskTypeStats:
     n: float = 0.0
     successes_w: float = 0.0
+    #: Outcomes the tool itself refused or could not run for lack of
+    #: configuration (`error_kind` refused/unconfigured). The tool worked
+    #: as designed, so these are neither successes nor failures: counted
+    #: here, reported separately, and excluded from the success-rate
+    #: denominator entirely. Defaults to 0 so old snapshots load.
+    refusals: float = 0.0
     cost_sum: float = 0.0
     dur_sum: float = 0.0
     at: float = 0.0
