@@ -155,9 +155,14 @@ class OutcomeRecorder:
         if task_type == "unknown":
             self.skipped_unknown += 1
             return
-        await self._record(task_id=task_id, task_type=task_type, succeeded=False, weight=1.0,
-                            verdict="failed", cost_usd=cost_usd, duration_s=duration_s, strategy=strategy,
-                            stated_confidence=None, event_type="failed", run=run)
+        kind = str(p.get("error_kind") or "failed")
+        refused = kind in ("refused", "unconfigured")
+        await self._record(task_id=task_id, task_type=task_type, succeeded=False,
+                            weight=0.0 if refused else 1.0,
+                            verdict="refused" if refused else "failed",
+                            cost_usd=cost_usd, duration_s=duration_s, strategy=strategy,
+                            stated_confidence=None, event_type="failed", run=run,
+                            error_kind=kind, refused=refused)
 
     async def on_task_blocked(self, message: Message) -> None:
         p = message.payload
@@ -166,18 +171,31 @@ class OutcomeRecorder:
         if task_type == "unknown":  # a blocked chat turn is no more an outcome than a finished one (C2)
             self.skipped_unknown += 1
             return
+        kind = str(p.get("error_kind") or "blocked")
+        refused = kind in ("refused", "unconfigured")
         await self._record(task_id=task_id, task_type=task_type, succeeded=False,
-                            weight=self._config.blocked_sample_weight, verdict="blocked",
+                            weight=0.0 if refused else self._config.blocked_sample_weight,
+                            verdict="refused" if refused else "blocked",
                             cost_usd=cost_usd, duration_s=duration_s, strategy=strategy, stated_confidence=None,
-                            event_type="blocked", run=run)
+                            event_type="blocked", run=run, error_kind=kind, refused=refused)
 
     async def _record(self, *, task_id: str, task_type: str, succeeded: bool, weight: float, verdict: str,
                        cost_usd: float, duration_s: float, strategy: str | None,
-                       stated_confidence: float | None, event_type: str = "completed", run: int = 0) -> None:
+                       stated_confidence: float | None, event_type: str = "completed", run: int = 0,
+                       error_kind: str | None = None, refused: bool = False) -> None:
         payload = {
             "task_id": task_id, "task_type": task_type, "succeeded": succeeded, "weight": weight,
             "verdict": verdict, "cost_usd": cost_usd, "duration_s": duration_s, "ts": self._clock(),
         }
+        # A correct refusal (`error_kind` refused/unconfigured: the tool
+        # working as designed) is neither a success nor a failure. It is
+        # carried into the record with `refused=True` so the competence
+        # fold reports it as its own bucket instead of feeding the
+        # success-rate denominator as a failure.
+        if refused:
+            payload["refused"] = True
+        if error_kind:
+            payload["error_kind"] = error_kind
         if strategy:
             payload["strategy"] = strategy
         if stated_confidence is not None:
@@ -208,6 +226,9 @@ class OutcomeRecorder:
                 "task_id": task_id, "task_type": task_type, "succeeded": succeeded,
                 "verdict": verdict, "cost_usd": cost_usd, "duration_s": duration_s,
             }
+            if refused:
+                recorded["refused"] = True
+                recorded["error_kind"] = error_kind
             if strategy:
                 recorded["strategy"] = strategy
             if stated_confidence is not None:
