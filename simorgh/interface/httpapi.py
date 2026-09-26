@@ -1136,11 +1136,20 @@ class HttpApi:
         offered = self._offered_token(headers, query)
         if not offered:
             return None
+        # `hmac.compare_digest` raises TypeError on non-str input, so a
+        # malformed query value would turn into a 500; reject it as a
+        # plain failed auth instead. Both sides must be ASCII-only str.
+        if not isinstance(offered, str) or not offered.isascii():
+            return None
         if self._devices is not None:
             device = self._devices.resolve(offered)
             if device is not None:
                 return device
-        if self._token and hmac.compare_digest(offered, self._token):
+        if (
+            isinstance(self._token, str)
+            and self._token.isascii()
+            and hmac.compare_digest(offered, self._token)
+        ):
             return "legacy"
         return None
 
