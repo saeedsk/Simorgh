@@ -82,3 +82,9 @@ by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "whisper prompt names Sim so the name is heard (AC/same)"
+since = "2026-09-26T20:43:51+00:00"
+until = "2026-09-27T04:43:51+00:00"
