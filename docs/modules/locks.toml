@@ -16,29 +16,17 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
-[locks.contracts]
+[locks.docs]
 by = "opus-main"
-task = "stage 13 item 8: play on the room's satellite"
-since = "2026-09-27T07:01:17+00:00"
-until = "2026-09-27T15:01:17+00:00"
-
-[locks.domains]
-by = "opus-main"
-task = "stage 13 item 8: play on the room's satellite"
-since = "2026-09-27T07:01:17+00:00"
-until = "2026-09-27T15:01:17+00:00"
+task = "stage 13: status after items 1-5, 7, 8"
+since = "2026-09-27T08:30:37+00:00"
+until = "2026-09-27T16:30:37+00:00"
 
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
-
-[locks.execution]
-by = "opus-main"
-task = "stage 13 item 8: execution may ask Voice to play on a room"
-since = "2026-09-27T07:02:08+00:00"
-until = "2026-09-27T15:02:08+00:00"
 
 [locks.growth]
 by = "opus-main"
@@ -51,12 +39,6 @@ by = "opus-main"
 task = "consolidation waits long enough for a provider to answer"
 since = "2026-09-22T20:46:27+00:00"
 until = "2026-09-23T04:46:27+00:00"
-
-[locks.orchestration]
-by = "opus-main"
-task = "stage 13 item 8: play on the room's satellite"
-since = "2026-09-27T07:01:17+00:00"
-until = "2026-09-27T15:01:17+00:00"
 
 [locks.planning]
 by = "opus-main"

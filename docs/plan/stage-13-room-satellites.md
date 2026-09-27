@@ -1,6 +1,6 @@
 # Stage 13 -- Room satellites
 
-Status: **designed; item 0 done** (2026-09-26: one reSpeaker XVF3800 + XIAO ESP32S3 flashed, on Wi-Fi as `sim-room-1`, wake word and barge-in measured) · Depends on: stage 3 (streaming voice); item 1 is the same change as stage 12 item 5, and whichever lands first satisfies both · Estimated: 1 week for one room, a day per room after · Modules touched: voice, interface, kernel (config wiring only), tools, docs
+Status: **in progress** (2026-09-27: items 1-4 and 8 live on `sim-room-1` -- 1.6 s from end of speech to the reply on the board; item 5's follow-ups done, barge-in-on-a-reply firmware ready, "Hey Sim" training on AWS; item 7's files and README done, a second board not yet provisioned; item 6 needs the creator) · Depends on: stage 3 (streaming voice); item 1 is the same change as stage 12 item 5, and whichever lands first satisfies both · Modules touched: voice, interface, contracts, domains, execution, orchestration, tools, docs
 
 ## Outcome
 
@@ -134,16 +134,30 @@ Move the device config from `~/esphome-sim/` into `tools/satellites/` (`room.yam
 
 Done when: a second satellite is added by following the README alone, and both rooms answer independently.
 
+### 8. Music in the room you asked from
+
+**Added 2026-09-27; done (7c703d3f).** The creator: "when I ask the satellite board to play something, I expect it to play the audio on the board by default." `voice.room.play.request/reply` (contracts); Voice plays a URL as music on a satellite -- the one named, else the one whose wake word was heard in the last 120 s, else the only one; `room_play` (domains/media/roomplay.py) finds internet radio by genre or station in radio-browser.info (keyless, MP3 only), or takes a URL, stop or volume. Live: SomaFM MP3 played in high quality, and a wake word over it was heard and answered.
+
+### Found live, 2026-09-27 (all fixed and pushed)
+
+- Whisper labelled the board's English `ic` and the room dropped it as noise; a turn inside a wake run is now addressed (9340e1b0).
+- `voice mute` silenced every room; `voice mute <room>` mutes one (9340e1b0).
+- A garbled request after a wake word got silence; it now gets "Sorry, I didn't catch that." (b551d462).
+- With the board beside the Mac both sessions answered; the laptop now defers to a woken room (275c3852).
+- One wake about a minute after a restart got no turn and is unexplained; `voice.session_listening` and `phase='no reply' heard=<bool>` now say which half failed if it recurs.
+
 ## Definition of done
 
 - [x] One satellite flashed, on Wi-Fi, wake word and barge-in measured (item 0, 2026-09-26)
-- [ ] The voice service holds a session per device (item 1)
-- [ ] `voice/satellite.py` with a fake-link test suite, including the run-end race (item 2)
-- [ ] Replies play from `/api/room/speech` (item 3)
-- [ ] Satellites configured in `[[voice.satellites]]`, keys in secrets (item 4)
-- [ ] Follow-ups and barge-in on a reply (item 5)
+- [x] The voice service holds a session per device (item 1, c7faac01)
+- [x] `voice/satellite.py` with a fake-link test suite, including the run-end race (item 2, d6f6b470)
+- [x] Replies play from `/api/room/speech` (item 3, 7609fc3a; FLAC -- the board refused WAV)
+- [x] Satellites configured in `[[voice.satellites]]`, keys in secrets (item 4, 7609fc3a)
+- [ ] Follow-ups (done, 96422de8) and barge-in on a reply (firmware in `tools/satellites/`, not yet flashed); "Hey Sim" (training) (item 5)
 - [ ] The four measurements in `docs/findings/` (item 6)
-- [ ] A second room provisioned from the README alone (item 7)
+- [x] Music plays in the room it was asked from (item 8, 7c703d3f)
+- [x] One question, one answer: the laptop defers to a woken room (275c3852)
+- [ ] A second room provisioned from the README alone (item 7; files and README done, f99c1f1c)
 
 ## What this stage does not build
 
