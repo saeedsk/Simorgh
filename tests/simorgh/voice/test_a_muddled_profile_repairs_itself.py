@@ -93,5 +93,12 @@ class AMuddledProfileRepairsItself(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.svc.auto_repair(now=1_000_000.0 + 2 * 86400), [])
         self.assertEqual(self.svc._ctx.bus.published, [])                # noqa: SLF001
 
+    async def test_a_typed_relearn_tidies_a_muddled_profile_first(self):
+        _ok, said = await self.svc._people_action("relearn", {"name": "Iris"})   # noqa: SLF001
+        # No kept recordings here, so the relearn half has nothing to add;
+        # the tidy is what mends it.
+        self.assertRegex(said, r"^first dropped \d take\(s\) pulling it apart")
+        self.assertGreaterEqual(coherence(self._takes()), MUDDLED_BELOW)
+
     def test_the_setting_is_on_by_default(self):
         self.assertTrue(Config().auto_relearn)

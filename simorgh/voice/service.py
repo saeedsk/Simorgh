@@ -995,7 +995,20 @@ class Service:
         if action == "relearn":
             if not name:
                 return False, "usage: voice relearn <name>   (rebuilds a profile from recordings Sim already kept)"
-            return await asyncio.to_thread(self._relearn_from_kept, book, name)
+            # A profile with two voices in it is tidied first, as the
+            # automatic repair does: relearning alone only swaps a weaker
+            # take for a better one and cannot drop the takes pulling it
+            # apart, so Iris stayed at 0.64 through two relearns (live,
+            # 2026-09-27).
+            from .speakers import muddled
+
+            tidied = ""
+            if any(n.lower() == name.lower() for n, _s, _t in muddled(book.people())):
+                dropped, before, after = await asyncio.to_thread(book.tidy, name)
+                if dropped:
+                    tidied = f"first dropped {dropped} take(s) pulling it apart ({before:.2f} -> {after:.2f}); then "
+            ok, said = await asyncio.to_thread(self._relearn_from_kept, book, name)
+            return ok, tidied + said
         if action == "pronounce":
             say_as = str(payload.get("value") or "").strip()
             if not name or not say_as:

@@ -34,9 +34,3 @@ by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "a muddled voice profile repairs itself: tidy, then relearn"
-since = "2026-09-27T16:52:33+00:00"
-until = "2026-09-28T00:52:33+00:00"
