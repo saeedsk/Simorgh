@@ -1713,7 +1713,7 @@ class VoiceSession:
                                              speaker_name=speaker, speaker_relation=relation, room=room,
                                              speaker_before=before, speaker_doubt=doubt, speaker_score=score,
                                              trace_id=clock.trace_id, device=self._config.device,
-                                             speaker_say_as=say_as)
+                                             speaker_say_as=say_as, heard_language=clock.language or "")
         finally:
             self._outstanding.pop(turn_id, None)
             self._pipeline.delta_sinks.pop(session_id, None)

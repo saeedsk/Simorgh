@@ -294,7 +294,7 @@ class Service:
         channel = str(message.payload.get("channel") or "")
         who = {k: str(message.payload.get(k) or "") for k in ("speaker", "speaker_relation", "room", "speaker_before",
                                                                   "speaker_doubt", "speaker_score", "device",
-                                                                  "speaker_say_as")}
+                                                                  "speaker_say_as", "heard_language")}
         # The recall this turn will want, started now (stage 5 item 5): it
         # runs while the session is built, the profile chosen and the
         # scaffold rendered, so Memory is off the critical path instead of

@@ -37,6 +37,11 @@ PerceptTextReceived = define(t.PERCEPT_TEXT_RECEIVED, [
     # it the model, asked "how do you pronounce my name?", made one up
     # from its own old replies (live, 2026-09-27).
     O("speaker_say_as", Str),
+    # The language the spoken turn was heard in ("english", "persian"...).
+    # The model answered an English question in Farsi because an earlier
+    # "switch to Farsi" sat in the conversation (live, 2026-09-27); it is
+    # now told which language THIS turn is in.
+    O("heard_language", Str),
 ], doc="channel=command + command for routed commands; steer=true marks a mid-task correction; "
        "channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation, "
        "how the voice says their name, and the room's recent lines that were not addressed to Sim.")

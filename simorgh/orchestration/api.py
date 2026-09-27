@@ -226,6 +226,8 @@ class Session:
     # How the voice says the speaker's name (`voice pronounce`), so the
     # model answers "how do you say my name?" from the setting.
     speaker_say_as: str = ""
+    # The language this spoken turn was heard in, so the reply matches it.
+    heard_language: str = ""
     # How well the voice matched their enrolled profile this turn, as
     # Voice words it; "" when nobody was matched.
     speaker_score: str = ""

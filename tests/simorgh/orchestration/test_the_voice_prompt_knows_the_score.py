@@ -60,3 +60,32 @@ class ThePronunciationIsInThePrompt(unittest.TestCase):
         self.assertIn("speaker_say_as=speaker_say_as", (root / "orchestration" / "worker.py").read_text())
         self.assertIn('speaker_say_as=getattr(session, "speaker_say_as", "")',
                       (root / "orchestration" / "session.py").read_text())
+
+
+
+class TheTurnsLanguageIsInThePrompt(unittest.TestCase):
+    """Live, 2026-09-27: "Hey Sim, can you hear me?" answered in Farsi,
+    twice, because an earlier "switch to Farsi" sat in the conversation."""
+
+    def test_the_heard_language_is_told(self):
+        from simorgh.orchestration.scaffolds import language_line
+
+        self.assertIn("spoken in English: answer in English", language_line("english"))
+        self.assertIn("spoken in Farsi: answer in Farsi", language_line("persian"))
+        self.assertEqual(language_line(""), "")
+        self.assertEqual(language_line("icelandic"), "", "only the house's languages are named")
+
+    def test_it_reaches_the_voice_prompt(self):
+        from simorgh.orchestration import profiles, scaffolds
+
+        text = scaffolds.render(profiles.VOICE_CHAT, channel="voice", speaker="Saeed", heard_language="english")
+        self.assertIn("This turn was spoken in English", text)
+
+    def test_the_field_travels_from_the_voice(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3] / "simorgh"
+        self.assertIn('"heard_language"', (root / "orchestration" / "service.py").read_text())
+        self.assertIn('O("heard_language", Str)', (root / "contracts" / "messages" / "percept.py").read_text())
+        self.assertIn("heard_language=clock.language", (root / "voice" / "session.py").read_text())
+        self.assertIn('payload["heard_language"]', (root / "voice" / "pipeline.py").read_text())

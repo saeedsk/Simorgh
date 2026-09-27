@@ -166,6 +166,7 @@ A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that 
 
 - A voice turn's `device` (from `percept.text.received`) reaches `Session.device`; when it is a room satellite (not `laptop`), `scaffolds.render` adds `satellite_note`: the person is in that room, already called Sim by its wake word, and music or sound goes to `room_play` with no room (stage 13, 2026-09-27).
 - A voice turn's `speaker_say_as` (from `percept.text.received`, 2026-09-27) reaches `Session.speaker_say_as`, and `scaffolds.who_is_here` tells the model how its voice says the speaker's name; nothing is said for an unsure voice.
+- A voice turn's `heard_language` (2026-09-27) reaches `Session.heard_language`; `scaffolds.language_line` tells the model "This turn was spoken in English: answer in English, whatever language an earlier turn asked for" (English/Farsi only).
 - The stop hook's generic bounce (`stophook.claimed_effect`) lists the write tools whose names share a word with the claim or the person's words first (`_fitting_first`, 2026-09-27): a claimed "started the music" is told music_play, not start_task.
 - A satellite turn's note (`scaffolds.satellite_note`, 2026-09-27) sends "stop the music" to room_play what=stop, not media_control (Home Assistant's players).
 

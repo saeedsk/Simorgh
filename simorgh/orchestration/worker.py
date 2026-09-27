@@ -420,7 +420,7 @@ class Worker:
     async def run_percept_chat(self, session_id: str, text: str, *, channel: str = "", speaker: str = "",
                                speaker_relation: str = "", room: str = "", speaker_before: str = "",
                                speaker_doubt: str = "", speaker_score: str = "", trace_id: str = "",
-                               device: str = "", speaker_say_as: str = "") -> None:
+                               device: str = "", speaker_say_as: str = "", heard_language: str = "") -> None:
         """Flow 1 (02 section 5): a plain conversational percept has no
         Planning task behind it -- only the `batch`/`evolve`/`plan`
         commands go through `intent.goal.stated` -> Intake -> a real
@@ -439,7 +439,7 @@ class Worker:
             worker_id=self.worker_id, user_text=text, channel=channel,
             speaker=speaker, speaker_relation=speaker_relation, room=room, speaker_before=speaker_before,
             speaker_doubt=speaker_doubt, speaker_score=speaker_score, trace_id=trace_id, device=device,
-            speaker_say_as=speaker_say_as,
+            speaker_say_as=speaker_say_as, heard_language=heard_language,
         )
         session.budget.max_steps = profile.max_steps
         session.budget.max_revisions = profile.max_revisions

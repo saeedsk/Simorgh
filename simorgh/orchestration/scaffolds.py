@@ -612,6 +612,21 @@ def when_line(now: float) -> str:
     return f"Right now it is {when:%A %-d %B %Y}, {when:%H:%M}."
 
 
+_LANGUAGE_NAMES = {"en": "English", "english": "English", "fa": "Farsi", "persian": "Farsi", "farsi": "Farsi"}
+
+
+def language_line(heard: str) -> str:
+    """"This turn was spoken in English: answer in English." -- the language
+    of THIS turn, which outranks an earlier "switch to Farsi" still in the
+    conversation. Live, 2026-09-27: "Hey Sim, can you hear me?" was
+    answered "شنیدمت Saeed -- بلند و واضح", twice."""
+    name = _LANGUAGE_NAMES.get((heard or "").strip().lower())
+    if not name:
+        return ""
+    return (f"This turn was spoken in {name}: answer in {name}, whatever language an earlier turn asked "
+            f"for or the conversation was in.")
+
+
 def satellite_note(device: str) -> str:
     """What a turn through a room satellite changes: where the person is,
     and where anything played for them goes."""
@@ -626,7 +641,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
            speaker_doubt: str = "", speaker_score: str = "",
            room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
-           skills: str = "", now: float = 0.0, device: str = "", speaker_say_as: str = "") -> str:
+           skills: str = "", now: float = 0.0, device: str = "", speaker_say_as: str = "",
+           heard_language: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -646,6 +662,9 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # what brevity says, and more.
         body = f"{who_is_here(speaker, speaker_relation, room, speaker_before, doubt=speaker_doubt,
                                   score=speaker_score, say_as=speaker_say_as)}\n\n{VOICE}"
+        said_in = language_line(heard_language)
+        if said_in:
+            body = f"{body}\n\n{said_in}"
         if device and device != "laptop":
             # Stage 13: the creator, 2026-09-27 -- "when I say 'play music'
             # on the board, I expect the music played on the same board
