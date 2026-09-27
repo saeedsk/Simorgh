@@ -18,9 +18,13 @@ struct SimorghApp: App {
             // Find Sim before anything asks for it, and again whenever the
             // app comes back -- coming back is usually what happened after
             // walking out of the house or in through the door.
-            .task { _ = await Finding.settle(store) }
+            .task {
+                Api.rediscover = { [store] in await store.refind() }
+                store.watchNetwork()
+                _ = await store.refind()
+            }
             .onChange(of: phase) { _, now in
-                if now == .active { Task { _ = await Finding.settle(store) } }
+                if now == .active { Task { _ = await store.refind() } }
             }
         }
     }

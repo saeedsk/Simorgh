@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Security
 
 /// Where Sim is, and this device's own token.
@@ -70,6 +71,41 @@ final class Store: ObservableObject {
     }
 
     var paired: Bool { token != nil }
+
+    // MARK: - Finding Sim again
+
+    private var finding: Task<String?, Never>?
+    private let network = NWPathMonitor()
+    private var lastPath = ""
+
+    /// `Finding.settle`, shared: five views failing at once when Wi-Fi drops
+    /// start ONE search, not five.
+    func refind() async -> String? {
+        if let finding { return await finding.value }
+        let search = Task { await Finding.settle(self) }
+        finding = search
+        let found = await search.value
+        finding = nil
+        return found
+    }
+
+    /// Search again whenever the phone changes network -- Wi-Fi to cellular
+    /// at the front door, back again coming in -- without waiting for a
+    /// request to fail or the app to be reopened. Only coming to the
+    /// foreground did this before, and the app is usually already open.
+    func watchNetwork() {
+        network.pathUpdateHandler = { [weak self] path in
+            let key = "\(path.status)|wifi=\(path.usesInterfaceType(.wifi))|cell=\(path.usesInterfaceType(.cellular))"
+            let up = path.status == .satisfied
+            Task { @MainActor in
+                guard let self, key != self.lastPath else { return }
+                let first = self.lastPath.isEmpty
+                self.lastPath = key
+                if !first && up { _ = await self.refind() }
+            }
+        }
+        network.start(queue: .global(qos: .utility))
+    }
 
     /// Whether Sim granted this device a capability. Advisory only: the
     /// server refuses on its own authority whatever this thinks, so this

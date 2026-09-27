@@ -10,6 +10,14 @@ struct Api {
     let baseURL: String
     let token: String?
 
+    /// Find Sim again and say where it answers now. Set once by the app
+    /// (`Store.refind`). A request that cannot connect asks this and tries
+    /// once more at the new address: walking out of the house takes the
+    /// LAN address away mid-session, and the tailnet one is right there
+    /// (the creator, 2026-09-27: "switch to tailscale ip when I go outside
+    /// home and my cell phone switch to cell internet").
+    static var rediscover: (() async -> String?)?
+
     struct Failure: LocalizedError {
         let status: Int
         let detail: String
@@ -384,11 +392,7 @@ struct Api {
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let json { request.httpBody = try JSONSerialization.data(withJSONObject: json) }
         if let bytes { request.httpBody = bytes }
-        do {
-            return try await URLSession.shared.data(for: request)
-        } catch {
-            throw Failure(status: 0, detail: Self.unreachable(baseURL, error))
-        }
+        return try await transfer(request, path)
     }
 
     func url(_ path: String) -> URL? {
@@ -413,15 +417,7 @@ struct Api {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: request)
-        } catch {
-            // Said plainly, because "could not connect" with no address is
-            // the least useful thing an app can say -- and on a LOCAL
-            // address the usual cause is not the network at all.
-            throw Failure(status: 0, detail: Self.unreachable(baseURL, error))
-        }
+        let (data, response) = try await transfer(request, path)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             throw Failure(status: status, detail: Self.reason(from: data) ?? "Sim answered \(status)")
@@ -441,6 +437,43 @@ struct Api {
     /// can give is to name it (the creator, 2026-09-25: "could not reach
     /// sim at http://192.168.50.33:8765", with Sim running and answering
     /// on that exact address).
+    /// One request, and -- when it could not reach Sim at all -- one more
+    /// at wherever `rediscover` finds it. A GET is retried after any
+    /// network failure; anything else only when the request certainly
+    /// never arrived, so a chat is never said twice.
+    private func transfer(_ request: URLRequest, _ path: String) async throws -> (Data, URLResponse) {
+        do {
+            return try await URLSession.shared.data(for: request)
+        } catch {
+            if Self.worthAnotherAddress(error, method: request.httpMethod ?? "GET"),
+               let found = await Self.rediscover?(), found != baseURL,
+               let url = URL(string: found + path) {
+                var again = request
+                again.url = url
+                do {
+                    return try await URLSession.shared.data(for: again)
+                } catch {
+                    throw Failure(status: 0, detail: Self.unreachable(found, error))
+                }
+            }
+            // Said plainly, because "could not connect" with no address is
+            // the least useful thing an app can say -- and on a LOCAL
+            // address the usual cause is not the network at all.
+            throw Failure(status: 0, detail: Self.unreachable(baseURL, error))
+        }
+    }
+
+    static func worthAnotherAddress(_ error: Error, method: String) -> Bool {
+        switch (error as? URLError)?.code {
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+            return true
+        case .timedOut, .networkConnectionLost:
+            return method == "GET"      // it may have arrived; only a read is safe to repeat
+        default:
+            return false
+        }
+    }
+
     static func unreachable(_ baseURL: String, _ error: Error) -> String {
         var said = "could not reach Sim at \(baseURL) -- \(error.localizedDescription)"
         if isLocal(baseURL) {
