@@ -75,12 +75,12 @@ select:
           id(okay_nabu).set_probability_cutoff(217);    // 0.85 -> 0.000 FAPH on DipCo (Manifest's default)
           id(hey_jarvis).set_probability_cutoff(247);   // 0.97 -> 0.563 FAPH on DipCo (Manifest's default)
           id(hey_mycroft).set_probability_cutoff(253);  // 0.99 -> 0.567 FAPH on DipCo
-          id(hey_sim).set_probability_cutoff(163);      // 0.64 -> 0.19 FAPH, 11.7% missed (Simorgh's test set)
+          id(hey_sim).set_probability_cutoff(107);      // 0.42 -> 0.56 FAPH, 6.1% missed -- live, 0.64 caught 6 of 10 real ones, 0.42 caught 10 of 11 (2026-09-27)
         } else if (x == "Moderately sensitive") {
           id(okay_nabu).set_probability_cutoff(176);    // 0.69 -> 0.376 FAPH on DipCo
           id(hey_jarvis).set_probability_cutoff(235);   // 0.92 -> 0.939 FAPH on DipCo
           id(hey_mycroft).set_probability_cutoff(242);  // 0.95 -> 1.502 FAPH on DipCo (Manifest's default)
-          id(hey_sim).set_probability_cutoff(107);      // 0.42 -> 0.56 FAPH, 6.1% missed
+          id(hey_sim).set_probability_cutoff(71);       // 0.28 -> 0.94 FAPH, 3.8% missed
         } else if (x == "Very sensitive") {
           id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
           id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
