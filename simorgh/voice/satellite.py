@@ -65,6 +65,9 @@ FETCH_LEAD_S = 0.3
 MAX_BACKOFF_S = 60.0
 #: Frames kept when the session falls behind (~15 s at 30 ms).
 MAX_QUEUED_FRAMES = 500
+#: Inside a run, how long the microphone waits for the board's next frame
+#: before it treats the stream as stalled and hands the session silence.
+IN_RUN_WAIT_S = 1.0
 
 _SILENCE = b"\x00" * FRAME_BYTES
 _MISSING = ("satellites need the ESPHome API client: `pip install aioesphomeapi` "
@@ -90,6 +93,10 @@ class SatelliteMicrophone:
         #: True from the board's wake word to the end of its run: the session
         #: treats that turn as addressed to Sim (`VoiceSession._wake_addressed`).
         self.woken = False
+        #: True while the board is streaming this run's audio -- from the wake
+        #: word until Sim decides the person finished; the only time the
+        #: stream waits for real frames instead of making up silence.
+        self.streaming = False
         #: The wake word that opened this run, as said ("Hey Sim"); "" for a
         #: follow-up. The session puts it back in front of the words.
         self.wake_phrase = ""
@@ -114,14 +121,27 @@ class SatelliteMicrophone:
     async def stream(self, *, max_seconds: float = 0.0):
         served = 0.0
         while True:
+            # Between runs the board sends nothing, and a silent frame every
+            # 30 ms keeps the session's clock going. INSIDE a run it must
+            # not: the board's audio arrives over Wi-Fi in bursts, and a
+            # burst a few ms late got a made-up silent frame spliced into
+            # the middle of the person's words -- "play a music" chopped
+            # into blips, the turn dropped as too short, worse right after
+            # Sim spoke and the Mac was busy (reproduced 2026-09-27 by
+            # replaying a kept run). In a run, wait for the real audio.
+            wait = IN_RUN_WAIT_S if self.streaming else FRAME_MS / 1000.0
             try:
-                frame = await asyncio.wait_for(self._queue.get(), timeout=FRAME_MS / 1000.0)
+                frames = [await asyncio.wait_for(self._queue.get(), timeout=wait)]
             except asyncio.TimeoutError:
-                frame = _SILENCE
-            yield frame
-            served += FRAME_MS / 1000.0
-            if max_seconds and served >= max_seconds:
-                return
+                # A stalled stream is silence for as long as it stalled,
+                # not one frame of it: the session's clock is the frames.
+                frames = [_SILENCE] * max(1, round(wait * 1000 / FRAME_MS))
+            for frame in frames:
+                yield frame
+                served += FRAME_MS / 1000.0
+                if max_seconds and served >= max_seconds:
+                    return
+            continue
 
     async def capture(self, *, max_seconds: float, endpointer) -> Audio:
         pcm = bytearray()
@@ -314,6 +334,7 @@ class SatelliteLink:
             self._ender.cancel()
         self._run = None
         self.microphone.woken = False
+        self.microphone.streaming = False
         client, self._client = self._client, None
         if client is not None:
             with contextlib.suppress(Exception):
@@ -330,6 +351,7 @@ class SatelliteLink:
         self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=not wake_word,
                          pcm=bytearray() if self._keep_runs else None, states=[])
         self.microphone.woken = True
+        self.microphone.streaming = True
         self.microphone.wake_phrase = (wake_word or "").replace("_", " ").strip().title() if wake_word else ""
         self.runs += 1
         self.last_wake_at = time.time()
@@ -407,6 +429,7 @@ class SatelliteLink:
             self._run = None
             self._log_run(run, "stopped by the board" + (" (abort)" if abort else ""))
         self.microphone.woken = False
+        self.microphone.streaming = False
         self.speaker.interrupted()
 
     def _watch(self, run: _Run) -> None:
@@ -428,6 +451,7 @@ class SatelliteLink:
             run.speech = True
         if state == "thinking" and not run.vad_ended_at:
             run.vad_ended_at = self._clock()
+            self.microphone.streaming = False
             self._log("info", "voice.satellite_turn", phase="heard",
                       after_wake_s=round(run.vad_ended_at - run.started_at, 2))
             self._event("VOICE_ASSISTANT_STT_VAD_END")
@@ -459,6 +483,7 @@ class SatelliteLink:
         run.ended = True
         self._log_run(run, "run end")
         self.microphone.woken = False
+        self.microphone.streaming = False
         if self._run is run:
             self._run = None
         if run.replied and self.follow_up():

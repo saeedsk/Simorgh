@@ -637,3 +637,34 @@ class TheWakeWordIsPutBack(unittest.TestCase):
 
     def test_the_board_names_the_wake_word_as_said(self):
         self.assertEqual(sat.SatelliteMicrophone("k").wake_phrase, "")
+
+
+class NoSilenceIsMadeUpInsideARun(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-27: the board's audio comes over Wi-Fi in bursts, and a
+    burst a few ms late got a made-up silent frame spliced into the words.
+    "Play a music" became blips, the turn was dropped as too short -- the
+    stuck runs, reproduced by replaying a kept run through a real session."""
+
+    async def test_late_bursts_inside_a_run_get_no_silence_between_them(self):
+        mic = sat.SatelliteMicrophone("kitchen")
+        mic.woken = mic.streaming = True
+        speech = b"\x10\x27" * (FRAME_BYTES // 2)
+        stream = mic.stream()
+
+        async def board():
+            for _ in range(4):
+                await asyncio.sleep(0.08)          # later than a 30 ms frame
+                mic.feed(speech * 2)
+        feeding = asyncio.create_task(board())
+        got = [await asyncio.wait_for(stream.__anext__(), 2) for _ in range(8)]
+        await feeding
+        self.assertTrue(all(f == speech for f in got), "every frame in a run is the board's own audio")
+
+    async def test_between_runs_the_room_is_still_paced_silence(self):
+        mic = sat.SatelliteMicrophone("kitchen")
+        stream = mic.stream()
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        frame = await stream.__anext__()
+        self.assertEqual(frame, b"\x00" * FRAME_BYTES)
+        self.assertLess(loop.time() - began, 0.2, "no run: a quiet room, frame by frame")
