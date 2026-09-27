@@ -55,6 +55,8 @@ _PRODUCES = (
     topics.VOICE_MODELS_REPLY, topics.VOICE_BENCH_REPLY,
     # A room satellite's reply piece, for Interface to serve (stage 13).
     topics.VOICE_ROOM_SPEECH, topics.VOICE_ROOM_PLAY_REPLY,
+    # What `auto_relearn` did to a muddled voice profile.
+    topics.UI_NOTICE,
 )
 
 
@@ -199,6 +201,11 @@ class Service:
         self._silenced = False
         self._problems: list[str] = []
         self._engine_names = {"stt": "", "tts": "", "mic": "", "spk": "", "vad": ""}
+        #: The self-repair loop (`auto_relearn`), and when each person's
+        #: profile was last repaired, so a profile that cannot be mended
+        #: from what is on disk is tried once a day, not every hour.
+        self._repair_task: asyncio.Task | None = None
+        self._repaired_at: dict[str, float] = {}
 
     # ---------------------------------------------------------- lifecycle
     async def start(self, ctx: Context) -> None:
@@ -235,6 +242,69 @@ class Service:
                 ctx.logger.warning("voice.not_enabled", reason=why)
         if self.config.satellites:
             await self._start_satellites()
+        if self.config.auto_relearn:
+            self._repair_task = asyncio.create_task(self._repair_loop(), name="voice-auto-relearn")
+
+    #: The first look waits for boot to settle and the engines to load.
+    REPAIR_FIRST_S = 300.0
+    REPAIR_EVERY_S = 3600.0
+    #: One attempt per person per day: what is on disk does not change fast.
+    REPAIR_AGAIN_S = 86400.0
+
+    async def _repair_loop(self) -> None:
+        await asyncio.sleep(self.REPAIR_FIRST_S)
+        while True:
+            try:
+                await self.auto_repair()
+            except Exception as exc:  # noqa: BLE001 -- a repair that fails must not end the loop
+                if self._ctx is not None:
+                    self._ctx.logger.warning("voice.auto_relearn_failed", error=repr(exc))
+            await asyncio.sleep(self.REPAIR_EVERY_S)
+
+    def _speaker_book(self):
+        """The book the live session holds, so a repair is seen at once;
+        a fresh one from disk when nothing is listening."""
+        from .speakers import SpeakerBook
+
+        session = self._session
+        book = getattr(session, "_speakers", None) if session is not None else None
+        if book is None:
+            book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold, household=HOUSEHOLD,
+                               refine_above=self.config.speaker_refine_above,
+                               margin=self.config.speaker_margin, lean=self.config.speaker_lean)
+        return book
+
+    async def auto_repair(self, *, now: float | None = None) -> list[str]:
+        """Repair every profile with more than one voice in it: `tidy`
+        (drop the learnt takes pulling it apart), then `relearn` (refill
+        from calibration takes, then kept turns). Says what it did on the
+        console. Returns those sentences.
+
+        Not while a calibration is being recorded -- that run is adding
+        this person's takes as it goes."""
+        import time
+
+        from .speakers import muddled
+
+        now = time.time() if now is None else now
+        if getattr(self._session, "_calibrating", None) is not None:
+            return []
+        book = self._speaker_book()
+        said: list[str] = []
+        for name, score, _takes in muddled(book.people()):
+            if now - self._repaired_at.get(name, 0.0) < self.REPAIR_AGAIN_S:
+                continue
+            self._repaired_at[name] = now
+            dropped, _before, after = await asyncio.to_thread(book.tidy, name)
+            _ok, relearnt = await asyncio.to_thread(self._relearn_from_kept, book, name)
+            tidied = f"dropped {dropped} take(s) pulling it apart ({score:.2f} -> {after:.2f}); " if dropped else ""
+            said.append(f"{name}'s voice profile had more than one voice in it, so I repaired it: {tidied}{relearnt}")
+        for text in said:
+            if self._ctx is not None:
+                self._ctx.logger.info("voice.auto_relearn", detail=text)
+                await self._ctx.bus.publish(self._ctx.bus.new(topics.UI_NOTICE, {
+                    "level": "info", "text": text, "source": "voice relearn"}))
+        return said
 
     @staticmethod
     def _interactive() -> bool:
@@ -250,6 +320,10 @@ class Service:
             return False
 
     async def stop(self) -> None:
+        if self._repair_task is not None:
+            self._repair_task.cancel()
+            await asyncio.gather(self._repair_task, return_exceptions=True)
+            self._repair_task = None
         self._satellite_stop.set()
         for task in self._satellite_tasks:
             task.cancel()
@@ -903,8 +977,11 @@ class Service:
             from .speakers import muddled
 
             for name, score, takes in muddled(people):
+                fix = (f"I repair it myself (`voice tidy`, then `voice relearn`) once a day; if it stays low, "
+                       f"`voice forget {name}` then `voice enroll {name}`" if self.config.auto_relearn else
+                       f"`voice relearn {name}`, or `voice forget {name}` then `voice enroll {name}`")
                 lines.append(f"  ! {name}'s profile only agrees with itself {score:.2f} over {takes} takes -- "
-                             f"more than one voice is in it. `voice forget {name}` then `voice enroll {name}`.")
+                             f"more than one voice is in it. {fix}.")
             return True, "\n".join(lines)
         if action == "tidy":
             if not name:

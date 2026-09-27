@@ -371,6 +371,11 @@ class Config:
     expressive_lane: str = "auto"
     expressive_min_chars: int = 0     # 0 = a spoken turn never takes the slow lane in auto (it held the floor 78 s once)
     keep_audio: bool = False
+    # A profile with two voices in it (`speakers.muddled`) repairs itself:
+    # `voice tidy`, then `voice relearn`, at most once a day per person
+    # (the creator, 2026-09-27: "auto relearn when ... it detects there
+    # [are] two voices in the learning"). False: only `voice people` says so.
+    auto_relearn: bool = True
     audio_dir: str = "workspace/voice/audio"
     # Kept turns are the family's own voices. They were written with no
     # retention at all (2026-09-18 evaluation, V11); now the oldest go

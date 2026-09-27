@@ -84,7 +84,7 @@ The publish direction is not pinned by the manifest test; `session.py` publishes
 | `voice.room.play.reply` | `messages/voice.py::VoiceRoomPlayReply` | service.py `_on_room_play` | What played, stopped or changed on which room's satellite, or why nothing did |
 | `task.cancel` | `messages/task.py::TaskCancel` | session.py:639 | A newer turn supersedes an older ask still thinking |
 | `ui.command.request` | `messages/ui.py::UiCommandRequest` | session.py `_restart` | "restart" said by a known voice under the loader |
-| `ui.notice` | `messages/ui.py::UiNotice` | session.py `_report_synthesis`, `_calibration_after` | A voice fell back or a reply could not be synthesised; during `voice calibrate` (source `voice calibrate`), each verdict and the next line to read (`warn` for a refused take, with the reason) |
+| `ui.notice` | `messages/ui.py::UiNotice` | session.py `_report_synthesis`, `_calibration_after`; service.py `auto_repair` (source `voice relearn`) | A voice fell back or a reply could not be synthesised; during `voice calibrate` (source `voice calibrate`), each verdict and the next line to read (`warn` for a refused take, with the reason) |
 | `ui.tv.speech` | `messages/ui.py::TvSpeech` | session.py (end of file) | `output = "tv"`: each synthesised piece as a blob ref for the TV page |
 | `voice.control.request` | `messages/voice.py::VoiceControlRequest` | session.py (commands) | "voice off" / "mute" said aloud, handed to the Service |
 | `voice.*.reply` (status, control, speak, listen, voices, devices, models, bench) | `messages/voice.py` | service.py `_reply` | Reply to each request above, only when it has `reply_to` |
@@ -202,6 +202,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `expressive_lane` | `'auto'` | yes |
 | `expressive_min_chars` | `0` | yes |
 | `keep_audio` | `False` | yes (live config sets it true) |
+| `auto_relearn` | `True` | yes -- `service._repair_loop`: hourly (first look 300 s after start), a profile under `MUDDLED_BELOW` is `tidy`-ed then relearnt, once a day per person, never during a calibration; each repair is a `ui.notice` (source `voice relearn`) and a `voice.auto_relearn` log line (2026-09-27) |
 | `keep_audio_days` | `7.0` | yes (session.py `prune_kept_audio`; 0 disables) |
 | `keep_audio_max_mb` | `500.0` | yes (same) |
 | `audio_dir` | `'workspace/voice/audio'` | yes |
