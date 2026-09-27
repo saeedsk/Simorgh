@@ -255,7 +255,27 @@ def claimed_effect(text: str, session) -> tuple[str, tuple[str, ...]]:
     if not could:
         return "", ()
     match = _EFFECT_CLAIM.search(text)
-    return (match.group(0).strip(), could) if match else ("", ())
+    if not match:
+        return "", ()
+    return match.group(0).strip(), _fitting_first(could, f"{text} {getattr(session, 'user_text', '') or ''}")
+
+
+def _fitting_first(tools: tuple[str, ...], words: str) -> tuple[str, ...]:
+    """`tools`, the ones whose name shares a word with `words` first.
+
+    The bounce listed the first eight write tools in profile order, and
+    for a spoken turn those were start_task, cancel_task, memory_forget...
+    Asked (as heard) "Sim, I play Persian music from Apple Music", the
+    model claimed "I started" it, was bounced with a list that did not
+    contain music_play, and apologised instead of playing it (live,
+    2026-09-27). A tool the words name comes first; order is otherwise kept."""
+    said = set(re.findall(r"[a-z]+", (words or "").lower()))
+    said |= {w[:-3] for w in said if w.endswith("ing")}      # "playing" is play; "started" is not start_task
+
+    def fit(tool: str) -> int:
+        return -sum(1 for part in tool.lower().split("_") if len(part) > 2 and part in said)
+
+    return tuple(sorted(tools, key=fit))
 
 
 @dataclass(frozen=True)

@@ -47,6 +47,19 @@ class TheGenericRule(unittest.TestCase):
         session = types.SimpleNamespace(profile=profiles.RESEARCH, steps=[], user_text="")
         self.assertEqual(stophook.claimed_effect("I've added a note.", session), ("", ()))
 
+    def test_the_tool_the_words_name_is_offered_first(self):
+        """Live, 2026-09-27: heard as "Sim, I play Persian music from Apple
+        Music", the reply said "I started" it with no tool run; the bounce
+        listed start_task, cancel_task, memory_forget... and no music_play,
+        and the model apologised instead of playing it."""
+        session = types.SimpleNamespace(profile=profiles.VOICE_CHAT, steps=[],
+                                        user_text="Sim, I play Persian music from Apple Music.")
+        _quote, could = stophook.claimed_effect("I started Persian music for you, Saeed.", session)
+        self.assertEqual(could[0], "music_play")
+        self.assertLess(could.index("room_play"), could.index("cancel_task"))
+        bounce = stophook.check("I started Persian music for you, Saeed.", session)
+        self.assertIn("the ones that could: music_play", bounce.reply)
+
     def test_the_specific_rules_come_first(self):
         session = types.SimpleNamespace(profile=profiles.CHAT, steps=[], user_text="")
         self.assertEqual(stophook.check("I pushed the change to main.", session).rule, "commit")
