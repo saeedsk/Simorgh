@@ -2194,6 +2194,13 @@ class VoiceSession:
         last = self._voice_room.last_said
         if last and language_of(last) != language:
             return ""
+        if language == "fa" and str(getattr(self._config, "tts_farsi", "auto") or "auto") in ("auto", "pocket"):
+            # Every Farsi aside is two or three words, and Pocket says its
+            # reference clip's own words instead of a line that short about
+            # half the time (measured 2026-09-27: "آها." came back as
+            # "khoob khaaleh f..."). A stranger's sentence mid-conversation
+            # is worse than a second of quiet.
+            return ""
         return language
 
     async def _tidy(self, text: str, turn_id: int) -> str:

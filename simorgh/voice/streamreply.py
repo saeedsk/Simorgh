@@ -28,7 +28,21 @@ from .planner import MORE_ON_SCREEN
 _SENTENCE_END = re.compile(r"(?<=[.!?؟۔])[\"')\]]*\s+|\s*\n\s*")
 #: A sentence shorter than this waits for the next one ("Dr." or "1.").
 MIN_SENTENCE = 12
+#: A Farsi sentence shorter than this many words waits for the next one.
+#: Pocket, cloning its voice from a reference clip, says the clip's own
+#: opening words ("khoob, Fahimeh o Azadeh...") instead of a line as
+#: short as "آره." about half the time (measured 2026-09-27); a full
+#: sentence it says cleanly.
+FARSI_MIN_WORDS = 4
 PAUSE_MS = 180
+
+
+def _too_short(sentence: str) -> bool:
+    if len(sentence) < MIN_SENTENCE:
+        return True
+    from .planner import _persian_script
+
+    return _persian_script(sentence) and len(sentence.split()) < FARSI_MIN_WORDS
 
 
 class SentenceStream:
@@ -64,7 +78,7 @@ class SentenceStream:
             if match is None:
                 return
             sentence = self._buffer[:match.end()].strip()
-            if len(sentence) < MIN_SENTENCE and match.end() < len(self._buffer):
+            if _too_short(sentence) and match.end() < len(self._buffer):
                 # "Dr." or "1." on its own: look on to the next sentence end
                 # and say the two together.  Putting the short one back at the
                 # front of the buffer would match here again for ever (live
