@@ -100,3 +100,47 @@ class TheDomainsAreSimsToChange(unittest.IsolatedAsyncioTestCase):
     async def test_what_remains_in_execution_still_is(self):
         self.assertEqual(await TheGrowthLoopCannotLoosenItsOwnGate._kind(
             TheGrowthLoopCannotLoosenItsOwnGate(), "simorgh/execution/verifier.py"), "deny")
+
+
+class ANewTestMayBeAddedBesideAProtectedPackage(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-26: a curiosity task's regression test for
+    `simorgh/execution/tools.py` was refused because its path,
+    `tests/simorgh/execution/...`, contains `simorgh/execution/`. The
+    creator chose: new test files may be created there, existing ones
+    never edited."""
+
+    _kind = TheGrowthLoopCannotLoosenItsOwnGate._kind
+    _write = staticmethod(TheGrowthLoopCannotLoosenItsOwnGate._write)
+    _ctx = staticmethod(TheGrowthLoopCannotLoosenItsOwnGate._ctx)
+
+    async def test_a_new_test_file_is_allowed(self):
+        self.assertEqual(await self._kind("tests/simorgh/execution/test_zz_never_written_by_this_test.py"), "abstain")
+
+    async def test_an_existing_test_is_still_refused(self):
+        """Editing a test that exists could weaken the check it makes."""
+        self.assertEqual(await self._kind("tests/simorgh/execution/test_a_cancelled_container_is_gone.py"), "deny")
+
+    async def test_a_conftest_is_refused_it_changes_how_other_tests_run(self):
+        self.assertEqual(await self._kind("tests/simorgh/execution/conftest.py"), "deny")
+        self.assertEqual(await self._kind("tests/simorgh/execution/__init__.py"), "deny")
+
+    async def test_the_package_itself_is_still_refused(self):
+        self.assertEqual(await self._kind("simorgh/execution/test_sneaky.py"), "deny")
+
+    async def test_a_shell_command_was_never_stopped_there(self):
+        """Recorded, not endorsed: `_mentioned_paths` drops every
+        `tests/` path on purpose ("the test tree is a write scope", so
+        `pytest tests/simorgh/execution/...` is not refused), which means a
+        shell command could always write -- or overwrite -- tests here,
+        before and after the exemption above. Only named-file writes were
+        ever refused. If that changes, this test should change with it."""
+        from simorgh.guardian.api import Proposal
+        from simorgh.guardian.rules import ProtectedRule
+
+        shell = Proposal(action_id="a1", tool="run_shell",
+                         args={"command": "echo x > tests/simorgh/execution/test_zz_new.py"},
+                         scope={}, reversibility="irreversible", rationale="", proposed_by="orchestration")
+        self.assertEqual((await ProtectedRule().evaluate(shell, self._ctx())).kind, "abstain")
+
+    async def test_climbing_out_of_tests_is_refused(self):
+        self.assertEqual(await self._kind("tests/simorgh/execution/../../../simorgh/execution/test_x.py"), "deny")

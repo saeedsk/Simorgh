@@ -375,6 +375,39 @@ class ModeRule:
         return Decision("abstain", self.layer)
 
 
+def _a_new_test_beside(canonical: str, protected: str, proposal: Proposal) -> bool:
+    """Is this a NEW test file in a protected package's tests, named
+    outright rather than written by a program?
+
+    The substring scan in `ProtectedRule` over-matches on purpose, and one
+    thing it caught was `tests/simorgh/execution/`: a curiosity task wrote
+    a regression test for `simorgh/execution/tools.py` and was refused
+    "only the creator may edit it directly" (live 2026-09-26). Protecting
+    a package's tests is right -- a task that could edit them could
+    weaken the checks guarding the package -- but ADDING a test weakens
+    nothing. The creator chose (2026-09-26): new test files may be
+    created, existing ones never edited.
+
+    So, all of: the proposal carries no program (`code`/`command`, whose
+    paths are guesses from text); the match is the package's `tests/`
+    twin, not the package itself; the file is `test_*.py` -- never
+    `conftest.py` or `__init__.py`, which change how OTHER tests run; and
+    it does not exist yet. A test that already exists is refused as before.
+    """
+    if any(_code_arg_text(proposal.args.get(k)) for k in _CODE_ARG_KEYS):
+        return False
+    if not protected.endswith("/") or ".." in canonical.split("/"):
+        return False
+    lower, twin = canonical.lower(), ("tests/" + protected).lower()
+    at = lower.find(twin)
+    if at < 0 or (at > 0 and lower[at - 1] != "/") or lower.find(protected.lower()) != at + len("tests/"):
+        return False
+    if not re.fullmatch(r"test_\w+\.py", posixpath.basename(canonical)):
+        return False
+    target = Path(canonical) if canonical.startswith("/") else _REPO_ROOT / canonical
+    return not target.exists()
+
+
 class ProtectedRule:
     name = "protected"
     layer = "protected"
@@ -435,6 +468,8 @@ class ProtectedRule:
             for protected in ctx.config.protected_subjects:
                 protected_lower = protected.lower()
                 if protected in path or protected in canonical or protected_lower in path_lower or protected_lower in canonical_lower:
+                    if _a_new_test_beside(canonical, protected, proposal):
+                        continue
                     if protected in ask:
                         asked.append((path, protected))
                         continue
