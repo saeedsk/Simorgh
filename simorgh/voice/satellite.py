@@ -46,6 +46,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
+import sys
 import time
 from dataclasses import dataclass
 
@@ -80,6 +82,30 @@ RESTOP_S = 15.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
+#: The lead-in's level: quiet noise, not digital silence. The first version
+#: padded with zeros and the start was still clipped -- a speaker that
+#: sleeps on its input (an Echo Dot on the jack) stays asleep through true
+#: silence and wakes on the first real sound, the first syllable (live,
+#: 2026-09-27). About -54 dBFS: enough signal to wake it, too quiet to hear.
+WAKE_NOISE_AMPLITUDE = 64
+#: Terminal colour codes in the board's log lines.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+#: Warnings the board prints on every reply, which say nothing.
+_BOARD_NOISE = ("No text in STT_END event", "No text in TTS_START event")
+
+
+def _wake_noise(samples: int) -> bytes:
+    """`samples` of very quiet, deterministic noise as int16 PCM."""
+    import array
+
+    out = array.array("h", [0]) * samples
+    seed = 12345
+    for i in range(samples):
+        seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
+        out[i] = (seed % (2 * WAKE_NOISE_AMPLITUDE + 1)) - WAKE_NOISE_AMPLITUDE
+    if sys.byteorder != "little":
+        out.byteswap()
+    return out.tobytes()
 #: How long the rest of a cut-off reply is dropped if no new turn is heard.
 HOLD_REPLY_S = 30.0
 #: Sent with every INTENT_END. ESPHome keeps `continue_conversation_` from
@@ -219,8 +245,7 @@ class SatelliteSpeaker:
         if lead and time.monotonic() - self._last_end > IDLE_BEFORE_LEAD_S:
             # Only after a quiet spell: the pieces inside one reply follow
             # each other closely and the speaker is already awake.
-            pad = int(lead * audio.sample_rate) * 2
-            audio = Audio(b"\x00" * pad + audio.pcm, audio.sample_rate)
+            audio = Audio(_wake_noise(int(lead * audio.sample_rate)) + audio.pcm, audio.sample_rate)
         self._stop = asyncio.Event()
         try:
             url = await self._publish(audio)
@@ -420,6 +445,12 @@ class SatelliteLink:
                                          handle_audio=self._on_audio)
         if (self._media_key is not None or self._sensitivity_key is not None) and hasattr(client, "subscribe_states"):
             client.subscribe_states(self._on_entity_state)
+        if hasattr(client, "subscribe_logs") and api is not None and hasattr(api, "LogLevel"):
+            # The board's own account, into Sim's log: for three minutes on
+            # 2026-09-27 no wake word reached Sim and nothing on Sim's side
+            # could say whether the board had heard one.
+            with contextlib.suppress(Exception):
+                client.subscribe_logs(self._on_board_log, log_level=api.LogLevel.LOG_LEVEL_INFO)
         self.connected = True
         self._set_status("connected" if self._media_key is not None else "connected, but it has no media player")
         if self.on_connected is not None:
@@ -427,6 +458,17 @@ class SatelliteLink:
                 await self.on_connected(self.name)
             except Exception as exc:  # noqa: BLE001 -- a hook that fails must not drop the board
                 self._log("warning", "voice.satellite_hook_failed", error=repr(exc))
+
+    def _on_board_log(self, message) -> None:
+        """Keep the board's lines about the wake word, and its warnings and
+        errors, minus the two it prints on every reply."""
+        raw = getattr(message, "message", b"")
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        text = _ANSI.sub("", text).strip()
+        if not text or any(noise in text for noise in _BOARD_NOISE):
+            return
+        if "wake" in text.lower() or text.startswith(("[E]", "[W]")):
+            self._log("info", "voice.board_log", line=text[:240])
 
     def _on_entity_state(self, state) -> None:
         """The board's media player, as it says it is. Music follows the

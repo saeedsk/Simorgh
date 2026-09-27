@@ -890,9 +890,30 @@ class TheFirstWordsAreNotClipped(unittest.IsolatedAsyncioTestCase):
             speaker._last_end -= sat.IDLE_BEFORE_LEAD_S + 1      # noqa: SLF001 -- a quiet spell
             await speaker.play(piece)
         self.assertAlmostEqual(published[0].seconds, 0.6, places=3)
-        self.assertTrue(published[0].pcm.startswith(b"\x00" * 16000), "the silence comes first")
+        lead = memoryview(published[0].pcm[:16000]).cast("h")
+        self.assertTrue(any(lead), "not digital silence: that leaves the speaker asleep")
+        self.assertLessEqual(max(abs(x) for x in lead), sat.WAKE_NOISE_AMPLITUDE, "and too quiet to hear")
+        self.assertEqual(published[0].pcm[16000:], piece.pcm, "then the reply, untouched")
         self.assertAlmostEqual(published[1].seconds, 0.1, places=3)
         self.assertAlmostEqual(published[2].seconds, 0.6, places=3)
+
+    def test_the_boards_log_keeps_wake_lines_and_warnings_only(self):
+        """No wake word reached Sim for three minutes and nothing could say
+        whether the board heard one (2026-09-27)."""
+        logged = []
+
+        class _Logger:
+            def info(self, event, **fields):
+                logged.append(fields.get("line"))
+
+        link = sat.SatelliteLink("kitchen", "h", "k", publish=None, logger=_Logger())
+        for line in (b"\x1b[0;33m[W][voice_assistant:806]: No text in STT_END event\x1b[0m",
+                     b"[D][micro_wake_word:123]: Detected wake word 'hey_sim'",
+                     b"[I][esp-idf:000]: micro_decoder.http_client: Connected",
+                     b"[E][i2s_audio:77]: Failed to read microphone"):
+            link._on_board_log(types.SimpleNamespace(message=line))  # noqa: SLF001
+        self.assertEqual(logged, ["[D][micro_wake_word:123]: Detected wake word 'hey_sim'",
+                                  "[E][i2s_audio:77]: Failed to read microphone"])
 
     def test_it_is_a_setting(self):
         from simorgh.contracts.settings import VOICE_SAFE_KEYS
