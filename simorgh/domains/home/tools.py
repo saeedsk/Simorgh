@@ -44,7 +44,56 @@ _UNDO_SERVICE = {
 }
 
 
+class _RecoveringClient(HomeAssistantClient):
+    """A client that, when Home Assistant cannot be reached, tries once to
+    bring it back (`keeper.revive`: start its VM or container) and asks
+    again. What was done rides in the answer either way."""
+
+    #: What `revive` did on this client's last failure, for the tool's answer.
+    revived = ""
+
+    async def _request(self, method: str, path: str, body):
+        try:
+            return await super()._request(method, path, body)
+        except HomeUnavailable as exc:
+            if getattr(exc, "error_kind", "") != "transient":
+                raise
+            from .keeper import revive
+
+            said = await revive(self.url)
+            if not said:
+                raise
+            self.revived = said
+            try:
+                return await super()._request(method, path, body)
+            except HomeUnavailable as again:
+                raise HomeUnavailable(f"{again} -- {said}", error_kind="transient") from None
+
+
 class _HomeTool:
+    def __init_subclass__(cls, **kwargs) -> None:
+        """Every tool's answer says when getting it meant starting Home
+        Assistant: a tool that changed the machine must say so."""
+        super().__init_subclass__(**kwargs)
+        inner = cls.__dict__.get("run")
+        if inner is None:
+            return
+
+        async def run(self, args: dict, *, ctx, _inner=inner):
+            self._last_client = None
+            result = await _inner(self, args, ctx=ctx)
+            said = getattr(self._last_client, "revived", "")
+            if not said or not isinstance(result, ToolResult):
+                return result
+            from dataclasses import replace
+
+            note = f"Home Assistant was not answering: {said}."
+            return replace(result, output=f"{note}\n{result.output}" if result.output else note,
+                           side_effects=(*result.side_effects, said))
+
+        run.__doc__ = inner.__doc__
+        cls.run = run
+
     def __init__(self, config, *, client=None, env=None, secrets=None, clock=time.time) -> None:
         self._config = config
         self._given = client
@@ -57,10 +106,11 @@ class _HomeTool:
             return self._given
         url = self._lookup("HOME_ASSISTANT_URL", "vault:home_assistant:url")
         token = self._lookup("HOME_ASSISTANT_TOKEN", "vault:home_assistant:token")
-        return HomeAssistantClient(
+        self._last_client = _RecoveringClient(
             url=url, token=token,
             timeout_s=float(getattr(self._config, "home_timeout_s", 10.0)),
             dry_run=bool(getattr(self._config, "home_dry_run", False)))
+        return self._last_client
 
     def _lookup(self, env_name: str, vault_name: str) -> str:
         """The setting, from the secret store under either name, else
