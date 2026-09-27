@@ -313,7 +313,7 @@ class ConfiguredSatellites(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config.satellites[0]["name"], "kitchen")
         self.assertEqual(Config().satellites, (), "none by default, and nothing imported")
 
-    async def _service(self, *, secrets, reply_url="http://192.168.50.33:8765"):
+    async def _service(self, *, secrets, reply_url="http://192.168.50.33:8765", **extra):
         from simorgh.voice.config import Config
         from simorgh.voice.fakes import FakeMicrophone, FakeRecogniser, FakeSpeaker, FakeSynthesiser
         from simorgh.voice.service import Service
@@ -323,7 +323,7 @@ class ConfiguredSatellites(unittest.IsolatedAsyncioTestCase):
         config = Config(stt="fake", tts="fake", microphone="fake", speaker="fake", speaker_id="off",
                         stt_partials=False, backchannel=False, enabled=False, satellite_reply_url=reply_url,
                         satellites=({"name": "kitchen", "host": "sim-room-1.local",
-                                     "key_env": "SIM_SATELLITE_KITCHEN_KEY", "volume": 1.0},))
+                                     "key_env": "SIM_SATELLITE_KITCHEN_KEY", "volume": 1.0},), **extra)
         service = Service(config, microphone=FakeMicrophone(silence(0.03)), speaker=FakeSpeaker(),
                           recogniser=FakeRecogniser(), synthesiser=FakeSynthesiser(),
                           satellite_client=lambda host, port, key: (client, _Api()))
@@ -581,6 +581,41 @@ class AQuestionIsFollowedUp(unittest.IsolatedAsyncioTestCase):
         self.assertIn("VOICE_ASSISTANT_RUN_END", client.kinds(), "nobody spoke: closed by itself")
         self.assertIsNone(link._run)  # noqa: SLF001
         await _close(stop, task)
+
+
+class OneWakeWordAConversation(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "every time I have to say the wake word ...
+    I only need to say it once at the beginning of the conversation."
+    `satellite_follow_up = "always"` listens after every reply -- but not
+    while the board plays music, which would be taken as the next turn."""
+
+    async def _link_for(self, mode: str):
+        helper = ConfiguredSatellites()
+        service, _client, _ctx = await helper._service(secrets={"SIM_SATELLITE_KITCHEN_KEY": "k"},
+                                                      satellite_follow_up=mode)
+        self.addAsyncCleanup(service.stop)
+        await service._start_satellites()  # noqa: SLF001
+        return service, service._satellites["kitchen"]  # noqa: SLF001
+
+    async def test_always_follows_a_statement_up(self):
+        service, link = await self._link_for("always")
+        service._rooms["kitchen"]._voice_room.last_said = "It's four o'clock."  # noqa: SLF001
+        self.assertTrue(link.follow_up())
+
+    async def test_but_not_while_the_board_plays_music(self):
+        _service, link = await self._link_for("always")
+        link.playing_media = True
+        self.assertFalse(link.follow_up())
+        await link.stop_playback()
+        self.assertFalse(link.playing_media, "stopping the music opens conversations again")
+        self.assertTrue(link.follow_up())
+
+    async def test_question_mode_still_follows_only_a_question(self):
+        service, link = await self._link_for("question")
+        service._rooms["kitchen"]._voice_room.last_said = "It's four o'clock."  # noqa: SLF001
+        self.assertFalse(link.follow_up())
+        service._rooms["kitchen"]._voice_room.last_said = "Want the forecast too?"  # noqa: SLF001
+        self.assertTrue(link.follow_up())
 
 
 class EveryRunSaysWhatItGot(unittest.IsolatedAsyncioTestCase):

@@ -256,6 +256,10 @@ class SatelliteLink:
         #: wake word? The service sets it: true when Sim's reply was a
         #: question. `follow_up_s` is how long a follow-up waits for speech.
         self.follow_up = lambda: False
+        #: Music or radio this link started and has not stopped. A board
+        #: playing a song is not listening for a next turn: the song
+        #: would be the turn.
+        self.playing_media = False
         self._follow_up_s = follow_up_s
         self._publish = publish
         #: A folder to keep each wake run's audio in, as WAV (the last 20),
@@ -534,6 +538,7 @@ class SatelliteLink:
         if self._client is None or self._media_key is None:
             raise RuntimeError(f"satellite {self.name} is not connected ({self.status})")
         self._client.media_player_command(self._media_key, media_url=url, announcement=False)
+        self.playing_media = True
 
     async def set_volume(self, level: float) -> None:
         if self._client is None or self._media_key is None:
@@ -541,6 +546,7 @@ class SatelliteLink:
         self._client.media_player_command(self._media_key, volume=float(level))
 
     async def stop_playback(self) -> None:
+        self.playing_media = False
         if self._client is None or self._media_key is None:
             return
         with contextlib.suppress(Exception):

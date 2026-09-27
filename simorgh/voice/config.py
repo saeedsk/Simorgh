@@ -401,9 +401,11 @@ class Config:
     # or `http_host` differ. A loopback-only Interface cannot be reached.
     satellite_reply_url: str = ""
     # After Sim's reply in a room ends with a question, the satellite listens
-    # again with no wake word for `follow_up_window_s` ("question"), or never
-    # ("off"). Only a question: listening after every answer would take in
-    # the TV as the person's next turn.
+    # again with no wake word for `follow_up_window_s` ("question"); after
+    # EVERY reply ("always": one wake word opens a conversation, and a
+    # window nobody speaks into closes it; never while the board plays
+    # music); or never ("off"). "question" is the default because an open
+    # mic after a statement can take in the TV as the person's next turn.
     satellite_follow_up: str = "question"
     # A folder to keep each satellite wake run's audio in (the last 20, as
     # WAV), for replaying a turn that went wrong; "" keeps none. Only runs

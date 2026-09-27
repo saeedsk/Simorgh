@@ -582,9 +582,16 @@ class Service:
             except (ValueError, RuntimeError) as exc:
                 self._problems.append(f"satellite {name}: {exc}")
                 continue
-            if str(self.config.satellite_follow_up).lower() == "question":
+            mode = str(self.config.satellite_follow_up).lower()
+            if mode == "question":
                 # Sim asked something: the board listens again, no wake word.
                 link.follow_up = lambda room=room: room._voice_room.last_said.rstrip().endswith(("?", "؟"))  # noqa: SLF001
+            elif mode in ("always", "conversation"):
+                # The creator, 2026-09-27: "I only need to say the wake word
+                # once at the beginning of the conversation." Every reply
+                # listens again; a window nobody speaks into ends it. Not
+                # while the board plays music -- the song would be the turn.
+                link.follow_up = lambda link=link: not link.playing_media
             self._satellites[name] = link
             if self._session is not None:
                 # One question, one answer: while any board's wake run is
