@@ -419,6 +419,10 @@ class VoiceSession:
         ), auto_listen=config.auto_listen)
         self.stats = SessionStats()
         self.muted = False
+        #: `() -> bool`, set by the service on the laptop's session: true while
+        #: a room satellite's wake run is open, so that room answers and
+        #: this one stays quiet (stage 13). None: never defer.
+        self.defer = None
         self.partial = ""
         self._clocks: dict[int, TurnClock] = {}
         self._frames: asyncio.Queue | None = None
@@ -1375,6 +1379,14 @@ class VoiceSession:
             await self._enroll_take(turn_id, text, vector)
             return
         speaker = identification.name if identification is not None else ""
+        if self.defer is not None and self.defer():
+            # A room satellite's wake word is open right now, so this same
+            # speech is that room's turn, and the room answers it. Live
+            # 2026-09-27: with the board beside the Mac, both sessions
+            # answered "what time is it" -- once from each speaker.
+            self._log("info", "voice.deferred_to_room", turn=turn_id, text=text[:60])
+            await self._stay_quiet(turn_id, reason="a room satellite heard its wake word for this; it answers")
+            return
         if not speaker and self._tv_is_playing() and not (self._wake_addressed() or self._names_sim(text)):
             # Live 2026-09-13: a KATSEYE video's own dialogue ("my wife
             # Michelle will judge the drawings") was heard, transcribed and

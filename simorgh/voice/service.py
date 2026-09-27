@@ -581,6 +581,10 @@ class Service:
                 self._problems.append(f"satellite {name}: {exc}")
                 continue
             self._satellites[name] = link
+            if self._session is not None:
+                # One question, one answer: while any board's wake run is
+                # open, the laptop leaves that speech to the room.
+                self._session.defer = lambda: any(sat.microphone.woken for sat in self._satellites.values())
             self._satellite_tasks.append(asyncio.create_task(link.run(self._satellite_stop),
                                                              name=f"voice-satellite-{name}"))
 

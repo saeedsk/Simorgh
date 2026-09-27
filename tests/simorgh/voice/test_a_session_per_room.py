@@ -213,3 +213,21 @@ class MutingOneRoom(unittest.IsolatedAsyncioTestCase):
         ok, detail = service._mute_one("garage", True)  # noqa: SLF001
         self.assertFalse(ok)
         self.assertIn("kitchen", detail)
+
+
+class OneQuestionOneAnswer(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-27: with the board beside the Mac, both the laptop and
+    the room answered "what time is it". While a room's wake run is open,
+    the laptop leaves that speech to the room."""
+
+    async def test_the_laptop_defers_while_a_room_is_woken_and_answers_otherwise(self):
+        pipeline, bus, sim, (laptop, _ls), (kitchen, _ks) = _two_rooms()
+        woken = {"now": True}
+        laptop.defer = lambda: woken["now"]
+        await _run_both(laptop, kitchen, lambda: kitchen.stats.turns >= 1 and bus.of(topics.VOICE_SPOKEN), timeout=10.0)
+        await asyncio.sleep(0.3)
+        asked_by = [d for d, _t in sim.asked]
+        self.assertNotIn("laptop", asked_by, "the laptop deferred to the woken room")
+        self.assertIn("kitchen", asked_by)
+        quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("device") == "laptop" and p.get("quiet")]
+        self.assertTrue(any("room satellite" in (p.get("reason") or "") for p in quiet), quiet)
