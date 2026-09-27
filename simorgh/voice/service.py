@@ -724,7 +724,8 @@ class Service:
         laptop first, then each satellite with its settings."""
         rooms = [{"name": "laptop", "muted": bool(getattr(self._session, "muted", False)),
                   "kind": "laptop"}] if self._session is not None else []
-        for name, link in self._satellites.items():
+        for name in [*self._satellites, *(d for d in self._rooms if d not in self._satellites)]:
+            link = self._satellites.get(name)
             # The room session's own state rides here too. It was a dict
             # written into `rooms` AFTER this list, keyed by device --
             # undeclared, and once `rooms` was declared a list it failed the
@@ -732,19 +733,24 @@ class Service:
             # 2026-09-27).
             room = self._rooms.get(name)
             task = self._room_tasks.get(name)
-            rooms.append({
-                "name": name, "kind": "satellite", "status": link.status,
+            entry = {
+                "name": name, "kind": "satellite" if link is not None else "room",
+                "status": link.status if link is not None else "",
                 "state": str(getattr(room, "state", "") or ""),
                 "turns": int(getattr(getattr(room, "stats", None), "turns", 0) or 0),
                 "partial": str(getattr(room, "partial", "") or ""),
                 "running": bool(task and not task.done()),
-                "muted": bool(getattr(self._rooms.get(name), "muted", False)),
-                "in_conversation": link.in_conversation(),
-                "follow_up": self._mode_for(name),
-                "conversation_s": self._conversation_for(name),
-                "follow_up_window_s": float(self.config.follow_up_window_s or 0.0),
-                "volume": float(self.config.satellite_volume or 0.0) or link._volume,  # noqa: SLF001
-            })
+                "muted": bool(getattr(room, "muted", False)),
+            }
+            if link is not None:
+                entry.update({
+                    "in_conversation": link.in_conversation(),
+                    "follow_up": self._mode_for(name),
+                    "conversation_s": self._conversation_for(name),
+                    "follow_up_window_s": float(self.config.follow_up_window_s or 0.0),
+                    "volume": float(self.config.satellite_volume or 0.0) or link._volume,  # noqa: SLF001
+                })
+            rooms.append(entry)
         return rooms
 
     def _follows_up(self, link, room) -> bool:

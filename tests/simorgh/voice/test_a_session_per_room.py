@@ -128,6 +128,11 @@ class TwoRoomsAtOnce(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pipeline.tool_started_handlers, [], "a stopped room leaves nothing behind")
 
 
+def _room(service, name):
+    """One room's entry in `voice status` (a list since 2026-09-27)."""
+    return next(r for r in service._state()["rooms"] if r["name"] == name)  # noqa: SLF001
+
+
 class TheServiceHoldsTheRooms(unittest.IsolatedAsyncioTestCase):
     async def _service(self):
         from simorgh.voice.config import Config
@@ -166,18 +171,18 @@ class TheServiceHoldsTheRooms(unittest.IsolatedAsyncioTestCase):
             await service.add_room("kitchen", microphone=FakeMicrophone(), speaker=FakeSpeaker())
         with self.assertRaises(ValueError):
             await service.add_room(service.config.device, microphone=FakeMicrophone(), speaker=FakeSpeaker())
-        self.assertIn("kitchen", service._state()["rooms"])  # noqa: SLF001
+        self.assertIn("kitchen", [r["name"] for r in service._state()["rooms"]])  # noqa: SLF001
 
     async def test_voice_on_starts_the_rooms_and_voice_off_stops_them(self):
         service = await self._service()
         await service.add_room("kitchen", microphone=FakeMicrophone(silence(0.03)), speaker=FakeSpeaker())
-        self.assertFalse(service._state()["rooms"]["kitchen"]["running"], "nothing listens while voice is off")  # noqa: SLF001
+        self.assertFalse(_room(service, "kitchen")["running"], "nothing listens while voice is off")  # noqa: SLF001
         ok, why = await service._turn_on()  # noqa: SLF001
         self.assertTrue(ok, why)
         await asyncio.sleep(0.05)
-        self.assertTrue(service._state()["rooms"]["kitchen"]["running"])  # noqa: SLF001
+        self.assertTrue(_room(service, "kitchen")["running"])  # noqa: SLF001
         await service._turn_off()  # noqa: SLF001
-        self.assertFalse(service._state()["rooms"]["kitchen"]["running"], "`voice off` silences every room")  # noqa: SLF001
+        self.assertFalse(_room(service, "kitchen")["running"], "`voice off` silences every room")  # noqa: SLF001
         await service.remove_room("kitchen")
         self.assertNotIn("rooms", service._state())  # noqa: SLF001
 

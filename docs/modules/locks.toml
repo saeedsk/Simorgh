@@ -29,20 +29,8 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
-[locks.interface]
-by = "opus-main"
-task = "voice status: a room without a board"
-since = "2026-09-27T18:32:03+00:00"
-until = "2026-09-28T02:32:03+00:00"
-
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "rooms list covers every room session"
-since = "2026-09-27T18:31:49+00:00"
-until = "2026-09-28T02:31:49+00:00"

@@ -386,7 +386,7 @@ class ConfiguredSatellites(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.005)
         state = service._state()  # noqa: SLF001
         self.assertTrue(state["satellites"]["kitchen"]["connected"], state["satellites"])
-        self.assertIn("kitchen", state["rooms"])
+        self.assertIn("kitchen", [r["name"] for r in state["rooms"]])
         self.assertIn({"volume": 1.0, "key": 7}, client.media, "the configured volume is set")
         port = await client.handlers["handle_start"]("c1", 1, None, "okay_nabu")
         self.assertIsNone(port, "voice is off, so the wake word is turned away, not left hanging")

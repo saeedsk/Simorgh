@@ -64,7 +64,8 @@ def rooms(listed: list) -> list[str]:
         name = str(room.get("name") or "?")
         mic = "muted" if room.get("muted") else "listening"
         if room.get("kind") != "satellite":
-            out.append(f"    {name}: mic {mic}  (`{'unmute' if room.get('muted') else 'mute'}`)")
+            out.append(f"    {name}: mic {mic}  (`{'unmute' if room.get('muted') else 'mute'}"
+                       f"{'' if room.get('kind') == 'laptop' else ' ' + name}`)")
             continue
         talk = " · in a conversation now" if room.get("in_conversation") else ""
         volume = room.get("volume")
