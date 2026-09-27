@@ -180,6 +180,10 @@ class _Run:
     ended: bool = False
     follow_up: bool = False          # opened by Sim's question, not by a wake word
     speech: bool = False             # the person started talking in this run
+    audio_bytes: int = 0             # what the board streamed in this run...
+    first_audio_at: float = 0.0      # ...when it started...
+    peak: int = 0                    # ...and the loudest 30 ms of it (s16 RMS)
+    logged: bool = False
 
 
 def _default_client(host: str, port: int, key: str):
@@ -340,8 +344,29 @@ class SatelliteLink:
 
     async def _on_audio(self, data: bytes, _extra=None) -> None:
         run = self._run
+        if run is not None and not run.ended:
+            if not run.audio_bytes:
+                run.first_audio_at = self._clock()
+            run.audio_bytes += len(data)
+            if len(data) >= 2:
+                import audioop
+
+                run.peak = max(run.peak, audioop.rms(data, 2))
         if run is not None and not run.ended and not run.vad_ended_at:
             self.microphone.feed(data)
+
+    def _log_run(self, run: _Run, how: str) -> None:
+        """One line per run, however it ended: did the board send audio,
+        how soon after the wake, and was anyone in it? A run with no turn
+        is otherwise silent, and the question -- was the speech lost on
+        the board or ignored by Sim -- has no answer (2026-09-27)."""
+        if run.logged:
+            return
+        run.logged = True
+        self._log("info", "voice.satellite_run", ended=how, heard=bool(run.vad_ended_at), replied=run.replied,
+                  follow_up=run.follow_up, audio_s=round(run.audio_bytes / 32000, 2),
+                  first_audio_after_s=round(run.first_audio_at - run.started_at, 2) if run.first_audio_at else None,
+                  peak_rms=run.peak, lasted_s=round(self._clock() - run.started_at, 2))
 
     async def _on_stop(self, abort: bool) -> None:
         """The board ended the run itself: its wake word again (to stop a
@@ -350,6 +375,7 @@ class SatelliteLink:
         if run is not None:
             run.ended = True
             self._run = None
+            self._log_run(run, "stopped by the board" + (" (abort)" if abort else ""))
         self.microphone.woken = False
         self.speaker.interrupted()
 
@@ -399,6 +425,7 @@ class SatelliteLink:
                       heard=bool(run.vad_ended_at), after_wake_s=round(self._clock() - run.started_at, 2))
         self._event("VOICE_ASSISTANT_RUN_END")
         run.ended = True
+        self._log_run(run, "run end")
         self.microphone.woken = False
         if self._run is run:
             self._run = None

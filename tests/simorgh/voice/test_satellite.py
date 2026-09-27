@@ -580,3 +580,29 @@ class AQuestionIsFollowedUp(unittest.IsolatedAsyncioTestCase):
         self.assertIn("VOICE_ASSISTANT_RUN_END", client.kinds(), "nobody spoke: closed by itself")
         self.assertIsNone(link._run)  # noqa: SLF001
         await _close(stop, task)
+
+
+class EveryRunSaysWhatItGot(unittest.IsolatedAsyncioTestCase):
+    """2026-09-27: two of five "Hey Sim"s got no turn and the log could not
+    say whether the board sent the speech. Every run now logs its audio."""
+
+    async def test_a_run_the_board_stops_still_logs_its_audio(self):
+        lines: list[tuple[str, dict]] = []
+
+        class _Log:
+            def info(self, event, **f): lines.append((event, f))
+            warning = info
+
+        link, client, _p = _link()
+        link._logger = _Log()  # noqa: SLF001
+        stop, task = await _connected(link, client)
+        await client.handlers["handle_start"]("c1", 1, None, "hey_sim")
+        await client.handlers["handle_audio"](b"\x10\x27" * 1600)     # 0.1 s, loud
+        await client.handlers["handle_stop"](True)
+        runs = [f for e, f in lines if e == "voice.satellite_run"]
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["audio_s"], 0.1)
+        self.assertGreater(runs[0]["peak_rms"], 5000)
+        self.assertFalse(runs[0]["heard"])
+        self.assertIn("stopped by the board", runs[0]["ended"])
+        await _close(stop, task)
