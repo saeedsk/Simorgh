@@ -602,11 +602,20 @@ def when_line(now: float) -> str:
     return f"Right now it is {when:%A %-d %B %Y}, {when:%H:%M}."
 
 
+def satellite_note(device: str) -> str:
+    """What a turn through a room satellite changes: where the person is,
+    and where anything played for them goes."""
+    return (f"You are being spoken to through the room satellite {device!r}: the person is in that room, "
+            "not at the laptop, and they already called you by name -- its wake word. Music, radio or any "
+            "sound they ask for goes to room_play with no room: it plays right here, on the speaker they "
+            "are talking to.")
+
+
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
            speaker_doubt: str = "", speaker_score: str = "",
            room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
-           skills: str = "", now: float = 0.0) -> str:
+           skills: str = "", now: float = 0.0, device: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -626,6 +635,12 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # what brevity says, and more.
         body = f"{who_is_here(speaker, speaker_relation, room, speaker_before, doubt=speaker_doubt,
                                   score=speaker_score)}\n\n{VOICE}"
+        if device and device != "laptop":
+            # Stage 13: the creator, 2026-09-27 -- "when I say 'play music'
+            # on the board, I expect the music played on the same board
+            # that heard the prompt". The model could not know it was a
+            # board: nothing told it, so "play music" went nowhere.
+            body = f"{body}\n\n{satellite_note(device)}"
     elif profile.scaffold == "chat":
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if task:

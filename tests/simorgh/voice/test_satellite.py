@@ -439,7 +439,8 @@ class AWakeWordIsTheAddress(unittest.IsolatedAsyncioTestCase):
             stop.set()
             running.cancel()
             await asyncio.gather(running, return_exceptions=True)
-        self.assertEqual(replies.asked, ["What time is it?"], "heard and asked, not dropped as noise")
+        self.assertEqual(replies.asked, ["Okay Nabu, what time is it?"],
+                         "heard and asked -- with the wake word put back -- not dropped as noise")
         await _close(stop_link, link_task)
 
     async def test_a_quiet_verdict_after_the_wake_word_is_said_not_left_silent(self):
@@ -606,3 +607,33 @@ class EveryRunSaysWhatItGot(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(runs[0]["heard"])
         self.assertIn("stopped by the board", runs[0]["ended"])
         await _close(stop, task)
+
+
+class TheWakeWordIsPutBack(unittest.TestCase):
+    """The board streams only what follows its wake word, so "Hey Sim, play
+    music" reached the model as "Play music." and was refused for not
+    naming Sim (live 2026-09-27)."""
+
+    def _session(self, *, woken: bool, phrase: str = "Hey Sim"):
+        from simorgh.voice.session import VoiceSession
+
+        class _Mic:
+            pass
+        s = VoiceSession.__new__(VoiceSession)
+        s._mic = _Mic()  # noqa: SLF001
+        s._mic.woken = woken  # noqa: SLF001
+        s._mic.wake_phrase = phrase  # noqa: SLF001
+        return s
+
+    def test_a_satellite_turn_gets_its_wake_word_back(self):
+        self.assertEqual(self._session(woken=True)._with_wake_phrase("Play music."), "Hey Sim, play music.")  # noqa: SLF001
+
+    def test_nothing_is_added_twice_or_at_the_laptop(self):
+        self.assertEqual(self._session(woken=True)._with_wake_phrase("Sim, play music."), "Sim, play music.")  # noqa: SLF001
+        self.assertEqual(self._session(woken=False)._with_wake_phrase("Play music."), "Play music.")  # noqa: SLF001
+
+    def test_a_follow_up_has_no_wake_word_and_says_sim(self):
+        self.assertEqual(self._session(woken=True, phrase="")._with_wake_phrase("Yes please."), "Sim, yes please.")  # noqa: SLF001
+
+    def test_the_board_names_the_wake_word_as_said(self):
+        self.assertEqual(sat.SatelliteMicrophone("k").wake_phrase, "")

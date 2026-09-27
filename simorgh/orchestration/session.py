@@ -1613,6 +1613,7 @@ class SessionRunner:
                     speaker_doubt=session.speaker_doubt,
                     speaker_score=getattr(session, "speaker_score", ""),
                     speaker_before=getattr(session, "speaker_before", ""),
+                    device=getattr(session, "device", ""),
                     offered=() if no_tools else offered,
                     skills=catalog,
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),

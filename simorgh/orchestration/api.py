@@ -226,6 +226,9 @@ class Session:
     # How well the voice matched their enrolled profile this turn, as
     # Voice words it; "" when nobody was matched.
     speaker_score: str = ""
+    # The microphone a spoken turn came through (`percept.text.received`'s
+    # `device`): "laptop", or a room satellite's name (stage 13).
+    device: str = ""
     #: What Sim believes about its own competence at this kind of task
     #: (`self.estimate.reply`), read once when the session starts.
     estimate: dict = field(default_factory=dict)

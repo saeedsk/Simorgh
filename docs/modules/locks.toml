@@ -40,6 +40,12 @@ task = "consolidation waits long enough for a provider to answer"
 since = "2026-09-22T20:46:27+00:00"
 until = "2026-09-23T04:46:27+00:00"
 
+[locks.orchestration]
+by = "opus-main"
+task = "stage 13: the model knows a turn came through a room satellite"
+since = "2026-09-27T11:39:37+00:00"
+until = "2026-09-27T19:39:37+00:00"
+
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"

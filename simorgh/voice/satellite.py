@@ -90,6 +90,9 @@ class SatelliteMicrophone:
         #: True from the board's wake word to the end of its run: the session
         #: treats that turn as addressed to Sim (`VoiceSession._wake_addressed`).
         self.woken = False
+        #: The wake word that opened this run, as said ("Hey Sim"); "" for a
+        #: follow-up. The session puts it back in front of the words.
+        self.wake_phrase = ""
 
     def feed(self, pcm: bytes) -> None:
         """Audio from the board, any chunk size; kept as whole frames."""
@@ -327,6 +330,7 @@ class SatelliteLink:
         self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=not wake_word,
                          pcm=bytearray() if self._keep_runs else None, states=[])
         self.microphone.woken = True
+        self.microphone.wake_phrase = (wake_word or "").replace("_", " ").strip().title() if wake_word else ""
         self.runs += 1
         self.last_wake_at = time.time()
         self._event("VOICE_ASSISTANT_RUN_START")

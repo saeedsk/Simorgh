@@ -163,6 +163,8 @@ A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that 
 
 - `room_play` has a `_TOOL_POLICY` row (reversible), a marker note and a scaffold line, and is in `agents/chat.md` and `agents/voice_chat.md` (stage 13 item 8): asked through a satellite, music plays there.
 
+- A voice turn's `device` (from `percept.text.received`) reaches `Session.device`; when it is a room satellite (not `laptop`), `scaffolds.render` adds `satellite_note`: the person is in that room, already called Sim by its wake word, and music or sound goes to `room_play` with no room (stage 13, 2026-09-27).
+
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract orchestration`.

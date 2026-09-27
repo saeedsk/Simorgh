@@ -794,6 +794,17 @@ class VoiceSession:
         in_exchange = 0.0 <= self._now() - self._sim_spoke_at <= self._config.exchange_window_s
         return not in_exchange
 
+    def _with_wake_phrase(self, text: str) -> str:
+        """Put back the wake word a satellite took off. The board streams
+        only what follows it, so "Hey Sim, play music" reached the model as
+        "Play music." -- no name -- and it answered "say 'Sim, play music'
+        and I'll start it" (live 2026-09-27). What the person said, the
+        screen and the memory then say too."""
+        if not self._wake_addressed() or not text.strip() or self._names_sim(text):
+            return text
+        phrase = str(getattr(getattr(self, "_mic", None), "wake_phrase", "") or "Sim").strip()
+        return f"{phrase}, {text[0].lower() + text[1:] if text[:1].isupper() and text[1:2].islower() else text}"
+
     def _wake_addressed(self) -> bool:
         """This turn came through a room satellite's wake word (stage 13):
         whoever is speaking has already named Sim, on the board. The
@@ -1419,6 +1430,7 @@ class VoiceSession:
         # model all see the same person. The creator, out loud on
         # 2026-09-20, correcting Sim: "Ira and not Aira".
         text = spell_household_names(text, self._household_names())
+        text = self._with_wake_phrase(text)
         self.last_identification = identification
         if speaker:
             self.last_speaker = speaker
