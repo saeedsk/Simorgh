@@ -26,9 +26,9 @@ class AShortFarsiSentenceWaits(unittest.TestCase):
 
     def test_english_is_unchanged(self):
         s = SentenceStream(max_sentences=5)
-        for piece in ("Yes, Saeed.", " I can hear you clearly.", " "):
+        for piece in ("Yes, I hear you.", " Loud and clear.", " "):
             s.feed(piece)
-        self.assertEqual(s.spoken[0], "Yes, Saeed.")
+        self.assertEqual(s.spoken[0], "Yes, I hear you.")
 
 
 if __name__ == "__main__":
