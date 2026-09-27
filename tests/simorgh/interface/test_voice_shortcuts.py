@@ -110,6 +110,16 @@ class FollowUpModeCommand(unittest.TestCase):
         self.assertIn("followup on|off|question [board]", text)
 
 
+class CalibrateOptions(unittest.TestCase):
+    def test_noisy_is_an_option_not_part_of_the_name(self):
+        """`voice calibrate Saeed room=satellite noisy aloud short` filed its
+        takes under "Saeed noisy" (live, 2026-09-27)."""
+        seen = VoiceShortcuts._sent(self, "calibrate Saeed room=satellite noisy aloud short")
+        self.assertEqual(seen["name"], "Saeed")
+        self.assertEqual(seen["value"].split()[0], "start")
+        self.assertEqual(set(seen["value"].split()[1:]), {"room=satellite", "noisy", "aloud", "short"})
+
+
 if __name__ == "__main__":
     unittest.main()
 

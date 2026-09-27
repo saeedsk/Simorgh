@@ -185,8 +185,17 @@ def claimed_tv_act(text: str, session) -> str:
             return on_tv.group(0).strip()
     if _changed_something(session):
         return ""      # something really happened; the same rule as the promise above
-    match = _TV_CLAIM.search(text)
-    return match.group(0).strip() if match else ""
+    for match in _TV_CLAIM.finditer(text):
+        if not _NEGATED.search(text[max(0, match.start() - 24):match.start()]):
+            return match.group(0).strip()
+    return ""
+
+
+#: A subject that says nothing is happening: "Nothing's playing", "no music
+#: is playing", "nobody's on the TV". Live, 2026-09-27: "Nothing's playing,
+#: Saeed" was bounced as a claim that something was, and the retry had to
+#: apologise for a garbled "'s playing" nobody said.
+_NEGATED = re.compile(r"\b(?:nothing|nobody|none|not|never|no\s+\w+)\s*\Z|n't\s*\Z", re.I)
 
 
 #: "I've noted it", said of a name's pronunciation, with nothing written.

@@ -647,7 +647,9 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
         if words and words[0].lower() in controls:
             value, names = words[0].lower(), words[1:]
         else:
-            flags = ("aloud", "short", "en", "fa", "english", "farsi")
+            # `noisy` was missing, so `voice calibrate Saeed room=satellite noisy`
+            # filed 16 takes under a person called "Saeed noisy" (2026-09-27).
+            flags = ("aloud", "short", "en", "fa", "english", "farsi", "noisy")
             options = [w for w in words if w.lower() in flags or "=" in w]
             names = [w for w in words if w not in options]
             value = " ".join(["start", *options])

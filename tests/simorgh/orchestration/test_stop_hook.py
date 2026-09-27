@@ -60,6 +60,16 @@ class TheGenericRule(unittest.TestCase):
         bounce = stophook.check("I started Persian music for you, Saeed.", session)
         self.assertIn("the ones that could: music_play", bounce.reply)
 
+    def test_saying_nothing_is_playing_is_not_a_claim(self):
+        """Live, 2026-09-27: "Nothing's playing, Saeed" was bounced as a
+        claim that something was playing."""
+        session = types.SimpleNamespace(profile=profiles.CHAT, steps=[], user_text="skip")
+        for text in ("Nothing's playing, Saeed.", "No music is playing right now.", "Nothing is on the TV.",
+                     "It isn't playing."):
+            with self.subTest(text=text):
+                self.assertEqual(stophook.claimed_tv_act(text, session), "")
+        self.assertNotEqual(stophook.claimed_tv_act("The chart's playing on the TV now.", session), "")
+
     def test_the_specific_rules_come_first(self):
         session = types.SimpleNamespace(profile=profiles.CHAT, steps=[], user_text="")
         self.assertEqual(stophook.check("I pushed the change to main.", session).rule, "commit")
