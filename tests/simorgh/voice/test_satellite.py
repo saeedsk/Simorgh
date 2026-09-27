@@ -822,6 +822,50 @@ class MusicFollowsTheBoard(unittest.IsolatedAsyncioTestCase):
         await _close(stop, task)
 
 
+class TheFirstWordsAreNotClipped(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "when sim replies on satellite the first few
+    characters of its reply are chopped out". The board's output -- and an
+    Echo Dot on its jack -- wakes late; a reply after a quiet spell starts
+    with `satellite_lead_in_ms` of silence, the pieces after it do not."""
+
+    async def test_silence_leads_a_reply_after_a_quiet_spell_only(self):
+        published: list[Audio] = []
+
+        class _Link:
+            def holding_reply(self):
+                return False
+
+            async def play_url(self, url):
+                pass
+
+            async def stop_playback(self):
+                pass
+
+        async def publish(audio):
+            published.append(audio)
+            return "u"
+
+        speaker = sat.SatelliteSpeaker("kitchen", _Link(), publish)
+        speaker.lead_in_s = lambda: 0.5
+        piece = Audio(b"\x01\x00" * 1600, 16000)                 # 0.1 s of sound
+        with mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+            await speaker.play(piece)
+            await speaker.play(piece)                            # right after: the speaker is awake
+            speaker._last_end -= sat.IDLE_BEFORE_LEAD_S + 1      # noqa: SLF001 -- a quiet spell
+            await speaker.play(piece)
+        self.assertAlmostEqual(published[0].seconds, 0.6, places=3)
+        self.assertTrue(published[0].pcm.startswith(b"\x00" * 16000), "the silence comes first")
+        self.assertAlmostEqual(published[1].seconds, 0.1, places=3)
+        self.assertAlmostEqual(published[2].seconds, 0.6, places=3)
+
+    def test_it_is_a_setting(self):
+        from simorgh.contracts.settings import VOICE_SAFE_KEYS
+        from simorgh.voice.config import Config
+
+        self.assertIn("satellite_lead_in_ms", VOICE_SAFE_KEYS)
+        self.assertEqual(Config().satellite_lead_in_ms, 500)
+
+
 class TheBoardDoesNotContinueOnItsOwn(unittest.IsolatedAsyncioTestCase):
     """2026-09-27, live: after one follow-up announcement the board kept
     ESPHome's `continue_conversation_` and started a new run every time a

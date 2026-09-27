@@ -77,6 +77,9 @@ FOLLOW_UP_START_S = 20.0
 #: 2026-09-27). Music the board starts again this soon after an explicit
 #: stop is stopped again.
 RESTOP_S = 15.0
+#: A reply piece that starts this long after the last one ended gets the
+#: lead-in silence (`SatelliteSpeaker.lead_in_s`).
+IDLE_BEFORE_LEAD_S = 2.0
 #: How long the rest of a cut-off reply is dropped if no new turn is heard.
 HOLD_REPLY_S = 30.0
 #: Sent with every INTENT_END. ESPHome keeps `continue_conversation_` from
@@ -193,10 +196,31 @@ class SatelliteSpeaker:
         self._link = link
         self._publish = publish
         self._stop: asyncio.Event | None = None
+        #: Seconds of silence put in front of a reply that starts after the
+        #: speaker has been quiet (`satellite_lead_in_ms`; a callable, read
+        #: live). The board's output -- and an external speaker behind its
+        #: jack -- takes a moment to wake, and eats whatever plays first:
+        #: "the first few characters of its reply are chopped out" (the
+        #: creator, 2026-09-27, with an Echo Dot on the board's 3.5 mm jack).
+        self.lead_in_s = 0.0
+        self._last_end = 0.0
+
+    def _lead_in(self) -> float:
+        try:
+            value = self.lead_in_s() if callable(self.lead_in_s) else self.lead_in_s
+            return max(0.0, float(value or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
 
     async def play(self, audio: Audio) -> None:
         if self._link.holding_reply():
             return          # the rest of a reply the person cut off
+        lead = self._lead_in()
+        if lead and time.monotonic() - self._last_end > IDLE_BEFORE_LEAD_S:
+            # Only after a quiet spell: the pieces inside one reply follow
+            # each other closely and the speaker is already awake.
+            pad = int(lead * audio.sample_rate) * 2
+            audio = Audio(b"\x00" * pad + audio.pcm, audio.sample_rate)
         self._stop = asyncio.Event()
         try:
             url = await self._publish(audio)
@@ -205,6 +229,7 @@ class SatelliteSpeaker:
                 await asyncio.wait_for(self._stop.wait(), timeout=audio.seconds + FETCH_LEAD_S)
         finally:
             self._stop = None
+            self._last_end = time.monotonic()
 
     async def stop(self) -> None:
         if self._stop is not None:

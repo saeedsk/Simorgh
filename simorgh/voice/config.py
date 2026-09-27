@@ -429,6 +429,10 @@ class Config:
     # The satellites' speaker volume, 0.05-1.0; 0 leaves each board at its
     # own `[[voice.satellites]] volume` (or where it was).
     satellite_volume: float = 0.0
+    # Silence in front of a satellite reply that starts after a quiet
+    # spell, so the board's output (and a speaker on its jack) is awake
+    # before the words: the first words were being clipped (2026-09-27).
+    satellite_lead_in_ms: int = 500
     # A folder to keep each satellite wake run's audio in (the last 20, as
     # WAV), for replaying a turn that went wrong; "" keeps none. Only runs
     # a wake word opened -- no room is ever recorded otherwise.

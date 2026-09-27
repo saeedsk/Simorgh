@@ -671,6 +671,7 @@ class Service:
             self._board_prefs[name] = {k: entry[k] for k in ("follow_up", "follow_up_s") if entry.get(k) is not None}
             link.follow_up = lambda link=link, room=room: self._follows_up(link, room)
             link.conversation_s = lambda name=name: self._conversation_for(name)
+            link.speaker.lead_in_s = lambda: float(self.config.satellite_lead_in_ms or 0) / 1000.0
             link.on_connected = self._satellite_connected
             self._satellites[name] = link
             if self._session is not None:
