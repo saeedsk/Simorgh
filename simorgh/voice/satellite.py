@@ -248,22 +248,36 @@ class SatelliteSpeaker:
             return 0.0
 
     async def play(self, audio: Audio) -> None:
+        log = getattr(self._link, "_log", None)
         if self._link.holding_reply():
+            if callable(log):
+                log("info", "voice.satellite_piece", dropped="held after a cut-off", seconds=round(audio.seconds, 2))
             return          # the rest of a reply the person cut off
         lead = self._lead_in()
+        padded = False
         if lead and time.monotonic() - self._last_end > IDLE_BEFORE_LEAD_S:
+            padded = True
             # Only after a quiet spell: the pieces inside one reply follow
             # each other closely and the speaker is already awake.
             audio = Audio(_wake_noise(int(lead * audio.sample_rate), audio.sample_rate) + audio.pcm, audio.sample_rate)
         self._stop = asyncio.Event()
+        started = time.monotonic()
+        stopped = False
         try:
             url = await self._publish(audio)
             await self._link.play_url(url)
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), timeout=audio.seconds + FETCH_LEAD_S)
+                stopped = True
         finally:
             self._stop = None
             self._last_end = time.monotonic()
+            # One line per piece (2026-09-27: multi-sentence replies lost
+            # everything after the first sentence or two, and nothing in the
+            # log could say whether the rest was sent, waited for or stopped).
+            if callable(log):
+                log("info", "voice.satellite_piece", seconds=round(audio.seconds, 2), lead=padded,
+                    waited_s=round(time.monotonic() - started, 2), stopped_early=stopped)
 
     async def stop(self) -> None:
         if self._stop is not None:
@@ -492,6 +506,11 @@ class SatelliteLink:
             return
         name = str(getattr(state.state, "name", state.state)).lower()
         self.board_media = name
+        if name in ("playing", "paused") and self._speaking_now():
+            # Sim's own reply: the board reports it as media playing, and
+            # this took it for music -- sensitivity raised and put back on
+            # every reply, and the follow-up held shut (live, 2026-09-27).
+            return
         if name in ("playing", "paused"):
             if self._stopped_music_at and self._clock() - self._stopped_music_at < RESTOP_S:
                 self._log("info", "voice.satellite_music_restopped", state=name)
@@ -503,6 +522,12 @@ class SatelliteLink:
         elif name in ("idle", "off", "none"):
             self.playing_media = False
             self._music_sensitivity(False)
+
+    def _speaking_now(self) -> bool:
+        """Sim is speaking through the board, or a run is open whose reply
+        may be playing -- what the board reports now is not music."""
+        return (getattr(self.speaker, "_stop", None) is not None) or \
+            (self._run is not None and not self._run.ended)
 
     def _music_sensitivity(self, music: bool) -> None:
         """Raise the wake word's sensitivity while music plays; put the
