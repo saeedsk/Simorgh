@@ -34,3 +34,9 @@ by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "StyleTTS 2: Kokoro speaks until it is loaded, then it takes over"
+since = "2026-09-27T21:29:20+00:00"
+until = "2026-09-28T05:29:20+00:00"
