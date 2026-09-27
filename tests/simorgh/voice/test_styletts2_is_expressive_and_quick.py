@@ -31,6 +31,7 @@ from __future__ import annotations
 import ast
 import inspect
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from simorgh.voice.tts import styletts2
@@ -216,3 +217,74 @@ class AWordOrTwoTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KokoroSpeaksUntilStyleTTS2IsLoaded(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "can sim be smart and at the beginning use
+    Kokoro while StyleTTS 2 is booting up, and once StyleTTS 2 becomes
+    available switch to StyleTTS 2". Loading takes ~18 s here."""
+
+    def _engine(self, gate):
+        import asyncio
+
+        from simorgh.voice.api import Audio
+        from simorgh.voice.tts import styletts2
+        from simorgh.voice.tts.subproc import SubprocessSynthesiser
+
+        said = []
+
+        class _Kokoro:
+            def voices(self):
+                return ["af_bella"]
+
+            async def synthesise(self, text, voice="", speed=1.0):
+                said.append(("kokoro", text))
+                return Audio(b"\x00\x00" * 160)
+
+        async def _server(self, text, voice="", speed=1.0, tone=""):
+            await gate.wait()
+            said.append(("styletts2", text))
+            return Audio(b"\x00\x00" * 160)
+
+        engine = styletts2.StyleTTS2Synthesiser.__new__(styletts2.StyleTTS2Synthesiser)
+        engine._short = _Kokoro()                           # noqa: SLF001
+        engine.problems = []
+        engine.LOAD_AFTER_S = 0.0
+        patch = mock.patch.object(SubprocessSynthesiser, "synthesise", _server)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return engine, said
+
+    async def test_kokoro_while_loading_then_styletts2(self):
+        import asyncio
+
+        gate = asyncio.Event()
+        engine, said = self._engine(gate)
+        await engine.warmup()
+        await engine.synthesise("Here and listening, Saeed, what can I do?", voice="af_bella")
+        self.assertEqual(said[-1], ("kokoro", "Here and listening, Saeed, what can I do?"), "not waiting ~18 s")
+        gate.set()
+        await engine._loading                               # noqa: SLF001
+        self.assertTrue(engine.loaded)
+        await engine.synthesise("Here and listening, Saeed, what can I do?", voice="af_bella")
+        self.assertEqual(said[-1], ("styletts2", "Here and listening, Saeed, what can I do?"))
+        await engine.synthesise("Yes.", voice="af_bella")
+        self.assertEqual(said[-1], ("kokoro", "Yes."), "a word or two stays with Kokoro")
+
+    async def test_a_load_that_fails_leaves_kokoro_speaking_and_says_why(self):
+        import asyncio
+
+        from simorgh.voice.tts.subproc import SubprocessSynthesiser
+
+        engine, said = self._engine(asyncio.Event())
+
+        async def _broken(self, *a, **k):
+            raise RuntimeError("no venv")
+
+        with mock.patch.object(SubprocessSynthesiser, "synthesise", _broken):
+            await engine.warmup()
+            await engine._loading                           # noqa: SLF001
+        self.assertFalse(engine.loaded)
+        self.assertIn("Kokoro keeps speaking", engine.problems[-1])
+        await engine.synthesise("Still here and talking to you.", voice="af_bella")
+        self.assertEqual(said[-1][0], "kokoro")

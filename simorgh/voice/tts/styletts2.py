@@ -111,9 +111,47 @@ class StyleTTS2Synthesiser(SubprocessSynthesiser):
     #: short goes to Kokoro in the voice of the same name (the reference
     #: clips were made from Kokoro's af_* voices).
     SHORT_WORDS = 2
+    #: Seconds after `voice on` before StyleTTS 2 starts loading, so whisper
+    #: and Kokoro get the machine first (loading beside them at boot starved
+    #: them once, 2026-09-13).
+    LOAD_AFTER_S = 10.0
+
+    #: True once the server is up and has spoken; until then Kokoro speaks.
+    loaded = False
+    _loading = None
+
+    async def warmup(self) -> float:
+        """Kokoro now, StyleTTS 2 in the background.
+
+        The creator, 2026-09-27: "can sim be smart and at the beginning use
+        Kokoro while StyleTTS 2 is booting up, and once StyleTTS 2 becomes
+        available switch to StyleTTS 2". Before this, the session's warm-up
+        said "Okay." -- one word, which goes to Kokoro -- so StyleTTS 2 never
+        loaded until the first real reply, and that reply waited ~18 s."""
+        import asyncio
+        import time
+
+        started = time.monotonic()
+        short = self._short_engine()
+        if short is not None:
+            await short.synthesise("Okay.", speed=1.0)
+        if self._loading is None or self._loading.done():
+            self._loading = asyncio.create_task(self._load())
+        return time.monotonic() - started
+
+    async def _load(self) -> None:
+        import asyncio
+
+        await asyncio.sleep(self.LOAD_AFTER_S)
+        try:
+            await super().synthesise("Ready when you are.", voice="", speed=1.0)
+            self.loaded = True
+        except Exception as exc:  # noqa: BLE001 -- Kokoro keeps speaking; say why StyleTTS 2 did not come up
+            self.problems.append(f"{self.name} did not load, Kokoro keeps speaking: {exc}")
 
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
-        if len((text or "").split()) <= self.SHORT_WORDS:
+        still_loading = self._loading is not None and not self.loaded
+        if still_loading or len((text or "").split()) <= self.SHORT_WORDS:
             short = self._short_engine()
             if short is not None:
                 names = set(short.voices())
