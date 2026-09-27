@@ -49,3 +49,16 @@ class TheHouseLanguagesWin(unittest.IsolatedAsyncioTestCase):
                                        "en": ("Stop the music.", "en")})
         got = await rec.transcribe(Audio(b"\x00\x00" * 16000))
         self.assertEqual((got.text, asked), ("Stop the music.", ["", "fa", "en"]))
+
+
+class NoEnglishPromptOnFarsi(unittest.TestCase):
+    """Measured 2026-09-27 on a kept satellite take: forced Farsi with the
+    English prompt gave "سَدَيْمَنْ مِشْنَا بِي", without it "سلام آمیشنی بیدی."."""
+
+    def test_the_prompt_is_for_english_and_auto_only(self):
+        from simorgh.voice.stt.whisper_server import _not_english
+
+        self.assertTrue(_not_english("fa"))
+        self.assertTrue(_not_english("persian"))
+        for language in ("", "auto", "en", "English"):
+            self.assertFalse(_not_english(language), language)

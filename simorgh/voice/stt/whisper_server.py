@@ -147,6 +147,15 @@ def _words(reply: dict) -> list[Word]:
     return out
 
 
+def _not_english(language: str) -> bool:
+    """A forced language other than English. The prompt ("Sim, Simorgh.")
+    is English and pulls a Farsi transcription into nonsense: the same
+    satellite take came back "سَدَيْمَنْ مِشْنَا بِي" with it and
+    "سلام آمیشنی بیدی." without (measured 2026-09-27)."""
+    code = (language or "").strip().lower()
+    return bool(code) and code not in ("auto", "en", "english")
+
+
 class WhisperServerRecogniser:
     name = "whisper_server"
 
@@ -262,7 +271,7 @@ class WhisperServerRecogniser:
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=language or self._language)
         fields = {"response_format": "verbose_json", "language": language or self._language, "temperature": "0.0"}
-        if self._prompt:
+        if self._prompt and not _not_english(language or self._language):
             fields["prompt"] = self._prompt     # the name, so it is heard as a name (config.stt_prompt)
         body, content_type = _multipart(fields, "file", "turn.wav", wav_bytes(audio))
         started = time.monotonic()
