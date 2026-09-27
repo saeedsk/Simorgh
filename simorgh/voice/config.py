@@ -400,6 +400,11 @@ class Config:
     # Interface's default port 8765 -- set it if `[interface] http_port`
     # or `http_host` differ. A loopback-only Interface cannot be reached.
     satellite_reply_url: str = ""
+    # After Sim's reply in a room ends with a question, the satellite listens
+    # again with no wake word for `follow_up_window_s` ("question"), or never
+    # ("off"). Only a question: listening after every answer would take in
+    # the TV as the person's next turn.
+    satellite_follow_up: str = "question"
     # Where whisper.cpp / Kokoro models live when a model is a bare name.
     model_dir: str = "workspace/voice/models"
     # Capture and playback paths: auto | sounddevice | ffmpeg | fake, and

@@ -178,6 +178,8 @@ class _Run:
     vad_ended_at: float = 0.0
     replied: bool = False
     ended: bool = False
+    follow_up: bool = False          # opened by Sim's question, not by a wake word
+    speech: bool = False             # the person started talking in this run
 
 
 def _default_client(host: str, port: int, key: str):
@@ -198,7 +200,8 @@ class SatelliteLink:
     it waiting for a reply nobody will send."""
 
     def __init__(self, name: str, host: str, key: str, *, publish, port: int = 6053, volume: float | None = None,
-                 client_factory=None, accepting=lambda: True, logger=None, clock=time.monotonic) -> None:
+                 client_factory=None, accepting=lambda: True, logger=None, clock=time.monotonic,
+                 follow_up_s: float = 6.0) -> None:
         self.name = name
         self.host = host
         self._key = key
@@ -220,6 +223,12 @@ class SatelliteLink:
         self.status = "not started"
         self.runs = 0
         self.last_wake_at = 0.0
+        #: `() -> bool`: after this run's reply, open the mic again without a
+        #: wake word? The service sets it: true when Sim's reply was a
+        #: question. `follow_up_s` is how long a follow-up waits for speech.
+        self.follow_up = lambda: False
+        self._follow_up_s = follow_up_s
+        self._publish = publish
 
     # ------------------------------------------------------------ logging
     def _log(self, level: str, event: str, **fields) -> None:
@@ -306,16 +315,28 @@ class SatelliteLink:
             self._log("info", "voice.satellite_wake_declined", wake_word=wake_word or "")
             return None
         self.microphone.clear()
-        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "")
+        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=not wake_word)
         self.microphone.woken = True
         self.runs += 1
         self.last_wake_at = time.time()
         self._event("VOICE_ASSISTANT_RUN_START")
         self._event("VOICE_ASSISTANT_STT_START")
         self._event("VOICE_ASSISTANT_STT_VAD_START")
-        self._log("info", "voice.satellite_wake", wake_word=wake_word or "")
+        self._log("info", "voice.satellite_wake", wake_word=wake_word or "(follow-up)")
         self._watch(self._run)
+        if self._run.follow_up:
+            self._close_quiet_follow_up(self._run)
         return 0
+
+    def _close_quiet_follow_up(self, run: _Run) -> None:
+        """A follow-up nobody answers closes after `follow_up_s`, so the
+        board does not sit listening to the room."""
+        async def _close() -> None:
+            await asyncio.sleep(self._follow_up_s)
+            if self._run is run and not run.ended and not run.speech:
+                self._log("info", "voice.satellite_turn", phase="follow-up unanswered")
+                await self._end_run(run)
+        asyncio.get_running_loop().create_task(_close())
 
     async def _on_audio(self, data: bytes, _extra=None) -> None:
         run = self._run
@@ -345,6 +366,8 @@ class SatelliteLink:
         run = self._run
         if run is None or run.ended:
             return
+        if state == "user_speaking":
+            run.speech = True
         if state == "thinking" and not run.vad_ended_at:
             run.vad_ended_at = self._clock()
             self._log("info", "voice.satellite_turn", phase="heard",
@@ -379,6 +402,24 @@ class SatelliteLink:
         self.microphone.woken = False
         if self._run is run:
             self._run = None
+        if run.replied and self.follow_up():
+            asyncio.get_running_loop().create_task(self._open_follow_up())
+
+    async def _open_follow_up(self) -> None:
+        """Sim asked a question: have the board listen again with no wake
+        word. It plays a tenth of a second of silence and then starts a
+        run (`start_conversation`), sent only after this run is over --
+        the INTENT_END flag the firmware also offers fires when the FIRST
+        piece of a reply ends, and Sim's longer replies come in several."""
+        await asyncio.sleep(0.3)
+        client = self._client
+        if client is None or self._run is not None:
+            return
+        try:
+            url = await self._publish(Audio(b"\x00" * 3200))      # 0.1 s of silence
+            await client.send_voice_assistant_announcement_await_response(url, 15.0, start_conversation=True)
+        except Exception as exc:  # noqa: BLE001 -- a missed follow-up is a wake word said again
+            self._log("warning", "voice.satellite_follow_up_failed", error=str(exc)[:160])
 
     # ---------------------------------------------------------- playback
     async def play_url(self, url: str) -> None:

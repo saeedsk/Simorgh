@@ -67,6 +67,11 @@ class _Client:
     async def disconnect(self) -> None:
         self.disconnected += 1
 
+    async def send_voice_assistant_announcement_await_response(self, media_id, timeout, text="",
+                                                                preannounce_media_id="", start_conversation=False):
+        self.announcements = getattr(self, "announcements", [])
+        self.announcements.append((media_id, start_conversation))
+
     def kinds(self) -> list[str]:
         return [k for k, _d, _t in self.events]
 
@@ -463,8 +468,8 @@ class AWakeWordIsTheAddress(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(sat, "RUN_END_GAP_S", 0.05), mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
             running = asyncio.create_task(session.run(stop))
             for _ in range(500):
-                if any("catch" in t for t in tts.spoken):
-                    break
+                if any("catch" in t for t in tts.spoken) and published:
+                    break                     # synthesised AND handed to the board: they are not the same moment
                 await asyncio.sleep(0.01)
             stop.set()
             running.cancel()
@@ -528,3 +533,50 @@ class PlayingInTheRoom(unittest.IsolatedAsyncioTestCase):
         await service._on_room_play(self._Msg({"action": "play", "url": "u", "room": "garage"}))  # noqa: SLF001
         self.assertFalse(replies[-1]["ok"])
         self.assertIn("kitchen", replies[-1]["detail"])
+
+
+class AQuestionIsFollowedUp(unittest.IsolatedAsyncioTestCase):
+    """Stage 13 item 5: a reply that asks something opens the board's mic
+    again with no wake word; one that does not, does not; and a follow-up
+    nobody answers closes by itself."""
+
+    async def _replied_run(self, link, client, *, question: bool):
+        link.follow_up = lambda: question
+        await client.handlers["handle_start"]("c1", 1, None, "okay_nabu")
+        link.microphone.on_state("thinking")
+        with mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+            await link.speaker.play(silence(0.02))
+        link.microphone.on_state("listening")
+
+    async def test_a_question_opens_the_mic_again_after_the_run(self):
+        link, client, _p = _link()
+        stop, task = await _connected(link, client)
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.01):
+            await self._replied_run(link, client, question=True)
+            await asyncio.sleep(0.6)
+        self.assertEqual(len(getattr(client, "announcements", [])), 1)
+        self.assertTrue(client.announcements[0][1], "start_conversation: listen after it")
+        kinds = client.kinds()
+        self.assertIn("VOICE_ASSISTANT_RUN_END", kinds, "sent after the run ended, not inside it")
+        await _close(stop, task)
+
+    async def test_a_statement_does_not(self):
+        link, client, _p = _link()
+        stop, task = await _connected(link, client)
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.01):
+            await self._replied_run(link, client, question=False)
+            await asyncio.sleep(0.6)
+        self.assertEqual(getattr(client, "announcements", []), [])
+        await _close(stop, task)
+
+    async def test_a_follow_up_nobody_answers_closes_and_one_answered_is_addressed(self):
+        link, client, _p = _link()
+        link._follow_up_s = 0.1  # noqa: SLF001
+        stop, task = await _connected(link, client)
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.01):
+            await client.handlers["handle_start"]("c2", 1, None, None)      # no wake word: a follow-up
+            self.assertTrue(link.microphone.woken, "a follow-up is addressed to Sim")
+            await asyncio.sleep(0.3)
+        self.assertIn("VOICE_ASSISTANT_RUN_END", client.kinds(), "nobody spoke: closed by itself")
+        self.assertIsNone(link._run)  # noqa: SLF001
+        await _close(stop, task)

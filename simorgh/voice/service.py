@@ -574,12 +574,16 @@ class Service:
                                  accepting=lambda name=name: (self._enabled and not self._muted
                                                               and not getattr(self._rooms.get(name), "muted", False)),
                                  client_factory=self._satellite_client,
+                                 follow_up_s=float(self.config.follow_up_window_s or 6.0),
                                  logger=self._ctx.logger if self._ctx else None)
             try:
-                await self.add_room(name, microphone=link.microphone, speaker=link.speaker)
+                room = await self.add_room(name, microphone=link.microphone, speaker=link.speaker)
             except (ValueError, RuntimeError) as exc:
                 self._problems.append(f"satellite {name}: {exc}")
                 continue
+            if str(self.config.satellite_follow_up).lower() == "question":
+                # Sim asked something: the board listens again, no wake word.
+                link.follow_up = lambda room=room: room._voice_room.last_said.rstrip().endswith(("?", "؟"))  # noqa: SLF001
             self._satellites[name] = link
             if self._session is not None:
                 # One question, one answer: while any board's wake run is

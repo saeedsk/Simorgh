@@ -210,6 +210,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `device` | `'laptop'` | yes |
 | `satellites` | `()` | yes (stage 13 item 4) -- `[[voice.satellites]]` tables: `name` (the room; its device name), `host`, `key_env` (the env/secrets name of the board's ESPHome API key, which must ALSO be listed in `[voice] secrets` so the Kernel hands it over), optional `port` (6053) and `volume`. Each becomes a `SatelliteLink` and a room session (`add_room`); a missing name, host or key is a named problem in `voice status`, never a failed boot. Empty: `aioesphomeapi` is never imported |
 | `satellite_reply_url` | `''` | yes -- Interface's address as a satellite sees it, for the reply URL; `''` = this machine's LAN address toward the board on port 8765 (Interface's default). Set it when `[interface] http_port`/`http_host` differ; a loopback-only Interface cannot be reached by a board |
+| `satellite_follow_up` | `'question'` | yes (stage 13 item 5) -- when Sim's reply in a room ends with `?`/`؟`, after the run ends the satellite is sent a 0.1 s silent announcement with `start_conversation`, so it listens again with no wake word; the follow-up run is addressed like a wake run and closes by itself after `follow_up_window_s` if nobody speaks. `'off'`: never. Not after every reply: an open mic after a statement takes in the TV as the next turn |
 | `model_dir` | `'workspace/voice/models'` | yes |
 | `microphone` | `'auto'` | yes |
 | `speaker` | `'auto'` | yes |
