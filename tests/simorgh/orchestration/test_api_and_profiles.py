@@ -107,7 +107,9 @@ class MusicByVoiceTestCase(unittest.TestCase):
         from simorgh.orchestration import scaffolds
         from simorgh.orchestration.profiles import VOICE_CHAT
 
-        self.assertIn("Write every name as it is spelled", " ".join(scaffolds.render(VOICE_CHAT).split()))
+        spoken = " ".join(scaffolds.render(VOICE_CHAT).split())
+        self.assertIn("Write every name as it is spelled", spoken)
+        self.assertIn("never describe its sound", spoken)
 
     def test_sim_can_press_its_own_buttons_from_either_chat(self):
         """Built, registered, gated -- and in no profile, so "run restart" got

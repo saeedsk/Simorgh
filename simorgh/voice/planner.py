@@ -418,6 +418,8 @@ def _own_respelling_as_name(text: str, name: str) -> str:
 
     def _swap(match: re.Match) -> str:
         word = match.group(0)
+        if all(len(part) == 1 for part in re.split(r"[-']", word)):
+            return word         # "S-A-E-E-D": spelled out, letter by letter, on purpose
         plain = re.sub(r"[^a-z]", "", word.lower())
         if plain[:1] != letters[:1] or difflib.SequenceMatcher(None, letters, plain).ratio() < _OWN_RESPELLING_ALIKE:
             return word

@@ -253,7 +253,7 @@ class TheModelsOwnSpellingOfANameIsSaidTheHouseholdsWay(unittest.TestCase):
             self.assertEqual(self._say(said), spoken)
 
     def test_ordinary_hyphenated_words_are_left_alone(self):
-        for said in ("the sea-bed is deep", "a so-called fix", "self-made"):
+        for said in ("the sea-bed is deep", "a so-called fix", "self-made", "that is S-A-E-E-D"):
             self.assertEqual(self._say(said), said)
 
     def test_the_setting_itself_is_not_mangled(self):

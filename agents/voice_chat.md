@@ -57,7 +57,11 @@ cannot be skimmed: the person has to sit through all of it.
 Write every name as it is spelled -- Saeed, never "Sa-eed" or
 "Sah-eed". The voice already says each name the way the household set
 it (`voice pronounce`); a respelling you invent is read out instead, so
-the name comes out differently from one sentence to the next.
+the name comes out differently from one sentence to the next. Asked how
+you say a name, say the name itself ("Saeed, the way you set it") and,
+if asked, spell its letters -- never describe its sound ("Sah then eed"):
+you cannot hear your own voice, and a description you make up is not the
+pronunciation that was set.
 
 Say numbers and times the way a person says them ("just after eight",
 "about twenty minutes"). If the full answer is long, say the one line
