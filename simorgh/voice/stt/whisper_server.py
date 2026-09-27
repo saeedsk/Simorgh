@@ -147,6 +147,16 @@ def _words(reply: dict) -> list[Word]:
     return out
 
 
+def _english_letters(text: str, *, allow: int = 0) -> bool:
+    """Every letter an English one (a-z; a name's accent aside, English
+    has none; `allow` a "café" or two): what forced-English whisper writes when the speech was
+    not English is Czech- or Turkish-looking Latin ("již neví",
+    "Şeruziye"), or another script."""
+    letters = [c for c in text if c.isalpha()]
+    foreign = sum(1 for c in letters if not ("a" <= c.lower() <= "z"))
+    return bool(letters) and foreign <= allow
+
+
 def _not_english(language: str) -> bool:
     """A forced language other than English. The prompt ("Sim, Simorgh.")
     is English and pulls a Farsi transcription into nonsense: the same
@@ -340,8 +350,12 @@ class WhisperServerRecogniser:
             # and a quiet Sim would have woken to it (measured 2026-09-26).
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=heard_language)
-        if route and not language and cleaned and self._farsi is not None and _language_code(heard_language) == "fa":
-            # Heard as Farsi: the Farsi model says what was said.
+        if route and not language and cleaned and self._farsi is not None and (
+                _language_code(heard_language) == "fa"
+                or (_language_code(heard_language) == "en" and not _english_letters(cleaned, allow=1))):
+            # Heard as Farsi -- or as "English" in letters English does
+            # not use, which is Farsi misheard more often than not: the
+            # Farsi model says what was said.
             better = await self._farsi.transcribe(audio, language="fa")
             if better.text.strip():
                 return better
@@ -378,12 +392,21 @@ class WhisperServerRecogniser:
                 code = _language_code(h)
                 return max((float(p) for k, p in probabilities.items() if _language_code(str(k)) == code), default=0.0)
             order = sorted(self._house, key=odds, reverse=True)
+        fallback = None
         for forced in order:
             got = await self.transcribe(audio, language=forced)
-            if got.text.strip():
-                self.problems_heard = f"heard as {code}, transcribed as {forced}"
-                return got
-        return None
+            if not got.text.strip():
+                continue
+            if _language_code(forced) == "en" and not _english_letters(got.text):
+                # Forced to English, whisper still wrote another language:
+                # "A da se demanem již neví." for a Farsi sentence (live,
+                # 2026-09-27), and Farsi never got its turn. Kept only if
+                # no house language does better.
+                fallback = fallback or got
+                continue
+            self.problems_heard = f"heard as {code}, transcribed as {forced}"
+            return got
+        return fallback
 
     async def _speech_without_prompt(self, audio: Audio, language: str) -> bool:
         """Was there a word in this audio at all? Asked only when the

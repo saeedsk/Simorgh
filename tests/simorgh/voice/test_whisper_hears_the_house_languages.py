@@ -81,6 +81,35 @@ class NoEnglishPromptOnFarsi(unittest.TestCase):
             self.assertFalse(_not_english(language), language)
 
 
+class ForcedEnglishThatIsNotEnglish(unittest.IsolatedAsyncioTestCase):
+    """Live, 2026-09-27: a Farsi turn heard as Czech, English the likelier
+    by whisper's odds, and forced English wrote "A da se demanem již
+    neví." -- accepted, so Farsi never got its turn."""
+
+    async def test_farsi_gets_its_turn(self):
+        rec = WhisperServerRecogniser.__new__(WhisperServerRecogniser)
+        rec._house = ("en", "fa")                          # noqa: SLF001
+        asked = []
+
+        async def transcribe(audio, *, language=""):
+            asked.append(language)
+            return Utterance(text={"en": "A da se demanem již neví.", "fa": "آره، دیگه نمی‌دونم."}[language],
+                             confidence=1.0, seconds=audio.seconds, engine="w", language=language)
+
+        rec.transcribe = transcribe
+        got = await WhisperServerRecogniser._in_a_house_language(
+            rec, Audio(b"\x00\x00" * 16000), "cs", probabilities={"cs": 0.5, "en": 0.2, "fa": 0.05})
+        self.assertEqual((got.text, asked), ("آره، دیگه نمی‌دونم.", ["en", "fa"]))
+
+    def test_what_counts_as_english_letters(self):
+        from simorgh.voice.stt.whisper_server import _english_letters
+
+        self.assertTrue(_english_letters("Stop the music."))
+        self.assertFalse(_english_letters("A da se demanem již neví."))
+        self.assertFalse(_english_letters("سلام"))
+        self.assertTrue(_english_letters("A café, please.", allow=1))
+
+
 class FarsiGoesToTheFarsiModel(unittest.IsolatedAsyncioTestCase):
     """Measured on 18 Farsi satellite takes, 2026-09-27: large-v3 got most
     right that large-v3-turbo turned to nonsense. A Farsi turn goes to the
