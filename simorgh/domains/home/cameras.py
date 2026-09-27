@@ -903,12 +903,118 @@ def _camera_and_switch(args: dict, key: str) -> tuple[str, bool]:
     return " ".join(words), bool(value) if value is not None else True
 
 
+class CamWebrtcTool(_CameraTool):
+    """Low-latency live video, with the tool Home Assistant uses.
+
+    Deliberately NOT part of `cam_stream`. That tool feeds the TV, and the
+    Cast receiver plays HLS; WebRTC there would be a regression dressed as
+    an upgrade. This is for a screen that can negotiate -- the phone, and
+    the dashboard's full-screen camera -- and it leaves the HLS relay
+    exactly as it is.
+
+    The creator, 2026-09-25: "its interesting how ha stream the video, it
+    with high quality, easy to handle, flips in full screen, can you get
+    idea from ha and use same technology?" The technology is go2rtc, his HA
+    already runs it, and the gap is structural: `cam_stream` writes 2-second
+    HLS segments and a player buffers about three before it starts, so the
+    floor is ~6 s and no flag moves it. go2rtc republishes the same RTSP as
+    WebRTC with no transcode.
+    """
+
+    name = "cam_webrtc"
+    # `install` downloads and runs a program: Guardian weighs it as that.
+    read_only = False
+    reversibility = "irreversible"
+    description = ("Low-delay live video relay (go2rtc, what Home Assistant uses), for the phone and the dashboard "
+                   "-- not the TV, which plays HLS via cam_stream. `action` status (installed? running? which "
+                   "cameras), install (fetch the go2rtc binary once, from its GitHub releases), start (relay every "
+                   "online camera at full resolution), stop. Its API listens on this Mac only; the phone and "
+                   "dashboard view needs Interface's proxy, which is not built yet -- say so if asked to show it there.")
+    args_schema = {"type": "object", "required": ["action"],
+                   "properties": {"action": {"type": "string", "enum": ["status", "install", "start", "stop"]},
+                                  "camera": {"type": "string"}}}
+
+    #: One per Sim, not one per tool instance: the process outlives a call.
+    _shared: dict = {}
+
+    def _engine(self, root):
+        from . import go2rtc as g
+
+        engine = self._shared.get("engine")
+        if engine is None:
+            engine = g.Go2rtc(root)
+            self._shared["engine"] = engine
+        return engine
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        import platform
+
+        from . import go2rtc as g
+
+        action = str(args.get("action") or "status").lower()
+        root = Path(getattr(ctx, "root", None) or getattr(ctx, "data_dir", ".") or ".")
+        engine = self._engine(root)
+
+        if action == "status":
+            binary = g.found(root)
+            if not binary:
+                return ToolResult(ok=True, output="go2rtc is not installed; `cam_webrtc install` fetches it "
+                                                 "(one static binary). Live video still works over HLS meanwhile.",
+                                  metadata={"installed": False, "running": False})
+            return ToolResult(ok=True,
+                              output=(f"go2rtc {engine.version() or '?'} at {binary}; "
+                                      + ("running" if engine.running else "not running")),
+                              metadata={"installed": True, "running": engine.running,
+                                        "version": engine.version()})
+
+        if action == "install":
+            if g.found(root):
+                return ToolResult(ok=True, output=f"go2rtc is already installed at {g.found(root)}")
+            notes: list[str] = []
+            path, problem = await asyncio.to_thread(
+                g.install, root, system=platform.system(), machine=platform.machine(), log=notes.append)
+            if not path:
+                return ToolResult.unconfigured(f"refused: {problem}")
+            return ToolResult(ok=True, output=f"go2rtc installed at {path}",
+                              side_effects=("cam_webrtc:install",))
+
+        if action == "stop":
+            engine.stop()
+            return ToolResult(ok=True, output="go2rtc stopped; HLS relays are untouched",
+                              side_effects=("cam_webrtc:stop",))
+
+        # start
+        if not g.found(root):
+            return ToolResult.unconfigured("refused: go2rtc is not installed (`cam_webrtc install`); "
+                                           "live video still works over HLS")
+        try:
+            nvr = self._nvr()
+            cameras = [c for c in await nvr.channels() if c.online]
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult.from_exception(exc, f"refused: {exc}", default="transient")
+        if not cameras:
+            return ToolResult.refused("refused: no camera is online")
+        streams, names = {}, {}
+        for cam in cameras:
+            # The name a person would use, as go2rtc's stream id.
+            key = re.sub(r"[^a-z0-9]+", "_", cam.name.lower()).strip("_") or f"ch{cam.channel}"
+            streams[key] = await nvr.stream_url(cam.channel, "main")
+            names[key] = cam.name
+        ok, detail = await asyncio.to_thread(engine.start, streams)
+        if not ok:
+            return ToolResult.transient(f"refused: {detail}")
+        return ToolResult(ok=True,
+                          output=f"{detail}; " + ", ".join(sorted(streams)),
+                          side_effects=("cam_webrtc:start",),
+                          metadata={"cameras": sorted(streams), "running": True, "names": names})
+
+
 def cameras_tools(config, **kwargs) -> list:
     kwargs = {k: v for k, v in kwargs.items() if k in ("nvr", "env", "secrets", "clock", "settings_home", "ffmpeg")}
     prefs = CameraPreferences()
     return [cls(config, prefs=prefs, **kwargs) for cls in (
         CamSetupTool, CamListTool, CamStateTool, CamSnapshotTool, CamStreamTool, CamLightTool, CamIrTool, CamSirenTool,
-        CamPtzTool, CamRecordingsTool, CamWatchTool)]
+        CamPtzTool, CamRecordingsTool, CamWatchTool, CamWebrtcTool)]
 
 
-__all__ = ["Camera", "CameraPreferences", "ReolinkNvr", "available", "cameras_tools"]
+__all__ = ["CamWebrtcTool", "Camera", "CameraPreferences", "ReolinkNvr", "available", "cameras_tools"]

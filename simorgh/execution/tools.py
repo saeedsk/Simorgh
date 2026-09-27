@@ -2160,9 +2160,12 @@ class MemoryForgetTool:
     description = ("Forget what was remembered in the last `minutes` (default 2) -- when told the words were the TV's, "
                    "or not for you, or to be forgotten. `days` instead of `minutes` reaches further back, for "
                    "clearing out old overheard talk. `containing` keeps it to records with those words in them. "
+                   "`kinds` says WHICH memories: episodic (the default, what was said), semantic, facts, "
+                   "procedural. A wrong FACT needs naming -- it is stated flatly and retrieval trusts it. "
                    "The result says how many records went; repeat that, never more.")
     args_schema = {"type": "object", "properties": {"minutes": {"type": "number"}, "days": {"type": "number"},
-                                                    "containing": {"type": "string"}}}
+                                                    "containing": {"type": "string"},
+                                                    "kinds": {"type": "array", "items": {"type": "string"}}}}
     read_only = False
     reversibility = "irreversible"
 
@@ -2187,6 +2190,21 @@ class MemoryForgetTool:
         else:
             minutes = max(0.1, min(minutes or 2.0, 24 * 60.0))
         containing = str(args.get("containing") or "").strip()
+        # WHICH memories. This was hardcoded to `["episodic"]`, so a wrong
+        # FACT could not be forgotten by any route -- not by this tool, and
+        # not by the `forget` command that calls it. Live, 2026-09-25: a
+        # consolidated fact ({subject: Saeed, predicate: interest, object:
+        # "speaking Farsi"}, distilled from one session spent DEBUGGING
+        # Farsi recognition) was making Sim answer English questions in
+        # Farsi, and four sweeps over the episodic turns changed nothing
+        # because the episodic turns were never the cause.
+        asked_kinds = args.get("kinds") or ["episodic"]
+        if isinstance(asked_kinds, str):
+            asked_kinds = [asked_kinds]
+        known = ("episodic", "semantic", "facts", "procedural")
+        kinds = [k for k in (str(x).strip().lower() for x in asked_kinds) if k in known]
+        if not kinds:
+            return ToolResult.refused(f"refused: `kinds` must be some of {', '.join(known)}")
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult.unconfigured("refused: no bus to reach memory")
@@ -2194,8 +2212,9 @@ class MemoryForgetTool:
 
         try:
             reply = await bus.request(_Message.new(topics.MEMORY_FORGET, source="execution", payload={
-                "minutes": minutes, "containing": containing, "kinds": ["episodic"],
-                "reason": f"asked to forget the last {minutes:g} min" + (f" about {containing!r}" if containing else "")}),
+                "minutes": minutes, "containing": containing, "kinds": kinds,
+                "reason": f"asked to forget the last {minutes:g} min of {'/'.join(kinds)}"
+                          + (f" about {containing!r}" if containing else "")}),
                 timeout=10.0)
         except Exception as exc:  # noqa: BLE001
             return ToolResult.transient(f"refused: memory did not answer ({exc.__class__.__name__}: {exc})")

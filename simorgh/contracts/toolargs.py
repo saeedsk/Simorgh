@@ -37,7 +37,7 @@ MARKER_ARG_KEY: dict[str, str] = {
     # and was refused three times in a row (the creator, 2026-09-12).
     # The cameras (execution/home/cameras.py): one line, the camera's
     # name first and the rest of the line read by the tool.
-    "cam_state": "camera", "cam_snapshot": "camera", "cam_stream": "camera", "cam_light": "camera",
+    "cam_state": "camera", "cam_snapshot": "camera", "cam_stream": "camera", "cam_webrtc": "action", "cam_light": "camera",
     "cam_ir": "camera", "cam_siren": "camera", "cam_ptz": "camera", "cam_recordings": "camera",
     "cam_watch": "on",
     "ring_snapshot": "camera", "ring_events": "camera", "ring_light": "camera", "ring_siren": "camera", "ring_watch": "on",

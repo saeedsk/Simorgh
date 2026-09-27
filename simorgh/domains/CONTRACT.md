@@ -30,6 +30,8 @@ Each domain still has its own `CONTRACT.md` describing its tools, config and str
 
 - `media/roomplay.py` (stage 13 item 8, 2026-09-27): `room_play` -- music on a room satellite: internet radio by genre or station (radio-browser.info, keyless, MP3 only: the board refused WAV and AAC is unproven), a URL, or stop/volume, sent to Voice as `voice.room.play.request`; no room named plays where the wake word was just heard.
 
+- `home/go2rtc.py` + `cam_webrtc` (2026-09-25/27): the low-delay camera relay Home Assistant uses. Optional, probed, named when missing; `install` fetches the static binary from its GitHub releases into `workspace/bin/` (so the tool is weighed irreversible). Its API listens on 127.0.0.1:1984 only and RTSP is off; the WebRTC media port 8555 is open, as peer-to-peer media must be. The config carrying the NVR password is created 0600. **Not built yet:** Interface's token-guarded proxy to that API, without which only this Mac can view the streams -- the tool says so. Planned for the camera view's move to go2rtc (interface roadmap, stage 9).
+
 ## What a domain may import
 
 `simorgh.contracts` only (plus guarded third-party libraries), like every other package -- pinned by `tests/simorgh/test_module_boundaries.py`. Two things the domains needed from Execution moved into contracts so this holds: `contracts/pathnames.py::looks_like_credential_path` and the document converters `contracts/text/{pdftext,doctext,htmltext}`. Execution imports them from there too; the old `simorgh.execution.{pdftext,doctext,htmltext}` paths are shims for one bless cycle.

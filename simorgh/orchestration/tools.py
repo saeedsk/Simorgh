@@ -192,6 +192,8 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
 
 
     "cam_stream": ("reversible", True),
+    # go2rtc (domains/home/go2rtc.py): `install` downloads and runs a binary.
+    "cam_webrtc": ("irreversible", True),
 
 
     "cam_light": ("reversible", True),
@@ -455,6 +457,10 @@ _MARKER_ARG_HINT.update({
         "first line: play, pause, stop, next, previous, volume, mute or unmute. Second line, "
         'for volume: {"value": 30} -- 0-100. Loud is refused unattended, and refused outright '
         "during quiet hours."
+    ),
+    "cam_webrtc": (
+        "first line: status, install, start or stop. install fetches go2rtc once (a download -- only when the "
+        "person asked); start relays every online camera. Not for the TV (cam_stream); the phone view is not built yet."
     ),
     "music_play": (
         "first line: what to play -- a playlist, album, artist or song name, or a local audio "

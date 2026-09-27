@@ -244,6 +244,8 @@ for the segments. Verified against a live relay: playlist 200 with six rewritten
 
 - `voice mute <room>` / `voice unmute <room>` (stage 13, 2026-09-27) send `voice.control.request {action, name}`: one room's microphone, the others keep listening; bare `voice mute` still stops the whole subsystem.
 
+- `forget [kind] [minutes|Nd] [words]`: a kind first (episodic, semantic, facts, procedural, all), then minutes (capped at a day) or `<n>d` / `<n> days` for older overheard talk, then words to match (`tests/simorgh/interface/test_the_forget_command.py`).
+
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract interface`.

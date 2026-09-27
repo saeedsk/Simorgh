@@ -61,7 +61,7 @@ tools = [
     # The TV (execution/media/cast.py): "put yourself on the TV",
     # "play this on the TV" are chat requests too.
     "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key", "tv_app", "tv_key", "tv_charts",
-    "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
+    "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_webrtc", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
     "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch"
 ]
 read_only = false

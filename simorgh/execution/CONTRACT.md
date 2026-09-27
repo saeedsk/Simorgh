@@ -291,6 +291,8 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 
 - Execution may send `voice.room.play.request` (declared in `produces`): the `room_play` tool asks Voice to play on a room satellite (stage 13 item 8).
 
+- `memory_forget` takes `kinds` (episodic -- the default --, semantic, facts, procedural); an unknown kind is refused and nothing is sent. Until 2026-09-27 it was hardcoded to episodic, so a wrong consolidated FACT could not be forgotten by any route (live 2026-09-25: one kept Sim answering English in Farsi).
+
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract execution`.

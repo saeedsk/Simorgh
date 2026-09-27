@@ -366,10 +366,23 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         if words and words[0].lower() in kinds_by_word:
             kinds = kinds_by_word[words[0].lower()]
             words = words[1:]
-        minutes = 2.0
-        if words and re.fullmatch(r"\d+(?:\.\d+)?", words[0]):
+        # `<n>d` or `<n> days` reaches past the one-day cap on `minutes`.
+        # The cap is deliberate -- it is what stands between "forget the
+        # last minute, that was the TV" and a wiped memory -- so reaching
+        # further back is a different argument, said on purpose
+        # (execution/tools.py::MemoryForgetTool).
+        minutes, days = 2.0, 0.0
+        if words and re.fullmatch(r"(\d+(?:\.\d+)?)\s*d(?:ays?)?", words[0], re.I):
+            days, words = float(re.match(r"\d+(?:\.\d+)?", words[0]).group(0)), words[1:]
+        elif len(words) >= 2 and re.fullmatch(r"\d+(?:\.\d+)?", words[0]) and words[1].lower() in ("d", "day", "days"):
+            days, words = float(words[0]), words[2:]
+        elif words and re.fullmatch(r"\d+(?:\.\d+)?", words[0]):
             minutes, words = float(words[0]), words[1:]
-        asked = {"minutes": minutes, "containing": " ".join(words)}
+        asked = {"containing": " ".join(words)}
+        if days > 0:
+            asked["days"] = days
+        else:
+            asked["minutes"] = minutes
         if kinds:
             asked["kinds"] = kinds
         return await _run_tool(bus=bus, ledger=ledger, tool="memory_forget", session_id=session_id, timeout=30.0,

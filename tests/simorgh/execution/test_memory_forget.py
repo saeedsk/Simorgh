@@ -90,3 +90,35 @@ class MemoryForgetReachTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemoryForgetKindsTestCase(unittest.IsolatedAsyncioTestCase):
+    """WHICH memories. `kinds` was hardcoded to episodic, so a wrong FACT
+    could not be forgotten by any route (live 2026-09-25: a consolidated
+    fact kept Sim answering English in Farsi, and four episodic sweeps
+    changed nothing)."""
+
+    def setUp(self):
+        self.bus = _Bus()
+        self.tool = MemoryForgetTool(Config())
+        self.ctx = types.SimpleNamespace(bus=self.bus)
+
+    async def test_episodic_is_still_the_default(self):
+        await self.tool.run({}, ctx=self.ctx)
+        self.assertEqual(self.bus.sent[-1]["kinds"], ["episodic"])
+
+    async def test_a_wrong_fact_can_be_named(self):
+        result = await self.tool.run({"kinds": ["facts"], "containing": "Farsi"}, ctx=self.ctx)
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(self.bus.sent[-1]["kinds"], ["facts"])
+        self.assertIn("facts", self.bus.sent[-1]["reason"])
+
+    async def test_one_kind_given_as_a_string_is_a_list_of_one(self):
+        await self.tool.run({"kinds": "Semantic"}, ctx=self.ctx)
+        self.assertEqual(self.bus.sent[-1]["kinds"], ["semantic"])
+
+    async def test_an_unknown_kind_is_refused_and_nothing_is_sent(self):
+        result = await self.tool.run({"kinds": ["everything"]}, ctx=self.ctx)
+        self.assertFalse(result.ok)
+        self.assertIn("episodic", result.error)
+        self.assertEqual(self.bus.sent, [])

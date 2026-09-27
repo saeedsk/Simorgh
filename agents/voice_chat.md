@@ -15,7 +15,7 @@ tools = [
     # the front door camera see?", "this room is the study".
     "overheard", "overheard_note", "camera_describe", "remember_place", "people",
     "voice_setting", "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key", "tv_app", "tv_key", "tv_charts",
-    "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
+    "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_webrtc", "cam_light", "cam_ir", "cam_siren", "cam_ptz", "cam_recordings", "cam_watch",
     "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch",
     # The things people say OUT LOUD, which this list did not have.
     # "Remind me in 5 minutes" (the creator, 2026-09-16) found no
