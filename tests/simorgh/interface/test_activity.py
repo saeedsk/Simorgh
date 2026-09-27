@@ -389,3 +389,42 @@ class ShortTitleTestCase(unittest.TestCase):
         self.assertEqual(short_title("**Add** a `docstring` to vitals.py"), "Add a docstring to vitals.py")
         self.assertEqual(short_title(""), "(no description)")
         self.assertLessEqual(len(short_title("word " * 40)), 57)
+
+
+class AConversationThatKeepsItsSessionId(unittest.IsolatedAsyncioTestCase):
+    """The phone sends one session id for a whole conversation, and the
+    console showed every turn of it as the first one's words -- ten
+    turns of "Thank you." (live, 2026-09-27)."""
+
+    async def test_each_turn_is_named_by_its_own_words(self):
+        from types import SimpleNamespace
+
+        from simorgh.interface.activity import TaskBook
+        from simorgh.interface.service import Service
+
+        svc = Service.__new__(Service)
+        svc._book = TaskBook()                                           # noqa: SLF001
+
+        async def said(text):
+            await svc._on_percept(SimpleNamespace(payload={              # noqa: SLF001
+                "session_id": "iphone-4", "channel": "api", "text": text}))
+
+        await said("Thank you.")
+        self.assertEqual(svc._book.tasks["iphone-4"].description, "Thank you.")   # noqa: SLF001
+        svc._book.on_finished("iphone-4", "completed")                  # noqa: SLF001
+        await said("play some jazz")
+        self.assertEqual(svc._book.tasks["iphone-4"].description, "play some jazz")  # noqa: SLF001
+
+    async def test_a_turn_still_open_keeps_the_better_name(self):
+        from types import SimpleNamespace
+
+        from simorgh.interface.activity import TaskBook
+        from simorgh.interface.service import Service
+
+        svc = Service.__new__(Service)
+        svc._book = TaskBook()                                           # noqa: SLF001
+        svc._book.on_created({"task_id": "v1", "kind": "chat", "origin": "voice",    # noqa: SLF001
+                              "description": "Hey Sim, what time is it?"})
+        await svc._on_percept(SimpleNamespace(payload={"session_id": "v1", "channel": "voice",  # noqa: SLF001
+                                                        "text": "what time is it"}))
+        self.assertEqual(svc._book.tasks["v1"].description, "Hey Sim, what time is it?")  # noqa: SLF001

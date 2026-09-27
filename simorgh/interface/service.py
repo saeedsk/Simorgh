@@ -1461,8 +1461,12 @@ class Service:
         if not session_id or not text:
             return
         known = self._book.tasks.get(session_id)
-        if known is not None and known.description:
-            return      # somebody who knew more already named it
+        if known is not None and known.description and known.status in ("created", "available", "running"):
+            return      # somebody who knew more already named THIS turn
+        # A finished row under the same id is the last turn, not this one:
+        # the phone keeps one session id for a whole conversation, and
+        # every turn of it showed as its first words, "Thank you." (live,
+        # 2026-09-27).
         self._book.on_created({"task_id": session_id, "kind": "chat",
                                "origin": str(payload.get("channel") or "human"),
                                "description": text})
