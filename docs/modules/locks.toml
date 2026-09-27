@@ -4,6 +4,7 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
 [locks.benchmark]
 by = "opus-main"
 task = "a swebench case works in its checkout, not a worktree of this repo"
@@ -15,12 +16,6 @@ by = "opus-main"
 task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
-
-[locks.docs]
-by = "opus-main"
-task = "stage 13: status after items 1-5, 7, 8"
-since = "2026-09-27T08:30:37+00:00"
-until = "2026-09-27T16:30:37+00:00"
 
 [locks.evals]
 by = "opus-main"
@@ -40,12 +35,6 @@ task = "consolidation waits long enough for a provider to answer"
 since = "2026-09-22T20:46:27+00:00"
 until = "2026-09-23T04:46:27+00:00"
 
-[locks.orchestration]
-by = "opus-main"
-task = "stage 13: the model knows a turn came through a room satellite"
-since = "2026-09-27T11:39:37+00:00"
-until = "2026-09-27T19:39:37+00:00"
-
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"
@@ -57,15 +46,3 @@ by = "opus-main"
 task = "the house gate writes its report to the loader notes, not docs/findings"
 since = "2026-09-22T13:49:46+00:00"
 until = "2026-09-22T21:49:46+00:00"
-
-[locks.tools]
-by = "opus-main"
-task = "stage 13 item 7: satellite provisioning files"
-since = "2026-09-27T07:58:25+00:00"
-until = "2026-09-27T15:58:25+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "stage 13 items 1-4: a session per device, satellites"
-since = "2026-09-27T04:02:38+00:00"
-until = "2026-09-27T12:02:38+00:00"
