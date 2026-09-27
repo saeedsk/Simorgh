@@ -188,3 +188,4 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim memory --by <you> --task "..."`), commit the lock, edit only `simorgh/memory/`, `tests/simorgh/memory/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py memory` before committing; commit subject `memory: <what changed>`.
+- 2026-09-27: `memory.forget` with kind `facts` ends each live fact recorded in the window (and containing the words, matched against subject, predicate and object): a `fact.superseded` with nothing superseding it, since the fact index does not read tombstones. `containing` matches a fact's subject/predicate/object -- a fact has no `content` (`store._searchable`).

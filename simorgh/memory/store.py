@@ -39,6 +39,17 @@ def stream_for(kind: str) -> str:
     return f"memory:{kind}"
 
 
+def _searchable(payload: dict) -> str:
+    """The words `forget ... <words>` is matched against: a memory's
+    content, or -- for a fact, which has none -- its subject, predicate
+    and object. Matching `content` alone meant no word could ever find a
+    fact (2026-09-27)."""
+    text = payload.get("content")
+    if text:
+        return str(text).lower()
+    return " ".join(str(payload.get(k) or "") for k in ("subject", "predicate", "object")).lower()
+
+
 #: Appended to a memory that came back shorter than it was stored.
 #: Said in the content itself because that is the only part of a recall
 #: that reaches the model.
@@ -550,16 +561,44 @@ class MemoryEngine:
         tombstoned = await self._tombstoned_refs()
         gone: list[str] = []
         for kind in kinds:
+            if kind == "facts":
+                gone += await self._forget_facts(since=since, until=end, needle=needle, reason=reason)
+                continue
             stream = stream_for(kind)
             for event in await self._ledger.read(stream):
                 ref = f"{stream}:{event.seq}"
                 if ref in tombstoned or not (since <= float(event.ts) <= end):
                     continue
-                if needle and needle not in str(event.payload.get("content", "")).lower():
+                if needle and needle not in _searchable(event.payload):
                     continue
                 gone.append(ref)
         if gone:
             await self.forget(gone, reason=reason)
+        return gone
+
+    async def _forget_facts(self, *, since: float, until: float, needle: str, reason: str) -> list[str]:
+        """End every live fact recorded in the window (and matching
+        `needle`): a `fact.superseded` with nothing superseding it. The fact
+        index does not read tombstones -- a fact ends the way facts end --
+        so `forget facts` tombstoning them would have changed nothing
+        (2026-09-27)."""
+        from .facts import FACT_STREAM, STORED, SUPERSEDED
+
+        index = await self._facts_synced()
+        live = set(index.by_key.values())
+        now = self._clock.now()
+        gone: list[str] = []
+        for event in await self._ledger.read(FACT_STREAM):
+            fact_id = str((event.payload or {}).get("id") or "")
+            if event.type != STORED or fact_id not in live or not (since <= float(event.ts) <= until):
+                continue
+            if needle and needle not in _searchable(event.payload):
+                continue
+            await self._ledger.append(FACT_STREAM, Event(
+                stream=FACT_STREAM, type=SUPERSEDED, ts=now, trace_id="", causation_id=None,
+                payload={"id": fact_id, "valid_to": now, "superseded_by": "", "reason": reason}))
+            gone.append(f"{FACT_STREAM}:{event.seq}")
+        await self._facts_synced()
         return gone
 
     async def forget(self, refs: list[str], *, reason: str) -> None:

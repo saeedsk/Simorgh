@@ -16,7 +16,8 @@
           "working",
           "episodic",
           "semantic",
-          "procedural"
+          "procedural",
+          "facts"
         ],
         "type": "string"
       },

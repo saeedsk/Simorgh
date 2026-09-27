@@ -7,6 +7,12 @@ from ..registry import define
 from .. import topics as t
 
 MEMORY_KIND = Enum("working", "episodic", "semantic", "procedural")
+#: What `memory.forget` may reach: the kinds, and the consolidated facts
+#: (`memory:facts`). `forget facts` / `forget all` were added to the
+#: console on 2026-09-25 and this enum was not, so both were refused at
+#: publish ("'facts' not in enum", live 2026-09-27) -- the one record kind
+#: most worth removing stayed out of reach.
+FORGET_KIND = Enum("working", "episodic", "semantic", "procedural", "facts")
 
 MemoryRetrieve = define(t.MEMORY_RETRIEVE, [
     F("query", Str),
@@ -66,7 +72,7 @@ MemoryForgotten = define(t.MEMORY_FORGOTTEN, [F("refs", List(Str)), F("reason", 
 # the last `minutes`, or `since`..`until`; `kinds` default episodic;
 # `containing` keeps it to records with those words. Request/reply.
 MemoryForget = define(t.MEMORY_FORGET, [
-    O("minutes", Float), O("since", Float), O("until", Float), O("kinds", List(MEMORY_KIND)),
+    O("minutes", Float), O("since", Float), O("until", Float), O("kinds", List(FORGET_KIND)),
     O("containing", Str), O("reason", Str),
 ])
 MemoryForgetReply = define(t.MEMORY_FORGET_REPLY, [F("forgotten", Int), F("refs", List(Str)), O("since", Float)])

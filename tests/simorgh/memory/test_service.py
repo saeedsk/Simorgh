@@ -303,6 +303,27 @@ class TheReportedScoreIsAboutTheQueryTestCase(MemoryServiceTestCase):
 
 
 class ForgetTestCase(MemoryServiceTestCase):
+    async def test_forget_all_reaches_a_fact_by_a_word_in_it(self):
+        """Live, 2026-09-27: `forget all 30d Sah-eed` was refused at publish
+        ("'facts' not in enum") -- the console had sent facts since
+        2026-09-25 and the contract never allowed it. And a fact has no
+        `content`, so no word could find one, and the fact index does not
+        read tombstones: a fact is ended, as facts end."""
+        engine = self.service.engine
+        await engine.store_fact(subject="Saeed", predicate="name is said", object="Sah-eed", person_scope="Saeed")
+        await engine.store_fact(subject="Saeed", predicate="likes", object="the pool at 30 degrees",
+                                person_scope="Saeed")
+        await self._store_and_wait({"kind": "episodic", "content": "Sim: Loud and clear, Sah-eed.",
+                                    "tags": ["person:Saeed"], "source_ref": ""})
+        reply = await self.bus.request(Message.new(topics.MEMORY_FORGET, source="test", payload={
+            "minutes": 30 * 24 * 60, "kinds": ["episodic", "semantic", "facts", "procedural"],
+            "containing": "sah-eed", "reason": "the creator: forget all 30d Sah-eed"}), timeout=5.0)
+        self.assertEqual(reply.type, topics.MEMORY_FORGET_REPLY, reply.payload)
+        self.assertEqual(reply.payload["forgotten"], 2, "the turn and the fact, not the pool")
+        left = [f.object for f, _ in await engine.facts_for("Saeed", person="Saeed")]
+        self.assertNotIn("Sah-eed", left)
+        self.assertIn("the pool at 30 degrees", left)
+
     async def test_forget_the_last_minutes_over_the_bus(self):
         # The creator, 2026-09-13: "forget all the one minute conversation, that was all from TV".
         await self._store_and_wait({"kind": "episodic", "content": "Saeed: the TV said my wife Michelle / Sim: fun test",
