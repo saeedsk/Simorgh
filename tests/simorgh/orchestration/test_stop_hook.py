@@ -60,6 +60,16 @@ class TheGenericRule(unittest.TestCase):
         bounce = stophook.check("I started Persian music for you, Saeed.", session)
         self.assertIn("the ones that could: music_play", bounce.reply)
 
+    def test_doing_it_now_with_no_tool_is_a_claim(self):
+        """"Turning the TV off now, Saeed." with no tool run; the TV stayed
+        on (live, 2026-09-27)."""
+        session = types.SimpleNamespace(profile=profiles.VOICE_CHAT, steps=[], user_text="Hey Sim, turn off the TV.")
+        bounce = stophook.check("Turning the TV off now, Saeed.", session)
+        self.assertIsNotNone(bounce)
+        self.assertIsNone(stophook.check("Turning the TV off now, Saeed.",
+                                         types.SimpleNamespace(profile=profiles.VOICE_CHAT, user_text="",
+                                                               steps=[types.SimpleNamespace(tool="tv_key", ok=True)])))
+
     def test_saying_nothing_is_playing_is_not_a_claim(self):
         """Live, 2026-09-27: "Nothing's playing, Saeed" was bounced as a
         claim that something was playing."""

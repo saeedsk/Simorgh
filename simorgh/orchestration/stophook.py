@@ -245,7 +245,11 @@ _EFFECT_CLAIM = re.compile(
     r"resumed|played|renamed|installed|dimmed|brightened|locked|unlocked|emailed|messaged|texted|"
     r"cancell?ed|muted|unmuted|armed|disarmed|ordered|reminded)\b[^.!?]{0,60}"
     r"|\b(?:is|are)\s+now\s+(?:on|off|set|locked|unlocked|playing|paused|muted|scheduled|saved|armed|disarmed)\b"
-    r"|\b(?:reminder|alarm|timer)\s+(?:is\s+|has been\s+)?set\b", re.IGNORECASE)
+    r"|\b(?:reminder|alarm|timer)\s+(?:is\s+|has been\s+)?set\b"
+    # "Turning the TV off now, Saeed." -- said as done, with no tool run,
+    # and the TV stayed on until he asked twice more (live, 2026-09-27).
+    r"|\b(?:turning|switching|shutting|powering|putting|stopping|starting|playing)\b[^.!?]{0,40}\bnow\b",
+    re.IGNORECASE)
 
 
 def _changed_something(session) -> bool:
