@@ -142,7 +142,10 @@ class ItIsReachableWhereItIsNeededTestCase(unittest.TestCase):
         from simorgh.orchestration import profiles
 
         voice = profiles.for_percept("voice").tools
-        for tool in ("git_commit", "git_revert", "git_discard", "run_shell"):
+        # `run_shell` joined the spoken profile on 2026-09-27 (the creator:
+        # "if creator asks, sim should take those action"); Guardian's
+        # PersonRule decides who may. The git writes stay out.
+        for tool in ("git_commit", "git_revert", "git_discard"):
             self.assertNotIn(tool, voice)
 
 

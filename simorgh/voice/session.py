@@ -1672,10 +1672,20 @@ class VoiceSession:
                 if ident is not None and ident.name == speaker else ""
             score = (f"{ident.score:.2f} against a bar of {self._config.speaker_threshold:.2f}"
                      if ident is not None and ident.name == speaker else "")
+            # How this voice says the speaker's name (`voice pronounce`), so
+            # "how do you pronounce my name?" is answered from the setting
+            # and not from a respelling the model made up (2026-09-27).
+            say_as = ""
+            if speaker and self._speakers is not None:
+                try:
+                    say_as = self._speakers.pronunciations().get(speaker, "")
+                except Exception:  # noqa: BLE001 -- a name without its sound is still a name
+                    say_as = ""
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
                                              speaker_name=speaker, speaker_relation=relation, room=room,
                                              speaker_before=before, speaker_doubt=doubt, speaker_score=score,
-                                             trace_id=clock.trace_id, device=self._config.device)
+                                             trace_id=clock.trace_id, device=self._config.device,
+                                             speaker_say_as=say_as)
         finally:
             self._outstanding.pop(turn_id, None)
             self._pipeline.delta_sinks.pop(session_id, None)

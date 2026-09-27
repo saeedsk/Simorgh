@@ -337,7 +337,7 @@ answer, and you do not route around it."""
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
 def who_is_here(speaker: str, relation: str, room: str, before: str = "", *, doubt: str = "",
-                score: str = "") -> str:
+                score: str = "", say_as: str = "") -> str:
     """The lines that tell the model who it is talking to and what it
     overheard (voice/speakers.py, voice/session.py). `before` is who Sim
     answered last: the creator, 2026-09-13, "I'd like sim to mention
@@ -380,6 +380,14 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "", *, dou
             lines.append(f"{speaker} is enrolled: Sim has their voice on file, and this turn it matched at {score}. "
                          "If they ask how well you know their voice, that is the number; `voice people` shows "
                          "the whole book and `voice relearn <name>` repairs a profile from kept recordings.")
+        if say_as and not doubt:
+            # Asked "how do you pronounce my name?", the model answered
+            # "Sah-eed, 'Sah' then 'eed'" from its own old replies, three
+            # times after being told not to -- while the voice said the
+            # name as set (live, 2026-09-27). It was never told the setting.
+            lines.append(f"Your voice says {speaker}'s name as \"{say_as}\" -- set with `voice pronounce "
+                         f"{speaker} <how>`. Write the name as {speaker}; if asked how you say it, that is the answer, "
+                         "and it changes only with that command.")
         if known is not None and is_child(speaker):
             lines.append(WITH_A_CHILD.format(name=known.name, age=known.age))
     else:
@@ -617,7 +625,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
            unavailable: str = "", channel: str = "", speaker: str = "", speaker_relation: str = "",
            speaker_doubt: str = "", speaker_score: str = "",
            room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
-           skills: str = "", now: float = 0.0, device: str = "") -> str:
+           skills: str = "", now: float = 0.0, device: str = "", speaker_say_as: str = "") -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
@@ -636,7 +644,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         # prompt ran to 12k characters (observer, 2026-09-13). VOICE says
         # what brevity says, and more.
         body = f"{who_is_here(speaker, speaker_relation, room, speaker_before, doubt=speaker_doubt,
-                                  score=speaker_score)}\n\n{VOICE}"
+                                  score=speaker_score, say_as=speaker_say_as)}\n\n{VOICE}"
         if device and device != "laptop":
             # Stage 13: the creator, 2026-09-27 -- "when I say 'play music'
             # on the board, I expect the music played on the same board

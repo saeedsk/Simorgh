@@ -165,6 +165,7 @@ A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that 
 - `run_shell` is in `agents/chat.md` and `agents/voice_chat.md` (2026-09-27): a spoken or typed "check what is using the GPU" is done, not explained. The profile does not decide who may: `run_shell` is tier 2, so Guardian's `PersonRule` lets the owner through, escalates a child or guest to an adult, and refuses a voice nobody placed.
 
 - A voice turn's `device` (from `percept.text.received`) reaches `Session.device`; when it is a room satellite (not `laptop`), `scaffolds.render` adds `satellite_note`: the person is in that room, already called Sim by its wake word, and music or sound goes to `room_play` with no room (stage 13, 2026-09-27).
+- A voice turn's `speaker_say_as` (from `percept.text.received`, 2026-09-27) reaches `Session.speaker_say_as`, and `scaffolds.who_is_here` tells the model how its voice says the speaker's name; nothing is said for an unsure voice.
 
 ## Contract tests
 

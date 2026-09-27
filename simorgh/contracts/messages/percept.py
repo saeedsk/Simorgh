@@ -33,9 +33,13 @@ PerceptTextReceived = define(t.PERCEPT_TEXT_RECEIVED, [
     # model, asked "what's my score?", said enrolment had never happened
     # to an enrolled person, turn after turn (live, 2026-09-21).
     O("speaker_score", Str),
+    # How the voice says the speaker's name (`voice pronounce`). Without
+    # it the model, asked "how do you pronounce my name?", made one up
+    # from its own old replies (live, 2026-09-27).
+    O("speaker_say_as", Str),
 ], doc="channel=command + command for routed commands; steer=true marks a mid-task correction; "
-       "channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation "
-       "and the room's recent lines that were not addressed to Sim.")
+       "channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation, "
+       "how the voice says their name, and the room's recent lines that were not addressed to Sim.")
 PerceptFileChanged = define(t.PERCEPT_FILE_CHANGED, [
     F("path", Str),
     F("change", Enum("created", "modified", "deleted")),

@@ -32,3 +32,31 @@ class TheScoreIsInThePrompt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class ThePronunciationIsInThePrompt(unittest.TestCase):
+    """Asked "how do you pronounce my name?", the model answered "Sah-eed,
+    'Sah' then 'eed'" three times, after the prompt told it not to --
+    while the voice said the name as set (live, 2026-09-27)."""
+
+    def test_the_setting_is_told(self):
+        text = who_is_here("Saeed", "", "", say_as="sa'eed")
+        self.assertIn('Your voice says Saeed\'s name as "sa\'eed"', text)
+        self.assertIn("voice pronounce Saeed", text)
+
+    def test_nothing_is_claimed_without_one_or_for_an_unsure_voice(self):
+        self.assertNotIn("Your voice says", who_is_here("Saeed", "", ""))
+        self.assertNotIn("Your voice says", who_is_here("Saeed", "", "", doubt="close to Iris", say_as="x"))
+
+    def test_the_field_travels_from_the_voice_to_the_prompt(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3] / "simorgh"
+        self.assertIn('"speaker_say_as"', (root / "orchestration" / "service.py").read_text())
+        self.assertIn('O("speaker_say_as", Str)', (root / "contracts" / "messages" / "percept.py").read_text())
+        self.assertIn("speaker_say_as=say_as", (root / "voice" / "session.py").read_text())
+        self.assertIn('payload["speaker_say_as"]', (root / "voice" / "pipeline.py").read_text())
+        self.assertIn("speaker_say_as=speaker_say_as", (root / "orchestration" / "worker.py").read_text())
+        self.assertIn('speaker_say_as=getattr(session, "speaker_say_as", "")',
+                      (root / "orchestration" / "session.py").read_text())

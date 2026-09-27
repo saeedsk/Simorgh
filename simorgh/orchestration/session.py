@@ -1614,6 +1614,7 @@ class SessionRunner:
                     speaker_score=getattr(session, "speaker_score", ""),
                     speaker_before=getattr(session, "speaker_before", ""),
                     device=getattr(session, "device", ""),
+                    speaker_say_as=getattr(session, "speaker_say_as", ""),
                     offered=() if no_tools else offered,
                     skills=catalog,
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),

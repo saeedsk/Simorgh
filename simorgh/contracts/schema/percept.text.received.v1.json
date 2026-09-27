@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/percept.text.received.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "channel=command + command for routed commands; steer=true marks a mid-task correction; channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation and the room's recent lines that were not addressed to Sim.",
+  "description": "channel=command + command for routed commands; steer=true marks a mid-task correction; channel=voice carries device/speaker/confidence from the voice pipeline, plus the speaker's relation, how the voice says their name, and the room's recent lines that were not addressed to Sim.",
   "properties": {
     "channel": {
       "enum": [
@@ -62,6 +62,12 @@
       ]
     },
     "speaker_relation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "speaker_say_as": {
       "type": [
         "string",
         "null"

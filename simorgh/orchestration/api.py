@@ -223,6 +223,9 @@ class Session:
     # Why the speaker's name is not certain (voice/speakers.py::doubt_of);
     # "" when it is. The prompt then asks for no name.
     speaker_doubt: str = ""
+    # How the voice says the speaker's name (`voice pronounce`), so the
+    # model answers "how do you say my name?" from the setting.
+    speaker_say_as: str = ""
     # How well the voice matched their enrolled profile this turn, as
     # Voice words it; "" when nobody was matched.
     speaker_score: str = ""
