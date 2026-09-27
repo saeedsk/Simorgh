@@ -7,7 +7,7 @@ tools = [
     # voice got "I can't start Apple Music on your Mac from here" -- true
     # of this profile and of nothing else: the typed chat had these all
     # along (the creator, 2026-09-15).
-    "music_now", "music_control", "music_play", "sim_command",
+    "music_now", "music_control", "music_play", "room_play", "sim_command",
     # Its own console: the only place "was there an error just now?" can
     # be answered from (see agents/chat.md).
     "console_tail",

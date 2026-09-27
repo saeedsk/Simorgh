@@ -289,6 +289,8 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 - `worktree_land` fast-forwards main only after a clean rebase and a green whole-suite gate that `simloader.unit_verdict` (loaded from the main checkout) also accepts: exit 0, no failure in the summary, tests ran, count within 10% of the loader baseline; a missing loader means no second opinion, not a refusal (`test_worktree_land_gate.py`). Worktrees are made only for a named `repo_root`. The gate is the slow step, so main can move WHILE it runs: since 2026-09-24 `land` re-reads main after the gate and, if it moved, rebases onto it and lands, saying how many commits arrived and that the suite ran before they did -- a conflict at that point still refuses and names the file, exactly as one before the gate would. Live that day: an 8.1-minute gate, five commits landed on main by a human in the meantime, `--ff-only` refused, and the task was told only "Not possible to fast-forward, aborting" with the whole suite thrown away and no way to tell a correct branch from a broken one (`test_landing_survives_main_moving.py`).
 - Execution imports only `simorgh.contracts`, `simorgh.bus.client` (for `UNBOUNDED`, `service.py:37`) and the standard library plus optional third-party SDKs imported lazily (`tests/simorgh/test_module_boundaries.py`).
 
+- Execution may send `voice.room.play.request` (declared in `produces`): the `room_play` tool asks Voice to play on a room satellite (stage 13 item 8).
+
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract execution`.

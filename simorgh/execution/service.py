@@ -222,6 +222,8 @@ class Service:
         topics.TASK_CREATE, topics.TASK_LIST_REQUEST, topics.TASK_CANCEL, topics.UI_COMMAND_REQUEST,
         topics.MEMORY_FORGET, topics.MEMORY_STORE, topics.VOICE_VOICES_REQUEST,
         topics.VOICE_CONTROL_REQUEST,
+        # `room_play` (domains/media/roomplay.py): music on a room's satellite.
+        topics.VOICE_ROOM_PLAY_REQUEST,
     )
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,

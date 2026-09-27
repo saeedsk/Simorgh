@@ -223,6 +223,8 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "music_now": ("read_only", True),
     "music_control": ("reversible", True),
     "music_play": ("reversible", True),
+    # A room satellite's speaker (domains/media/roomplay.py, stage 13 item 8).
+    "room_play": ("reversible", True),
     # Runs on a machine this process cannot inspect, snapshot or roll
     # back -- the strongest case for `irreversible` in the table.
     "run_remote": ("irreversible", True),
@@ -457,6 +459,11 @@ _MARKER_ARG_HINT.update({
     "music_play": (
         "first line: what to play -- a playlist, album, artist or song name, or a local audio "
         "file or folder path. Nothing else is needed."
+    ),
+    "room_play": (
+        "first line: what to play on a room satellite -- a genre (jazz), a radio station name, a stream "
+        "URL, or stop; second line, only if the person named another room: that room. Asked through a "
+        "satellite, play there: leave the room out and it plays where they are standing."
     ),
     "home_find": (
         "a name or a word to look for in the house -- \"kitchen\", \"thermostat\", "

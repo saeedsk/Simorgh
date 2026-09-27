@@ -148,6 +148,9 @@ MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     # The Mac's Music app: same two shapes as the home players.
     "music_control": ("op", "spec"),
     "music_play": ("query", "spec"),
+    # A room satellite's speaker (stage 13 item 8): what to play, then
+    # optionally which room.
+    "room_play": ("what", "room"),
 }
 
 #: Of those, the ones whose second part is JSON whose keys merge into

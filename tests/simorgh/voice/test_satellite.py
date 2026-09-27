@@ -478,3 +478,53 @@ class AWakeWordIsTheAddress(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(getattr(FakeMicrophone(), "woken", False))
         self.assertFalse(sat.SatelliteMicrophone("kitchen").woken, "and a satellite only inside a run")
+
+
+class PlayingInTheRoom(unittest.IsolatedAsyncioTestCase):
+    """Stage 13 item 8: music asked for in a room plays in that room."""
+
+    async def _connected_service(self):
+        helper = ConfiguredSatellites()
+        service, client, ctx = await helper._service(secrets={"SIM_SATELLITE_KITCHEN_KEY": "k"})
+        self.addAsyncCleanup(service.stop)
+        await service._start_satellites()  # noqa: SLF001
+        for _ in range(200):
+            if service._satellites["kitchen"].connected:  # noqa: SLF001
+                break
+            await asyncio.sleep(0.005)
+        replies: list[dict] = []
+
+        async def _reply(message, topic, payload):
+            replies.append(payload)
+        service._reply = _reply  # type: ignore[method-assign]
+        return service, client, replies
+
+    class _Msg:
+        def __init__(self, payload):
+            self.payload = payload
+
+    async def test_play_with_no_room_goes_to_the_board_you_just_spoke_to_as_music(self):
+        import time
+
+        service, client, replies = await self._connected_service()
+        service._satellites["kitchen"].last_wake_at = time.time()  # noqa: SLF001
+        await service._on_room_play(self._Msg({"action": "play", "url": "https://radio/jazz.mp3", "title": "Jazz"}))  # noqa: SLF001
+        self.assertTrue(replies[-1]["ok"], replies)
+        self.assertEqual(replies[-1]["room"], "kitchen")
+        played = [m for m in client.media if m.get("media_url")]
+        self.assertEqual(played[-1]["media_url"], "https://radio/jazz.mp3")
+        self.assertFalse(played[-1]["announcement"], "music, not an announcement: a wake word ducks it")
+
+    async def test_stop_and_volume(self):
+        service, client, replies = await self._connected_service()
+        await service._on_room_play(self._Msg({"action": "stop", "room": "Kitchen"}))  # noqa: SLF001
+        self.assertIn({"command": "STOP", "key": 7}, client.media)
+        await service._on_room_play(self._Msg({"action": "volume", "volume": 0.4, "room": "kitchen"}))  # noqa: SLF001
+        self.assertIn({"volume": 0.4, "key": 7}, client.media)
+        self.assertEqual(replies[-1]["detail"], "volume 40% in kitchen")
+
+    async def test_an_unknown_room_is_refused_by_name(self):
+        service, _client, replies = await self._connected_service()
+        await service._on_room_play(self._Msg({"action": "play", "url": "u", "room": "garage"}))  # noqa: SLF001
+        self.assertFalse(replies[-1]["ok"])
+        self.assertIn("kitchen", replies[-1]["detail"])

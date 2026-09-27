@@ -28,6 +28,8 @@ Home Assistant's URL and token are read from the secret store under EITHER `vaul
 
 Each domain still has its own `CONTRACT.md` describing its tools, config and streams; this file is the seam.
 
+- `media/roomplay.py` (stage 13 item 8, 2026-09-27): `room_play` -- music on a room satellite: internet radio by genre or station (radio-browser.info, keyless, MP3 only: the board refused WAV and AAC is unproven), a URL, or stop/volume, sent to Voice as `voice.room.play.request`; no room named plays where the wake word was just heard.
+
 ## What a domain may import
 
 `simorgh.contracts` only (plus guarded third-party libraries), like every other package -- pinned by `tests/simorgh/test_module_boundaries.py`. Two things the domains needed from Execution moved into contracts so this holds: `contracts/pathnames.py::looks_like_credential_path` and the document converters `contracts/text/{pdftext,doctext,htmltext}`. Execution imports them from there too; the old `simorgh.execution.{pdftext,doctext,htmltext}` paths are shims for one bless cycle.

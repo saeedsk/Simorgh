@@ -54,6 +54,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:38-45`, pinned by `tes
 | Topic | Schema | Where | Does |
 |---|---|---|---|
 | `voice.status.request` | `messages/voice.py::VoiceStatusRequest` | service.py:358 | Replies with `VoiceState` plus session state and metrics |
+| `voice.room.play.request` | `messages/voice.py::VoiceRoomPlayRequest` | service.py `_on_room_play` | Stage 13 item 8: play a URL as music (not an announcement), stop, or set the volume on a room satellite. `room` empty = the satellite whose wake word was heard in the last 120 s, else the only one; several and none recent = "which room?". Replies `voice.room.play.reply {ok, room, detail}`. Sender: `room_play` (domains/media/roomplay.py) |
 | `voice.control.request` | `messages/voice.py::VoiceControlRequest` | service.py:361 | on/off/mute (`mute`/`unmute` with `name` = one room's session only, `laptop` or a satellite's name -- the others keep listening, and a muted satellite turns its wake word away; without `name`, the whole subsystem as before), `voice set`, enrol and people actions; refusals as error replies. `action: "calibrate"` (`value` start [options] | status | stop | keep | accept | skip; `name`) runs the calibration set. |
 | `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | service.py:618 | `voice test` / speak a text now |
 | `voice.synthesise.request` | `messages/voice.py::VoiceSynthesiseRequest` | service.py:`_on_synthesise` | Makes a WAV and does **not** play it; replies with a `audio/wav` ledger blob `ref`. For a client with its own speaker (the phone). Never touches the session, the echo tracker or the turn state machine. |
@@ -80,6 +81,7 @@ The publish direction is not pinned by the manifest test; `session.py` publishes
 | `voice.spoken` | `messages/voice.py::VoiceSpoken` | pipeline.py:418; session.py (many) | After each reply, aside, command or quiet outcome |
 | `voice.listening` | `messages/voice.py::VoiceListening` | pipeline.py:563; session.py:366 | Each floor-state change |
 | `voice.room.speech` | `messages/voice.py::VoiceRoomSpeech` | service.py `_publish_room_speech` | Each reply piece for a room satellite: FLAC (ffmpeg, 48 kHz mono) put in the ledger, `{ref, seconds, device, content_type}`; Interface serves the ref at `/api/room/speech` for 120 s and the satellite fetches it by URL. ffmpeg missing is refused by name |
+| `voice.room.play.reply` | `messages/voice.py::VoiceRoomPlayReply` | service.py `_on_room_play` | What played, stopped or changed on which room's satellite, or why nothing did |
 | `task.cancel` | `messages/task.py::TaskCancel` | session.py:639 | A newer turn supersedes an older ask still thinking |
 | `ui.command.request` | `messages/ui.py::UiCommandRequest` | session.py `_restart` | "restart" said by a known voice under the loader |
 | `ui.notice` | `messages/ui.py::UiNotice` | session.py `_report_synthesis`, `_calibration_after` | A voice fell back or a reply could not be synthesised; during `voice calibrate` (source `voice calibrate`), each verdict and the next line to read (`warn` for a refused take, with the reason) |

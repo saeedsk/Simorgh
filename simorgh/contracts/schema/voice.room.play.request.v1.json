@@ -1,0 +1,50 @@
+{
+  "$id": "https://simorgh.local/schema/voice.room.play.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Play `url` (or stop, or set the volume 0-1) on a room satellite's media player. `room` empty: the satellite woken last, within two minutes.",
+  "properties": {
+    "action": {
+      "anyOf": [
+        {
+          "enum": [
+            "play",
+            "stop",
+            "volume"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "room": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "volume": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "voice.room.play.request",
+  "type": "object"
+}

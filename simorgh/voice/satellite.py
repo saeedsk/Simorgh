@@ -403,6 +403,18 @@ class SatelliteLink:
             raise RuntimeError(f"satellite {self.name} has no media player to speak on")
         self._client.media_player_command(self._media_key, media_url=url, announcement=True)
 
+    async def play_media(self, url: str) -> None:
+        """Music, a radio stream: ordinary media, not an announcement, so a
+        wake word ducks it and Sim's replies play over it (stage 13 item 8)."""
+        if self._client is None or self._media_key is None:
+            raise RuntimeError(f"satellite {self.name} is not connected ({self.status})")
+        self._client.media_player_command(self._media_key, media_url=url, announcement=False)
+
+    async def set_volume(self, level: float) -> None:
+        if self._client is None or self._media_key is None:
+            raise RuntimeError(f"satellite {self.name} is not connected ({self.status})")
+        self._client.media_player_command(self._media_key, volume=float(level))
+
     async def stop_playback(self) -> None:
         if self._client is None or self._media_key is None:
             return

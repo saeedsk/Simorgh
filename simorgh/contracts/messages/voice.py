@@ -86,3 +86,9 @@ VoiceRoomSpeech = define(t.VOICE_ROOM_SPEECH, [F("ref", Str), F("seconds", Float
                                                O("content_type", Str)],
                          doc="One piece of Sim's reply for a room satellite, as a ledger blob (FLAC: the board plays "
                              "nothing else). Interface serves a listed ref at /api/room/speech for two minutes.")
+VoiceRoomPlayRequest = define(t.VOICE_ROOM_PLAY_REQUEST, [O("action", Enum("play", "stop", "volume")), O("url", Str),
+                                                         O("room", Str), O("volume", Float), O("title", Str)],
+                              doc="Play `url` (or stop, or set the volume 0-1) on a room satellite's media player. "
+                                  "`room` empty: the satellite woken last, within two minutes.")
+VoiceRoomPlayReply = define(t.VOICE_ROOM_PLAY_REPLY, [O("room", Str), O("detail", Str)],
+                            doc="What happened on which room's satellite, or why nothing did.")

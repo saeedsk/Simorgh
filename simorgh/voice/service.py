@@ -40,6 +40,8 @@ _CONSUMES = (
     topics.VOICE_LISTEN_REQUEST, topics.VOICE_VOICES_REQUEST, topics.VOICE_DEVICES_REQUEST,
     topics.VOICE_MODELS_REQUEST, topics.VOICE_BENCH_REQUEST,
     topics.VOICE_SYNTHESISE_REQUEST, topics.VOICE_TRANSCRIBE_REQUEST,
+    # Music and the like on a room's satellite (stage 13 item 8).
+    topics.VOICE_ROOM_PLAY_REQUEST,
     topics.TURN_COMPLETED, topics.TASK_FAILED, topics.TASK_BLOCKED,
     # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
     topics.PERSONA_STATE_CHANGED, topics.TV_STATE, topics.SESSION_DELTA,
@@ -52,7 +54,7 @@ _PRODUCES = (
     topics.VOICE_LISTEN_REPLY, topics.VOICE_VOICES_REPLY, topics.VOICE_DEVICES_REPLY,
     topics.VOICE_MODELS_REPLY, topics.VOICE_BENCH_REPLY,
     # A room satellite's reply piece, for Interface to serve (stage 13).
-    topics.VOICE_ROOM_SPEECH,
+    topics.VOICE_ROOM_SPEECH, topics.VOICE_ROOM_PLAY_REPLY,
 )
 
 
@@ -214,6 +216,7 @@ class Service:
             topics.VOICE_BENCH_REQUEST: self._on_bench,
             topics.VOICE_SYNTHESISE_REQUEST: self._on_synthesise,
             topics.VOICE_TRANSCRIBE_REQUEST: self._on_transcribe,
+            topics.VOICE_ROOM_PLAY_REQUEST: self._on_room_play,
         }
         for topic, handler in handlers.items():
             self._subs.append(await ctx.bus.subscribe(topic, handler))
@@ -634,6 +637,64 @@ class Service:
         if mute:
             return True, f"{name} muted; the other rooms still listen (`voice unmute {name}` to undo)"
         return True, f"{name} listening again"
+
+    #: How long after its wake word a satellite is still "the room you are
+    #: in" when a play request names none.
+    ROOM_RECENT_S = 120.0
+
+    def _pick_satellite(self, name: str):
+        """(room, link) for `name`, or for the satellite woken most recently
+        (within `ROOM_RECENT_S`), or the only one there is; (why, None)
+        otherwise."""
+        import time as _time
+
+        links = self._satellites
+        if not links:
+            return "no room satellites are configured ([[voice.satellites]])", None
+        key = name.strip().lower()
+        if key:
+            for room, link in links.items():
+                if room.lower() == key or key in room.lower():
+                    return room, link
+            return f"no satellite called {name!r} -- rooms: {', '.join(links)}", None
+        recent = [(link.last_wake_at, room, link) for room, link in links.items()
+                  if link.last_wake_at and _time.time() - link.last_wake_at <= self.ROOM_RECENT_S]
+        if recent:
+            _at, room, link = max(recent)
+            return room, link
+        if len(links) == 1:
+            room, link = next(iter(links.items()))
+            return room, link
+        return f"which room? -- {', '.join(links)}", None
+
+    async def _on_room_play(self, message) -> None:
+        """Play, stop or set the volume on a room's satellite (stage 13
+        item 8). Music asked for in a room plays in that room: with no
+        room named, the one whose wake word was heard last."""
+        p = message.payload or {}
+        op = str(p.get("action") or "play")   # not named action: the voice-verb scan reads those
+        room, link = self._pick_satellite(str(p.get("room") or ""))
+        if link is None:
+            await self._reply(message, topics.VOICE_ROOM_PLAY_REPLY, {"ok": False, "detail": room})
+            return
+        try:
+            if op == "stop":
+                await link.stop_playback()
+                detail = f"stopped in {room}"
+            elif op == "volume":
+                level = max(0.0, min(1.0, float(p.get("volume") or 0.0)))
+                await link.set_volume(level)
+                detail = f"volume {round(level * 100)}% in {room}"
+            else:
+                url = str(p.get("url") or "").strip()
+                if not url:
+                    raise ValueError("nothing to play: no url")
+                await link.play_media(url)
+                detail = f"playing {str(p.get('title') or url)[:80]} in {room}"
+        except Exception as exc:  # noqa: BLE001 -- a board that cannot play says why
+            await self._reply(message, topics.VOICE_ROOM_PLAY_REPLY, {"ok": False, "room": room, "detail": str(exc)})
+            return
+        await self._reply(message, topics.VOICE_ROOM_PLAY_REPLY, {"ok": True, "room": room, "detail": detail})
 
     async def remove_room(self, device: str) -> None:
         """Stop and forget one room's session (a satellite went away)."""

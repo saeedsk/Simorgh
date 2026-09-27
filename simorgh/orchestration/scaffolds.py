@@ -100,6 +100,8 @@ _TOOL_NOTES: dict[str, str] = {
                      "the person's own Apple Music and local library",
     "music_play": "play a playlist, album, artist or song by name in the Mac's Music app, or a local audio "
                   "file or a folder of them",
+    "room_play": "play internet radio (a genre or station) or a stream on a room satellite's speaker -- where "
+                 "music goes when someone asks a satellite to play something; `stop` stops it",
     "home_find": "find things in the house by name and get their entity ids",
     "home_state": "what one thing in the house is doing right now",
     "home_describe": "what is in the house and what each kind of thing can do",

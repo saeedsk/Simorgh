@@ -810,7 +810,7 @@ class TestBuiltinTools(unittest.TestCase):
             "home_find", "home_state", "home_describe", "home_call", "home_undo",
             "energy_status", "energy_report", "energy_tariff",
             "media_now", "media_control", "media_play",
-            "music_now", "music_control", "music_play",
+            "music_now", "music_control", "music_play", "room_play",
             "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "cast_use", "cast_setup", "tv_pair", "tv_app", "tv_key", "tv_charts", "memory_forget", "remember", "dash_view", "dash_key",
             "cam_setup", "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren",
             "cam_ptz", "cam_recordings", "cam_watch", "camera_describe",

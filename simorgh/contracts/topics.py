@@ -385,6 +385,11 @@ VOICE_SPOKEN = "voice.spoken"                      # what was said aloud
 # board to fetch -- the satellite cannot carry a token, the way the TV's
 # Cast receiver cannot (TV_SPEECH is the same shape for the TV page).
 VOICE_ROOM_SPEECH = "voice.room.speech"
+# Play, stop or set the volume on a room satellite's media player (stage 13
+# item 8): music asked for in a room plays in that room. `room` "" = the
+# satellite whose wake word was heard last, within two minutes.
+VOICE_ROOM_PLAY_REQUEST = "voice.room.play.request"
+VOICE_ROOM_PLAY_REPLY = "voice.room.play.reply"
 
 CATALOG: tuple[str, ...] = tuple(
     value for name, value in sorted(globals().items())

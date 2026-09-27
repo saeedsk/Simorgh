@@ -29,7 +29,7 @@ tools = [
     # "what's it costing me" and "pause the telly" are the same
     # kind of question as "turn the light off".
     "energy_status", "energy_report", "media_now", "media_control", "media_play",
-    "music_now", "music_control", "music_play",
+    "music_now", "music_control", "music_play", "room_play",
     # Sim's own commands -- restart, tv show, tasks, voice off. Built,
     # registered, gated, and in no profile at all, so every "run restart"
     # got "I have no such tool" (live 2026-09-15).
