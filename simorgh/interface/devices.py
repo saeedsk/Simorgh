@@ -79,6 +79,12 @@ class Device:
     created_at: float
     last_seen: float = 0.0
     revoked_at: float = 0.0
+    #: Whose device this is: a household name, or "" for a shared one.
+    #: A chat from it names that person as the speaker, so Guardian
+    #: judges the person and not "a voice I cannot place" -- the phone
+    #: is a channel somebody holds in their hand (2026-09-27: "play
+    #: jazz" from the creator's own phone was refused as a stranger).
+    person: str = ""
 
     @property
     def revoked(self) -> bool:
@@ -90,7 +96,7 @@ class Device:
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "token_sha256": self.token_sha256,
                 "capabilities": list(self.capabilities), "created_at": self.created_at,
-                "last_seen": self.last_seen, "revoked_at": self.revoked_at}
+                "last_seen": self.last_seen, "revoked_at": self.revoked_at, "person": self.person}
 
     @classmethod
     def from_dict(cls, data: dict) -> "Device":
@@ -99,7 +105,8 @@ class Device:
                    capabilities=tuple(str(c) for c in (data.get("capabilities") or ())),
                    created_at=float(data.get("created_at") or 0.0),
                    last_seen=float(data.get("last_seen") or 0.0),
-                   revoked_at=float(data.get("revoked_at") or 0.0))
+                   revoked_at=float(data.get("revoked_at") or 0.0),
+                   person=str(data.get("person") or ""))
 
 
 @dataclass
@@ -113,6 +120,7 @@ class Pairing:
     capabilities: tuple[str, ...]
     expires_at: float
     attempts: int = 0
+    person: str = ""
 
 
 def normalise(capabilities) -> tuple[str, ...]:
@@ -191,7 +199,7 @@ class DeviceBook:
         return found
 
     # ------------------------------------------------------------- writing
-    def begin_pairing(self, *, name: str = "", capabilities=None) -> Pairing:
+    def begin_pairing(self, *, name: str = "", capabilities=None, person: str = "") -> Pairing:
         """Mint the one outstanding code. Local callers only -- nothing on
         the HTTP surface may reach this, or the gate is no gate."""
         self._pairing = Pairing(
@@ -199,6 +207,7 @@ class DeviceBook:
             name=" ".join(str(name or "phone").split())[:40],
             capabilities=normalise(capabilities) or tuple(DEFAULT_CAPABILITIES),
             expires_at=self.clock() + PAIRING_TTL_S,
+            person=" ".join(str(person or "").split())[:40],
         )
         return self._pairing
 
@@ -233,11 +242,24 @@ class DeviceBook:
         now = self.clock()
         token = secrets.token_urlsafe(32)
         device = Device(id=secrets.token_hex(8), name=pending.name, token_sha256=_hash(token),
-                        capabilities=pending.capabilities, created_at=now, last_seen=now)
+                        capabilities=pending.capabilities, created_at=now, last_seen=now,
+                        person=pending.person)
         self._devices[device.id] = device
         self._pairing = None          # single use
         self._save()
         return device, token
+
+    def assign(self, which: str, person: str) -> list[Device]:
+        """Say whose device `which` (an id or a name) is; "" makes it
+        shared again. Every live device of that name is assigned: a
+        phone paired twice is still the same person's phone."""
+        wanted = which.strip().lower()
+        hit = [d for d in self.devices() if d.id == which or d.name.lower() == wanted]
+        for device in hit:
+            device.person = " ".join(str(person or "").split())[:40]
+        if hit:
+            self._save()
+        return hit
 
     def revoke(self, which: str) -> Device | None:
         """Revoke by id or by name. A revoked device is KEPT, not deleted:

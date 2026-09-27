@@ -1794,7 +1794,7 @@ class HttpApi:
             return True
         return origin in allowed
 
-    async def _chat_route(self, _query: dict, body: bytes, _headers: dict) -> tuple[int, bytes, str]:
+    async def _chat_route(self, query: dict, body: bytes, headers: dict) -> tuple[int, bytes, str]:
         """POST /api/chat. The body has already been read and capped by
         the dispatcher, and the cross-origin check has already run --
         this decides only what the message means."""
@@ -1823,11 +1823,17 @@ class HttpApi:
                 "detail": f"session_id must be usable as a stream name: {stream_name_rule()}",
             }}).encode("utf-8"), "application/json"
 
-        payload = await self._chat(text, session_id=client_session_id)
+        # Whose phone it is, when the pairing said (`devices.Device.person`).
+        # Without it every phone chat was "a voice I cannot place" to
+        # Guardian: "play jazz" from the creator's own phone was refused
+        # (2026-09-27). The token is the proof; the name is whose it is.
+        who = self.caller(headers, query)
+        speaker = str(getattr(who, "person", "") or "")
+        payload = await self._chat(text, session_id=client_session_id, speaker=speaker)
         status = 409 if payload.get("error") == "turn already in flight" else 200
         return status, json.dumps(payload).encode("utf-8"), "application/json"
 
-    async def _chat(self, text: str, *, session_id: str | None = None) -> dict:
+    async def _chat(self, text: str, *, session_id: str | None = None, speaker: str = "") -> dict:
         """One dashboard chat turn: publish `percept.text.received` and
         await the matching `turn.completed` -- the same request/await-a-
         correlated-event shape `Interface._handle_chat` already uses for
@@ -1867,10 +1873,18 @@ class HttpApi:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self._pending_chats[session_id] = fut
+        payload = {"channel": "api", "text": text, "session_id": session_id}
+        if speaker:
+            from simorgh.contracts.household import member
+
+            payload["speaker"] = speaker
+            known = member(speaker)
+            if known is not None and known.relation:
+                payload["speaker_relation"] = known.relation
         try:
             await self._bus.publish(Message.new(
                 topics.PERCEPT_TEXT_RECEIVED, source="interface",
-                payload={"channel": "api", "text": text, "session_id": session_id},
+                payload=payload,
                 clock=self._clock,
             ))
             try:

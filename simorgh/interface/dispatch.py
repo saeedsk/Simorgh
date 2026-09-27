@@ -2723,8 +2723,20 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
 __all__ = ["dispatch", "run_shell", "Outcome"]
 
 
+def _whose(person: str) -> str:
+    """A note when `person` is not in the household, or "". Said, not
+    refused: the People store may know somebody the file does not."""
+    from simorgh.contracts.household import member
+
+    if not person or member(person) is not None:
+        return ""
+    return f"  note: {person!r} is not in the household list, so Guardian will treat them as a guest"
+
+
 def _pair_command(book, args: str = "") -> Outcome:
-    """`pair [name] [with approve[,control]]` -- a code, drawn as a barcode.
+    """`pair [name] [for <person>] [with approve[,control]]` -- a code,
+    drawn as a barcode. `for` says whose phone it is, and its chats then
+    speak as that person.
 
     The QR carries the pairing code, never a token: single use, 120
     seconds, one outstanding. A photograph of this screen is worth nothing
@@ -2742,14 +2754,17 @@ def _pair_command(book, args: str = "") -> Outcome:
                        "(it needs a data dir -- `[runtime] data_dir`)")
     text = " ".join(args.split())
     name, _, granted = text.partition(" with ")
+    name, _, person = f" {name}".partition(" for ")
+    name, person = name.strip(), person.strip()
     extra = normalise(granted.replace(",", " ").split()) if granted.strip() else ()
     capabilities = normalise(tuple(DEFAULT_CAPABILITIES) + tuple(extra))
-    pending = book.begin_pairing(name=name or "phone", capabilities=capabilities)
+    pending = book.begin_pairing(name=name or "phone", capabilities=capabilities, person=person)
 
     base = _pairing_base()
     url = pairing_url(base, pending.code)
     drawn = barcode(url)
-    lines = [f"pairing \"{pending.name}\" with {', '.join(pending.capabilities)} "
+    owner = f" for {pending.person}" if pending.person else ""
+    lines = [f"pairing \"{pending.name}\"{owner} with {', '.join(pending.capabilities)} "
              f"-- scan within {PAIRING_TTL_S:.0f}s:"]
     if drawn:
         lines.append(drawn)
@@ -2760,6 +2775,10 @@ def _pair_command(book, args: str = "") -> Outcome:
     lines.append(f"  code: {pending.code}")
     if "approve" in pending.capabilities:
         lines.append("  this device will be able to ANSWER Guardian's questions")
+    if not pending.person:
+        lines.append("  nobody's in particular: its chats are judged as a stranger's (`pair <name> for <person>`)")
+    elif _whose(pending.person):
+        lines.append(_whose(pending.person))
     return Outcome("\n".join(lines))
 
 
@@ -2788,7 +2807,8 @@ def _pairing_base() -> str:
 
 
 def _devices_command(book, args: str = "") -> Outcome:
-    """`devices` lists them; `devices revoke <name|id>` ends one."""
+    """`devices` lists them; `devices revoke <name|id>` ends one;
+    `devices assign <name|id> <person>` says whose it is (`-` for nobody's)."""
     import time as _time
 
     if book is None:
@@ -2801,6 +2821,17 @@ def _devices_command(book, args: str = "") -> Outcome:
         if gone is None:
             return Outcome(f"no device called {which!r}; `devices` lists them")
         return Outcome(f"revoked {gone.name} ({gone.id}) -- its token stops working now")
+    if what == "assign":
+        target, _, person = which.rpartition(" ")
+        if not target or not person:
+            return Outcome("usage: devices assign <name|id> <person>  (`-` makes it nobody's)")
+        person = "" if person == "-" else person
+        hit = book.assign(target, person)
+        if not hit:
+            return Outcome(f"no device called {target!r}; `devices` lists them")
+        whose = f"{person}'s" if person else "nobody's"
+        said = f"{len(hit)} device(s) called {target!r} are now {whose}: their chats speak as {person or 'a stranger'}"
+        return Outcome("\n".join(filter(None, [said, _whose(person)])))
     rows = book.devices(include_revoked=what == "all")
     if not rows:
         return Outcome("no devices paired. `pair <name>` shows a barcode to scan.")
@@ -2809,5 +2840,6 @@ def _devices_command(book, args: str = "") -> Outcome:
         seen = ("never" if not device.last_seen
                 else f"{(_time.time() - device.last_seen) / 60:.0f} min ago")
         mark = " REVOKED" if device.revoked else ""
-        lines.append(f"  {device.name}{mark}  [{device.id}]  {', '.join(device.capabilities)}  last seen {seen}")
+        owner = f"  {device.person}'s" if device.person else "  nobody's"
+        lines.append(f"  {device.name}{mark}  [{device.id}]{owner}  {', '.join(device.capabilities)}  last seen {seen}")
     return Outcome(f"{len(rows)} device(s):\n" + "\n".join(lines))

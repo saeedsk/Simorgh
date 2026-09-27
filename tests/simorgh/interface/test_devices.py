@@ -374,6 +374,86 @@ class ThePairAndDevicesCommands(DeviceBookCase):
             self.assertTrue(any(verb in names for _, names in SECTIONS), verb)
 
 
+class WhoseDeviceItIs(DeviceBookCase):
+    """2026-09-27: "play jazz" from the creator's own phone was refused as
+    "a voice I cannot place". The token proved which phone; nothing said
+    whose it was, so every phone chat reached Guardian with no speaker."""
+
+    def test_pairing_for_a_person_is_kept_across_a_restart(self):
+        device, _ = self._pair(name="phone", person="Saeed")
+        self.assertEqual(device.person, "Saeed")
+        self.assertEqual(DeviceBook(self.path).devices()[0].person, "Saeed")
+
+    def test_a_book_written_before_owners_reads_as_nobodys(self):
+        self._pair(name="phone")
+        rows = json.loads(self.path.read_text(encoding="utf-8"))
+        for row in rows["devices"]:
+            row.pop("person", None)
+        self.path.write_text(json.dumps(rows), encoding="utf-8")
+        self.assertEqual(DeviceBook(self.path).devices()[0].person, "")
+
+    def test_assign_names_every_live_device_of_that_name(self):
+        self._pair(name="phone")
+        self._pair(name="phone")
+        self._pair(name="tablet")
+        self.assertEqual(len(self.book.assign("phone", "Saeed")), 2)
+        self.assertEqual({d.name: d.person for d in DeviceBook(self.path).devices()},
+                         {"phone": "Saeed", "tablet": ""})
+
+    def test_the_commands_set_and_show_it(self):
+        from simorgh.interface.dispatch import _devices_command, _pair_command
+
+        out = _pair_command(self.book, "phone for Saeed").text
+        self.assertIn('"phone" for Saeed', out)
+        self.assertEqual(self.book.pending().name, "phone")
+        self.assertEqual(self.book.pending().person, "Saeed")
+        self.assertIn("stranger", _pair_command(self.book, "tablet").text)
+        self._pair(name="old phone")
+        self.assertIn("Saeed", _devices_command(self.book, "assign old phone Saeed").text)
+        self.assertIn("Saeed's", _devices_command(self.book, "").text)
+        self.assertIn("guest", _devices_command(self.book, "assign old phone Zed").text)
+        self.assertIn("nobody's", _devices_command(self.book, "assign old phone -").text)
+
+
+class APhoneChatNamesItsPerson(unittest.IsolatedAsyncioTestCase):
+    """Through the route, not around it: the speaker is what Guardian's
+    PersonRule reads, so it has to be on the percept the route publishes."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.book = DeviceBook(Path(self._tmp.name) / "devices.json")
+
+    async def _said_by(self, token: str) -> dict:
+        from simorgh.interface.httpapi import HttpApi
+
+        published = []
+
+        class _Bus:
+            async def publish(self, message):
+                published.append(message.payload)
+                api._pending_chats[message.payload["session_id"]].set_result({"text": "ok"})  # noqa: SLF001
+
+        api = HttpApi(bus=_Bus(), ledger=None, token="shared", devices=self.book)
+        status, _, _ = await api._chat_route({}, json.dumps({"text": "play jazz"}).encode(),  # noqa: SLF001
+                                             {"authorization": f"Bearer {token}"})
+        self.assertEqual(status, 200)
+        return published[0]
+
+    def _token(self, **kw) -> str:
+        return self.book.redeem(self.book.begin_pairing(**kw).code)[1]
+
+    async def test_the_owners_phone_speaks_as_the_owner(self):
+        said = await self._said_by(self._token(name="phone", person="Saeed"))
+        self.assertEqual(said["speaker"], "Saeed")
+        self.assertEqual(said["speaker_relation"], "Sim's creator")
+        self.assertEqual(said["channel"], "api")
+
+    async def test_a_shared_device_and_the_legacy_token_name_nobody(self):
+        self.assertNotIn("speaker", await self._said_by(self._token(name="tablet")))
+        self.assertNotIn("speaker", await self._said_by("shared"))
+
+
 class ThePairRoute(unittest.IsolatedAsyncioTestCase):
     """`POST /api/pair` -- the only unauthenticated write route, safe only
     because it can SPEND a code and cannot create one."""
