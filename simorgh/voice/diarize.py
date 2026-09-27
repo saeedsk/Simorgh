@@ -136,6 +136,21 @@ def _absorb_short(runs):
                 del runs[i:i + 2]
                 changed = True
                 break
+            # A GUESSED word or two at either edge, beside a voice heard for
+            # sure, is that voice's. Live, 2026-09-27: "Okay, this was
+            # better. Now I could hear all the full" -- Saeed, sure -- then
+            # "sentence." as probably Iris; the turn went to Iris and Sim
+            # thanked her.
+            edge = after if before is None else (before if after is None else None)
+            if (run[1] and len(run[2]) < MIN_RUN_WORDS and edge is not None and edge[0]
+                    and not edge[1] and edge[0] != run[0]):
+                if edge is before:
+                    before[2].extend(run[2])
+                else:
+                    after[2][0:0] = run[2]
+                del runs[i]
+                changed = True
+                break
             straddles = (run[0] == "" and before is not None and after is not None and before[0] and after[0]
                          and before[0] != after[0] and _seconds(run[2]) <= WINDOW_S + HOP_S)
             if run[0] == "" and (straddles or (_seconds(run[2]) <= MAX_NOBODY_ABSORB_S
@@ -167,9 +182,20 @@ def speakers_in(segments: Sequence[Attributed]) -> list[str]:
     return out
 
 
+def answering(segments: Sequence[Attributed]) -> str:
+    """Who Sim answers: the last voice heard FOR SURE, else the last one
+    guessed. A guess that trails a sure voice does not take the turn."""
+    sure = [seg.speaker for seg in segments if seg.speaker and not seg.probable]
+    if sure:
+        return sure[-1]
+    named = [seg.speaker for seg in segments if seg.speaker]
+    return named[-1] if named else ""
+
+
 def lines(segments: Sequence[Attributed]) -> str:
     """`Saeed: ... / Soodeh: ...` for the model and the screen."""
     return "\n".join(f"{seg.speaker or 'someone'}: {seg.text}" for seg in segments if seg.text)
 
 
-__all__ = ["Attributed", "HOP_S", "MIN_RUN_WORDS", "WINDOW_S", "attribute", "lines", "speakers_in", "windows"]
+__all__ = ["Attributed", "HOP_S", "MIN_RUN_WORDS", "WINDOW_S", "answering", "attribute", "lines", "speakers_in",
+           "windows"]

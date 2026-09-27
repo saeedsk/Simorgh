@@ -34,9 +34,3 @@ by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "diarize: a guessed trailing word does not take the turn"
-since = "2026-09-27T21:44:44+00:00"
-until = "2026-09-28T05:44:44+00:00"

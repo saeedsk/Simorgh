@@ -98,3 +98,43 @@ class AttributeTestCase(unittest.TestCase):
         segs = attribute(pcm, RATE, _words("a b c 0 3"), _boom, _identify)
         self.assertEqual([(s.speaker, s.text) for s in segs], [("", "a b c")])
         self.assertEqual(speakers_in(segs), [])
+
+
+class AGuessAtTheEdgeDoesNotTakeTheTurn(unittest.TestCase):
+    """Live, 2026-09-27: "Okay, this was better. Now I could hear all the
+    full" -- Saeed, sure -- then "sentence." as probably Iris. The turn went
+    to Iris and Sim thanked her."""
+
+    def _run(self, name, probable, spec):
+        return [name, probable, _words(spec)]
+
+    def test_the_trailing_guess_joins_the_sure_voice(self):
+        from simorgh.voice.diarize import _absorb_short
+
+        runs = _absorb_short([self._run("Saeed", False, "okay this was better now I could hear all the full 0 4.9"),
+                              self._run("Iris", True, "sentence 4.9 6.2")])
+        self.assertEqual([(r[0], r[1]) for r in runs], [("Saeed", False)])
+        self.assertEqual(len(runs[0][2]), 12)
+
+    def test_a_leading_guess_too(self):
+        from simorgh.voice.diarize import _absorb_short
+
+        runs = _absorb_short([self._run("Iris", True, "so 0 0.4"),
+                              self._run("Saeed", False, "what is the weather like today 0.4 3")])
+        self.assertEqual([r[0] for r in runs], ["Saeed"])
+
+    def test_a_sure_second_voice_keeps_its_words(self):
+        from simorgh.voice.diarize import _absorb_short
+
+        runs = _absorb_short([self._run("Saeed", False, "should we eat outside 0 3"),
+                              self._run("Soodeh", False, "yes 3 3.6")])
+        self.assertEqual([r[0] for r in runs], ["Saeed", "Soodeh"])
+
+    def test_sim_answers_the_last_voice_heard_for_sure(self):
+        from simorgh.voice.diarize import Attributed, answering
+
+        segs = [Attributed(speaker="Saeed", text="okay this was better", start=0, end=4.9),
+                Attributed(speaker="Iris", probable=True, text="sentence", start=4.9, end=6.2)]
+        self.assertEqual(answering(segs), "Saeed")
+        self.assertEqual(answering(segs[1:]), "Iris", "only a guess: the guess")
+        self.assertEqual(answering([]), "")

@@ -1458,10 +1458,11 @@ class VoiceSession:
         segments = await self._attribute(turn_id, identification)
         self._last_segments = [seg.as_dict() for seg in segments]
         if segments:
-            from .diarize import lines, speakers_in
+            from .diarize import answering, lines
 
-            names = speakers_in(segments)
-            speaker = names[-1] if names else speaker     # the last voice is the one Sim answers
+            # The last voice heard for sure is the one Sim answers; a
+            # trailing guess does not take the turn (2026-09-27).
+            speaker = answering(segments) or speaker
             text = lines(segments)
         # Give a household name its own spelling before anything reads
         # this turn: the screen, the memory, the vocative rule and the

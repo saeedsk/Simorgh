@@ -82,6 +82,8 @@ RESTOP_S = 15.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
+#: How far the board's media-player state reports trail real playback.
+BOARD_STATE_LAG_S = 15.0
 #: The lead-in: a 20 Hz tone, not digital silence and not noise. Zeros left
 #: an input-sleeping speaker (the Echo Dot on the jack) asleep, so the first
 #: syllable woke it and was lost; quiet white noise woke it but was heard as
@@ -526,8 +528,13 @@ class SatelliteLink:
     def _speaking_now(self) -> bool:
         """Sim is speaking through the board, or a run is open whose reply
         may be playing -- what the board reports now is not music."""
-        return (getattr(self.speaker, "_stop", None) is not None) or \
-            (self._run is not None and not self._run.ended)
+        if getattr(self.speaker, "_stop", None) is not None or (self._run is not None and not self._run.ended):
+            return True
+        # The board's PLAYING/IDLE reports lag real playback by up to ~10 s,
+        # so a report just after Sim's reply ended is still that reply (live:
+        # the sensitivity flipped at 14:43:55, a second after a reply ended).
+        last = float(getattr(self.speaker, "_last_end", 0.0) or 0.0)
+        return bool(last) and time.monotonic() - last < BOARD_STATE_LAG_S
 
     def _music_sensitivity(self, music: bool) -> None:
         """Raise the wake word's sensitivity while music plays; put the
