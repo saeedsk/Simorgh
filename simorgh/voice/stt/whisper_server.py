@@ -147,6 +147,11 @@ def _words(reply: dict) -> list[Word]:
     return out
 
 
+#: How long after Sim's last Farsi answer a turn still counts as part of
+#: a Farsi conversation (`_in_a_farsi_conversation`).
+CONVERSATION_LANGUAGE_S = 300.0
+
+
 def _english_letters(text: str, *, allow: int = 0) -> bool:
     """Every letter an English one (a-z; a name's accent aside, English
     has none; `allow` a "café" or two): what forced-English whisper writes when the speech was
@@ -196,6 +201,8 @@ class WhisperServerRecogniser:
         self._lock = asyncio.Lock()
         self.problems: list[str] = []
         self.last_took_s = 0.0
+        #: The language Sim last answered in, and when (`conversing_in`).
+        self._conversation: tuple[str, float] = ("", 0.0)
         #: A second server for Farsi turns (`stt_model_farsi`), or None.
         self._farsi: "WhisperServerRecogniser | None" = None
         farsi_model = str(getattr(config, "stt_model_farsi", "") or "").strip()
@@ -301,11 +308,27 @@ class WhisperServerRecogniser:
         with urllib.request.urlopen(request, timeout=120) as response:
             return json.loads(response.read().decode("utf-8") or "{}")
 
+    def conversing_in(self, language: str) -> None:
+        """The session says which language Sim just answered in."""
+        self._conversation = ((language or "").lower(), time.monotonic())
+
+    def _in_a_farsi_conversation(self) -> bool:
+        language, at = self._conversation
+        return language == "fa" and time.monotonic() - at <= CONVERSATION_LANGUAGE_S
+
     async def transcribe(self, audio: Audio, *, language: str = "", route: bool = True) -> Utterance:
         from ..session import _language_code
 
         if route and self._farsi is not None and _language_code(language) == "fa":
             return await self._farsi.transcribe(audio, language="fa")
+        if route and not language and self._farsi is not None and self._in_a_farsi_conversation():
+            # Sim is talking Farsi with someone: the whole turn goes to the
+            # Farsi model, which tells Farsi from English far better. Turbo
+            # labelled the creator's Farsi as English and wrote it in Latin
+            # letters, turn after turn ("Sustu Farsi? Only speak Farsi.",
+            # "alain, se der man imisnevi" -- live, 2026-09-27). An English
+            # turn here costs the bigger model's two to four seconds.
+            return await self._farsi.transcribe(audio)
         if audio.seconds < 0.1:
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=language or self._language)

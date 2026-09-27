@@ -13,6 +13,11 @@ from ..config import Config
 from ..lang import ENGLISH, language_of
 
 
+#: What each language's engine says, unheard, to load at startup: a full
+#: sentence, since Pocket says its reference clip's words for a short one.
+WARM_LINES = {"fa": "سلام، امروز هوا خیلی خوبه و آفتابیه."}
+
+
 class PolyglotSynthesiser:
     """One synthesiser per language, chosen by the reply's script.
 
@@ -87,11 +92,26 @@ class PolyglotSynthesiser:
         return float(own(lane)) if callable(own) else 0.0
 
     async def warmup(self) -> float:
+        import asyncio
+
+        # The other languages' engines warm in the background: Pocket
+        # loads two models on first use, and the first Farsi reply after
+        # a restart waited 12.3 s for them (live, 2026-09-27).
+        self._warming = [asyncio.create_task(self._warm_language(language)) for language in self._openers]
         own = getattr(self._primary, "warmup", None)
         if callable(own):
             return float(await own())
         await self._primary.synthesise("Okay.", speed=1.0)
         return 0.0
+
+    async def _warm_language(self, language: str) -> None:
+        try:
+            engine = self.engine_for(language)
+            if engine is None or engine is self._primary:
+                return
+            await engine.synthesise(WARM_LINES.get(language, "Okay."), speed=1.0)
+        except Exception:  # noqa: BLE001 -- a warm-up that fails is found again on first use, and said
+            pass
 
     async def close(self) -> None:
         for engine in self._engines.values():

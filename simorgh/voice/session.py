@@ -2207,6 +2207,20 @@ class VoiceSession:
             await asyncio.sleep(0.05)
             waited += 0.05
 
+    def _tell_recogniser(self, said: str) -> None:
+        """Which language Sim just answered in, for a recogniser that
+        routes by it (whisper_server's `conversing_in`), through the
+        incremental wrapper when there is one."""
+        rec = self._stt
+        for _ in range(3):
+            tell = getattr(rec, "conversing_in", None)
+            if callable(tell):
+                tell(language_of(said or ""))
+                return
+            rec = getattr(rec, "_inner", None)
+            if rec is None:
+                return
+
     def _aside_language(self, heard: str) -> str:
         """The language an aside ("aha", "one sec") is said in, or "" to
         say none. The draft transcript is turbo's first pass, and turbo
@@ -2627,6 +2641,7 @@ class VoiceSession:
         await self._report_synthesis(report)
         said = live.said
         self._voice_room.last_said = said
+        self._tell_recogniser(said)
         self.stats.turns += 1
         metrics = clock.metrics(report)
         metrics["streamed"] = True
@@ -2753,6 +2768,7 @@ class VoiceSession:
         self._sim_spoke_at = self._now()
         await self._report_synthesis(report)
         self._voice_room.last_said = said
+        self._tell_recogniser(said)
         self.stats.turns += 1
         metrics = clock.metrics(report)
         if clock.interrupted_at and clock.stopped_at:
@@ -2857,6 +2873,7 @@ class VoiceSession:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
         self._voice_room.last_said = shown
+        self._tell_recogniser(shown)
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": shown, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": report.interrupted})

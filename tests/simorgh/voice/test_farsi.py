@@ -71,6 +71,17 @@ class TestPolyglotRouting(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.last_engine, "kokoro")
         self.assertEqual(router.name, "kokoro")
 
+    async def test_warmup_loads_the_farsi_engine_in_the_background(self) -> None:
+        """Live 2026-09-27: the first Farsi reply after a restart waited
+        12.3 s for Pocket to load."""
+        import asyncio
+
+        router = self._router()
+        await router.warmup()
+        await asyncio.gather(*router._warming)                 # noqa: SLF001
+        self.assertEqual(len(self.farsi.spoken), 1)
+        self.assertGreaterEqual(len(self.farsi.spoken[0].split()), 4, "a full sentence: Pocket leaks on short ones")
+
     async def test_the_farsi_engine_is_opened_once(self) -> None:
         opened = []
 

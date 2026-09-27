@@ -133,6 +133,27 @@ class FarsiGoesToTheFarsiModel(unittest.IsolatedAsyncioTestCase):
         got = await rec.transcribe(Audio(b"\\x00\\x00" * 16000), language="fa")
         self.assertEqual((got.text, got.engine, asked), ("الان صدای منو میشنوی؟", "whisper_server:large-v3", ["fa"]))
 
+    async def test_a_farsi_conversation_sends_every_turn_to_the_farsi_model(self):
+        """Live 2026-09-27: turbo labelled the creator's Farsi as English
+        ("Sustu Farsi? Only speak Farsi."); no retry ever ran."""
+        rec, asked = self._recogniser()
+        rec._conversation = ("", 0.0)                          # noqa: SLF001
+        rec.conversing_in("fa")
+        got = await rec.transcribe(Audio(b"\x00\x00" * 16000))
+        self.assertEqual((got.text, asked), ("الان صدای منو میشنوی؟", [""]))
+
+    async def test_not_after_an_english_answer_or_a_long_pause(self):
+        from unittest import mock
+
+        from simorgh.voice.stt import whisper_server as ws
+
+        rec, _ = self._recogniser()
+        rec.conversing_in("en")
+        self.assertFalse(rec._in_a_farsi_conversation())       # noqa: SLF001
+        rec.conversing_in("fa")
+        with mock.patch.object(ws.time, "monotonic", return_value=ws.time.monotonic() + ws.CONVERSATION_LANGUAGE_S + 1):
+            self.assertFalse(rec._in_a_farsi_conversation())   # noqa: SLF001
+
     def test_the_setting_defaults_to_large_v3(self):
         from simorgh.contracts.settings import VOICE_SAFE_KEYS
         from simorgh.voice.config import Config
