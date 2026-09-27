@@ -376,6 +376,28 @@ def sentences(text: str) -> list[str]:
     return out
 
 
+def _persian_script(text: str) -> bool:
+    """Mostly Persian/Arabic script: a Farsi sentence."""
+    letters = [c for c in text or "" if c.isalpha()]
+    if not letters:
+        return False
+    persian = sum(1 for c in letters if "\u0600" <= c <= "\u06ff" or "\ufb50" <= c <= "\ufeff")
+    return persian / len(letters) > 0.5
+
+
+def _names_in_persian(text: str) -> str:
+    """Household names written in Latin letters -- or as the model's own
+    respelling of them -- replaced by their Persian spelling."""
+    from simorgh.contracts.household import HOUSEHOLD
+
+    for member in HOUSEHOLD:
+        if not member.fa:
+            continue
+        text = _own_respelling_as_name(text, member.name)
+        text = re.sub(r"(?<![A-Za-z])" + re.escape(member.name) + r"(?![A-Za-z])", member.fa, text, flags=re.I)
+    return text
+
+
 def _drop_self_respelling(text: str, name: str) -> str:
     """`Saeed -- Saa-eed`, `Saeed (SAH-eed)`, `Saeed, pronounced Sah-eed`:
     the respelling after the name goes when it is the name's own sound
@@ -633,6 +655,13 @@ class SpokenResponsePlanner:
         heard his name twice (2026-09-13)."""
         from .pronounce import is_ipa, mark
 
+        if _persian_script(text):
+            # A Farsi sentence: a household name the model wrote in Latin
+            # letters is said in Persian script. The Farsi voice reads
+            # phonemes from Persian script, and "Saeed" -- or its English
+            # respelling "sa'eed" -- in the middle of one was read as
+            # letters (live, 2026-09-27: "اشکال داره sa'eed، ...").
+            return _names_in_persian(text)
         table = self._pronunciations() if callable(self._pronunciations) else (self._pronunciations or {})
         for name, say_as in table.items():
             if not name or not say_as:

@@ -33,6 +33,7 @@ class Member:
     age: int | None = None
     relation: str = ""     # only what is certain from the start; the rest is learnt
     note: str = ""         # a line for the model
+    fa: str = ""           # the name in Persian script, for a Farsi sentence (2026-09-27)
 
     def described(self) -> str:
         """`boy, 13` / `woman` / `man; Sim's creator` -- who they are
@@ -46,11 +47,12 @@ class Member:
 
 
 HOUSEHOLD: tuple[Member, ...] = (
-    Member("Saeed", "male", "sɑˈid", relation="Sim's creator", note="the one who builds you; direct and technical is fine"),
-    Member("Soodeh", "female", "ˈsuːdɛ"),
-    Member("Aran", "male", "ɑːˈɹɑːn", age=13),
-    Member("Ira", "female", "ˈaɪɹə", age=9, note="Iris's twin"),
-    Member("Iris", "female", "ˈaɪɹɪs", age=9, note="Ira's twin"),
+    Member("Saeed", "male", "sɑˈid", relation="Sim's creator", note="the one who builds you; direct and technical is fine",
+           fa="سعید"),
+    Member("Soodeh", "female", "ˈsuːdɛ", fa="سوده"),
+    Member("Aran", "male", "ɑːˈɹɑːn", age=13, fa="آران"),
+    Member("Ira", "female", "ˈaɪɹə", age=9, note="Iris's twin", fa="آیرا"),
+    Member("Iris", "female", "ˈaɪɹɪs", age=9, note="Ira's twin", fa="آیریس"),
 )
 
 CHILD_AGE = 16

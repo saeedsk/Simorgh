@@ -166,6 +166,10 @@ class WhisperServerRecogniser:
                               f"(run `voice models base.en` to download one)")
         self._model = model
         self._language = config.stt_language or "auto"
+        #: The languages this house speaks (`[voice] stt_languages`): a turn
+        #: whisper hears as another is transcribed again in one of these.
+        self._house = tuple(c.strip().lower() for c in str(getattr(config, "stt_languages", "") or "").split(",")
+                            if c.strip())
         self._prompt = str(getattr(config, "stt_prompt", "") or "")
         self._port = int(port or getattr(config, "stt_server_port", 0) or 0)
         self._by_word = bool(getattr(config, "diarize_words", False))
@@ -298,8 +302,32 @@ class WhisperServerRecogniser:
             # and a quiet Sim would have woken to it (measured 2026-09-26).
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=heard_language)
+        if not language and cleaned and self._house:
+            again = await self._in_a_house_language(audio, heard_language)
+            if again is not None:
+                return again
         return Utterance(text=cleaned, confidence=1.0, seconds=audio.seconds,
                          engine=self.name, language=heard_language, words=words)
+
+    async def _in_a_house_language(self, audio: Audio, heard: str) -> Utterance | None:
+        """Whisper picked a language the house does not speak: transcribe
+        again in each house language -- the non-English ones first, since
+        Farsi misheard is what this looks like -- and keep the first that
+        gives words. Live, 2026-09-27: Farsi came back as Turkish-looking
+        Latin ("Emris Şeruziye") and "Stop the music." was labelled Icelandic.
+        None when the language was the house's, or nothing better came."""
+        from ..session import _language_code
+
+        code = _language_code(heard)
+        if not code or code in ("au", "un") or code in {_language_code(h) for h in self._house}:
+            return None
+        order = sorted(self._house, key=lambda h: _language_code(h) == "en")
+        for forced in order:
+            got = await self.transcribe(audio, language=forced)
+            if got.text.strip():
+                self.problems_heard = f"heard as {code}, transcribed as {forced}"
+                return got
+        return None
 
     async def _speech_without_prompt(self, audio: Audio, language: str) -> bool:
         """Was there a word in this audio at all? Asked only when the

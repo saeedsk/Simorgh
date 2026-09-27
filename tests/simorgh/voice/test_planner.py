@@ -262,3 +262,18 @@ class TheModelsOwnSpellingOfANameIsSaidTheHouseholdsWay(unittest.TestCase):
         planner = SpokenResponsePlanner(pronunciations={"Saeed": "sa'eed"})
         self.assertEqual(planner.pronounced("Right here, Saeed."), "Right here, sa'eed.")
         self.assertEqual(planner.pronounced("Right here, Sa-eed."), "Right here, sa'eed.")
+
+
+class ANameInAFarsiSentenceIsSaidInPersian(unittest.TestCase):
+    """Live, 2026-09-27: "اشکال داره sa'eed، ..." -- the Farsi voice reads
+    Persian script, and the Latin name was read as letters; the creator
+    heard names nobody said."""
+
+    def test_latin_names_and_their_respellings_become_persian(self):
+        from simorgh.voice.planner import SpokenResponsePlanner
+
+        planner = SpokenResponsePlanner(pronunciations={"Saeed": "sa'eed"})
+        self.assertEqual(planner.pronounced("اشکال داره Saeed، این رو درست نشنیدم."),
+                         "اشکال داره سعید، این رو درست نشنیدم.")
+        self.assertEqual(planner.pronounced("سلام Iris و Aran، خوبید؟"), "سلام آیریس و آران، خوبید؟")
+        self.assertEqual(planner.pronounced("Right here, Saeed."), "Right here, sa'eed.", "English is untouched")
