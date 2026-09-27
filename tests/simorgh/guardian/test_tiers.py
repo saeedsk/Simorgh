@@ -72,6 +72,23 @@ class WhoMayAsk(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.kind, "deny")
         self.assertIn("cannot place", decision.reasons[0])
 
+    async def test_anyone_may_make_it_quieter(self):
+        """Live, 2026-09-27: "Stop the music." at the satellite was 0.66 s,
+        too short to recognise, and was refused as a voice nobody placed --
+        the music played on. Stopping, pausing and muting are tier 0;
+        starting it is not."""
+        for tool, args in (("room_play", {"what": "stop"}), ("media_control", {"op": "stop"}),
+                           ("music_control", {"op": "pause"}), ("media_control", {"op": "mute"}),
+                           ("cast_stop", {})):
+            with self.subTest(tool=tool, args=args):
+                quiet = _proposal(tool, channel="voice", reversibility="reversible", args=args)
+                self.assertEqual((await PersonRule().evaluate(quiet, _ctx())).kind, "abstain")
+        for tool, args in (("room_play", {"what": "jazz"}), ("media_control", {"op": "volume", "value": 90}),
+                           ("music_control", {"op": "play"})):
+            with self.subTest(tool=tool, args=args):
+                loud = _proposal(tool, channel="voice", reversibility="reversible", args=args)
+                self.assertEqual((await PersonRule().evaluate(loud, _ctx())).kind, "deny")
+
     async def test_a_child_may_still_turn_a_light_on(self):
         light = _proposal("home_call", requester="Ira", channel="voice", reversibility="reversible",
                           args={"service": "light.turn_on", "target": "light.kitchen"})

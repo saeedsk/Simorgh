@@ -618,7 +618,8 @@ def satellite_note(device: str) -> str:
     return (f"You are being spoken to through the room satellite {device!r}: the person is in that room, "
             "not at the laptop, and they already called you by name -- its wake word. Music, radio or any "
             "sound they ask for goes to room_play with no room: it plays right here, on the speaker they "
-            "are talking to.")
+            "are talking to. \"Stop the music\" here is room_play with what=stop -- the music on this "
+            "speaker -- not media_control, which is Home Assistant's players.")
 
 
 def render(profile: Profile, *, subject: str | None = None, task: str | None = None,

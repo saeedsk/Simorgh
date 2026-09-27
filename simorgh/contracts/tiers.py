@@ -45,6 +45,21 @@ LOCAL_IRREVERSIBLE: frozenset[str] = frozenset({
 #: right sentence. Reversible, and still a person's call.
 CHANGES_WHO_SIM_TRUSTS: frozenset[str] = frozenset({"people"})
 
+#: Calls that only make the house quieter: the tool, the argument that
+#: says what it does, and the values that stop, pause or mute. Tier 0,
+#: so anyone may -- a voice too short to recognise, a guest, a child.
+#: Live, 2026-09-27: "Stop the music." at the satellite was 0.66 s of
+#: speech, too short to place, and Guardian refused it as "a voice I
+#: cannot place"; the music played on. Starting, resuming or turning it up
+#: stays where the tool's class puts it.
+QUIETS: dict[str, tuple[str, frozenset[str]]] = {
+    "media_control": ("op", frozenset({"stop", "pause", "mute"})),
+    "music_control": ("op", frozenset({"stop", "pause", "mute"})),
+    "room_play": ("what", frozenset({"stop", "pause"})),
+}
+#: Whole tools that only ever stop something playing.
+ONLY_STOPS: frozenset[str] = frozenset({"cast_stop"})
+
 TIER_NAMES = {0: "read", 1: "reversible", 2: "local irreversible", 3: "reaches outside"}
 
 
@@ -55,6 +70,14 @@ def tier_of(proposal: Proposal, info=None, *, network: bool | None = None) -> tu
         return 3, f"{tool} reaches outside the house"
     if tool in CHANGES_WHO_SIM_TRUSTS:
         return 3, f"{tool} changes who I trust"
+    if tool in ONLY_STOPS:
+        return 0, f"{tool} only makes it quieter"
+    quiet = QUIETS.get(tool)
+    if quiet is not None:
+        key, values = quiet
+        said = str((getattr(proposal, "args", None) or {}).get(key) or "").strip().lower()
+        if said in values:
+            return 0, f"{tool} {said} only makes it quieter"
     reversibility = getattr(info, "reversibility", None) or proposal.reversibility or "irreversible"
     if reversibility == "read_only":
         return 0, f"{tool} only reads"
@@ -68,4 +91,5 @@ def tier_of(proposal: Proposal, info=None, *, network: bool | None = None) -> tu
 
 
 
-__all__ = ["CHANGES_WHO_SIM_TRUSTS", "LOCAL_IRREVERSIBLE", "REACHES_OUTSIDE", "TIER_NAMES", "tier_of"]
+__all__ = ["CHANGES_WHO_SIM_TRUSTS", "LOCAL_IRREVERSIBLE", "ONLY_STOPS", "QUIETS", "REACHES_OUTSIDE", "TIER_NAMES",
+           "tier_of"]
