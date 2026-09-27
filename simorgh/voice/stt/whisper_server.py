@@ -346,13 +346,15 @@ class WhisperServerRecogniser:
             if better.text.strip():
                 return better
         if route and not language and cleaned and self._house:
-            again = await self._in_a_house_language(audio, heard_language)
+            again = await self._in_a_house_language(audio, heard_language,
+                                                    probabilities=reply.get("language_probabilities"))
             if again is not None:
                 return again
         return Utterance(text=cleaned, confidence=1.0, seconds=audio.seconds,
                          engine=self.name, language=heard_language, words=words)
 
-    async def _in_a_house_language(self, audio: Audio, heard: str) -> Utterance | None:
+    async def _in_a_house_language(self, audio: Audio, heard: str, *,
+                                   probabilities: dict | None = None) -> Utterance | None:
         """Whisper picked a language the house does not speak: transcribe
         again in each house language -- the non-English ones first, since
         Farsi misheard is what this looks like -- and keep the first that
@@ -365,6 +367,17 @@ class WhisperServerRecogniser:
         if not code or code in ("au", "un") or code in {_language_code(h) for h in self._house}:
             return None
         order = sorted(self._house, key=lambda h: _language_code(h) == "en")
+        if isinstance(probabilities, dict) and probabilities:
+            # Whisper's own odds, over the house's languages only: the
+            # likelier of English and Farsi first. Farsi-first sent English
+            # heard as Icelandic ("Stop the music.") through the Farsi model
+            # before English got a turn (the creator, 2026-09-27: "Sim knows
+            # I talk English or Farsi, and the engines still detect
+            # Icelandic, Turkish, Chinese").
+            def odds(h: str) -> float:
+                code = _language_code(h)
+                return max((float(p) for k, p in probabilities.items() if _language_code(str(k)) == code), default=0.0)
+            order = sorted(self._house, key=odds, reverse=True)
         for forced in order:
             got = await self.transcribe(audio, language=forced)
             if got.text.strip():

@@ -44,6 +44,23 @@ class TheHouseLanguagesWin(unittest.IsolatedAsyncioTestCase):
         got = await rec.transcribe(Audio(b"\x00\x00" * 16000))
         self.assertEqual((got.text, asked), ("Stop the music.", [""]))
 
+    async def test_the_likelier_house_language_by_whispers_own_odds(self):
+        """"Stop the music." heard as Icelandic: English is the likelier of
+        the house's two, so it is tried first -- not forced into Farsi."""
+        rec = WhisperServerRecogniser.__new__(WhisperServerRecogniser)
+        rec._house = ("en", "fa")                          # noqa: SLF001
+        asked = []
+
+        async def transcribe(audio, *, language=""):
+            asked.append(language)
+            return Utterance(text={"en": "Stop the music.", "fa": "استاپ د میوزیک"}[language], confidence=1.0,
+                             seconds=audio.seconds, engine="w", language=language)
+
+        rec.transcribe = transcribe
+        got = await WhisperServerRecogniser._in_a_house_language(
+            rec, Audio(b"\x00\x00" * 16000), "is", probabilities={"is": 0.4, "en": 0.3, "fa": 0.01})
+        self.assertEqual((got.text, asked), ("Stop the music.", ["en"]))
+
     async def test_english_when_farsi_gives_nothing(self):
         rec, asked = self._recogniser({"": ("Stoppa tónlistina.", "is"), "fa": ("", "fa"),
                                        "en": ("Stop the music.", "en")})
