@@ -208,6 +208,11 @@ class Service:
         #: Whether this start has already muted the laptop for a satellite:
         #: once, so a reconnect does not undo the person's `unmute`.
         self._laptop_muted_for_satellite = False
+        #: Each board's own Follow Up Mode (`follow_up`: on | off | question)
+        #: and conversation length (`follow_up_s`), from its
+        #: `[[voice.satellites]]` entry or `followup`; absent keys fall back
+        #: to `satellite_follow_up` / `satellite_conversation_s`.
+        self._board_prefs: dict[str, dict] = {}
         self._repaired_at: dict[str, float] = {}
 
     # ---------------------------------------------------------- lifecycle
@@ -663,8 +668,9 @@ class Service:
                 continue
             # Read at each reply, not once here: `voice set satellite_follow_up`
             # changes a running board (2026-09-27).
+            self._board_prefs[name] = {k: entry[k] for k in ("follow_up", "follow_up_s") if entry.get(k) is not None}
             link.follow_up = lambda link=link, room=room: self._follows_up(link, room)
-            link.conversation_s = lambda: float(self.config.satellite_conversation_s or 0.0)
+            link.conversation_s = lambda name=name: self._conversation_for(name)
             link.on_connected = self._satellite_connected
             self._satellites[name] = link
             if self._session is not None:
@@ -723,8 +729,8 @@ class Service:
                 "name": name, "kind": "satellite", "status": link.status,
                 "muted": bool(getattr(self._rooms.get(name), "muted", False)),
                 "in_conversation": link.in_conversation(),
-                "follow_up": str(self.config.satellite_follow_up),
-                "conversation_s": float(self.config.satellite_conversation_s or 0.0),
+                "follow_up": self._mode_for(name),
+                "conversation_s": self._conversation_for(name),
                 "follow_up_window_s": float(self.config.follow_up_window_s or 0.0),
                 "volume": float(self.config.satellite_volume or 0.0) or link._volume,  # noqa: SLF001
             })
@@ -736,12 +742,91 @@ class Service:
         reply (the creator, 2026-09-27: "I only need to say the wake word
         once at the beginning of the conversation") -- never while the
         board plays music, or the song would be the next turn. "off": never."""
-        mode = str(self.config.satellite_follow_up).lower()
+        mode = self._mode_for(link.name)
         if mode == "question":
             return room._voice_room.last_said.rstrip().endswith(("?", "؟"))  # noqa: SLF001
-        if mode in ("always", "conversation"):
+        if mode == "on":
             return not link.playing_media
         return False
+
+    def _mode_for(self, name: str) -> str:
+        """A board's Follow Up Mode: on | off | question."""
+        mode = str(self._board_prefs.get(name, {}).get("follow_up") or self.config.satellite_follow_up).lower()
+        return {"always": "on", "conversation": "on", "true": "on", "false": "off"}.get(mode, mode)
+
+    def _conversation_for(self, name: str) -> float:
+        own = self._board_prefs.get(name, {}).get("follow_up_s")
+        try:
+            return float(own if own is not None else (self.config.satellite_conversation_s or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _parse_span(raw: str) -> float | None:
+        """`300`, `300s`, `5m`, `2.5 min` -> seconds; None if unreadable."""
+        import re
+
+        m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(s|sec|secs|seconds?|m|min|mins|minutes?)?\s*", raw or "")
+        if not m:
+            return None
+        value = float(m.group(1))
+        return value * 60 if (m.group(2) or "").startswith("m") else value
+
+    def _followup_lines(self) -> str:
+        if not self._satellites:
+            return "Follow Up Mode is for satellites, and none is configured (`[[voice.satellites]]` in simorgh.toml)"
+        lines = ["Follow Up Mode -- after Sim's reply, a board keeps listening with no wake word:"]
+        for name in self._satellites:
+            mode = self._mode_for(name)
+            span = self._conversation_for(name)
+            what = {"on": f"on · stays open {span:g}s after the last word",
+                    "question": f"after a question only · stays open {span:g}s",
+                    "off": "off · every turn needs the wake word"}.get(mode, mode)
+            lines.append(f"  {name}: {what}")
+        lines.append("  `followup on|off|question [board]` · `followup time 5m [board]` (no board = every board)")
+        return "\n".join(lines)
+
+    async def _followup(self, board: str, what: str, value: str) -> tuple[bool, str]:
+        """`followup` -- Follow Up Mode per satellite (the creator,
+        2026-09-27: "let's call the feature ... Follow Up Mode ... user can
+        enable it per satellite device"). Applied live, saved to the
+        board's `[[voice.satellites]]` entry."""
+        from simorgh.contracts.settings import persist_satellite
+
+        what = what.lower().strip()
+        if not what:
+            return True, self._followup_lines()
+        if not self._satellites:
+            return False, self._followup_lines()
+        boards = list(self._satellites)
+        if board:
+            match = next((n for n in boards if n.lower() == board.lower()), None)
+            if match is None:
+                return False, f"no satellite called {board!r} -- boards: {', '.join(boards)}"
+            boards = [match]
+        if what in ("on", "off", "question"):
+            key, stored = "follow_up", what
+        elif what == "time":
+            span = self._parse_span(value)
+            if span is None or not 0 <= span <= 600:
+                return False, "usage: followup time <seconds or minutes, up to 10m> [board] -- e.g. followup time 5m"
+            key, stored = "follow_up_s", span
+        else:
+            return False, "usage: followup [on|off|question|time <5m>] [board]"
+        path = None
+        if self._ctx is not None and getattr(self._ctx, "data_dir", None):
+            path = Path(self._ctx.data_dir).parent / "simorgh.toml"
+        saved = []
+        for name in boards:
+            self._board_prefs.setdefault(name, {})[key] = stored
+            if path is not None:
+                try:
+                    if persist_satellite(path, name, key, stored):
+                        saved.append(name)
+                except OSError:
+                    pass
+        tail = f" (saved for {', '.join(saved)})" if saved else " (for this run only: not saved)"
+        return True, self._followup_lines() + tail
 
     async def _apply_satellite_volume(self) -> str:
         """`satellite_volume` onto every connected board; what happened."""
@@ -964,6 +1049,9 @@ class Service:
             self._muted = False
             self._silenced = False
             ok, detail = await self._turn_on()
+        elif action == "followup":
+            ok, detail = await self._followup(room_name, str(message.payload.get("key") or ""),
+                                              str(message.payload.get("value") or ""))
         elif action == "set":
             ok, detail = await self._set(str(message.payload.get("key") or ""), str(message.payload.get("value") or ""))
         elif action in ("barge_on", "barge_off", "aec_on", "aec_off"):

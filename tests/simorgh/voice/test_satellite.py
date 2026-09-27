@@ -682,6 +682,66 @@ class AConversationStaysOpenForMinutes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Config().satellite_conversation_s, 180.0)
 
 
+class FollowUpModeIsPerBoard(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "let's call the feature ... Follow Up Mode
+    and change the cli commands to reflect that (user can enable Follow Up
+    Mode per satellite device)"."""
+
+    async def _board(self, **voice):
+        return await OneWakeWordAConversation._link_for(self, voice.pop("mode", "question"))
+
+    async def test_on_off_and_question_per_board(self):
+        service, link = await self._board()
+        service._rooms["kitchen"]._voice_room.last_said = "It's four o'clock."  # noqa: SLF001
+        self.assertFalse(link.follow_up(), "the house default: after a question only")
+        ok, said = await service._followup("kitchen", "on", "")  # noqa: SLF001
+        self.assertTrue(ok)
+        self.assertIn("kitchen: on", said)
+        self.assertTrue(link.follow_up())
+        await service._followup("", "off", "")  # noqa: SLF001 -- no board named: every board
+        self.assertFalse(link.follow_up())
+
+    async def test_its_length_per_board_in_minutes_or_seconds(self):
+        service, link = await self._board()
+        await service._followup("kitchen", "time", "5m")  # noqa: SLF001
+        self.assertEqual(link._seconds(link.conversation_s), 300.0)  # noqa: SLF001
+        await service._followup("kitchen", "time", "90")  # noqa: SLF001
+        self.assertEqual(link._seconds(link.conversation_s), 90.0)  # noqa: SLF001
+        ok, said = await service._followup("kitchen", "time", "forever")  # noqa: SLF001
+        self.assertFalse(ok)
+        self.assertIn("followup time 5m", said)
+
+    async def test_an_unknown_board_is_refused_by_name(self):
+        service, _link = await self._board()
+        ok, said = await service._followup("garage", "on", "")  # noqa: SLF001
+        self.assertFalse(ok)
+        self.assertIn("kitchen", said)
+
+    async def test_a_board_entry_in_the_config_is_its_own_mode(self):
+        service, link = await self._board(mode="off")
+        service._board_prefs["kitchen"] = {"follow_up": "on", "follow_up_s": 120}  # noqa: SLF001
+        self.assertTrue(link.follow_up())
+        self.assertEqual(link._seconds(link.conversation_s), 120.0)  # noqa: SLF001
+        self.assertEqual(service._rooms_state()[-1]["follow_up"], "on")  # noqa: SLF001
+
+    def test_it_is_saved_in_that_boards_entry(self):
+        import tempfile
+        import tomllib
+        from pathlib import Path
+
+        from simorgh.contracts.settings import persist_satellite
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "simorgh.toml"
+            path.write_text('[voice]\ntts = "auto"\n\n[[voice.satellites]]\nname = "kitchen"\nhost = "k.local"\n'
+                            '\n[[voice.satellites]]\nname = "hall"\nhost = "h.local"\n')
+            self.assertTrue(persist_satellite(path, "kitchen", "follow_up", "on"))
+            self.assertFalse(persist_satellite(path, "garage", "follow_up", "on"))
+            boards = tomllib.loads(path.read_text())["voice"]["satellites"]
+        self.assertEqual([b.get("follow_up") for b in boards], ["on", None])
+        self.assertEqual(boards[1]["host"], "h.local")
+
+
 class TheBoardDoesNotContinueOnItsOwn(unittest.IsolatedAsyncioTestCase):
     """2026-09-27, live: after one follow-up announcement the board kept
     ESPHome's `continue_conversation_` and started a new run every time a

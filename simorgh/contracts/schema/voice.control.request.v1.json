@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/voice.control.request.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`; tidy: drop the learnt takes pulling a profile apart, never the enrolment ones; relearn: rebuild a profile from recordings already kept, so nobody has to re-record; calibrate: `value` is the calibration verb (start [options] | status | stop | keep | accept | skip) for `name`'s record-once calibration set (voice/calibration.py).",
+  "description": "set: change one safe setting (voice/settings.py) live and persist it; key/value travel with it. enroll: learn `name`'s voice from the next `takes` utterances (voice/speakers.py); forget: drop them; people: who is enrolled; whois: say who the next utterance sounds like, with scores; pronounce: `value` is how to say `name`; tidy: drop the learnt takes pulling a profile apart, never the enrolment ones; relearn: rebuild a profile from recordings already kept, so nobody has to re-record; calibrate: `value` is the calibration verb (start [options] | status | stop | keep | accept | skip) for `name`'s record-once calibration set (voice/calibration.py); followup: Follow Up Mode for satellite `name` (\"\" = every board) -- `key` on | off | question | time (`value` = how long the conversation stays open) | \"\" to show it.",
   "properties": {
     "action": {
       "enum": [
@@ -22,7 +22,8 @@
         "pronounce",
         "tidy",
         "relearn",
-        "calibrate"
+        "calibrate",
+        "followup"
       ],
       "type": "string"
     },

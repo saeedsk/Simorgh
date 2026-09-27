@@ -81,6 +81,35 @@ class MuteIsOneWord(unittest.TestCase):
         self.assertIsNone(parse("mute the tv please").name)
 
 
+class FollowUpModeCommand(unittest.TestCase):
+    """`followup` -- Follow Up Mode per satellite (2026-09-27)."""
+
+    def _sent(self, line):
+        return MuteIsOneWord._dispatched(self, line)
+
+    def test_the_board_and_the_mode_in_either_order(self):
+        self.assertEqual(self._sent("followup on satellite"),
+                         {"action": "followup", "key": "on", "value": "", "name": "satellite"})
+        self.assertEqual(self._sent("followup satellite off"),
+                         {"action": "followup", "key": "off", "value": "", "name": "satellite"})
+
+    def test_time_takes_minutes_or_seconds_and_no_board_means_every_board(self):
+        self.assertEqual(self._sent("followup time 5m"), {"action": "followup", "key": "time", "value": "5m", "name": ""})
+        self.assertEqual(self._sent("followup time 5 min satellite"),
+                         {"action": "followup", "key": "time", "value": "5min", "name": "satellite"})
+
+    def test_bare_shows_it(self):
+        self.assertEqual(self._sent("followup"), {"action": "followup", "key": "", "value": "", "name": ""})
+
+    def test_status_names_it_per_board(self):
+        text = voiceview.status({"enabled": True, "listening": True, "muted": False, "speaking": False, "stt": "w",
+                                 "tts": "k", "device": "laptop", "turns": 0, "rooms": [
+                                     {"name": "satellite", "kind": "satellite", "status": "connected",
+                                      "follow_up": "on", "conversation_s": 180.0}]})
+        self.assertIn("satellite: connected · mic listening · Follow Up Mode on (180s)", text)
+        self.assertIn("followup on|off|question [board]", text)
+
+
 if __name__ == "__main__":
     unittest.main()
 

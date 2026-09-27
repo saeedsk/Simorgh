@@ -103,12 +103,13 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     # The satellites (stage 13). They were set only in simorgh.toml and read
     # once at start, so "how do I change that?" had no answer at the prompt
     # (the creator, 2026-09-27). `voice status` lists them per room.
-    "satellite_follow_up": (str, ("question", "always", "off"),
-                            "after a reply, a satellite listens again with no wake word: after a question only, "
-                            "after every reply, or never"),
+    "satellite_follow_up": (str, ("on", "question", "off", "always"),
+                            "Follow Up Mode for every board that has not its own (`followup on|off|question "
+                            "<board>` sets one): after a reply the board listens again with no wake word -- "
+                            "always (on), after a question only, or never"),
     "satellite_conversation_s": (float, (0.0, 600.0),
-                                 "how long a satellite conversation stays open after the last reply or the last "
-                                 "thing said -- no wake word needed until it passes quietly; 0 = one follow-up only"),
+                                 "Follow Up Mode's length for boards without their own (`followup time 5m <board>`): "
+                                 "the conversation stays open this long after the last word; 0 = one follow-up only"),
     "follow_up_window_s": (float, (2.0, 60.0), "how long one satellite follow-up waits for speech before it closes"),
     "satellite_volume": (float, (0.0, 1.0), "the satellites' speaker volume, 0.05-1.0; 0 = each board's own"),
     "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),
@@ -295,6 +296,28 @@ def persist(path: Path, key: str, value: object, *, section: str = "voice") -> N
     tmp.replace(path)
 
 
+def persist_satellite(path: Path, name: str, key: str, value: object) -> bool:
+    """Write `key = value` into the `[[voice.satellites]]` entry called
+    `name`, keeping everything else; False when there is no such entry
+    (Follow Up Mode is per board -- the creator, 2026-09-27)."""
+    if not path.is_file():
+        return False
+    with path.open("rb") as handle:
+        data = tomllib.load(handle)
+    boards = list((data.get("voice") or {}).get("satellites") or [])
+    for board in boards:
+        if isinstance(board, dict) and str(board.get("name") or "") == name:
+            board[key] = value
+            break
+    else:
+        return False
+    data["voice"]["satellites"] = boards
+    tmp = path.with_suffix(".toml.part")
+    tmp.write_text(_dump(data))
+    tmp.replace(path)
+    return True
+
+
 def conversation_key(channel: str | None, speaker: str | None) -> str:
     """One conversation per (channel, person): the key Memory's working
     window is fed under (`memory/service.py::_on_turn_completed`) and
@@ -310,4 +333,5 @@ def conversation_key(channel: str | None, speaker: str | None) -> str:
 
 
 __all__ = ["QUIET_REPLY", "VOICE_SAFE_KEYS", "conversation_key", "is_quiet_reply", "config_path", "handoff_path", "persist",
+           "persist_satellite",
            "read_handoff", "settings_home", "write_handoff"]

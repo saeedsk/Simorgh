@@ -517,6 +517,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "tv":
         return await _tv(args, bus=bus, ledger=ledger, session_id=session_id)
+    if name == "followup":
+        return await _followup(bus, args)
+
     if name in ("mute", "unmute"):
         # One word for the one room people mute: the laptop, whose
         # microphone hears the satellite's replies (2026-09-27).
@@ -604,6 +607,8 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
         verb, rest = "set", f"{verb} {rest}".strip()
     if verb in ("", "status"):
         return await _request(bus, topics.VOICE_STATUS_REQUEST, {}, timeout=10.0, render=voiceview.status)
+    if verb in ("followup", "follow-up", "follow_up"):
+        return await _followup(bus, rest)
     if verb in ("mute", "unmute") and rest.strip():
         # `voice mute laptop` / `voice mute kitchen`: one room (stage 13).
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": verb, "name": rest.strip()},
@@ -2736,6 +2741,33 @@ def _whose(person: str) -> str:
     if not person or member(person) is not None:
         return ""
     return f"  note: {person!r} is not in the household list, so Guardian will treat them as a guest"
+
+
+async def _followup(bus: BusClient, args: str) -> Outcome:
+    """`followup [on|off|question|time <5m>] [board]` -- Follow Up Mode
+    per satellite (the creator, 2026-09-27). The board and the mode come
+    in either order: `followup satellite on` is `followup on satellite`."""
+    from . import voiceview
+
+    words = args.split()
+    what, value, board = "", "", []
+    i = 0
+    while i < len(words):
+        word = words[i].lower()
+        if not what and word in ("on", "off", "question", "time"):
+            what = word
+            if word == "time" and i + 1 < len(words):
+                value = words[i + 1]
+                i += 1
+                if i + 1 < len(words) and words[i + 1].lower() in ("m", "min", "mins", "minutes", "s", "sec", "seconds"):
+                    value += words[i + 1]
+                    i += 1
+        else:
+            board.append(words[i])
+        i += 1
+    return await _request(bus, topics.VOICE_CONTROL_REQUEST,
+                          {"action": "followup", "key": what, "value": value, "name": " ".join(board)},
+                          timeout=10.0, render=voiceview.controlled)
 
 
 def _pair_command(book, args: str = "") -> Outcome:

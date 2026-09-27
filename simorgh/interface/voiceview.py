@@ -68,15 +68,15 @@ def rooms(listed: list) -> list[str]:
             continue
         talk = " · in a conversation now" if room.get("in_conversation") else ""
         volume = room.get("volume")
-        out.append(f"    {name}: {room.get('status') or '?'} · mic {mic}"
+        mode = str(room.get("follow_up") or "off")
+        span = float(room.get("conversation_s") or 0.0)
+        follow = {"on": f"Follow Up Mode on ({span:g}s)", "question": f"Follow Up Mode after questions ({span:g}s)",
+                  "off": "Follow Up Mode off"}.get(mode, f"Follow Up Mode {mode}")
+        out.append(f"    {name}: {room.get('status') or '?'} · mic {mic} · {follow}"
                    + (f" · volume {float(volume):g}" if isinstance(volume, (int, float)) else "") + talk)
     if satellites:
-        s = satellites[0]
-        span = float(s.get("conversation_s") or 0.0)
-        out.append(f"    after a reply: {s.get('follow_up')} · conversation stays open {span:g}s after the last word"
-                   f" · each follow-up waits {float(s.get('follow_up_window_s') or 0):g}s")
-        out.append("    change: `voice set satellite_conversation_s 300` · `voice set satellite_follow_up "
-                   "always|question|off` · `voice set satellite_volume 0.7` · `mute|unmute <room>`")
+        out.append("    change: `followup on|off|question [board]` · `followup time 5m [board]` · "
+                   "`voice set satellite_volume 0.7` · `mute|unmute <room>`")
     return out
 
 
