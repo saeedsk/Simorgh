@@ -68,6 +68,18 @@ MAX_QUEUED_FRAMES = 500
 #: Inside a run, how long the microphone waits for the board's next frame
 #: before it treats the stream as stalled and hands the session silence.
 IN_RUN_WAIT_S = 1.0
+#: A run the board starts this soon after Sim asked it to listen again is
+#: that follow-up, whatever wake word the board names on it.
+FOLLOW_UP_START_S = 20.0
+#: How long the rest of a cut-off reply is dropped if no new turn is heard.
+HOLD_REPLY_S = 30.0
+#: Sent with every INTENT_END. ESPHome keeps `continue_conversation_` from
+#: the follow-up announcement (`start_conversation`) until something clears
+#: it, and while it is set the board starts a new run each time a reply
+#: PIECE ends -- after "I see.", mid-answer -- so the rest of the answer
+#: played into a run of its own (2026-09-27). Sim opens follow-ups itself,
+#: after the whole reply.
+_NO_CONTINUE = {"continue_conversation": "0"}
 
 _SILENCE = b"\x00" * FRAME_BYTES
 _MISSING = ("satellites need the ESPHome API client: `pip install aioesphomeapi` "
@@ -173,6 +185,8 @@ class SatelliteSpeaker:
         self._stop: asyncio.Event | None = None
 
     async def play(self, audio: Audio) -> None:
+        if self._link.holding_reply():
+            return          # the rest of a reply the person cut off
         self._stop = asyncio.Event()
         try:
             url = await self._publish(audio)
@@ -261,6 +275,14 @@ class SatelliteLink:
         #: would be the turn.
         self.playing_media = False
         self._follow_up_s = follow_up_s
+        #: When Sim last asked the board to listen again. The board names
+        #: its last wake word on that run too, so this is how a follow-up
+        #: is told from a wake.
+        self._follow_up_asked_at = 0.0
+        #: Until when the rest of a reply the person cut off is dropped
+        #: rather than played (0: nothing held). Cleared once the new turn
+        #: is heard: what comes after that is the answer to it.
+        self._hold_reply_until = 0.0
         self._publish = publish
         #: A folder to keep each wake run's audio in, as WAV (the last 20),
         #: for replaying a turn that went wrong; "" keeps nothing.
@@ -352,17 +374,30 @@ class SatelliteLink:
             self._log("info", "voice.satellite_wake_declined", wake_word=wake_word or "")
             return None
         self.microphone.clear()
-        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=not wake_word,
+        old = self._run
+        if old is not None and not old.ended:
+            # The wake word while a run is still open: the person cut in on
+            # Sim's reply. The board has stopped its playback; the rest of
+            # that reply must not follow into the new run -- it did, and
+            # five "Hey Sim"s in a row stopped nothing (2026-09-27).
+            old.ended = True
+            self._log_run(old, "cut off by the wake word")
+            self._cut_off_reply()
+        asked, self._follow_up_asked_at = self._follow_up_asked_at, 0.0
+        # A run Sim asked for: the board still names its last wake word.
+        follow_up = not wake_word or (asked > 0 and self._clock() - asked < FOLLOW_UP_START_S)
+        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=follow_up,
                          pcm=bytearray() if self._keep_runs else None, states=[])
         self.microphone.woken = True
         self.microphone.streaming = True
-        self.microphone.wake_phrase = (wake_word or "").replace("_", " ").strip().title() if wake_word else ""
+        self.microphone.wake_phrase = (wake_word or "").replace("_", " ").strip().title() \
+            if wake_word and not follow_up else ""
         self.runs += 1
         self.last_wake_at = time.time()
         self._event("VOICE_ASSISTANT_RUN_START")
         self._event("VOICE_ASSISTANT_STT_START")
         self._event("VOICE_ASSISTANT_STT_VAD_START")
-        self._log("info", "voice.satellite_wake", wake_word=wake_word or "(follow-up)")
+        self._log("info", "voice.satellite_wake", wake_word="(follow-up)" if follow_up else wake_word)
         self._watch(self._run)
         if self._run.follow_up:
             self._close_quiet_follow_up(self._run)
@@ -432,9 +467,21 @@ class SatelliteLink:
             run.ended = True
             self._run = None
             self._log_run(run, "stopped by the board" + (" (abort)" if abort else ""))
+            if run.replied:
+                self._cut_off_reply()
         self.microphone.woken = False
         self.microphone.streaming = False
         self.speaker.interrupted()
+
+    def _cut_off_reply(self) -> None:
+        """Stop the reply now playing and drop its remaining pieces until
+        the person's next turn is heard (or `HOLD_REPLY_S` passes)."""
+        self._hold_reply_until = self._clock() + HOLD_REPLY_S
+        self.speaker.interrupted()
+        self._log("info", "voice.satellite_barge_in")
+
+    def holding_reply(self) -> bool:
+        return self._hold_reply_until > self._clock()
 
     def _watch(self, run: _Run) -> None:
         async def _expire() -> None:
@@ -455,6 +502,7 @@ class SatelliteLink:
             run.speech = True
         if state == "thinking" and not run.vad_ended_at:
             run.vad_ended_at = self._clock()
+            self._hold_reply_until = 0.0     # what comes now answers this turn
             self.microphone.streaming = False
             self._log("info", "voice.satellite_turn", phase="heard",
                       after_wake_s=round(run.vad_ended_at - run.started_at, 2))
@@ -477,7 +525,7 @@ class SatelliteLink:
         if run.ended:
             return
         if not run.replied:
-            self._event("VOICE_ASSISTANT_INTENT_END")
+            self._event("VOICE_ASSISTANT_INTENT_END", _NO_CONTINUE)
             # A run that ends with no reply says which way it went: Sim never
             # heard the end of speech (nothing reached the session), or heard
             # it and chose silence.
@@ -505,6 +553,7 @@ class SatelliteLink:
             return
         try:
             url = await self._publish(Audio(b"\x00" * 3200))      # 0.1 s of silence
+            self._follow_up_asked_at = self._clock()
             await client.send_voice_assistant_announcement_await_response(url, 15.0, start_conversation=True)
         except Exception as exc:  # noqa: BLE001 -- a missed follow-up is a wake word said again
             self._log("warning", "voice.satellite_follow_up_failed", error=str(exc)[:160])
@@ -524,7 +573,7 @@ class SatelliteLink:
             self._log("info", "voice.satellite_turn", phase="replying",
                       after_wake_s=round(now - run.started_at, 2),
                       after_speech_s=round(now - run.vad_ended_at, 2) if run.vad_ended_at else None)
-            self._event("VOICE_ASSISTANT_INTENT_END")
+            self._event("VOICE_ASSISTANT_INTENT_END", _NO_CONTINUE)
             self._event("VOICE_ASSISTANT_TTS_START", {"text": ""})
             self._event("VOICE_ASSISTANT_TTS_END", {"url": url})
             return

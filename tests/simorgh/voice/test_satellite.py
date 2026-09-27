@@ -618,6 +618,58 @@ class OneWakeWordAConversation(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(link.follow_up())
 
 
+class TheBoardDoesNotContinueOnItsOwn(unittest.IsolatedAsyncioTestCase):
+    """2026-09-27, live: after one follow-up announcement the board kept
+    ESPHome's `continue_conversation_` and started a new run every time a
+    reply PIECE ended -- after the "I see." filler, mid-answer. Every
+    INTENT_END now says `continue_conversation: 0`; Sim opens follow-ups
+    itself, after the whole reply. And the follow-up run it asked for is
+    a follow-up even though the board names its last wake word on it."""
+
+    async def test_every_intent_end_clears_the_boards_continuation(self):
+        link, client, _p = _link()
+        stop, task = await _connected(link, client)
+        await client.handlers["handle_start"]("c1", 1, None, "hey_sim")
+        link.microphone.on_state("thinking")
+        with mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+            await link.speaker.play(silence(0.02))
+        ends = [d for k, d, _t in client.events if k == "VOICE_ASSISTANT_INTENT_END"]
+        self.assertEqual(ends, [{"continue_conversation": "0"}])
+        await _close(stop, task)
+
+    async def test_the_run_sim_asked_for_is_a_follow_up_whatever_it_is_called(self):
+        link, client, _p = _link()
+        stop, task = await _connected(link, client)
+        await link._open_follow_up()  # noqa: SLF001
+        await client.handlers["handle_start"]("c2", 1, None, "hey_sim")
+        self.assertTrue(link._run.follow_up)  # noqa: SLF001
+        self.assertEqual(link.microphone.wake_phrase, "", "no 'Hey Sim' put in front of a follow-up")
+        await _close(stop, task)
+
+
+class AWakeWordMidReplyStopsIt(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "I tried to stop you five times, still you
+    didn't stop." The board stopped its playback and opened a new run, and
+    Sim sent the rest of the reply into it."""
+
+    async def test_the_rest_of_the_reply_is_dropped_until_the_next_turn_is_heard(self):
+        link, client, published = _link()
+        stop, task = await _connected(link, client)
+        await client.handlers["handle_start"]("c1", 1, None, "hey_sim")
+        link.microphone.on_state("thinking")
+        with mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+            await link.speaker.play(silence(0.02))                 # the reply begins
+            await client.handlers["handle_start"]("c2", 1, None, "hey_sim")   # the person cuts in
+            before = len(published)
+            await link.speaker.play(silence(0.02))                 # the old reply's next piece
+            self.assertEqual(len(published), before, "dropped, not played")
+            link.microphone.on_state("user_speaking")
+            link.microphone.on_state("thinking")                   # the new turn is heard
+            await link.speaker.play(silence(0.02))                 # its answer
+        self.assertEqual(len(published), before + 1)
+        await _close(stop, task)
+
+
 class EveryRunSaysWhatItGot(unittest.IsolatedAsyncioTestCase):
     """2026-09-27: two of five "Hey Sim"s got no turn and the log could not
     say whether the board sent the speech. Every run now logs its audio."""
