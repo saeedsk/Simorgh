@@ -4,7 +4,6 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
 [locks.benchmark]
 by = "opus-main"
 task = "a swebench case works in its checkout, not a worktree of this repo"
@@ -16,12 +15,6 @@ by = "opus-main"
 task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
-
-[locks.contracts]
-by = "opus-main"
-task = "stage 13 item 3: voice.room.speech topic"
-since = "2026-09-27T04:18:16+00:00"
-until = "2026-09-27T12:18:16+00:00"
 
 [locks.domains]
 by = "opus-main"
@@ -40,12 +33,6 @@ by = "opus-main"
 task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "stage 13 item 3: /api/room/speech"
-since = "2026-09-27T04:18:16+00:00"
-until = "2026-09-27T12:18:16+00:00"
 
 [locks.memory]
 by = "opus-main"
