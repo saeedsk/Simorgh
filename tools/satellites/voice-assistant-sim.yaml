@@ -85,7 +85,7 @@ select:
           id(okay_nabu).set_probability_cutoff(143);    // 0.56 -> 0.751 FAPH on DipCo
           id(hey_jarvis).set_probability_cutoff(212);   // 0.83 -> 1.502 FAPH on DipCo
           id(hey_mycroft).set_probability_cutoff(237);  // 0.93 -> 1.878 FAPH on DipCo
-          id(hey_sim).set_probability_cutoff(71);       // 0.28 -> 0.94 FAPH, 3.8% missed
+          id(hey_sim).set_probability_cutoff(56);       // 0.22 -> ~1.3 FAPH, ~3% missed
         }
 
 audio_file:
@@ -181,7 +181,8 @@ micro_wake_word:
   models:
     # Simorgh's own wake word, trained 2026-09-27 (docs/plan/stage-13-room-satellites.md,
     # item 5): 30k Piper samples + 27 near-miss phrases, microWakeWord mixednet.
-    # Held-out test: cutoff 0.64 misses 11.7% at 0.19 false wakes an hour.
+    # Held-out test: 0.64 misses 11.7% at 0.19 false wakes/h, 0.42 misses 6.1% at 0.56. Live on
+    # the creator's voice 0.64 caught 6 of 10 and 0.42 caught 10 of 11, so 0.42 is the default.
     - model: wakewords/hey_sim/hey_sim.json
       id: hey_sim
     - model: https://github.com/OHF-Voice/micro-wake-word/releases/download/okay_nabu_20241226.3/okay_nabu.json
