@@ -137,7 +137,7 @@ _PAIR_PAGE = """<!doctype html>
 #: BY NAME, so the failure is legible rather than a mystery 403.
 ACTION_TOOLS: frozenset[str] = frozenset({
     # the house
-    "home_find", "home_state", "home_describe", "home_call", "home_undo",
+    "home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",
     "energy_status", "energy_report",
     # what it can see
     "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_light", "cam_ir", "cam_siren",

@@ -1,4 +1,5 @@
-"""`home_find`, `home_state`, `home_describe`, `home_call`, `home_undo`.
+"""`home_find`, `home_state`, `home_describe`, `home_call`, `home_undo`,
+`home_blink`.
 
 `home_call` is the one that matters, and its shape is set by two rules
 from the design:
@@ -488,11 +489,152 @@ class HomeUndoTool(_HomeTool):
                                     "changed": changed, "after": after_state})
 
 
+#: Blinks running now, by entity: a second blink of the same light
+#: replaces the first rather than the two fighting over it.
+_BLINKING: dict[str, "asyncio.Task"] = {}
+
+
+class HomeBlinkTool(_HomeTool):
+    """A light (or a switch) switched off and on at a steady rate for a
+    while, then put back as it was -- a signal, a light show.
+
+    Live, 2026-09-27: asked three times to blink a light at 1-5 Hz for a
+    minute, the model wrote a shell loop around `curl` with a token
+    variable the shell did not have, reported "started", and nothing
+    blinked. The first switch here is made and read back before the
+    answer, so "blinking" is never said of a light that did not move; the
+    rest runs in the background, one Guardian decision for the whole act.
+    """
+
+    name = "home_blink"
+    description = (
+        "Blink a light on and off at a steady rate for a while, then put it back as it was. "
+        "Takes a target name, `hz` (switches per second, up to 4) and `seconds` (up to 300)."
+    )
+    read_only = False
+    reversibility = "reversible"
+    args_schema = {
+        "type": "object", "required": ["target"],
+        "properties": {"target": {"type": "string"}, "hz": {"type": "number"},
+                       "seconds": {"type": "number"}},
+    }
+    MAX_HZ = 4.0          # a Home Assistant round trip is ~0.1 s; faster only queues calls
+    MAX_SECONDS = 300.0
+    MAX_ENTITIES = 10
+    _DOMAINS = ("light", "switch")
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        import asyncio
+
+        target = str(args.get("target") or "").strip()
+        if not target:
+            return ToolResult.refused("refused: which light? Pass a `target`, like \"family room light\".")
+        try:
+            hz = float(args.get("hz") or 1.0)
+            seconds = float(args.get("seconds") or 10.0)
+        except (TypeError, ValueError):
+            return ToolResult.refused("refused: `hz` and `seconds` are numbers, like 1 and 60.")
+        if hz <= 0 or seconds <= 0:
+            return ToolResult.refused("refused: `hz` and `seconds` must be above zero.")
+        notes = []
+        if hz > self.MAX_HZ:
+            notes.append(f"{hz:g} Hz is faster than Home Assistant can switch a light, so {self.MAX_HZ:g} Hz")
+            hz = self.MAX_HZ
+        if seconds > self.MAX_SECONDS:
+            notes.append(f"{seconds:g} s is over the {self.MAX_SECONDS:g} s limit, so {self.MAX_SECONDS:g} s")
+            seconds = self.MAX_SECONDS
+
+        client = self._client()
+        if not client.configured:
+            return self._unconfigured(client)
+        try:
+            registry = await self._registry(client)
+            entity_ids, last = None, None
+            for domain in self._DOMAINS:
+                try:
+                    entity_ids = registry.resolve(target, domain=domain)
+                    break
+                except NotFound as exc:
+                    last = exc
+            if entity_ids is None:
+                raise last or NotFound(target)
+        except HomeUnavailable as exc:
+            return ToolResult.from_exception(exc, f"refused: {exc}")
+        except (Ambiguous, NotFound) as exc:
+            return ToolResult.refused(f"refused: {exc}")
+        if len(entity_ids) > self.MAX_ENTITIES:
+            return ToolResult.refused(f"refused: {target!r} is {len(entity_ids)} things; blink at most "
+                                      f"{self.MAX_ENTITIES} at once -- name them more narrowly.")
+
+        # The first switch, read back: the evidence that the house moves.
+        domain = entity_ids[0].split(".", 1)[0]
+        on, off = f"{domain}.turn_on", f"{domain}.turn_off"
+        try:
+            probe = await client.call(f"{domain}.toggle", entity_ids=tuple(entity_ids),
+                                      settle_s=float(getattr(self._config, "home_settle_s", 1.0)))
+        except HomeUnavailable as exc:
+            return ToolResult.from_exception(exc, f"refused: {exc}")
+        if probe.dry_run:
+            return ToolResult(ok=True, output=(f"dry run: would blink {', '.join(entity_ids)} at {hz:g} Hz "
+                                               f"for {seconds:g} s ([execution] home_dry_run is on)"),
+                              metadata={"dry_run": True, "entities": list(entity_ids)})
+        if not probe.changed:
+            return ToolResult.refused(
+                f"refused: switched {', '.join(entity_ids)} once and nothing changed -- Home Assistant "
+                "accepted the call, so the light is most likely unavailable. Nothing is blinking.")
+        before = {e: v.state for e, v in probe.before.items()}
+
+        for entity_id in entity_ids:
+            running = _BLINKING.pop(entity_id, None)
+            if running is not None:
+                running.cancel()
+        half = 1.0 / (2.0 * hz)
+        switches = max(1, int(seconds / half))
+        lit = {e: (v.state == "on") for e, v in probe.after.items()}
+
+        async def blink() -> None:
+            state = all(lit.values())
+            try:
+                for _ in range(switches):
+                    started = asyncio.get_running_loop().time()
+                    state = not state
+                    try:
+                        await client.fire(on if state else off, entity_ids=tuple(entity_ids))
+                    except HomeUnavailable:
+                        pass                          # a missed switch; the next one tries again
+                    await asyncio.sleep(max(0.0, half - (asyncio.get_running_loop().time() - started)))
+            finally:
+                # Put each back as it was, whatever ended the blink.
+                for entity_id, was in before.items():
+                    try:
+                        await client.fire(on if was == "on" else off, entity_ids=(entity_id,))
+                    except HomeUnavailable:
+                        pass
+                for entity_id in entity_ids:
+                    if _BLINKING.get(entity_id) is task:
+                        _BLINKING.pop(entity_id, None)
+
+        task = asyncio.get_running_loop().create_task(blink())
+        for entity_id in entity_ids:
+            _BLINKING[entity_id] = task
+        moved = ", ".join(f"{e}: {probe.before[e].state} -> {probe.after[e].state}"
+                          for e in probe.changed if e in probe.before and e in probe.after)
+        body = (f"blinking {', '.join(entity_ids)} at {hz:g} Hz for {seconds:g} s ({switches} switches), "
+                f"then back to {', '.join(f'{e} {s}' for e, s in before.items())}. "
+                f"The first switch was confirmed ({moved}).")
+        if notes:
+            body += " Limited: " + "; ".join(notes) + "."
+        return ToolResult(ok=True, output=body,
+                          side_effects=tuple(f"home:blink:{e}" for e in entity_ids),
+                          metadata={"entities": list(entity_ids), "hz": hz, "seconds": seconds,
+                                    "switches": switches, "before": before, "changed": list(probe.changed)})
+
+
 def home_tools(config, **kwargs) -> list:
     return [HomeFindTool(config, **kwargs), HomeStateTool(config, **kwargs),
             HomeDescribeTool(config, **kwargs), HomeCallTool(config, **kwargs),
-            HomeUndoTool(config, **kwargs)]
+            HomeUndoTool(config, **kwargs), HomeBlinkTool(config, **kwargs)]
 
 
-__all__ = ["HomeCallTool", "HomeDescribeTool", "HomeFindTool", "HomeStateTool", "HomeUndoTool",
+__all__ = ["HomeBlinkTool", "HomeCallTool", "HomeDescribeTool", "HomeFindTool", "HomeStateTool", "HomeUndoTool",
            "home_tools"]

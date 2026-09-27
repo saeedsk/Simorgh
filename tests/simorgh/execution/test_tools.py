@@ -807,7 +807,7 @@ class TestBuiltinTools(unittest.TestCase):
             "kb_search", "kb_ask", "kb_open", "kb_sources", "kb_status",
             "cal_list", "mail_search", "mail_read", "remind",
             "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",
-            "home_find", "home_state", "home_describe", "home_call", "home_undo",
+            "home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",
             "energy_status", "energy_report", "energy_tariff",
             "media_now", "media_control", "media_play",
             "music_now", "music_control", "music_play", "room_play",

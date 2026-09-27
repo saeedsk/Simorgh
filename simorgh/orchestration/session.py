@@ -390,6 +390,7 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "home_describe": 30.0,
     "home_call": 45.0,
     "home_undo": 45.0,
+    "home_blink": 45.0,
     "sec_self": 120.0,
     "sec_posture": 20.0,
     "sec_findings": 20.0,

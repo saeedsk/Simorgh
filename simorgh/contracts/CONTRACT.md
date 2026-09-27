@@ -94,6 +94,8 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 - Security: `approval_token`, `verify_approval_token`, `canonical_args_sha256`, `ReplayGuard`, `new_run_secret`, `subsystem_token`, `verify_subsystem_token`.
 - Module-level mutable singletons (risks): `registry._REGISTRY` (filled by importing `messages`; a type defined twice or late changes validation for the whole process), `compat._TRANSLATORS` (`clear()` exists for tests), `overheard._lock` (a `threading.Lock` around a file), `console._since_check` (a counter mutated on every printed line from the event loop). These are the four module-level singletons of B20.
 
+- `home/client.HomeAssistantClient.fire(service, *, entity_ids, data)` and `FakeHomeAssistant.fire` (2026-09-27): send a service call and read nothing back, for a repeated act whose first call `call` already read back (`domains/home/tools.HomeBlinkTool`). `toolargs` gains `home_blink: (target, spec)`, JSON rest.
+
 ## Invariants
 
 - `simorgh/contracts/` imports only the standard library and itself.

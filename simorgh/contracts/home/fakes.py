@@ -143,6 +143,9 @@ class FakeHomeAssistant:
         after = {e: self._entities[e] for e in entity_ids if e in self._entities}
         return ServiceResult(service, tuple(entity_ids), before, after)
 
+    async def fire(self, service: str, *, entity_ids=(), data=None) -> None:
+        await self.call(service, entity_ids=entity_ids, data=data)
+
     # -- helpers for tests ---------------------------------------------------
 
     def set_state(self, entity_id: str, state: str, **attributes) -> None:

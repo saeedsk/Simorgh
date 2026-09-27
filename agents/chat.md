@@ -25,7 +25,7 @@ tools = [
     "overheard", "overheard_note", "camera_describe", "remember_place", "people",
     # "turn the kitchen light off" is the most ordinary chat
     # request there is.
-    "home_find", "home_state", "home_describe", "home_call", "home_undo",
+    "home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",
     # "what's it costing me" and "pause the telly" are the same
     # kind of question as "turn the light off".
     "energy_status", "energy_report", "media_now", "media_control", "media_play",

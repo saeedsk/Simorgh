@@ -142,6 +142,7 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "home_describe": ("read_only", True),
     "home_call": ("reversible", True),
     "home_undo": ("reversible", True),
+    "home_blink": ("reversible", True),
     # -- what the house costs (domains/03) and what it is playing
     # (domains/05). Reading is free; the two that act do so through the
     # same `media_player` services `home_call` would use, with the
@@ -495,6 +496,13 @@ _MARKER_ARG_HINT.update({
     "home_undo": (
         'second line: {"before": {...}} copied from the home_call result you want to reverse. '
         "There is no hidden last-action slot: acting on one is how the wrong thing gets undone."
+    ),
+    "home_blink": (
+        "first line: the light, by name. Second line, optional: a JSON object like "
+        '{"hz": 1, "seconds": 60}. It switches the light off and on at that rate (up to 4 Hz, '
+        "300 s) and puts it back as it was afterwards -- the one way to blink a light; never a "
+        "shell loop. It confirms the first switch before saying anything is blinking.\nExample:\n"
+        'HOME_BLINK: family room light\n{"hz": 1, "seconds": 60}\n'
     ),
     "sec_show": (
         "the id of a finding from SEC_FINDINGS or SEC_SELF, to read its evidence and what to do "

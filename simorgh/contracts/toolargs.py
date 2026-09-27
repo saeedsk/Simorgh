@@ -142,6 +142,7 @@ MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
     "sec_findings": ("severity", "spec"),
     "home_call": ("service", "spec"),
     "home_undo": ("entity", "spec"),
+    "home_blink": ("target", "spec"),
     "energy_tariff": ("op", "spec"),
     "media_control": ("op", "spec"),
     "media_play": ("what", "spec"),
@@ -160,7 +161,7 @@ MARKER_SPLIT_FIRST_LINE: dict[str, tuple[str, str]] = {
 MARKER_JSON_REST: frozenset[str] = frozenset({
     "start_task", "delegate", "cam_setup",
     "search_listings", "install_package", "browse_page", "run_container",
-    "kb_sources", "sec_findings", "home_call", "home_undo",
+    "kb_sources", "sec_findings", "home_call", "home_undo", "home_blink",
     "energy_tariff", "media_control", "media_play",
     "music_control", "music_play",
 })

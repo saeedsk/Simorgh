@@ -114,6 +114,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "home_describe"): "Looking round the house",
     ("act", "home_call"): "Acting on the house",
     ("act", "home_undo"): "Putting it back",
+    ("act", "home_blink"): "Blinking the light",
     ("act", "sec_self"): "Checking its own posture",
     ("act", "sec_posture"): "Checking security",
     ("act", "sec_findings"): "Checking security",

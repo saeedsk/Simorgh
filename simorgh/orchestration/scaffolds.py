@@ -108,6 +108,7 @@ _TOOL_NOTES: dict[str, str] = {
     "home_call": "do something in the house through Home Assistant -- a light, the thermostat, "
                   "the TV. Reports what actually changed, which is not always what was asked",
     "home_undo": "put back what the last home_call changed",
+    "home_blink": "blink a light on and off at a rate for a while, then put it back",
     "sec_self": "check your own security posture -- is the API exposed, do irreversible actions "
                  "run unattended, has a credential been written into a working file, what is this "
                  "machine listening on. Entirely local",

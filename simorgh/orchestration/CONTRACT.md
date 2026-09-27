@@ -121,6 +121,8 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
   - `tools._TOOL_POLICY`, `tools._DYNAMIC_TOOLS`, `tools._REGISTERED` (`tools.py:29, 559, 569`): the policy table and known-tool set, mutated by `tool.registered`. A hand-written entry wins over an announced one.
   - `scaffolds._UNAVAILABLE` (`scaffolds.py:35`): tools currently probed down.
 
+- `home_blink` (2026-09-27) is in `_TOOL_POLICY` (reversible), the marker help, `session` tool time budgets (45 s) and `scaffolds` tool lines, and in `agents/chat.md` / `agents/voice_chat.md`: the one way to blink a light, never a shell loop.
+
 ## Invariants
 
 A resumed session owns what earlier attempts WROTE, read from their steps' side effects (`resume._claim_written`), not only from the `task.edits_kept` record an attempt writes when it ends. A SIGKILL writes no such record -- which is the case resume exists for -- so a crashed attempt's file was nobody's: `git_commit` refused it with "this task did not write <path>" and the task could never finish (kill-and-resume drill, 2026-09-23).

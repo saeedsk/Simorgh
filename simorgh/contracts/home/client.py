@@ -174,6 +174,21 @@ class HomeAssistantClient:
                 after[entity_id] = entity
         return ServiceResult(service=service, entities=tuple(entity_ids), before=before, after=after)
 
+    async def fire(self, service: str, *, entity_ids: tuple[str, ...] = (), data: dict | None = None) -> None:
+        """Send a service call and read nothing back: for a repeated act
+        whose first call was already read back with `call` (`home_blink`).
+        `call` reads every entity before and after, which at four switches
+        a second is three requests where one will do."""
+        domain, _, name = service.partition(".")
+        if not domain or not name:
+            raise HomeUnavailable(f"{service!r} is not a domain.service name", error_kind="refused")
+        if self.dry_run:
+            return
+        body = dict(data or {})
+        if entity_ids:
+            body["entity_id"] = list(entity_ids)
+        await self._post(f"/api/services/{urllib.parse.quote(domain)}/{urllib.parse.quote(name)}", body)
+
     # -- plumbing ------------------------------------------------------------
 
     async def _get(self, path: str):
