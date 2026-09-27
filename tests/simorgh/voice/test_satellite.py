@@ -724,6 +724,22 @@ class FollowUpModeIsPerBoard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(link._seconds(link.conversation_s), 120.0)  # noqa: SLF001
         self.assertEqual(service._rooms_state()[-1]["follow_up"], "on")  # noqa: SLF001
 
+    async def test_the_status_reply_passes_its_contract_with_a_room_running(self):
+        """Live, 2026-09-27: `mute` and `unmute` raised ContractError on every
+        call once a satellite room existed -- a per-device dict was written
+        over the declared `rooms` list."""
+        from simorgh.contracts import topics as t
+        from simorgh.contracts.registry import all_specs
+        from simorgh.contracts.validation import validate
+
+        service, _link = await self._board()
+        self.assertIn("kitchen", service._rooms)  # noqa: SLF001
+        payload = {"ok": True, "detail": "laptop muted", **service._state()}  # noqa: SLF001
+        self.assertIsInstance(payload["rooms"], list)
+        schema = all_specs()[t.VOICE_CONTROL_REPLY].schema
+        self.assertEqual(validate(payload, schema), [])
+        self.assertIn("running", payload["rooms"][-1])
+
     def test_it_is_saved_in_that_boards_entry(self):
         import tempfile
         import tomllib

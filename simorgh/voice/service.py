@@ -725,8 +725,19 @@ class Service:
         rooms = [{"name": "laptop", "muted": bool(getattr(self._session, "muted", False)),
                   "kind": "laptop"}] if self._session is not None else []
         for name, link in self._satellites.items():
+            # The room session's own state rides here too. It was a dict
+            # written into `rooms` AFTER this list, keyed by device --
+            # undeclared, and once `rooms` was declared a list it failed the
+            # reply contract, so `mute`/`unmute` raised on every call (live,
+            # 2026-09-27).
+            room = self._rooms.get(name)
+            task = self._room_tasks.get(name)
             rooms.append({
                 "name": name, "kind": "satellite", "status": link.status,
+                "state": str(getattr(room, "state", "") or ""),
+                "turns": int(getattr(getattr(room, "stats", None), "turns", 0) or 0),
+                "partial": str(getattr(room, "partial", "") or ""),
+                "running": bool(task and not task.done()),
                 "muted": bool(getattr(self._rooms.get(name), "muted", False)),
                 "in_conversation": link.in_conversation(),
                 "follow_up": self._mode_for(name),
@@ -1008,11 +1019,6 @@ class Service:
             out["satellites"] = {name: {"host": link.host, "status": link.status, "connected": link.connected,
                                         "runs": link.runs, "last_wake_at": link.last_wake_at}
                                  for name, link in self._satellites.items()}
-        if self._rooms:
-            out["rooms"] = {
-                device: {"state": room.state, "turns": room.stats.turns, "partial": room.partial,
-                         "running": bool(self._room_tasks.get(device) and not self._room_tasks[device].done())}
-                for device, room in self._rooms.items()}
         return out
 
     # ----------------------------------------------------------- handlers
