@@ -71,6 +71,12 @@ IN_RUN_WAIT_S = 1.0
 #: A run the board starts this soon after Sim asked it to listen again is
 #: that follow-up, whatever wake word the board names on it.
 FOLLOW_UP_START_S = 20.0
+#: ESPHome's media player resumes the stream an announcement interrupted,
+#: so a STOP that lands during one of Sim's replies stops the reply and the
+#: music comes back ("that's the third time it resumed on its own", live
+#: 2026-09-27). Music the board starts again this soon after an explicit
+#: stop is stopped again.
+RESTOP_S = 15.0
 #: How long the rest of a cut-off reply is dropped if no new turn is heard.
 HOLD_REPLY_S = 30.0
 #: Sent with every INTENT_END. ESPHome keeps `continue_conversation_` from
@@ -277,6 +283,14 @@ class SatelliteLink:
         #: playing a song is not listening for a next turn: the song
         #: would be the turn.
         self.playing_media = False
+        #: The board's own media-player state, as it reports it
+        #: (`subscribe_states`): "playing", "paused", "announcing", "idle"...
+        #: `playing_media` follows it, so music a previous Sim started -- or
+        #: one the board resumed by itself after an announcement -- counts.
+        self.board_media = ""
+        #: When the music was last stopped on purpose; a resume within
+        #: `RESTOP_S` of that is the board's, and is stopped again.
+        self._stopped_music_at = 0.0
         #: Seconds, or a callable giving them: read live, so `voice set`
         #: changes a running link.
         self._follow_up_s = follow_up_s
@@ -362,6 +376,8 @@ class SatelliteLink:
             client.media_player_command(self._media_key, volume=float(self._volume))
         client.subscribe_voice_assistant(handle_start=self._on_start, handle_stop=self._on_stop,
                                          handle_audio=self._on_audio)
+        if self._media_key is not None and hasattr(client, "subscribe_states"):
+            client.subscribe_states(self._on_entity_state)
         self.connected = True
         self._set_status("connected" if self._media_key is not None else "connected, but it has no media player")
         if self.on_connected is not None:
@@ -369,6 +385,36 @@ class SatelliteLink:
                 await self.on_connected(self.name)
             except Exception as exc:  # noqa: BLE001 -- a hook that fails must not drop the board
                 self._log("warning", "voice.satellite_hook_failed", error=repr(exc))
+
+    def _on_entity_state(self, state) -> None:
+        """The board's media player, as it says it is. Music follows the
+        board: PLAYING or PAUSED is music (Sim's follow-ups stay shut, or
+        the song would be the next turn); IDLE is none; ANNOUNCING says
+        nothing about the music under it."""
+        if getattr(state, "key", None) != self._media_key or not hasattr(state, "state"):
+            return
+        name = str(getattr(state.state, "name", state.state)).lower()
+        self.board_media = name
+        if name in ("playing", "paused"):
+            if self._stopped_music_at and self._clock() - self._stopped_music_at < RESTOP_S:
+                self._log("info", "voice.satellite_music_restopped", state=name)
+                self._send_stop()
+                return
+            self.playing_media = True
+        elif name in ("idle", "off", "none"):
+            self.playing_media = False
+
+    def _send_stop(self) -> None:
+        if self._client is None or self._media_key is None:
+            return
+        with contextlib.suppress(Exception):
+            self._client.media_player_command(self._media_key, command=self._api.MediaPlayerCommand.STOP)
+
+    async def stop_media(self) -> None:
+        """Stop the MUSIC, on purpose ("stop the jazz"): STOP now, and again
+        if the board brings it back within `RESTOP_S`."""
+        self._stopped_music_at = self._clock()
+        await self.stop_playback()
 
     async def _disconnect(self) -> None:
         self.connected = False
@@ -633,6 +679,7 @@ class SatelliteLink:
         if self._client is None or self._media_key is None:
             raise RuntimeError(f"satellite {self.name} is not connected ({self.status})")
         self._client.media_player_command(self._media_key, media_url=url, announcement=False)
+        self._stopped_music_at = 0.0         # this music is wanted
         self.playing_media = True
 
     async def set_volume(self, level: float) -> None:

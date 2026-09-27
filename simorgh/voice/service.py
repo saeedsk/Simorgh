@@ -935,7 +935,7 @@ class Service:
             return
         try:
             if op == "stop":
-                await link.stop_playback()
+                await link.stop_media()
                 detail = f"stopped in {room}"
             elif op == "volume":
                 level = max(0.0, min(1.0, float(p.get("volume") or 0.0)))

@@ -758,6 +758,49 @@ class FollowUpModeIsPerBoard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(boards[1]["host"], "h.local")
 
 
+class MusicFollowsTheBoard(unittest.IsolatedAsyncioTestCase):
+    """Live, 2026-09-27: radio a previous Sim had started kept playing
+    after a restart, the new Sim thought nothing was playing and opened
+    follow-up after follow-up over it, and each follow-up's announcement
+    made the board resume the stream -- "the third time it resumed on its
+    own". The board's own media state now decides."""
+
+    class _State:
+        def __init__(self, key, name):
+            import enum
+
+            self.key = key
+            self.state = enum.Enum("S", [name.upper()])[name.upper()]
+
+    async def test_music_the_board_reports_shuts_the_follow_ups(self):
+        link, client, _p = _link()
+        stop, task = await _connected(link, client)
+        self.assertFalse(link.playing_media, "a fresh Sim knows of no music")
+        link._on_entity_state(self._State(7, "playing"))  # noqa: SLF001
+        self.assertTrue(link.playing_media)
+        link._on_entity_state(self._State(7, "announcing"))  # noqa: SLF001
+        self.assertTrue(link.playing_media, "an announcement says nothing about the music under it")
+        link._on_entity_state(self._State(7, "idle"))  # noqa: SLF001
+        self.assertFalse(link.playing_media)
+        link._on_entity_state(self._State(99, "playing"))  # noqa: SLF001 -- another entity
+        self.assertFalse(link.playing_media)
+        await _close(stop, task)
+
+    async def test_music_that_comes_back_after_a_stop_is_stopped_again(self):
+        link, client, _p = _link()
+        stop, task = await _connected(link, client)
+        await link.play_media("http://radio")
+        await link.stop_media()
+        stops = sum(1 for c in client.media if c.get("command") == "STOP")
+        link._on_entity_state(self._State(7, "playing"))  # noqa: SLF001 -- the board resumed it
+        self.assertEqual(sum(1 for c in client.media if c.get("command") == "STOP"), stops + 1)
+        self.assertFalse(link.playing_media)
+        await link.play_media("http://jazz")                 # wanted again: not stopped
+        link._on_entity_state(self._State(7, "playing"))  # noqa: SLF001
+        self.assertTrue(link.playing_media)
+        await _close(stop, task)
+
+
 class TheBoardDoesNotContinueOnItsOwn(unittest.IsolatedAsyncioTestCase):
     """2026-09-27, live: after one follow-up announcement the board kept
     ESPHome's `continue_conversation_` and started a new run every time a
