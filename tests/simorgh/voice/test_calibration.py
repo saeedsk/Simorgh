@@ -19,6 +19,7 @@ import math
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from simorgh.voice import calibration
@@ -484,3 +485,41 @@ class FarsiColloquialCopula(unittest.TestCase):
         from simorgh.voice.calibration import wer
 
         self.assertEqual(wer("به سوده بگو شام آماده‌ست.", "به سوده بگو شام آماده است"), 0.0)
+
+
+
+class ANoisyRoomOnPurpose(unittest.TestCase):
+    """The creator, 2026-09-27: "let's calibrate satellite sim in noisy
+    room". A noisy set lets the room's noise through -- that is what it is
+    for -- but the voice must still stand over it, and it is its own set:
+    the satellite's noisy lines are asked even when the laptop's quiet set
+    is complete."""
+
+    def test_the_noise_floor_does_not_refuse_a_noisy_take(self):
+        loud_room = replace(GOOD, noise_dbfs=-33.0, speech_dbfs=-24.0)          # 9 dB over a loud floor
+        self.assertTrue(any("noisy" in p for p in level_problems(loud_room, words=6)))
+        self.assertEqual(level_problems(loud_room, words=6, noisy=True), [])
+
+    def test_the_voice_must_still_stand_over_it(self):
+        drowned = replace(GOOD, noise_dbfs=-30.0, speech_dbfs=-27.0)            # 3 dB
+        self.assertIn("too little voice", " ".join(level_problems(drowned, words=6, noisy=True)))
+
+    def test_a_satellites_noisy_set_is_its_own(self):
+        import json
+        import tempfile
+
+        from simorgh.voice.calibration import MANIFEST, done_ids, person_folder
+        from simorgh.voice.calibration_script import lines
+
+        first = lines()[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            place = person_folder(tmp, "Saeed")
+            place.mkdir(parents=True)
+            (place / MANIFEST).write_text(json.dumps({"line_id": first.id, "script_text": first.text,
+                                                      "person": "Saeed", "device": "laptop"}) + "\n")
+            self.assertIn(first.id, done_ids(tmp, "Saeed"))
+            self.assertIn(first.id, done_ids(tmp, "Saeed", device="laptop"))
+            self.assertNotIn(first.id, done_ids(tmp, "Saeed", device="satellite", condition="noisy"))
+            run = CalibrationRun("Saeed", tmp, script=lines(), device="satellite", condition="noisy")
+            self.assertEqual(run.done_before, 0)
+            self.assertEqual(run.current.id, first.id)

@@ -740,6 +740,27 @@ class FollowUpModeIsPerBoard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(validate(payload, schema), [])
         self.assertIn("running", payload["rooms"][-1])
 
+    async def test_calibrating_on_a_board_records_through_its_room(self):
+        """"let's calibrate satellite sim in noisy room" (2026-09-27): the
+        takes come from that board's session, tagged with its device and
+        the noisy condition."""
+        import tempfile
+        from dataclasses import replace
+
+        service, _link = await self._board()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        service.config = replace(service.config, calibration_dir=tmp.name)
+        started = []
+        room = service._rooms["kitchen"]  # noqa: SLF001
+        room.calibrate = lambda run: started.append(run) or ""
+        service._room_tasks["kitchen"] = asyncio.get_running_loop().create_future()  # noqa: SLF001 -- "running"
+        self.addCleanup(service._room_tasks["kitchen"].cancel)  # noqa: SLF001
+        ok, said = await service._calibrate({"name": "Saeed", "value": "start room=kitchen noisy"}, book=None)  # noqa: SLF001
+        self.assertTrue(ok, said)
+        self.assertEqual((started[0].device, started[0].condition), ("kitchen", "noisy"))
+        self.assertIn("Recording through kitchen", said)
+
     def test_it_is_saved_in_that_boards_entry(self):
         import tempfile
         import tomllib

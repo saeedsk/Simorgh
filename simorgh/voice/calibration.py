@@ -72,6 +72,14 @@ MAX_CLIP_RATIO = 0.01
 #: or the speech less than `MIN_SNR_DB` above it.
 MAX_NOISE_DBFS = -35.0
 MIN_SNR_DB = 12.0
+#: A set recorded in a noisy room on purpose (`voice calibrate ... noisy`,
+#: the creator, 2026-09-27: "let's calibrate satellite sim in noisy room").
+#: The noise floor no longer refuses a take -- the noise is the point --
+#: but the voice must still stand this far above it, and the wrong-PERSON
+#: check keeps working at this fraction of its bar (noise pulls every
+#: score down).
+NOISY_MIN_SNR_DB = 6.0
+NOISY_SPEAKER_FACTOR = 0.6
 #: Cut off: the take ran into the turn's length limit, or its last
 #: 100 ms are still speech (the person was stopped mid-word).
 CUT_TAIL_S = 0.1
@@ -300,8 +308,9 @@ def measure(pcm: bytes, sample_rate: int = 16000) -> Levels:
                   tail_dbfs=max(tail) if tail else -120.0)
 
 
-def level_problems(levels: Levels, *, words: int, max_utterance_s: float = 0.0) -> list[str]:
-    """Why these levels make a bad take, in words for the person; [] if none."""
+def level_problems(levels: Levels, *, words: int, max_utterance_s: float = 0.0, noisy: bool = False) -> list[str]:
+    """Why these levels make a bad take, in words for the person; [] if none.
+    `noisy`: a set recorded in noise on purpose -- the floor is not a reason."""
     problems = []
     need = max(MIN_SPEECH_S, MIN_SPEECH_S_PER_WORD * max(1, words))
     if levels.speech_s < need:
@@ -316,11 +325,12 @@ def level_problems(levels: Levels, *, words: int, max_utterance_s: float = 0.0) 
                         "-- a little closer or a little louder")
     if levels.clipping > MAX_CLIP_RATIO:
         problems.append(f"clipping ({levels.clipping:.1%} of samples at full scale) -- a little further away")
-    if levels.noise_dbfs > MAX_NOISE_DBFS:
+    snr_bar = NOISY_MIN_SNR_DB if noisy else MIN_SNR_DB
+    if not noisy and levels.noise_dbfs > MAX_NOISE_DBFS:
         problems.append(f"the room is too noisy (noise floor {levels.noise_dbfs:.0f} dBFS, needs under "
                         f"{MAX_NOISE_DBFS:.0f})")
-    elif levels.speech_dbfs >= MIN_SPEECH_DBFS and levels.snr_db < MIN_SNR_DB:
-        problems.append(f"too little voice over the room ({levels.snr_db:.0f} dB, needs {MIN_SNR_DB:.0f})")
+    elif levels.speech_dbfs >= MIN_SPEECH_DBFS and levels.snr_db < snr_bar:
+        problems.append(f"too little voice over the room ({levels.snr_db:.0f} dB, needs {snr_bar:.0f})")
     return problems
 
 
@@ -373,12 +383,19 @@ def append_row(folder: Path | str, person: str, row: dict) -> None:
         handle.flush()
 
 
-def done_ids(folder: Path | str, person: str) -> set[str]:
+def done_ids(folder: Path | str, person: str, *, device: str | None = None, condition: str = "") -> set[str]:
     """The script lines this person already has a take for -- read from
     the same text they are scripted with today, so a line whose words
-    ever changed is asked again rather than silently mislabelled."""
+    ever changed is asked again rather than silently mislabelled.
+
+    With `device`, only takes from that microphone in that `condition`
+    ("" or "noisy") count: the satellite's noisy set is its own set, not
+    "done" because the laptop's quiet one is (2026-09-27)."""
     done = set()
     for row in read_rows(folder, person):
+        if device is not None and (str(row.get("device") or "") != device
+                                   or str(row.get("condition") or "") != condition):
+            continue
         line = by_id(str(row.get("line_id") or ""))
         if line is not None and row.get("script_text", line.text) == line.text:
             done.add(line.id)
@@ -499,7 +516,7 @@ class CalibrationRun:
 
     def __init__(self, person: str, folder: Path | str, *, script: Sequence[Line] = LINES, book=None,
                  score_bar: float | None = None, device: str = "", microphone: str = "", room: str = "",
-                 distance: str = "", aloud: bool = False, max_utterance_s: float = 0.0,
+                 distance: str = "", aloud: bool = False, max_utterance_s: float = 0.0, condition: str = "",
                  measure_fn: Callable[[bytes, int], Levels] = measure, clock: Callable[[], float] = time.time) -> None:
         self.person = person
         self.folder = Path(folder)
@@ -511,10 +528,12 @@ class CalibrationRun:
         self.room = room
         self.distance = distance
         self.aloud = aloud
+        #: "" or "noisy" (`NOISY_MIN_SNR_DB`): a set recorded in noise on purpose.
+        self.condition = condition
         self.max_utterance_s = max_utterance_s
         self._measure = measure_fn
         self._clock = clock
-        done = done_ids(self.folder, person)
+        done = done_ids(self.folder, person, device=device, condition=condition)
         self.done_before = sum(1 for line in self.script if line.id in done)
         self.todo: list[Line] = [line for line in self.script if line.id not in done]
         self.skipped: list[str] = []
@@ -566,7 +585,9 @@ class CalibrationRun:
         line = self.current
         assert line is not None, "nothing left to read"
         levels = self._measure(pcm, sample_rate)
-        reasons = level_problems(levels, words=len(normalise(line.text)), max_utterance_s=self.max_utterance_s)
+        noisy = self.condition == "noisy"
+        reasons = level_problems(levels, words=len(normalise(line.text)), max_utterance_s=self.max_utterance_s,
+                                 noisy=noisy)
         score, coherence_now, profile_takes = None, None, 0
         person = self.book.get(self.person) if self.book is not None else None
         if person is not None and person.embeddings and vector is not None:
@@ -580,7 +601,7 @@ class CalibrationRun:
             # scored ~0.4, his Farsi 0.19-0.39 (live, 2026-09-22), and a
             # Farsi line was refused as "not Saeed" at 0.19. The check is
             # there to catch the wrong PERSON, not an accent shift.
-            bar = self.score_bar * SPEAKER_BAR_FACTOR.get(line.language, 1.0)
+            bar = self.score_bar * SPEAKER_BAR_FACTOR.get(line.language, 1.0) * (NOISY_SPEAKER_FACTOR if noisy else 1.0)
             if score < bar:
                 reasons.append(f"that did not sound like {person.name} ({score:.2f} against a bar of "
                                f"{bar:.2f})")
@@ -613,7 +634,7 @@ class CalibrationRun:
             "profile_takes": profile_takes,
             "stt_engine": engine, "stt_transcript": transcript, "stt_language": heard_language,
             "stt_confidence": round(float(confidence), 4), "wer": round(error, 3),
-            "room": self.room, "distance": self.distance, "aloud": self.aloud,
+            "room": self.room, "distance": self.distance, "aloud": self.aloud, "condition": self.condition,
         }
         return reasons, row
 

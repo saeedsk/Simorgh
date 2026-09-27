@@ -1250,7 +1250,17 @@ class Service:
         known = member(name)
         name = known.name if known is not None else name
         folder = self.config.calibration_dir
-        session = self._session
+        # Which microphone: the laptop's, or a room's (`room=satellite`) --
+        # the satellite records through its own session, so its takes are
+        # its microphone in its room (the creator, 2026-09-27: "let's
+        # calibrate satellite sim in noisy room"). A running calibration is
+        # found wherever it is, for status/stop/keep.
+        extra = {k.lower(): v for k, _, v in (w.partition("=") for w in options if "=" in w)}
+        wanted_room = str(extra.get("room") or "").strip()
+        room_key = next((d for d in self._rooms if d.lower() == wanted_room.lower()), None)
+        sessions = [s for s in (self._session, *self._rooms.values()) if s is not None]
+        running = next((s for s in sessions if getattr(s, "_calibrating", None) is not None), None)
+        session = running or (self._rooms[room_key] if room_key else self._session)
         live = getattr(session, "_calibrating", None) if session is not None else None
         if verb == "status":
             text = summary(folder, name)
@@ -1271,7 +1281,11 @@ class Service:
             if live is None:
                 return False, "no calibration is running -- `voice calibrate` starts one"
             return True, await session.calibration_control(verb)
-        if session is None or not getattr(session, "run", None) or self._loop_task is None:
+        if room_key:
+            task = self._room_tasks.get(room_key)
+            if task is None or task.done():
+                return False, f"{room_key} is not listening -- `voice on`, and check `voice status`"
+        elif session is None or not getattr(session, "run", None) or self._loop_task is None:
             return False, "the microphone is not listening -- `voice on` first"
         if live is not None:
             return False, (f"already calibrating {live.person} ({live.progress()}) -- "
@@ -1280,14 +1294,16 @@ class Service:
         short = "short" in [w.lower() for w in options]
         language = next((code for w in options for code in ("en", "fa")
                          if w.lower() in (code, {"en": "english", "fa": "farsi"}[code])), "")
-        extra = {k.lower(): v for k, _, v in (w.partition("=") for w in options if "=" in w)}
+        noisy = "noisy" in [w.lower() for w in options]
         script = lines(language=language, short=short)
         mic = getattr(session, "_mic", None)
         run = CalibrationRun(
             name, folder, script=script, book=book, score_bar=getattr(book, "threshold", None),
-            device=self.config.device, microphone=self._input_device_name() or getattr(mic, "name", "") or "",
+            device=room_key or self.config.device,
+            microphone=(f"satellite {room_key}" if room_key else
+                        self._input_device_name() or getattr(mic, "name", "") or ""),
             room=extra.get("room", ""), distance=extra.get("distance", ""), aloud=aloud,
-            max_utterance_s=float(self.config.max_turn_ms) / 1000.0)
+            max_utterance_s=float(self.config.max_turn_ms) / 1000.0, condition="noisy" if noisy else "")
         if run.finished:
             return True, (f"{name} already has every line of this set -- {summary(folder, name, script)}. "
                           f"Nothing to record; the takes are in {person_folder(folder, name)}.")
@@ -1297,6 +1313,14 @@ class Service:
         resumed = f"resuming: {run.done_before} line(s) already kept are not asked again. " if run.done_before else ""
         heard = ("I will read each line aloud first; wait for me to finish. " if aloud else
                  "I stay silent: read each line from the screen, in your normal voice. ")
+        if noisy:
+            heard += ("Noisy set: the room's noise does not refuse a take, but your voice must stand over it. ")
+        if room_key:
+            listens = self._mode_for(room_key) != "off" if room_key in self._satellites else True
+            heard += (f"Recording through {room_key}. " + (
+                "Follow Up Mode keeps it listening between lines. " if listens else
+                f"Follow Up Mode is off there, so say the wake word before each line "
+                f"(`followup on {room_key}` saves that). "))
         detail = (f"calibrating {name} -- {summary(folder, name, script)}. {resumed}{heard}"
                   f"A take that is too short, quiet, clipped, noisy, not your voice or misread is refused "
                   f"at once with the reason. Say \"skip\" to leave a line for later, \"stop calibrating\" "
