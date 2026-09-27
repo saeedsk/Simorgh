@@ -1,0 +1,396 @@
+"""A room satellite -- ESPHome voice hardware -- as a microphone and a speaker.
+
+Stage 13 item 2 (docs/plan/stage-13-room-satellites.md). The creator's
+first satellite, a reSpeaker XVF3800 with a XIAO ESP32S3, arrived on
+2026-09-25; everything below that looks arbitrary was measured on it.
+
+The board runs its own wake word. Until it fires, nothing leaves the
+room -- the privacy line this whole design keeps. When it fires, the
+board opens a "run" over the ESPHome native API and streams 16 kHz mono
+s16le, the format `api.py` already speaks, so nothing transcodes on the
+way in. Sim's own endpointer decides when the person has finished,
+exactly as it does at the laptop; the board does not endpoint. The reply
+goes back as a URL the board's media player fetches (it will not take
+audio down the API socket in this firmware), and the board plays FLAC
+only: WAV at any rate came back "Could not determine audio file type"
+and the fetch was dropped (2026-09-26).
+
+`SatelliteMicrophone` and `SatelliteSpeaker` sit behind the same seams as
+`RemoteMicrophone`/`RemoteSpeaker` (voice/remote.py), so `VoiceSession`
+does not know a satellite from a laptop. `SatelliteLink` owns the one
+connection both of them use.
+
+The rules learnt on the device, each of which is a line below:
+
+- ONE client may hold a satellite's voice assistant. A second is refused
+  on the device ("Multiple API Clients attempting to connect to Voice
+  Assistant") and the first is dropped. Home Assistant, a stray probe,
+  or a second Sim would all fight for it; the link says so by name and
+  backs off rather than looping.
+- The run-end race. `RUN_END` sent while the board is still stopping its
+  microphone is ignored; the board then sits in AWAITING_RESPONSE for
+  ever, and every later wake word STOPS a run instead of starting one.
+  So `RUN_END` waits at least `RUN_END_GAP_S` after `STT_VAD_END`.
+- The board's PLAYING/IDLE state lags real playback by up to ~10 s. A
+  reply lasts as long as its audio, never as long as the board says.
+- During an announcement the stock firmware's wake word only stops the
+  playback (item 5 changes the firmware); here that arrives as
+  `handle_stop`, and the speaker stops keeping time.
+
+Optional dependency: `aioesphomeapi`, imported only when a satellite is
+configured, and refused by name when missing -- the rule every voice
+engine follows. Tests hand the link a fake client instead.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import time
+from dataclasses import dataclass
+
+from .api import Audio
+from .remote import FRAME_BYTES, FRAME_MS
+
+#: The measured minimum between `STT_VAD_END` and `RUN_END` (see above).
+RUN_END_GAP_S = 1.0
+#: A run nobody ended -- a session muted mid-turn, a turn the session
+#: never took -- is closed after this long, so the board is never left
+#: waiting for ever.
+MAX_RUN_S = 60.0
+#: A reply is fetched over HTTP before it plays; this much is added to
+#: the audio's own length when keeping its time.
+FETCH_LEAD_S = 0.3
+#: Backoff between reconnects, doubling to this ceiling.
+MAX_BACKOFF_S = 60.0
+#: Frames kept when the session falls behind (~15 s at 30 ms).
+MAX_QUEUED_FRAMES = 500
+
+_SILENCE = b"\x00" * FRAME_BYTES
+_MISSING = ("satellites need the ESPHome API client: `pip install aioesphomeapi` "
+            "(the voice subsystem runs without it; only [[voice.satellites]] needs it)")
+
+
+class SatelliteUnavailable(RuntimeError):
+    """The optional dependency is missing, named."""
+
+
+# ----------------------------------------------------------------- engines
+class SatelliteMicrophone:
+    """The satellite's audio, re-framed to 30 ms, with paced silence in
+    between runs -- so to the session it is a quiet room, not a stream
+    that stops. A session that saw no frames would never check its stop
+    event and never run the timers that end a turn."""
+
+    def __init__(self, name: str) -> None:
+        self.name = f"satellite:{name}"
+        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=MAX_QUEUED_FRAMES)
+        self._partial = bytearray()
+        self._on_state = None
+
+    def feed(self, pcm: bytes) -> None:
+        """Audio from the board, any chunk size; kept as whole frames."""
+        self._partial += pcm
+        while len(self._partial) >= FRAME_BYTES:
+            frame = bytes(self._partial[:FRAME_BYTES])
+            del self._partial[:FRAME_BYTES]
+            if self._queue.full():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    self._queue.get_nowait()          # the oldest goes: a late turn beats a stuck one
+            self._queue.put_nowait(frame)
+
+    def clear(self) -> None:
+        """A new run: nothing of the last one leaks into it."""
+        self._partial.clear()
+        while not self._queue.empty():
+            self._queue.get_nowait()
+
+    async def stream(self, *, max_seconds: float = 0.0):
+        served = 0.0
+        while True:
+            try:
+                frame = await asyncio.wait_for(self._queue.get(), timeout=FRAME_MS / 1000.0)
+            except asyncio.TimeoutError:
+                frame = _SILENCE
+            yield frame
+            served += FRAME_MS / 1000.0
+            if max_seconds and served >= max_seconds:
+                return
+
+    async def capture(self, *, max_seconds: float, endpointer) -> Audio:
+        pcm = bytearray()
+        async for frame in self.stream(max_seconds=max_seconds):
+            pcm += frame
+            if endpointer.feed(frame):
+                break
+        return Audio(bytes(pcm))
+
+    def on_state(self, state: str) -> None:
+        """The session's turn state (`VoiceSession._announce`): how the
+        board learns that Sim has decided the person finished."""
+        if self._on_state is not None:
+            self._on_state(state)
+
+
+class SatelliteSpeaker:
+    """Sim's voice to the satellite, keeping the turn's time.
+
+    `publish(audio) -> url` puts the audio where the board can fetch it
+    (item 3's `/api/room/speech`); the link tells the board to play it.
+    Then this waits the audio's own length -- the speaking flag, the echo
+    gate and barge-in all follow it, as they follow `RemoteSpeaker`."""
+
+    def __init__(self, name: str, link: "SatelliteLink", publish) -> None:
+        self.name = f"satellite:{name}"
+        self._link = link
+        self._publish = publish
+        self._stop: asyncio.Event | None = None
+
+    async def play(self, audio: Audio) -> None:
+        self._stop = asyncio.Event()
+        try:
+            url = await self._publish(audio)
+            await self._link.play_url(url)
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._stop.wait(), timeout=audio.seconds + FETCH_LEAD_S)
+        finally:
+            self._stop = None
+
+    async def stop(self) -> None:
+        if self._stop is not None:
+            self._stop.set()
+        await self._link.stop_playback()
+
+    def interrupted(self) -> None:
+        """The board stopped the reply itself (its wake word, mid-reply)."""
+        if self._stop is not None:
+            self._stop.set()
+
+
+# -------------------------------------------------------------------- link
+@dataclass
+class _Run:
+    started_at: float
+    wake_word: str = ""
+    vad_ended_at: float = 0.0
+    replied: bool = False
+    ended: bool = False
+
+
+def _default_client(host: str, port: int, key: str):
+    try:
+        import aioesphomeapi
+    except ImportError as exc:  # pragma: no cover -- exercised by the refusal test with a patched import
+        raise SatelliteUnavailable(_MISSING) from exc
+    return aioesphomeapi.APIClient(host, port, None, noise_psk=key), aioesphomeapi
+
+
+class SatelliteLink:
+    """One satellite's connection: the voice assistant, its runs, and the
+    media player the replies play on.
+
+    `accepting()` says whether the room's session is listening (voice on,
+    not muted). A wake word while it is not is answered with an error
+    event, which puts the board straight back to idle instead of leaving
+    it waiting for a reply nobody will send."""
+
+    def __init__(self, name: str, host: str, key: str, *, publish, port: int = 6053, volume: float | None = None,
+                 client_factory=None, accepting=lambda: True, logger=None, clock=time.monotonic) -> None:
+        self.name = name
+        self.host = host
+        self._key = key
+        self._port = port
+        self._volume = volume
+        self._factory = client_factory or _default_client
+        self._accepting = accepting
+        self._logger = logger
+        self._clock = clock
+        self.microphone = SatelliteMicrophone(name)
+        self.speaker = SatelliteSpeaker(name, self, publish)
+        self.microphone._on_state = self._on_session_state
+        self._client = None
+        self._api = None
+        self._media_key: int | None = None
+        self._run: _Run | None = None
+        self._ender: asyncio.Task | None = None
+        self.connected = False
+        self.status = "not started"
+        self.runs = 0
+        self.last_wake_at = 0.0
+
+    # ------------------------------------------------------------ logging
+    def _log(self, level: str, event: str, **fields) -> None:
+        if self._logger is not None:
+            getattr(self._logger, level)(event, satellite=self.name, **fields)
+
+    def _event(self, name: str, data: dict | None = None) -> None:
+        if self._client is None:
+            return
+        kind = getattr(self._api.VoiceAssistantEventType, name)
+        self._client.send_voice_assistant_event(kind, data)
+
+    # --------------------------------------------------------- connection
+    async def run(self, stop: asyncio.Event) -> None:
+        """Hold the connection until `stop`, reconnecting with backoff.
+        Each state change is logged once, not once per retry."""
+        backoff = 1.0
+        while not stop.is_set():
+            dropped = asyncio.Event()
+            try:
+                await self._connect(dropped)
+                backoff = 1.0
+                waiter = asyncio.create_task(dropped.wait())
+                stopper = asyncio.create_task(stop.wait())
+                await asyncio.wait({waiter, stopper}, return_when=asyncio.FIRST_COMPLETED)
+                for task in (waiter, stopper):
+                    task.cancel()
+            except SatelliteUnavailable as exc:
+                self._set_status(str(exc), "error")
+                return                                   # retrying cannot install a package
+            except Exception as exc:  # noqa: BLE001 -- a satellite that is unplugged is not a crash
+                why = str(exc) or type(exc).__name__
+                if "Multiple API Clients" in why:
+                    why = ("another client holds this satellite's voice assistant (Home Assistant, a probe, "
+                           "a second Sim?) -- only one may")
+                self._set_status(f"unreachable: {why}", "warning")
+            finally:
+                await self._disconnect()
+            if stop.is_set():
+                break
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=backoff)
+            backoff = min(MAX_BACKOFF_S, backoff * 2)
+
+    def _set_status(self, status: str, level: str = "info") -> None:
+        if status != self.status:
+            self.status = status
+            self._log(level, "voice.satellite", status=status)
+
+    async def _connect(self, dropped: asyncio.Event) -> None:
+        client, api = self._factory(self.host, self._port, self._key)
+        self._client, self._api = client, api
+
+        async def _on_stop(expected_disconnect: bool = False) -> None:
+            dropped.set()
+
+        await client.connect(on_stop=_on_stop, login=True)
+        entities, _services = await client.list_entities_services()
+        players = [e for e in entities if type(e).__name__ == "MediaPlayerInfo"]
+        self._media_key = players[0].key if players else None
+        if self._media_key is not None and self._volume is not None:
+            client.media_player_command(self._media_key, volume=float(self._volume))
+        client.subscribe_voice_assistant(handle_start=self._on_start, handle_stop=self._on_stop,
+                                         handle_audio=self._on_audio)
+        self.connected = True
+        self._set_status("connected" if self._media_key is not None else "connected, but it has no media player")
+
+    async def _disconnect(self) -> None:
+        self.connected = False
+        if self._ender is not None and not self._ender.done():
+            self._ender.cancel()
+        self._run = None
+        client, self._client = self._client, None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+
+    # -------------------------------------------------------------- runs
+    async def _on_start(self, conversation_id: str, flags: int, audio_settings, wake_word: str | None):
+        """The board heard its wake word. 0 = stream over this connection."""
+        if not self._accepting():
+            self._event("VOICE_ASSISTANT_ERROR", {"code": "not-listening", "message": "Sim is not listening"})
+            self._log("info", "voice.satellite_wake_declined", wake_word=wake_word or "")
+            return None
+        self.microphone.clear()
+        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "")
+        self.runs += 1
+        self.last_wake_at = time.time()
+        self._event("VOICE_ASSISTANT_RUN_START")
+        self._event("VOICE_ASSISTANT_STT_START")
+        self._event("VOICE_ASSISTANT_STT_VAD_START")
+        self._log("info", "voice.satellite_wake", wake_word=wake_word or "")
+        self._watch(self._run)
+        return 0
+
+    async def _on_audio(self, data: bytes, _extra=None) -> None:
+        run = self._run
+        if run is not None and not run.ended and not run.vad_ended_at:
+            self.microphone.feed(data)
+
+    async def _on_stop(self, abort: bool) -> None:
+        """The board ended the run itself: its wake word again (to stop a
+        reply), or a microphone that gave up."""
+        run = self._run
+        if run is not None:
+            run.ended = True
+            self._run = None
+        self.speaker.interrupted()
+
+    def _watch(self, run: _Run) -> None:
+        async def _expire() -> None:
+            await asyncio.sleep(MAX_RUN_S)
+            if self._run is run and not run.ended:
+                self._log("warning", "voice.satellite_run_expired", seconds=MAX_RUN_S)
+                await self._end_run(run)
+        asyncio.get_running_loop().create_task(_expire())
+
+    def _on_session_state(self, state: str) -> None:
+        """The session's turn state, mapped onto the board's run."""
+        run = self._run
+        if run is None or run.ended:
+            return
+        if state == "thinking" and not run.vad_ended_at:
+            run.vad_ended_at = self._clock()
+            self._event("VOICE_ASSISTANT_STT_VAD_END")
+            self._event("VOICE_ASSISTANT_STT_END", {"text": ""})
+            self._event("VOICE_ASSISTANT_INTENT_START")
+        elif state in ("listening", "idle") and (run.vad_ended_at or run.replied):
+            # The reply is over (or there was none): end the run -- but
+            # never inside the gap the board needs (the run-end race).
+            if self._ender is None or self._ender.done():
+                self._ender = asyncio.get_running_loop().create_task(self._end_run(run))
+
+    async def _end_run(self, run: _Run) -> None:
+        if not run.vad_ended_at:
+            run.vad_ended_at = self._clock()
+            self._event("VOICE_ASSISTANT_STT_VAD_END")
+        wait = RUN_END_GAP_S - (self._clock() - run.vad_ended_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        if run.ended:
+            return
+        if not run.replied:
+            self._event("VOICE_ASSISTANT_INTENT_END")
+        self._event("VOICE_ASSISTANT_RUN_END")
+        run.ended = True
+        if self._run is run:
+            self._run = None
+
+    # ---------------------------------------------------------- playback
+    async def play_url(self, url: str) -> None:
+        """Inside a run, the first piece of a reply is the run's answer
+        (`TTS_END` carries it and the board's LEDs follow); every other
+        piece -- the rest of a long reply, or Sim speaking unprompted --
+        is an announcement."""
+        if self._client is None:
+            raise RuntimeError(f"satellite {self.name} is not connected ({self.status})")
+        run = self._run
+        if run is not None and not run.ended and not run.replied:
+            run.replied = True
+            self._event("VOICE_ASSISTANT_INTENT_END")
+            self._event("VOICE_ASSISTANT_TTS_START", {"text": ""})
+            self._event("VOICE_ASSISTANT_TTS_END", {"url": url})
+            return
+        if self._media_key is None:
+            raise RuntimeError(f"satellite {self.name} has no media player to speak on")
+        self._client.media_player_command(self._media_key, media_url=url, announcement=True)
+
+    async def stop_playback(self) -> None:
+        if self._client is None or self._media_key is None:
+            return
+        with contextlib.suppress(Exception):
+            self._client.media_player_command(self._media_key, command=self._api.MediaPlayerCommand.STOP)
+
+
+__all__ = ["MAX_RUN_S", "RUN_END_GAP_S", "SatelliteLink", "SatelliteMicrophone", "SatelliteSpeaker",
+           "SatelliteUnavailable"]

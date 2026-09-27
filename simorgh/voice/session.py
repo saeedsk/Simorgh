@@ -524,6 +524,11 @@ class VoiceSession:
             getattr(self._logger, level, self._logger.info)(event, **fields)
 
     async def _announce(self, state: str) -> None:
+        # A satellite's microphone (voice/satellite.py) is told too: the
+        # board learns from this that Sim decided the person finished.
+        on_state = getattr(self._mic, "on_state", None)
+        if on_state is not None:
+            on_state(state)
         await self._pipeline._publish(topics.VOICE_LISTENING, {  # noqa: SLF001 -- the same announcement
             "state": state, "device": self._config.device, "turn": self.turns.turn_id})
 
