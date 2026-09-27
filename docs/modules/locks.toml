@@ -35,12 +35,6 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
-[locks.guardian]
-by = "opus-main"
-task = "a new test file under a protected package's tests may be created, never edited"
-since = "2026-09-26T20:54:44+00:00"
-until = "2026-09-27T04:54:44+00:00"
-
 [locks.interface]
 by = "opus-main"
 task = "forget can reach a wrong consolidated FACT, not only episodic turns"
