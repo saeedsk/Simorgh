@@ -29,6 +29,12 @@ task = "voice replay harness: calibration takes through the real listening path"
 since = "2026-09-22T13:54:29+00:00"
 until = "2026-09-22T21:54:29+00:00"
 
+[locks.execution]
+by = "opus-main"
+task = "test: run_shell is allowed in a spoken turn (642eddc1)"
+since = "2026-09-27T17:17:43+00:00"
+until = "2026-09-28T01:17:43+00:00"
+
 [locks.growth]
 by = "opus-main"
 task = "diagnose sees real task failures"
