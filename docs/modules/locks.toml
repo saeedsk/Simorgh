@@ -37,6 +37,6 @@ until = "2026-09-23T04:53:16+00:00"
 
 [locks.voice]
 by = "opus-main"
-task = "a word after a dash is not a respelling; Sim's own echo"
-since = "2026-09-27T23:12:25+00:00"
-until = "2026-09-28T07:12:25+00:00"
+task = "the phone's voice is said sentence by sentence"
+since = "2026-09-27T23:59:16+00:00"
+until = "2026-09-28T07:59:16+00:00"
