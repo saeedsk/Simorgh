@@ -51,6 +51,8 @@ _PRODUCES = (
     topics.VOICE_STATUS_REPLY, topics.VOICE_CONTROL_REPLY, topics.VOICE_SPEAK_REPLY,
     topics.VOICE_LISTEN_REPLY, topics.VOICE_VOICES_REPLY, topics.VOICE_DEVICES_REPLY,
     topics.VOICE_MODELS_REPLY, topics.VOICE_BENCH_REPLY,
+    # A room satellite's reply piece, for Interface to serve (stage 13).
+    topics.VOICE_ROOM_SPEECH,
 )
 
 
@@ -159,7 +161,7 @@ class Service:
     produces = _PRODUCES
 
     def __init__(self, config: Config | None = None, *, microphone=None, speaker=None,
-                 recogniser=None, synthesiser=None) -> None:
+                 recogniser=None, synthesiser=None, satellite_client=None) -> None:
         self._config_from_caller = config
         self.config = config or Config()
         self._ctx: Context | None = None
@@ -178,6 +180,14 @@ class Service:
         # synthesiser, the speaker book and the pipeline's bus side.
         self._rooms: dict = {}
         self._room_tasks: dict[str, asyncio.Task] = {}
+        # The satellites that feed those rooms (voice/satellite.py), and
+        # the tasks that hold their connections.
+        self._satellites: dict = {}
+        self._satellite_tasks: list[asyncio.Task] = []
+        self._satellite_stop = asyncio.Event()
+        #: `(host, port, key) -> (client, api module)`; tests pass a fake,
+        #: everything else gets `aioesphomeapi` (voice/satellite.py).
+        self._satellite_client = satellite_client
         self._enabled = False
         self._muted = False
         # `voice off` / `voice mute`, typed or said: silent as well as
@@ -220,6 +230,8 @@ class Service:
             ok, why = await self._turn_on()
             if not ok:
                 ctx.logger.warning("voice.not_enabled", reason=why)
+        if self.config.satellites:
+            await self._start_satellites()
 
     @staticmethod
     def _interactive() -> bool:
@@ -235,6 +247,11 @@ class Service:
             return False
 
     async def stop(self) -> None:
+        self._satellite_stop.set()
+        for task in self._satellite_tasks:
+            task.cancel()
+        await asyncio.gather(*self._satellite_tasks, return_exceptions=True)
+        self._satellite_tasks = []
         await self._turn_off()
         if self._pipeline is not None:
             await self._pipeline.stop()
@@ -525,6 +542,83 @@ class Service:
             self._start_room(device)
         return session
 
+    async def _start_satellites(self) -> None:
+        """`[[voice.satellites]]`: connect each board and give its room a
+        session. A board that cannot start is a named problem in
+        `voice status`, never a failed boot -- the laptop goes on
+        listening either way."""
+        from .satellite import SatelliteLink
+
+        for entry in self.config.satellites:
+            name = str(entry.get("name") or "").strip()
+            host = str(entry.get("host") or "").strip()
+            key_env = str(entry.get("key_env") or "").strip()
+            key = (self._ctx.secrets.get(key_env) if (self._ctx is not None and key_env) else None) or ""
+            if not name or not host:
+                self._problems.append(f"satellite {entry!r}: needs a name and a host")
+                continue
+            if not key:
+                self._problems.append(
+                    f"satellite {name}: no key -- put {key_env or 'its ESPHome API key'} in secrets.toml and list it "
+                    f"in `[voice] secrets`")
+                continue
+
+            async def _publish(audio, *, device=name, host=host):
+                return await self._publish_room_speech(device, host, audio)
+
+            link = SatelliteLink(name, host, key, publish=_publish, port=int(entry.get("port") or 6053),
+                                 volume=float(entry["volume"]) if entry.get("volume") is not None else None,
+                                 accepting=lambda: self._enabled and not self._muted,
+                                 client_factory=self._satellite_client,
+                                 logger=self._ctx.logger if self._ctx else None)
+            try:
+                await self.add_room(name, microphone=link.microphone, speaker=link.speaker)
+            except (ValueError, RuntimeError) as exc:
+                self._problems.append(f"satellite {name}: {exc}")
+                continue
+            self._satellites[name] = link
+            self._satellite_tasks.append(asyncio.create_task(link.run(self._satellite_stop),
+                                                             name=f"voice-satellite-{name}"))
+
+    async def _publish_room_speech(self, device: str, host: str, audio) -> str:
+        """One reply piece for a satellite: FLAC (the board plays nothing
+        else), into the ledger, announced for Interface to serve at
+        `/api/room/speech`. Returns the URL the board fetches."""
+        import shutil
+        import urllib.parse
+
+        from .audio import wav_bytes
+
+        if self._ctx is None or self._ctx.ledger is None:
+            raise RuntimeError("no ledger to hold the reply for the satellite")
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("satellites need ffmpeg to make FLAC (`brew install ffmpeg`)")
+        proc = await asyncio.create_subprocess_exec(
+            ffmpeg, "-loglevel", "error", "-i", "pipe:0", "-ar", "48000", "-ac", "1", "-f", "flac", "pipe:1",
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        flac, err = await proc.communicate(wav_bytes(audio))
+        if proc.returncode != 0 or not flac:
+            raise RuntimeError(f"ffmpeg could not make FLAC: {err.decode(errors='replace')[:200]}")
+        ref = await self._ctx.ledger.put_blob(flac, content_type="audio/flac")
+        await self._ctx.bus.publish(self._ctx.bus.new(topics.VOICE_ROOM_SPEECH, {
+            "ref": ref, "seconds": round(audio.seconds, 3), "device": device, "content_type": "audio/flac"}))
+        return f"{self._reply_base(host)}/api/room/speech?ref={urllib.parse.quote(str(ref), safe='')}"
+
+    def _reply_base(self, host: str) -> str:
+        """Interface's address as the satellite sees it."""
+        if self.config.satellite_reply_url:
+            return self.config.satellite_reply_url.rstrip("/")
+        import socket
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect((socket.gethostbyname(host), 6053))    # no packet is sent: it picks the route
+                address = probe.getsockname()[0]
+        except OSError:
+            address = socket.gethostname()
+        return f"http://{address}:8765"
+
     async def remove_room(self, device: str) -> None:
         """Stop and forget one room's session (a satellite went away)."""
         self._rooms.pop(device, None)
@@ -592,6 +686,10 @@ class Service:
                 out["breaches"] = {day: dict(counts) for day, counts in session.stats.breaches.items()}
             if self.config.diagnostics and session.stats.last_metrics:
                 out["metrics"] = dict(session.stats.last_metrics)
+        if self._satellites:
+            out["satellites"] = {name: {"host": link.host, "status": link.status, "connected": link.connected,
+                                        "runs": link.runs, "last_wake_at": link.last_wake_at}
+                                 for name, link in self._satellites.items()}
         if self._rooms:
             out["rooms"] = {
                 device: {"state": room.state, "turns": room.stats.turns, "partial": room.partial,

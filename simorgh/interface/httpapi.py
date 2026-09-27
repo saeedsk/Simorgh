@@ -173,6 +173,12 @@ _UNAUTHORIZED = json.dumps({
 RouteHandler = Callable[[dict, bytes, dict], Awaitable[tuple[int, bytes, str]]]
 
 
+#: How long a room satellite's reply piece may be fetched (stage 13 item 3).
+#: The board fetches within a second of being told; two minutes covers a
+#: long reply's later pieces and nothing more.
+ROOM_SPEECH_TTL_S = 120.0
+
+
 @dataclass(frozen=True)
 class Route:
     method: str
@@ -275,6 +281,12 @@ class HttpApi:
         self._tv_sub = None
         self._tv_speech: deque = deque(maxlen=40)   # (seq, ref, seconds, at): Sim's voice for the page
         self._tv_speech_sub = None
+        # A room satellite's reply pieces (stage 13 item 3): (ref,
+        # content_type, at). Served without a token, because the board's
+        # media player cannot carry one -- so ONLY a ref Voice announced,
+        # only for `ROOM_SPEECH_TTL_S`, and nothing else from the ledger.
+        self._room_speech: deque = deque(maxlen=40)
+        self._room_speech_sub = None
         # The glass dashboard's collector (interface/dashfeeds.py), or
         # None when `[interface] dash_feeds = false`: `/api/dash/data`
         # then answers an empty snapshot that says the feeds are off.
@@ -387,8 +399,23 @@ class HttpApi:
                 return 404, b"no such speech", "text/plain; charset=utf-8"
             return 200, data, "audio/wav"
 
+        async def _room_speech(query, _body, _headers):
+            ref = self._q1(query, "ref", "") or ""
+            now = self._now()
+            known = next((kind for r, kind, at in self._room_speech if r == ref and now - at < ROOM_SPEECH_TTL_S), None)
+            if not ref or known is None or self._ledger is None:
+                return 404, b"no such speech", "text/plain; charset=utf-8"
+            try:
+                data = await self._ledger.get_blob(ref)
+            except Exception:  # noqa: BLE001
+                return 404, b"no such speech", "text/plain; charset=utf-8"
+            return 200, data, known
+
         self.register_route("GET", "/", _page, auth=False)
         self.register_route("GET", "/api/status", _status, auth=False)
+        # No token: the satellite's media player fetches it and cannot send
+        # one. What stands in for the token is the list above.
+        self.register_route("GET", "/api/room/speech", _room_speech, auth=False)
         self.register_route("GET", "/tv", _tv, auth=False)
 
         async def _dash(_query, _body, _headers):
@@ -1231,6 +1258,7 @@ class HttpApi:
         self._turn_sub = await self._bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._tv_sub = await self._bus.subscribe(topics.TV_STATE, self._on_tv_state)
         self._tv_speech_sub = await self._bus.subscribe(topics.TV_SPEECH, self._on_tv_speech)
+        self._room_speech_sub = await self._bus.subscribe(topics.VOICE_ROOM_SPEECH, self._on_room_speech)
         self._dash_sub = await self._bus.subscribe(topics.DASH_STATE, self._on_dash_state)
         self._dash_key_sub = await self._bus.subscribe(topics.UI_DASH_KEY, self._on_dash_key)
         if self._feeds is not None:
@@ -1273,6 +1301,9 @@ class HttpApi:
         if self._turn_sub is not None:
             await self._turn_sub.unsubscribe()
             self._turn_sub = None
+        if self._room_speech_sub is not None:
+            await self._room_speech_sub.unsubscribe()
+            self._room_speech_sub = None
         for sub in getattr(self, "_activity_subs", []):
             await sub.unsubscribe()
         self._activity_subs = []
@@ -1747,6 +1778,12 @@ class HttpApi:
                 return {"text": "", "floor": True, "error": "no response in time"}
         finally:
             self._pending_chats.pop(session_id, None)
+
+    async def _on_room_speech(self, message) -> None:
+        p = message.payload
+        ref = str(p.get("ref") or "")
+        if ref:
+            self._room_speech.append((ref, str(p.get("content_type") or "audio/flac"), self._now()))
 
     async def _on_tv_speech(self, message) -> None:
         p = message.payload

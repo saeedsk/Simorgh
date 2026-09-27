@@ -388,6 +388,18 @@ class Config:
     # The device name a turn is recorded under (satellites will bring
     # their own).
     device: str = "laptop"
+    # Room satellites (stage 13, voice/satellite.py): `[[voice.satellites]]`
+    # tables, each `name` (the room, and its device name), `host`,
+    # `key_env` (the environment name of its ESPHome API encryption key;
+    # the key itself goes in secrets.toml, and `key_env` must also be
+    # listed in `[voice] secrets`), optional `port` (6053) and `volume`.
+    # Empty: no satellite, and `aioesphomeapi` is never imported.
+    satellites: tuple = ()
+    # Where a satellite fetches Sim's reply: Interface's address as the
+    # board sees it. "" = this machine's LAN address toward the board, on
+    # Interface's default port 8765 -- set it if `[interface] http_port`
+    # or `http_host` differ. A loopback-only Interface cannot be reached.
+    satellite_reply_url: str = ""
     # Where whisper.cpp / Kokoro models live when a model is a bare name.
     model_dir: str = "workspace/voice/models"
     # Capture and playback paths: auto | sounddevice | ffmpeg | fake, and
@@ -411,6 +423,8 @@ class Config:
             return cls()
         known = set(cls.__dataclass_fields__)
         values = {k: v for k, v in dict(mapping).items() if k in known}
+        if "satellites" in values:
+            values["satellites"] = tuple(dict(entry) for entry in (values["satellites"] or ()) if isinstance(entry, Mapping))
         if isinstance(values.get("enabled"), str) and values["enabled"].strip().lower() != "auto":
             values["enabled"] = values["enabled"].strip().lower() in ("on", "true", "yes", "1")
         return cls(**values)

@@ -380,6 +380,11 @@ VOICE_BENCH_REPLY = "voice.bench.reply"
 VOICE_LISTENING = "voice.listening"                # the mic state changed (listening | idle | muted)
 VOICE_TRANSCRIPT = "voice.transcript"              # what was heard, before Sim answers
 VOICE_SPOKEN = "voice.spoken"                      # what was said aloud
+# A reply piece for a room satellite (stage 13 item 3): the audio is a
+# ledger blob, and Interface serves it at `/api/room/speech?ref=` for the
+# board to fetch -- the satellite cannot carry a token, the way the TV's
+# Cast receiver cannot (TV_SPEECH is the same shape for the TV page).
+VOICE_ROOM_SPEECH = "voice.room.speech"
 
 CATALOG: tuple[str, ...] = tuple(
     value for name, value in sorted(globals().items())

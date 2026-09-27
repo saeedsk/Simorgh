@@ -1,0 +1,30 @@
+{
+  "$id": "https://simorgh.local/schema/voice.room.speech.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "One piece of Sim's reply for a room satellite, as a ledger blob (FLAC: the board plays nothing else). Interface serves a listed ref at /api/room/speech for two minutes.",
+  "properties": {
+    "content_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "device": {
+      "type": "string"
+    },
+    "ref": {
+      "type": "string"
+    },
+    "seconds": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "ref",
+    "seconds",
+    "device"
+  ],
+  "title": "voice.room.speech",
+  "type": "object"
+}

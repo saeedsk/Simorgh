@@ -79,6 +79,7 @@ The publish direction is not pinned by the manifest test; `session.py` publishes
 | `voice.transcript` | `messages/voice.py::VoiceTranscript` | pipeline.py:306; session.py (partials, finals, asides) | A calibration take carries `enrolling: <person>` and `speaker_note` "" (kept), "not kept", or the control word. Partial and final transcripts, echoes and not-for-Sim lines. `seconds` is how long the person spoke, from the VAD's own marks (`_spoken_seconds`); every final published a hard-coded `0.0` until 2026-09-20, which silently disabled the speaking-pace signal behind a companion check-in -- the World Model keeps a reading only when `seconds > 0` |
 | `voice.spoken` | `messages/voice.py::VoiceSpoken` | pipeline.py:418; session.py (many) | After each reply, aside, command or quiet outcome |
 | `voice.listening` | `messages/voice.py::VoiceListening` | pipeline.py:563; session.py:366 | Each floor-state change |
+| `voice.room.speech` | `messages/voice.py::VoiceRoomSpeech` | service.py `_publish_room_speech` | Each reply piece for a room satellite: FLAC (ffmpeg, 48 kHz mono) put in the ledger, `{ref, seconds, device, content_type}`; Interface serves the ref at `/api/room/speech` for 120 s and the satellite fetches it by URL. ffmpeg missing is refused by name |
 | `task.cancel` | `messages/task.py::TaskCancel` | session.py:639 | A newer turn supersedes an older ask still thinking |
 | `ui.command.request` | `messages/ui.py::UiCommandRequest` | session.py `_restart` | "restart" said by a known voice under the loader |
 | `ui.notice` | `messages/ui.py::UiNotice` | session.py `_report_synthesis`, `_calibration_after` | A voice fell back or a reply could not be synthesised; during `voice calibrate` (source `voice calibrate`), each verdict and the next line to read (`warn` for a refused take, with the reason) |
@@ -205,6 +206,8 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `calibration_dir` | `'workspace/voice/calibration'` | yes (service.py `_calibrate`, `_relearn_from_calibration`; calibration.py `load` default). Never pruned; back it up |
 | `keep_transcripts` | `True` | yes |
 | `device` | `'laptop'` | yes |
+| `satellites` | `()` | yes (stage 13 item 4) -- `[[voice.satellites]]` tables: `name` (the room; its device name), `host`, `key_env` (the env/secrets name of the board's ESPHome API key, which must ALSO be listed in `[voice] secrets` so the Kernel hands it over), optional `port` (6053) and `volume`. Each becomes a `SatelliteLink` and a room session (`add_room`); a missing name, host or key is a named problem in `voice status`, never a failed boot. Empty: `aioesphomeapi` is never imported |
+| `satellite_reply_url` | `''` | yes -- Interface's address as a satellite sees it, for the reply URL; `''` = this machine's LAN address toward the board on port 8765 (Interface's default). Set it when `[interface] http_port`/`http_host` differ; a loopback-only Interface cannot be reached by a board |
 | `model_dir` | `'workspace/voice/models'` | yes |
 | `microphone` | `'auto'` | yes |
 | `speaker` | `'auto'` | yes |

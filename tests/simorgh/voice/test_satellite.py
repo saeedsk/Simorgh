@@ -293,3 +293,99 @@ class ThroughTheRealSession(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfiguredSatellites(unittest.IsolatedAsyncioTestCase):
+    """Stage 13 item 4: `[[voice.satellites]]` -> a connected board and a
+    room session, the key from secrets, the reply published for
+    Interface."""
+
+    def test_the_tables_parse(self):
+        from simorgh.voice.config import Config
+
+        config = Config.from_mapping({"satellites": [{"name": "kitchen", "host": "sim-room-1.local",
+                                                      "key_env": "SIM_SATELLITE_KITCHEN_KEY", "volume": 1.0}]})
+        self.assertEqual(config.satellites[0]["name"], "kitchen")
+        self.assertEqual(Config().satellites, (), "none by default, and nothing imported")
+
+    async def _service(self, *, secrets, reply_url="http://192.168.50.33:8765"):
+        from simorgh.voice.config import Config
+        from simorgh.voice.fakes import FakeMicrophone, FakeRecogniser, FakeSpeaker, FakeSynthesiser
+        from simorgh.voice.service import Service
+        from tests.simorgh.voice.test_session import _Bus
+
+        client = _Client()
+        config = Config(stt="fake", tts="fake", microphone="fake", speaker="fake", speaker_id="off",
+                        stt_partials=False, backchannel=False, enabled=False, satellite_reply_url=reply_url,
+                        satellites=({"name": "kitchen", "host": "sim-room-1.local",
+                                     "key_env": "SIM_SATELLITE_KITCHEN_KEY", "volume": 1.0},))
+        service = Service(config, microphone=FakeMicrophone(silence(0.03)), speaker=FakeSpeaker(),
+                          recogniser=FakeRecogniser(), synthesiser=FakeSynthesiser(),
+                          satellite_client=lambda host, port, key: (client, _Api()))
+
+        class _Ledger:
+            blobs: dict = {}
+
+            async def put_blob(self, data, content_type=""):
+                ref = f"blob:{len(self.blobs) + 1}"
+                self.blobs[ref] = (data, content_type)
+                return ref
+
+        class _Ctx:
+            bus = _Bus()
+            clock = None
+            ledger = _Ledger()
+            config = {}
+
+            class logger:
+                @staticmethod
+                def info(*a, **k): pass
+                @staticmethod
+                def warning(*a, **k): pass
+                @staticmethod
+                def error(*a, **k): pass
+                @staticmethod
+                def debug(*a, **k): pass
+
+        _Ctx.secrets = secrets
+        service._ctx = _Ctx()
+        self.addAsyncCleanup(service.stop)
+        return service, client, _Ctx
+
+    async def test_a_satellite_without_its_key_is_named_and_the_room_is_not_made(self):
+        service, _client, _ctx = await self._service(secrets={})
+        await service._start_satellites()  # noqa: SLF001
+        self.assertEqual(service._rooms, {})  # noqa: SLF001
+        self.assertTrue(any("SIM_SATELLITE_KITCHEN_KEY" in p and "[voice] secrets" in p
+                            for p in service._problems), service._problems)  # noqa: SLF001
+
+    async def test_a_satellite_with_its_key_connects_and_gets_a_room(self):
+        service, client, _ctx = await self._service(secrets={"SIM_SATELLITE_KITCHEN_KEY": "k"})
+        await service._start_satellites()  # noqa: SLF001
+        for _ in range(200):
+            if service._satellites["kitchen"].connected:  # noqa: SLF001
+                break
+            await asyncio.sleep(0.005)
+        state = service._state()  # noqa: SLF001
+        self.assertTrue(state["satellites"]["kitchen"]["connected"], state["satellites"])
+        self.assertIn("kitchen", state["rooms"])
+        self.assertIn({"volume": 1.0, "key": 7}, client.media, "the configured volume is set")
+        port = await client.handlers["handle_start"]("c1", 1, None, "okay_nabu")
+        self.assertIsNone(port, "voice is off, so the wake word is turned away, not left hanging")
+
+    async def test_a_reply_piece_is_flac_in_the_ledger_announced_for_interface(self):
+        import shutil
+
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg is not installed here")
+        from simorgh.contracts import topics
+
+        service, _client, ctx = await self._service(secrets={"SIM_SATELLITE_KITCHEN_KEY": "k"})
+        url = await service._publish_room_speech("kitchen", "sim-room-1.local", silence(0.2))  # noqa: SLF001
+        self.assertEqual(url, "http://192.168.50.33:8765/api/room/speech?ref=blob%3A1")
+        data, kind = ctx.ledger.blobs["blob:1"]
+        self.assertTrue(data.startswith(b"fLaC"), "FLAC: the board plays nothing else")
+        self.assertEqual(kind, "audio/flac")
+        announced = ctx.bus.of(topics.VOICE_ROOM_SPEECH)
+        self.assertEqual(announced[0]["ref"], "blob:1")
+        self.assertEqual(announced[0]["device"], "kitchen")

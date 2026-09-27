@@ -82,3 +82,7 @@ VoiceSpoken = define(t.VOICE_SPOKEN, [F("text", Str), F("seconds", Float), F("en
                                        O("response", Int), O("metrics", Obj()), O("first_audio_s", Float),
                                        O("underruns", Int), O("quiet", Bool), O("reason", Str), O("tone", Str),
                                        O("dropped", Bool), O("aside", Bool), O("command", Str)])
+VoiceRoomSpeech = define(t.VOICE_ROOM_SPEECH, [F("ref", Str), F("seconds", Float), F("device", Str),
+                                               O("content_type", Str)],
+                         doc="One piece of Sim's reply for a room satellite, as a ledger blob (FLAC: the board plays "
+                             "nothing else). Interface serves a listed ref at /api/room/speech for two minutes.")
