@@ -460,7 +460,7 @@ _MARKER_ARG_HINT.update({
     ),
     "cam_webrtc": (
         "first line: status, install, start or stop. install fetches go2rtc once (a download -- only when the "
-        "person asked); start relays every online camera. Not for the TV (cam_stream); the phone view is not built yet."
+        "person asked); start relays every online camera and returns each one's viewer path. Not for the TV (cam_stream)."
     ),
     "music_play": (
         "first line: what to play -- a playlist, album, artist or song name, or a local audio "

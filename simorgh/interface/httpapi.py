@@ -51,7 +51,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -156,6 +156,18 @@ _HOUSE_KEYS: tuple[str, ...] = ("cameras", "streams", "ring_cameras", "events")
 
 #: Prefix routes served without the token. Wallpapers only.
 _OPEN_PREFIXES: tuple[str, ...] = ("/wallpapers/",)
+#: The cookie `/api/cam/live/` sets, scoped to that path, carrying the token
+#: for the player page's own relative requests.
+_CAM_COOKIE = "sim_cam"
+
+
+def _cookie(headers: dict[str, str], name: str) -> str:
+    """One cookie's value from the request, or ""."""
+    for part in headers.get("cookie", "").split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == name:
+            return value.strip()
+    return ""
 
 #: The response to an unauthenticated request. A JSON body, because
 #: every other error on this server is JSON and a dashboard that got
@@ -328,6 +340,13 @@ class HttpApi:
         # (the creator dropped them in images/wallpapers, 2026-09-12).
         self._wallpaper_root = (Path.cwd() / "images" / "wallpapers").resolve()
         self._prefixes: list[tuple[str, str, RouteHandler]] = []
+        #: Routes that take the connection over once the token checks out:
+        #: `(prefix, handler(reader, writer, method, split, headers, token,
+        #: prefix))`. Not bounded by the per-request timeout -- a live video
+        #: stream is meant to stay open (the go2rtc proxy, 2026-09-27).
+        self._raw_prefixes: list[tuple[str, object]] = [("/api/cam/live/", self._cam_live)]
+        #: Where go2rtc's API listens (domains/home/go2rtc.py): loopback.
+        self.go2rtc_port = 1984
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
         self._register_builtin_routes()
@@ -1514,7 +1533,9 @@ class HttpApi:
         # in-flight answer to a fixed 10s (the exact class of bug
         # `chat_reply_timeout_s`/`think_timeout_s` had elsewhere).
         try:
-            await asyncio.wait_for(self._handle_one(reader, writer), timeout=self._chat_timeout + 15.0)
+            takeover = await asyncio.wait_for(self._handle_one(reader, writer), timeout=self._chat_timeout + 15.0)
+            if takeover is not None:
+                await takeover        # a raw route owns the connection now, for as long as it lasts
         except (asyncio.TimeoutError, ConnectionError):
             pass
         except Exception as exc:  # noqa: BLE001 -- one bad request must never take the server down
@@ -1547,6 +1568,18 @@ class HttpApi:
 
         split = urlsplit(path)
         query = parse_qs(split.query)
+        for prefix, raw in self._raw_prefixes:
+            if split.path.startswith(prefix) and method in ("GET", "POST"):
+                # The token as header or `?token=`, or -- for the requests a
+                # page makes by relative URL, which drop the query -- the
+                # cookie this prefix sets on its first authorised answer.
+                offered = self._offered_token(headers, query) or _cookie(headers, _CAM_COOKIE)
+                checked = {**query, "token": [offered]} if offered else query
+                if not self._authorized(headers, checked):
+                    await self._try_respond(writer, 401, _UNAUTHORIZED, "application/json",
+                                            extra_headers=('WWW-Authenticate: Bearer realm="simorgh"',))
+                    return None
+                return raw(reader, writer, method, split, headers, offered, prefix)
         route = self._routes.get((method, split.path))
         prefix_extra: dict = {}
         if route is None:
@@ -1622,6 +1655,75 @@ class HttpApi:
         # video route's Content-Range).
         await self._try_respond(writer, status, payload, content_type,
                                 extra_headers=tuple(result[3]) if len(result) > 3 else ())
+
+    async def _cam_live(self, reader, writer, method: str, split, headers: dict, token: str, prefix: str) -> None:
+        """go2rtc's player and API, behind Sim's token (domains/home/go2rtc.py).
+
+        go2rtc listens on loopback only -- `/tv/hls/` was open to the whole
+        LAN until 2026-09-19 and let anyone on it watch the house (S15/V2),
+        and a second video server with its own port and no token would be
+        that mistake again. So the phone and the dashboard reach it here:
+        the request goes on to 127.0.0.1 without the token, and the answer
+        -- a page, a WebRTC offer's answer, or a WebSocket carrying the
+        video -- comes back byte for byte for as long as it lasts."""
+        rest = split.path[len(prefix):]
+        kept = [(k, v) for k, v in parse_qsl(split.query, keep_blank_values=True) if k != "token"]
+        target = "/" + rest + ("?" + urlencode(kept) if kept else "")
+        try:
+            up_reader, up_writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", self.go2rtc_port), timeout=3.0)
+        except (OSError, asyncio.TimeoutError):
+            await self._try_respond(writer, 503, b"the camera relay (go2rtc) is not running -- `cam_webrtc start`",
+                                    "text/plain; charset=utf-8")
+            return
+        upgrade = headers.get("upgrade", "").lower() == "websocket"
+        lines = [f"{method} {target} HTTP/1.1", f"Host: 127.0.0.1:{self.go2rtc_port}"]
+        for name, value in headers.items():
+            if name in ("host", "authorization", "cookie", "connection", "origin", "referer", "content-length"):
+                continue
+            lines.append(f"{name}: {value}")
+        lines.append("Connection: Upgrade" if upgrade else "Connection: close")
+        body = b""
+        if method == "POST":
+            try:
+                length = min(int(headers.get("content-length", "0") or 0), _MAX_BODY_BYTES)
+                body = await reader.readexactly(length) if length > 0 else b""
+            except (ValueError, asyncio.IncompleteReadError):
+                up_writer.close()
+                await self._try_respond(writer, 400, b"bad body", "text/plain; charset=utf-8")
+                return
+            lines.append(f"Content-Length: {len(body)}")
+        up_writer.write(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1") + body)
+        await up_writer.drain()
+        # The answer's head, with the cookie added, so the page's own
+        # relative requests carry the token without it being in their URLs.
+        try:
+            head = await asyncio.wait_for(up_reader.readuntil(b"\r\n\r\n"), timeout=15.0)
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
+            up_writer.close()
+            await self._try_respond(writer, 502, b"the camera relay did not answer", "text/plain; charset=utf-8")
+            return
+        if token and not head.startswith(b"HTTP/1.1 101"):
+            cookie = (f"Set-Cookie: {_CAM_COOKIE}={token}; Path={prefix}; HttpOnly; SameSite=Strict; "
+                      f"Max-Age=86400\r\n").encode("latin-1")
+            head = head[:-2] + cookie + b"\r\n"
+        writer.write(head)
+        await writer.drain()
+
+        async def pipe(src, dst) -> None:
+            try:
+                while True:
+                    data = await src.read(65536)
+                    if not data:
+                        break
+                    dst.write(data)
+                    await dst.drain()
+            except (ConnectionError, OSError):
+                pass
+            finally:
+                with contextlib.suppress(Exception):
+                    dst.close()
+        await asyncio.gather(pipe(up_reader, writer), pipe(reader, up_writer), return_exceptions=True)
 
     async def _benchmarks_json(self, query: dict) -> bytes:
         """Benchmark runs for the dashboard's accuracy-over-time chart --

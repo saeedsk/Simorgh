@@ -928,8 +928,9 @@ class CamWebrtcTool(_CameraTool):
     description = ("Low-delay live video relay (go2rtc, what Home Assistant uses), for the phone and the dashboard "
                    "-- not the TV, which plays HLS via cam_stream. `action` status (installed? running? which "
                    "cameras), install (fetch the go2rtc binary once, from its GitHub releases), start (relay every "
-                   "online camera at full resolution), stop. Its API listens on this Mac only; the phone and "
-                   "dashboard view needs Interface's proxy, which is not built yet -- say so if asked to show it there.")
+                   "online camera at full resolution), stop. Its API listens on this Mac only; the phone and the "
+                   "dashboard open it through Sim's own server, behind the house token: start returns each "
+                   "camera's viewer path, /api/cam/live/stream.html?src=<name>.")
     args_schema = {"type": "object", "required": ["action"],
                    "properties": {"action": {"type": "string", "enum": ["status", "install", "start", "stop"]},
                                   "camera": {"type": "string"}}}
@@ -1003,10 +1004,12 @@ class CamWebrtcTool(_CameraTool):
         ok, detail = await asyncio.to_thread(engine.start, streams)
         if not ok:
             return ToolResult.transient(f"refused: {detail}")
+        viewers = {key: f"/api/cam/live/stream.html?src={key}" for key in sorted(streams)}
         return ToolResult(ok=True,
-                          output=f"{detail}; " + ", ".join(sorted(streams)),
+                          output=f"{detail}; watch through Sim's server: "
+                                 + ", ".join(f"{names[k]} {v}" for k, v in viewers.items()),
                           side_effects=("cam_webrtc:start",),
-                          metadata={"cameras": sorted(streams), "running": True, "names": names})
+                          metadata={"cameras": sorted(streams), "running": True, "names": names, "viewers": viewers})
 
 
 def cameras_tools(config, **kwargs) -> list:

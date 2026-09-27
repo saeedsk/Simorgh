@@ -246,6 +246,8 @@ for the segments. Verified against a live relay: playlist 200 with six rewritten
 
 - `forget [kind] [minutes|Nd] [words]`: a kind first (episodic, semantic, facts, procedural, all), then minutes (capped at a day) or `<n>d` / `<n> days` for older overheard talk, then words to match (`tests/simorgh/interface/test_the_forget_command.py`).
 
+- `/api/cam/live/` proxies go2rtc (loopback `go2rtc_port`, default 1984) behind the token: header, `?token=`, or the `sim_cam` cookie it sets scoped to that path on its first authorised answer (go2rtc's player loads its script and opens its WebSocket by relative URL, which drops the query). The token is stripped before go2rtc; a WebSocket is carried both ways; a raw route owns its connection and is not bounded by the per-request timeout; go2rtc down is a 503 naming `cam_webrtc start`.
+
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract interface`.

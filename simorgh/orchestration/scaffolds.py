@@ -223,7 +223,7 @@ _TOOL_NOTES: dict[str, str] = {
                 "you worked out or fetched that would otherwise be one line in a transcript",
     "console_tail": "the last lines Sim printed on its own console, the only way to answer a question about its own screen or output: `<count>` or `<count> <word to filter>`, e.g. `30 error`",
     "cam_webrtc": "the low-delay camera relay (go2rtc) for the phone and dashboard: status, install, start, stop -- "
-                  "not the TV, and its phone view is not built yet",
+                  "not the TV; start gives each camera's viewer path behind the house token",
     "cam_stream": "a camera live on the TV: `<camera> frame` beside your page, `<camera> full` full screen, `<camera> stop`. "
                   "The house rule (the creator, 2026-09-19): ONE named camera asked for on the TV/screen is `<camera> full`; "
                   "\"the cameras\" is `CAST_SHOW: cameras`",

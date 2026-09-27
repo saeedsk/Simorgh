@@ -121,7 +121,7 @@ That last one is not hypothetical. A voice turn months ago -- "switch to
 Farsi language" -- was answered "از این به بعد فارسی حرف می‌زنم" ("from
 now on I will speak Farsi"), and that sentence went into episodic memory
 as a standing order. It kept being retrieved for short questions, so
-"what time is it" typed in English came back in Farsi while the same
+a short question typed in English came back in Farsi while the same
 reply asserted, in Farsi, that the answer always follows the question
 (measured 2026-09-25). A language request applies to the conversation it
 was made in. It does not outlive it, and a recalled one is history, not
