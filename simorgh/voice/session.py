@@ -314,6 +314,10 @@ def prune_kept_audio(folder, *, days: float, max_mb: float, now: float) -> int:
     return removed
 
 
+#: How long the "aha" waits for the final transcript before giving up
+#: (`VoiceSession._final_text`).
+ACK_WAITS_FOR_FINAL_S = 3.0
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None, room=None) -> None:
@@ -2173,7 +2177,10 @@ class VoiceSession:
         kind = classify(partial)
         if kind == GREETING:
             return  # answered in a breath anyway
-        language = self._aside_language(partial or self._last_user_text)
+        final = await self._final_text(turn_id)
+        if final is None:
+            return
+        language = self._aside_language(final)
         if not language:
             return
         text = self._backchannel.pick(kind, language)
@@ -2182,6 +2189,23 @@ class VoiceSession:
             self._last_aside_at = self._now()
             self._turns_since_connector = 0
             self._previous_connector = "okay"
+
+    async def _final_text(self, turn_id: int, wait_s: float = ACK_WAITS_FOR_FINAL_S) -> str | None:
+        """The turn's final transcript, once it is asked -- or None when
+        the turn is answered, replaced, or the final takes longer than
+        `wait_s`. The draft is turbo's first pass and writes Farsi as
+        English: an aside chosen from it went out in the English voice
+        before a Farsi answer in Pocket's (2026-09-27). An English final
+        is in within a second; a Farsi one takes the Farsi model's two to
+        four, and a Farsi aside is not said under Pocket anyway."""
+        waited = 0.0
+        while True:
+            if turn_id in self._outstanding:
+                return self._outstanding[turn_id][1]
+            if turn_id in self._answered or self.turns.turn_id != turn_id or waited >= wait_s:
+                return None
+            await asyncio.sleep(0.05)
+            waited += 0.05
 
     def _aside_language(self, heard: str) -> str:
         """The language an aside ("aha", "one sec") is said in, or "" to
@@ -2550,6 +2574,7 @@ class VoiceSession:
         except Exception as exc:  # noqa: BLE001
             self._log("warning", "voice.aside_failed", error=repr(exc))
             return False
+        self._log("info", "voice.aside", request=request_id, text=text[:40])
         # An aside is a thing Sim said, and Sim must remember saying it.
         # It did not: "One more second." came back through the mic as the
         # next turn, took the floor, and the real answer -- 28 seconds in

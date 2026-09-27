@@ -42,5 +42,33 @@ class AnAsideKeepsTheVoice(unittest.TestCase):
         self.assertEqual(_aside("Sim, what time is it?", "It's nine.", tts_farsi="pocket"), "en")
 
 
+
+class TheAsideWaitsForTheFinal(unittest.IsolatedAsyncioTestCase):
+    """The draft wrote Farsi as English; the final, from the Farsi model,
+    does not. The aside's language comes from the final."""
+
+    def _fake(self):
+        return SimpleNamespace(_outstanding={}, _answered=set(), turns=SimpleNamespace(turn_id=7))
+
+    async def test_the_final_once_it_is_asked(self):
+        import asyncio
+
+        fake = self._fake()
+
+        async def later():
+            await asyncio.sleep(0.12)
+            fake._outstanding[7] = ("s", "سیم امروز هوا چطوره؟")
+
+        asyncio.get_running_loop().create_task(later())
+        got = await VoiceSession._final_text(fake, 7, wait_s=1.0)  # noqa: SLF001
+        self.assertEqual(got, "سیم امروز هوا چطوره؟")
+
+    async def test_nothing_when_the_turn_is_answered_or_the_final_is_late(self):
+        fake = self._fake()
+        fake._answered.add(7)
+        self.assertIsNone(await VoiceSession._final_text(fake, 7, wait_s=1.0))  # noqa: SLF001
+        self.assertIsNone(await VoiceSession._final_text(self._fake(), 7, wait_s=0.1))  # noqa: SLF001
+
+
 if __name__ == "__main__":
     unittest.main()
