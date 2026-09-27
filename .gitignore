@@ -55,3 +55,7 @@ ios/build/
 ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/
 DerivedData/
+
+# Room satellites (tools/satellites/): Wi-Fi and keys, and ESPHome build output.
+tools/satellites/secrets.yaml
+tools/satellites/.esphome/

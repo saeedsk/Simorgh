@@ -1,0 +1,39 @@
+# A Simorgh room satellite: reSpeaker XVF3800 + XIAO ESP32S3, ESPHome.
+# Stage 13 (docs/plan/stage-13-room-satellites.md). One file for every room;
+# the room is a substitution on the command line:
+#
+#   esphome -s name kitchen -s friendly_name "Kitchen" run room.yaml
+#
+# Wi-Fi and the keys come from secrets.yaml beside this file (copy
+# secrets.yaml.example; it is git-ignored). See README.md.
+substitutions:
+  name: sim-room
+  friendly_name: Sim Room
+  respeaker_ref: main
+
+packages:
+  respeaker:
+    url: https://github.com/formatBCE/Respeaker-XVF3800-ESPHome-integration
+    ref: ${respeaker_ref}
+    refresh: 1d
+    files:
+      - packages/base.yaml
+      - packages/hardware.yaml
+      - packages/leds.yaml
+      - packages/timers-alarm.yaml
+  # The package's voice-assistant.yaml, copied with the wake-word handler
+  # changed: during Sim's reply the wake word stops it AND listens.
+  voice_assistant_sim: !include voice-assistant-sim.yaml
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+    password: !secret ota_password
