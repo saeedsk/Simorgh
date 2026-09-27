@@ -169,6 +169,28 @@ def spoken_form(text: str) -> str:
     return "\n".join(line for line in lines if line).strip()
 
 
+class Room:
+    """What one room's voice keeps to itself (stage 13 item 1).
+
+    The laptop's session uses the `Pipeline` for these -- they were born
+    there and everything that reads them (status, `voice listen`, the
+    reply path) still does. A satellite's session gets its own, because
+    each of them is about ONE room: the speech lock stops two replies
+    talking over each other in the same room, and `last_said` /
+    `recent_said` are what that room's microphone may hear back from its
+    own speaker. Two rooms sharing them would make the kitchen deaf while
+    the study speaks, and mistake the study's words for the kitchen's
+    echo.
+    """
+
+    def __init__(self, device: str) -> None:
+        self.device = device
+        self.speech_lock = asyncio.Lock()
+        self.speaking = False
+        self.last_said = ""
+        self.recent_said: deque = deque(maxlen=6)
+
+
 class Pipeline:
     def __init__(self, *, bus, clock, logger, ledger, config: Config, microphone, speaker, recogniser,
                  synthesiser, detector_factory, repo_root: Path | None = None, telemetry=None) -> None:
@@ -212,6 +234,7 @@ class Pipeline:
         # The last few things Sim said, newest last: one string could not
         # catch a reply that comes back as several fragments.
         self.recent_said: deque = deque(maxlen=6)
+        self.tool_started_handlers = []
         self.speaking = False
         self.listening = False
 
@@ -238,12 +261,18 @@ class Pipeline:
     #: the pipeline has no idea whether a person is waiting.
     on_tool_started = None
 
+    #: A room's session (stage 13) adds its handler here rather than
+    #: taking `on_tool_started`, which is the laptop session's: one slot
+    #: would let the second session silently unhook the first.
+    tool_started_handlers: list = []
+
     async def _on_tool_started(self, message) -> None:
-        handler = self.on_tool_started
-        if handler is None:
+        handlers = [h for h in (self.on_tool_started, *self.tool_started_handlers) if h is not None]
+        if not handlers:
             return
         payload = message.payload or {}
-        await handler(str(payload.get("name") or ""), int(payload.get("recent_p95_ms") or -1))
+        for handler in handlers:
+            await handler(str(payload.get("name") or ""), int(payload.get("recent_p95_ms") or -1))
 
     #: the last `ui.tv.state`: mode, url, title, native (execution/media/cast.py)
     tv_state: dict = {}
@@ -388,14 +417,14 @@ class Pipeline:
     async def ask(self, text: str, *, session_id: str | None = None, speaker_name: str = "",
                   confidence: float = 1.0, speaker_relation: str = "", room: str = "",
                   speaker_before: str = "", speaker_doubt: str = "", speaker_score: str = "",
-                  trace_id: str = "") -> str:
+                  trace_id: str = "", device: str = "") -> str:
         """Hand the words to Sim exactly as the REPL would, and wait."""
         session_id = session_id or str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[session_id] = fut
         self._voice_sessions.append(session_id)
-        payload = {"channel": "voice", "text": text, "session_id": session_id, "device": self._config.device,
-                   "confidence": confidence}
+        payload = {"channel": "voice", "text": text, "session_id": session_id,
+                   "device": device or self._config.device, "confidence": confidence}
         if speaker_name:
             payload["speaker"] = speaker_name
             if speaker_relation:

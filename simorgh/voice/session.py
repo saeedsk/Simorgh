@@ -316,8 +316,12 @@ def prune_kept_audio(folder, *, days: float, max_mb: float, now: float) -> int:
 
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
-                 detector_factory, clock=None, logger=None, embedder=None, speakers=None) -> None:
+                 detector_factory, clock=None, logger=None, embedder=None, speakers=None, room=None) -> None:
         self._pipeline = pipeline
+        # The speech lock, `speaking`, `last_said`, `recent_said`: this
+        # room's own (`pipeline.Room`) for a satellite, the pipeline's for
+        # the laptop, whose session has always kept them there.
+        self._voice_room = room if room is not None else pipeline
         self._config = config
         self._audio: dict[int, bytearray] = {}      # a turn's frames, kept only until it is identified
         self._timed: dict[int, tuple] = {}          # a turn's (audio, timed words), kept until attributed
@@ -544,7 +548,10 @@ class VoiceSession:
         # here and cleared in `_teardown`: the pipeline outlives one
         # session, and a stale handler would speak for a session that
         # has stopped listening.
-        self._pipeline.on_tool_started = self._on_tool_started
+        if self._voice_room is self._pipeline:
+            self._pipeline.on_tool_started = self._on_tool_started
+        else:
+            self._pipeline.tool_started_handlers.append(self._on_tool_started)
         self.turns.start()
         try:
             self.stats.warmup_seconds = await self._tts.warmup()
@@ -569,7 +576,11 @@ class VoiceSession:
             await self._teardown()
 
     async def _teardown(self) -> None:
-        self._pipeline.on_tool_started = None
+        if self._voice_room is self._pipeline:
+            self._pipeline.on_tool_started = None
+        else:
+            with contextlib.suppress(ValueError):
+                self._pipeline.tool_started_handlers.remove(self._on_tool_started)
         # A chat still running for a turn nobody will hear is stopped too.
         with contextlib.suppress(Exception):
             await self._cancel_outstanding(before=10**9)
@@ -1442,7 +1453,7 @@ class VoiceSession:
         # Within the exchange window, test against everything Sim said
         # recently -- a long reply returns as fragments, each too short
         # for the run matcher and each landing after `last_said` moved on.
-        recents = list(self._pipeline.recent_said) or [self._pipeline.last_said]
+        recents = list(self._voice_room.recent_said) or [self._voice_room.last_said]
         in_exchange_now = 0.0 <= self._now() - self._sim_spoke_at <= self._config.exchange_window_s
         # ...or Sim is speaking RIGHT NOW. The two halves of a reply are
         # written down at different moments: `recent_said` and
@@ -1460,8 +1471,8 @@ class VoiceSession:
         # the creator's turn. `echoes_recent` catches that string
         # against that reply; it was never asked.
         if recents and (echoes_recent(text, recents)
-                        if (in_exchange_now or self._pipeline.speaking)
-                        else (self._pipeline.last_said and is_echo(text, self._pipeline.last_said))):
+                        if (in_exchange_now or self._voice_room.speaking)
+                        else (self._voice_room.last_said and is_echo(text, self._voice_room.last_said))):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
                 "device": self._config.device, "session_id": session_id, "echo": True, "turn": turn_id})
@@ -1578,7 +1589,7 @@ class VoiceSession:
             from .streamreply import SentenceStream
 
             live = SentenceStream(max_sentences=self._config.max_spoken_sentences,
-                                  on_sentence=self._pipeline.recent_said.append, language=language,
+                                  on_sentence=self._voice_room.recent_said.append, language=language,
                                   transform=self._planner.pronounced)
             self._pipeline.delta_sinks[session_id] = live.feed
             early_context = Context(user_text=text, language=language, turns=self.stats.turns,
@@ -1604,7 +1615,7 @@ class VoiceSession:
             reply = await self._pipeline.ask(text, session_id=session_id, confidence=clock.confidence,
                                              speaker_name=speaker, speaker_relation=relation, room=room,
                                              speaker_before=before, speaker_doubt=doubt, speaker_score=score,
-                                             trace_id=clock.trace_id)
+                                             trace_id=clock.trace_id, device=self._config.device)
         finally:
             self._outstanding.pop(turn_id, None)
             self._pipeline.delta_sinks.pop(session_id, None)
@@ -2063,7 +2074,7 @@ class VoiceSession:
         from simorgh.contracts.tidy import tidy
 
         tidied = await tidy(self._pipeline._bus, text,  # noqa: SLF001 -- the same bus the ask goes on
-                            recent=[self._last_user_text, self._pipeline.last_said])
+                            recent=[self._last_user_text, self._voice_room.last_said])
         if tidied.changed:
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": tidied.text, "confidence": 1.0, "seconds": 0.0, "engine": "tidy",
@@ -2365,7 +2376,7 @@ class VoiceSession:
         now = self._now()
         if spoken_ms < self._config.hum_after_ms or now - self._last_hum_at < self._config.hum_gap_s:
             return
-        if self.partial.rstrip().endswith("?") or self._pipeline.speech_lock.locked():
+        if self.partial.rstrip().endswith("?") or self._voice_room.speech_lock.locked():
             return
         if self._hum_task is not None and not self._hum_task.done():
             return
@@ -2383,7 +2394,7 @@ class VoiceSession:
         delivery = delivery.with_base(self._config.tts_speed, self._config.volume)
         request = TtsRequest(request_id=request_id, pieces=((self._planner.pronounced(text), 0),), voice=self._config.tts_voice,
                              speed=delivery.speed, gain=delivery.gain, lane="fast")
-        lock = self._pipeline.speech_lock
+        lock = self._voice_room.speech_lock
         if lock.locked():
             return False
         try:
@@ -2391,7 +2402,7 @@ class VoiceSession:
                 # Before playing, for the same reason as a reply: an aside
                 # is short, and its echo can be transcribed and judged
                 # while the speaker is still saying it.
-                self._pipeline.recent_said.append(text)
+                self._voice_room.recent_said.append(text)
                 await self._play(self._tts.synthesise_stream(request), request_id=request.request_id,
                                  chunk_timeout=self._tts.chunk_timeout(request))
         except asyncio.CancelledError:
@@ -2425,14 +2436,14 @@ class VoiceSession:
                              speed=delivery.speed, gain=delivery.gain,
                              tone=live.tone or (delivery.register if delivery.register in ("warm", "bright") else ""),
                              lane=lane)
-        self._pipeline.speaking = True
+        self._voice_room.speaking = True
 
         def _first_audio(seconds: float) -> None:
             clock.first_audio_at = self._now()
 
         try:
             clock.lock_wait_at = self._now()
-            async with self._pipeline.speech_lock:
+            async with self._voice_room.speech_lock:
                 clock.lock_got_at = self._now()
                 report = await self._play(self._tts.synthesise_stream(request), request_id=response_id,
                                           on_first_audio=_first_audio)
@@ -2442,15 +2453,15 @@ class VoiceSession:
             if self.turns.state == THINKING:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
-            self._pipeline.speaking = False
+            self._voice_room.speaking = False
             live.close()
             return
         live.close()
-        self._pipeline.speaking = False
+        self._voice_room.speaking = False
         self._sim_spoke_at = self._now()
         await self._report_synthesis(report)
         said = live.said
-        self._pipeline.last_said = said
+        self._voice_room.last_said = said
         self.stats.turns += 1
         metrics = clock.metrics(report)
         metrics["streamed"] = True
@@ -2553,15 +2564,15 @@ class VoiceSession:
         # been told about. "Nice counting, Iris" came back as Iris's turn,
         # was answered ("Hey, that's my line!"), and the speaker book
         # named her from the 0.87 s of clean frames beside the echo.
-        self._pipeline.recent_said.append(said)
-        self._pipeline.speaking = True
+        self._voice_room.recent_said.append(said)
+        self._voice_room.speaking = True
 
         def _first_audio(seconds: float) -> None:
             clock.first_audio_at = self._now()
 
         try:
             clock.lock_wait_at = self._now()
-            async with self._pipeline.speech_lock:
+            async with self._voice_room.speech_lock:
                 clock.lock_got_at = self._now()
                 report = await self._play(self._tts.synthesise_stream(request), request_id=response_id,
                                           on_first_audio=_first_audio)
@@ -2571,12 +2582,12 @@ class VoiceSession:
             if self.turns.state == THINKING:  # playback never started, so "finished" moved nothing
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
-            self._pipeline.speaking = False
+            self._voice_room.speaking = False
             return
-        self._pipeline.speaking = False
+        self._voice_room.speaking = False
         self._sim_spoke_at = self._now()
         await self._report_synthesis(report)
-        self._pipeline.last_said = said
+        self._voice_room.last_said = said
         self.stats.turns += 1
         metrics = clock.metrics(report)
         if clock.interrupted_at and clock.stopped_at:
@@ -2668,19 +2679,19 @@ class VoiceSession:
         from .pronounce import strip_marks
 
         shown = strip_marks(plan.text, for_voice=False)
-        self._pipeline.recent_said.append(shown)   # before playing; see the reply path
-        self._pipeline.speaking = True
+        self._voice_room.recent_said.append(shown)   # before playing; see the reply path
+        self._voice_room.speaking = True
         try:
-            async with self._pipeline.speech_lock:
+            async with self._voice_room.speech_lock:
                 report = await self._play(self._tts.synthesise_stream(request), request_id=request.request_id,
                                  chunk_timeout=self._tts.chunk_timeout(request))
         finally:
-            self._pipeline.speaking = False
+            self._voice_room.speaking = False
             self._sim_spoke_at = self._now()
             if self.turns.state == AGENT_SPEAKING and entered_from == LISTENING:
                 self.turns.state = LISTENING
                 await self._announce(self.turns.state)
-        self._pipeline.last_said = shown
+        self._voice_room.last_said = shown
         await self._pipeline._publish(topics.VOICE_SPOKEN, {  # noqa: SLF001
             "text": shown, "seconds": report.seconds, "engine": getattr(self._tts, "last_engine", "") or self._tts.name,
             "device": self._config.device, "interrupted": report.interrupted})

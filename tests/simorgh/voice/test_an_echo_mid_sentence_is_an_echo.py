@@ -55,19 +55,19 @@ class TheBranchIsChosenOnWhetherSimIsSpeaking(unittest.TestCase):
         return (Path(__file__).resolve().parents[3] / "simorgh" / "voice" / "session.py").read_text()
 
     def test_speaking_now_takes_the_recent_said_branch(self):
-        self.assertIn("if (in_exchange_now or self._pipeline.speaking)", self._source())
+        self.assertIn("if (in_exchange_now or self._voice_room.speaking)", self._source())
 
     def test_recent_said_is_still_filled_before_playback(self):
         """The fix depends on it: the ring must already hold the reply
         when the echo arrives, and that was fixed on 2026-09-17."""
         source = self._source()
-        append = source.index("self._pipeline.recent_said.append(said)")
+        append = source.index("self._voice_room.recent_said.append(said)")
         played = source.index("self._sim_spoke_at = self._now()", append)
         self.assertLess(append, played, "the ring is filled before the audio, not after")
 
     def test_speaking_is_set_before_playback_too(self):
         source = self._source()
-        speaking = source.index("self._pipeline.speaking = True")
+        speaking = source.index("self._voice_room.speaking = True")
         spoke_at = source.index("self._sim_spoke_at = self._now()", speaking)
         self.assertLess(speaking, spoke_at)
 

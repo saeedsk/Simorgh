@@ -172,6 +172,12 @@ class Service:
         # The streaming conversation (session.py), when the microphone
         # can stream; the older capture-then-answer loop otherwise.
         self._session = None
+        # Stage 13 item 1: a session per satellite room, beside the
+        # laptop's, keyed by device name. Each has its own microphone,
+        # speaker and `pipeline.Room`; they share the recogniser, the
+        # synthesiser, the speaker book and the pipeline's bus side.
+        self._rooms: dict = {}
+        self._room_tasks: dict[str, asyncio.Task] = {}
         self._enabled = False
         self._muted = False
         # `voice off` / `voice mute`, typed or said: silent as well as
@@ -475,7 +481,70 @@ class Service:
                 self._loop_task = asyncio.create_task(self._session.run(self._loop_stop), name="voice-session")
             else:
                 self._loop_task = asyncio.create_task(pipeline.run_loop(self._loop_stop), name="voice-loop")
+        for device in list(self._rooms):
+            self._start_room(device)
         return True, ""
+
+    # -------------------------------------------------------------- rooms
+    async def add_room(self, device: str, *, microphone, speaker):
+        """A session for one more room (stage 13 item 1): a satellite's
+        microphone and speaker, this machine's engines.
+
+        It shares the recogniser and synthesiser (one warm whisper-server,
+        one Kokoro -- a second copy per room would be gigabytes for
+        nothing) and the laptop session's speaker book, so a voice learnt
+        in one room is known in every room. It keeps its own turn state
+        and its own `Room`: the speech lock, what it last said, whether it
+        is speaking. It listens when voice is on, and `voice off` stops it
+        with the rest."""
+        device = str(device or "").strip()
+        if not device or device == self.config.device or device in self._rooms:
+            raise ValueError(f"a room needs its own name; {device!r} is taken or empty")
+        pipeline, why = await self._pipeline_ready()
+        if pipeline is None:
+            raise RuntimeError(why)
+        from dataclasses import replace
+
+        from .pipeline import Room
+        from .session import VoiceSession
+
+        laptop = self._session
+        session = VoiceSession(
+            pipeline=pipeline, config=replace(self.config, device=device), microphone=microphone, speaker=speaker,
+            recogniser=pipeline._stt, synthesiser=pipeline._tts,  # noqa: SLF001 -- the shared engines
+            detector_factory=pipeline._detector_factory,  # noqa: SLF001
+            clock=self._ctx.clock if self._ctx else None, logger=self._ctx.logger if self._ctx else None,
+            # The laptop's book and embedder when it has them. An embedder
+            # the laptop has not opened yet is opened by the room on its own
+            # first need -- a second copy, the price of not waiting for it.
+            embedder=getattr(laptop, "_embedder", None), speakers=getattr(laptop, "_speakers", None),
+            room=Room(device),
+        )
+        self._rooms[device] = session
+        if self._enabled:
+            self._start_room(device)
+        return session
+
+    async def remove_room(self, device: str) -> None:
+        """Stop and forget one room's session (a satellite went away)."""
+        self._rooms.pop(device, None)
+        await self._stop_room(device)
+
+    def _start_room(self, device: str) -> None:
+        task = self._room_tasks.get(device)
+        if task is not None and not task.done():
+            return
+        session = self._rooms[device]
+        self._room_tasks[device] = asyncio.create_task(session.run(self._loop_stop), name=f"voice-room-{device}")
+
+    async def _stop_room(self, device: str) -> None:
+        task = self._room_tasks.pop(device, None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise
+                pass
 
     async def _turn_off(self) -> None:
         self._enabled = False
@@ -489,6 +558,8 @@ class Service:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise
                 pass
         self._loop_task = None
+        for device in list(self._room_tasks):
+            await self._stop_room(device)
 
     def _state(self) -> dict:
         p = self._pipeline
@@ -521,6 +592,11 @@ class Service:
                 out["breaches"] = {day: dict(counts) for day, counts in session.stats.breaches.items()}
             if self.config.diagnostics and session.stats.last_metrics:
                 out["metrics"] = dict(session.stats.last_metrics)
+        if self._rooms:
+            out["rooms"] = {
+                device: {"state": room.state, "turns": room.stats.turns, "partial": room.partial,
+                         "running": bool(self._room_tasks.get(device) and not self._room_tasks[device].done())}
+                for device, room in self._rooms.items()}
         return out
 
     # ----------------------------------------------------------- handlers
@@ -880,6 +956,12 @@ class Service:
                 session._config = self.config  # noqa: SLF001 -- read per request
                 if key == "auto_listen":
                     session.turns.auto_listen = bool(value)
+            from dataclasses import replace
+
+            for device, room in self._rooms.items():
+                room._config = replace(self.config, device=device)  # noqa: SLF001 -- its own name, the house's settings
+                if key == "auto_listen":
+                    room.turns.auto_listen = bool(value)
         return True, f"{key} = {value!r}{where}{restarted}"
 
     async def _canonical_voice(self, name: str) -> str:
