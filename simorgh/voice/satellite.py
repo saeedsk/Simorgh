@@ -82,31 +82,39 @@ RESTOP_S = 15.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
-#: The lead-in's level: quiet noise, not digital silence. The first version
-#: padded with zeros and the start was still clipped -- a speaker that
-#: sleeps on its input (an Echo Dot on the jack) stays asleep through true
-#: silence and wakes on the first real sound, the first syllable (live,
-#: 2026-09-27). About -54 dBFS: enough signal to wake it, too quiet to hear.
-WAKE_NOISE_AMPLITUDE = 64
+#: The lead-in: a 20 Hz tone, not digital silence and not noise. Zeros left
+#: an input-sleeping speaker (the Echo Dot on the jack) asleep, so the first
+#: syllable woke it and was lost; quiet white noise woke it but was heard as
+#: a hiss "just before Sim starts talking" (live, 2026-09-27). 20 Hz is a
+#: signal on the wire the speaker's input detects, and below what a small
+#: speaker reproduces or a person hears. Faded in and out: a tone that
+#: starts or stops at full level clicks.
+WAKE_TONE_HZ = 20.0
+WAKE_TONE_AMPLITUDE = 900           # about -31 dBFS on the wire, inaudible at 20 Hz
+WAKE_TONE_FADE_S = 0.05
+
+
+def _wake_noise(samples: int, sample_rate: int = 16000) -> bytes:
+    """`samples` of the lead-in tone as int16 PCM (name kept for callers)."""
+    import array
+    import math
+
+    out = array.array("h", [0]) * samples
+    fade = max(1, int(WAKE_TONE_FADE_S * sample_rate))
+    step = 2.0 * math.pi * WAKE_TONE_HZ / sample_rate
+    for i in range(samples):
+        edge = min(1.0, i / fade, (samples - 1 - i) / fade) if samples > 1 else 0.0
+        out[i] = int(WAKE_TONE_AMPLITUDE * max(0.0, edge) * math.sin(step * i))
+    if sys.byteorder != "little":
+        out.byteswap()
+    return out.tobytes()
+
+
 #: Terminal colour codes in the board's log lines.
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 #: Warnings the board prints on every reply, which say nothing.
 _BOARD_NOISE = ("No text in STT_END event", "No text in TTS_START event",
                 "event 'esphome.tts_uri' dropped")      # every reply; Home Assistant is not the board's client
-
-
-def _wake_noise(samples: int) -> bytes:
-    """`samples` of very quiet, deterministic noise as int16 PCM."""
-    import array
-
-    out = array.array("h", [0]) * samples
-    seed = 12345
-    for i in range(samples):
-        seed = (1103515245 * seed + 12345) & 0x7FFFFFFF
-        out[i] = (seed % (2 * WAKE_NOISE_AMPLITUDE + 1)) - WAKE_NOISE_AMPLITUDE
-    if sys.byteorder != "little":
-        out.byteswap()
-    return out.tobytes()
 #: How long the rest of a cut-off reply is dropped if no new turn is heard.
 HOLD_REPLY_S = 30.0
 #: Sent with every INTENT_END. ESPHome keeps `continue_conversation_` from
@@ -246,7 +254,7 @@ class SatelliteSpeaker:
         if lead and time.monotonic() - self._last_end > IDLE_BEFORE_LEAD_S:
             # Only after a quiet spell: the pieces inside one reply follow
             # each other closely and the speaker is already awake.
-            audio = Audio(_wake_noise(int(lead * audio.sample_rate)) + audio.pcm, audio.sample_rate)
+            audio = Audio(_wake_noise(int(lead * audio.sample_rate), audio.sample_rate) + audio.pcm, audio.sample_rate)
         self._stop = asyncio.Event()
         try:
             url = await self._publish(audio)
