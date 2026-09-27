@@ -1740,12 +1740,15 @@ class VoiceSession:
         self._answered.add(turn_id)
         from simorgh.contracts.tone import strip_tone as _strip_tone
 
-        if is_quiet(_strip_tone(reply)) and self._wake_addressed():
+        if is_quiet(_strip_tone(reply)) and self._wake_addressed() and not getattr(self._mic, "follow_up", False):
             # Woken by a satellite's wake word, a person asked Sim something,
             # and silence answers them with nothing at all. Live 2026-09-27:
             # "play jazz in the kitchen" over music came back "Klai jaz in
             # the kitchen.", the model said QUIET, and the board went dark.
             # Say it was not caught; an empty (cancelled) reply stays silent.
+            # Not in a Follow Up Mode run: nobody said the wake word there,
+            # and a how-to video in the room got "Sorry, I didn't catch
+            # that." twice while the model rightly chose QUIET (2026-09-27).
             reply = "ببخشید، متوجه نشدم." if language_of(text) == "fa" else "Sorry, I didn't catch that."
             self._log("info", "voice.quiet_after_wake", turn=turn_id, text=text[:60])
             await self._speak_reply(turn_id, reply, clock, Context(is_error=True))
