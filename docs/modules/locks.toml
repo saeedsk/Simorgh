@@ -29,12 +29,6 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
-[locks.memory]
-by = "opus-main"
-task = "an unplaced voice's turn is tagged person:unknown so it is not recalled for a named person"
-since = "2026-09-27T12:49:57+00:00"
-until = "2026-09-27T20:49:57+00:00"
-
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"

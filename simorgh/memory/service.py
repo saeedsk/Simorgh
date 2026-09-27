@@ -16,6 +16,12 @@ from .config import Config
 #: How many facts a person's digest may carry into a prompt (stage 5 item
 #: 4). Eight short lines is about 150 tokens, the budget the plan sets.
 _DIGEST_FACTS = 8
+
+#: The owner tag of a spoken turn whose voice nobody matched: it keeps the
+#: turn out of every named person's recall (orchestration/context.py
+#: `_theirs` treats only untagged turns -- typed ones -- as shared).
+UNPLACED_VOICE_TAG = "person:unknown"
+
 from .consolidation import run_consolidation
 from .store import MemoryEngine
 
@@ -307,6 +313,13 @@ class Service:
         # The person's name is a tag as well as a label, so a recall can
         # ask for "what I remember with Ira" (orchestration/context.py).
         tags = [payload.get("session_id", "")] + [f"person:{name}" for name in voices]
+        if not voices and str(payload.get("channel") or "") == "voice":
+            # A voice nobody placed is somebody, not everybody. Untagged, the
+            # turn read as a typed one -- shared -- and recall handed it to
+            # the next named speaker: a stranger's "I can't start music for
+            # a voice I don't have enrolled" came back on Saeed's own "play
+            # music", and he got the same refusal, twice (2026-09-27).
+            tags.append(UNPLACED_VOICE_TAG)
         ref = await self.engine.store(kind="episodic", content=content, tags=tags,
                                       source_ref=payload.get("task_id", ""), confidence=None)
         await self._ctx.bus.publish(Message.new(
@@ -363,4 +376,4 @@ class Service:
             ))
 
 
-__all__ = ["Service", "VERSION"]
+__all__ = ["Service", "UNPLACED_VOICE_TAG", "VERSION"]
