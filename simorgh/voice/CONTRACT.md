@@ -54,7 +54,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:38-45`, pinned by `tes
 | Topic | Schema | Where | Does |
 |---|---|---|---|
 | `voice.status.request` | `messages/voice.py::VoiceStatusRequest` | service.py:358 | Replies with `VoiceState` plus session state and metrics |
-| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | service.py:361 | on/off/mute, `voice set`, enrol and people actions; refusals as error replies. `action: "calibrate"` (`value` start [options] | status | stop | keep | accept | skip; `name`) runs the calibration set. |
+| `voice.control.request` | `messages/voice.py::VoiceControlRequest` | service.py:361 | on/off/mute (`mute`/`unmute` with `name` = one room's session only, `laptop` or a satellite's name -- the others keep listening, and a muted satellite turns its wake word away; without `name`, the whole subsystem as before), `voice set`, enrol and people actions; refusals as error replies. `action: "calibrate"` (`value` start [options] | status | stop | keep | accept | skip; `name`) runs the calibration set. |
 | `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | service.py:618 | `voice test` / speak a text now |
 | `voice.synthesise.request` | `messages/voice.py::VoiceSynthesiseRequest` | service.py:`_on_synthesise` | Makes a WAV and does **not** play it; replies with a `audio/wav` ledger blob `ref`. For a client with its own speaker (the phone). Never touches the session, the echo tracker or the turn state machine. |
 | `voice.transcribe.request` | `messages/voice.py::VoiceTranscribeRequest` | service.py:`_on_transcribe` | Transcribes a WAV blob recorded somewhere else (the phone's microphone) with the configured recogniser |
@@ -267,6 +267,8 @@ A reply is cut at `max_spoken_sentences` (3) and says there is more on screen --
 - A satellite sends no audio until its own wake word fires: `SatelliteMicrophone` takes audio only inside a run and only until Sim decides the turn ended; between runs it yields silence it made itself. No room is a recording.
 - `RUN_END` is never sent within `satellite.RUN_END_GAP_S` (1 s) of `STT_VAD_END`: sent sooner, the XVF3800 firmware ignores it and turns every later wake word into a stop (measured 2026-09-25). A run nobody ends is closed after `MAX_RUN_S`.
 - A satellite reply is FLAC by URL (the board refused WAV, 2026-09-26) and lasts its audio's length; the board's PLAYING/IDLE state lags by up to ~10 s and is not read.
+
+- A turn inside a satellite's wake run is addressed to Sim (`VoiceSession._wake_addressed`, the microphone's `woken`): whisper's language label does not drop it (live 2026-09-27: English labelled `ic` was discarded as noise), and the rules that make a voice name Sim first -- unplaced voices, the TV playing, a half-heard aside, a courtesy word -- treat the wake word as the name. The laptop's microphone never claims a wake, so its rules are unchanged.
 
 ## Contract tests
 

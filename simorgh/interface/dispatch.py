@@ -586,6 +586,10 @@ async def _voice(bus: BusClient, args: str) -> Outcome:
         verb, rest = "set", f"{verb} {rest}".strip()
     if verb in ("", "status"):
         return await _request(bus, topics.VOICE_STATUS_REQUEST, {}, timeout=10.0, render=voiceview.status)
+    if verb in ("mute", "unmute") and rest.strip():
+        # `voice mute laptop` / `voice mute kitchen`: one room (stage 13).
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": verb, "name": rest.strip()},
+                              timeout=10.0, render=voiceview.controlled)
     if verb in ("on", "off", "mute", "unmute"):
         return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": verb}, timeout=60.0,
                               render=voiceview.controlled)

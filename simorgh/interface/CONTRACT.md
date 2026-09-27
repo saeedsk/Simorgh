@@ -242,6 +242,8 @@ for the segments. Verified against a live relay: playlist 200 with six rewritten
 
 - `GET /api/room/speech` is the one audio route open without a token: it serves only refs announced on `voice.room.speech` in the last `ROOM_SPEECH_TTL_S`, content addresses nobody can guess, for a home LAN. The TV's `/api/tv/speech` still requires the token.
 
+- `voice mute <room>` / `voice unmute <room>` (stage 13, 2026-09-27) send `voice.control.request {action, name}`: one room's microphone, the others keep listening; bare `voice mute` still stops the whole subsystem.
+
 ## Contract tests
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract interface`.

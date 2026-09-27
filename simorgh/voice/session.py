@@ -781,10 +781,16 @@ class VoiceSession:
         words = re.findall(r"[a-z']+", (text or "").lower())
         if not words or len(words) > 6 or any(w not in self._COURTESY for w in words):
             return False
-        if self._names_sim(text):
+        if self._wake_addressed() or self._names_sim(text):
             return False
         in_exchange = 0.0 <= self._now() - self._sim_spoke_at <= self._config.exchange_window_s
         return not in_exchange
+
+    def _wake_addressed(self) -> bool:
+        """This turn came through a room satellite's wake word (stage 13):
+        whoever is speaking has already named Sim, on the board. The
+        laptop's microphone never says so, so nothing changes there."""
+        return bool(getattr(getattr(self, "_mic", None), "woken", False))
 
     @staticmethod
     def _names_sim(text: str) -> bool:
@@ -870,7 +876,7 @@ class VoiceSession:
                     # Portuguese all arrived in one evening. It also went
                     # into the console log, where `console_tail` can hand
                     # Sim its own hallucination back as something heard.
-                    if self._other_language(event.language):
+                    if self._other_language(event.language) and not self._wake_addressed():
                         continue
                     self.partial = event.text
                     await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
@@ -878,6 +884,16 @@ class VoiceSession:
                         "seconds": event.audio_seconds, "engine": event.engine, "device": self._config.device})
                 else:
                     other = self._other_language(event.language)
+                    if other and event.text.strip() and self._wake_addressed():
+                        # A satellite's wake word fired, so a person is
+                        # talking to Sim: the language label is whisper's
+                        # guess and the words are the evidence. Live
+                        # 2026-09-27: "What time is it?" through the board
+                        # came back labelled `ic` and was dropped as noise.
+                        self._log("info", "voice.other_language_after_wake", turn=turn_id, guessed=other,
+                                  text=event.text[:60])
+                        event = replace(event, language=language_of(event.text))
+                        other = ""
                     if other and event.text.strip():
                         # ...unless asking again in a language the house
                         # DOES speak reads the same audio in another
@@ -1355,7 +1371,7 @@ class VoiceSession:
             await self._enroll_take(turn_id, text, vector)
             return
         speaker = identification.name if identification is not None else ""
-        if not speaker and self._tv_is_playing() and not self._names_sim(text):
+        if not speaker and self._tv_is_playing() and not (self._wake_addressed() or self._names_sim(text)):
             # Live 2026-09-13: a KATSEYE video's own dialogue ("my wife
             # Michelle will judge the drawings") was heard, transcribed and
             # answered. While the TV plays, a voice Sim cannot place that
@@ -1564,7 +1580,7 @@ class VoiceSession:
             now = self._now()
             in_exchange = (0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s
                            and self._last_ask_addressed)
-            if not in_exchange and not addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+            if not in_exchange and not (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)):
                 self._room.append((speaker or "someone", text, now, "aside"))
                 self._log_overheard(speaker or "someone", text)
                 await self._stay_quiet(turn_id)
@@ -1584,7 +1600,7 @@ class VoiceSession:
         room = self._room_lines(exclude_text=text, speaker=speaker)
         self._room.append((speaker or "someone", text, self._now(), "asked"))
         before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
-        self._last_ask_addressed = bool(speaker) or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)
+        self._last_ask_addressed = bool(speaker) or (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0))
         live = None
         early: asyncio.Task | None = None
         if self._config.stream_replies:
@@ -1735,7 +1751,7 @@ class VoiceSession:
         # Named, or a question: for Sim. The follow-up window after Sim spoke
         # belongs to the person it answered -- somebody else's statement in
         # that window is them talking to that person, not to Sim.
-        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0) or _looks_like_question(text):
+        if (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)) or _looks_like_question(text):
             return False
         # Asking for something only Sim does. The creator, 2026-09-20: his
         # daughter sang in the kitchen, he said "tell me a story from the
@@ -1854,7 +1870,7 @@ class VoiceSession:
         now = self._now()
         if window <= 0 or at is None or now - at > window or self._sim_spoke_at >= at:
             return False
-        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0) or _speaks_to_sim(text):
+        if (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)) or _speaks_to_sim(text):
             return False
         self._quiet_on[me] = now
         self._room.append((me, text, now, "aside"))
@@ -1884,6 +1900,8 @@ class VoiceSession:
         `[voice] unplaced_needs_name = false`."""
         if not self._config.unplaced_needs_name or speaker:
             return False
+        if self._wake_addressed():
+            return False                 # a satellite's wake word named Sim for them
         if self._in_conversation(speaker):
             return False
         if self._speakers is None or self._embedder is None:
@@ -1900,7 +1918,7 @@ class VoiceSession:
             # still hear those turns. Off by default since 2026-09-13.
             return False
         now = self._now()
-        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+        if (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)):
             return False
         # Sim asked something a moment ago and this may be the answer to it.
         if 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s and self._last_ask_addressed:
@@ -1950,7 +1968,7 @@ class VoiceSession:
         if not self._config.background_quiet or speaker:
             return False
         now = self._now()
-        if addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0):
+        if (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0)):
             return False
         # A follow-up counts only when the exchange began properly: Sim
         # answering a stray fragment of the TV must not make the next

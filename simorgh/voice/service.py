@@ -568,7 +568,8 @@ class Service:
 
             link = SatelliteLink(name, host, key, publish=_publish, port=int(entry.get("port") or 6053),
                                  volume=float(entry["volume"]) if entry.get("volume") is not None else None,
-                                 accepting=lambda: self._enabled and not self._muted,
+                                 accepting=lambda name=name: (self._enabled and not self._muted
+                                                              and not getattr(self._rooms.get(name), "muted", False)),
                                  client_factory=self._satellite_client,
                                  logger=self._ctx.logger if self._ctx else None)
             try:
@@ -618,6 +619,21 @@ class Service:
         except OSError:
             address = socket.gethostname()
         return f"http://{address}:8765"
+
+    def _mute_one(self, name: str, mute: bool) -> tuple[bool, str]:
+        """Mute or unmute ONE room's session; the others keep listening."""
+        key = name.lower()
+        if key in ("laptop", self.config.device.lower()):
+            session = self._session
+        else:
+            session = next((s for device, s in self._rooms.items() if device.lower() == key), None)
+        if session is None:
+            known = ", ".join([self.config.device, *self._rooms])
+            return False, f"no room called {name!r} -- rooms: {known}"
+        session.muted = mute
+        if mute:
+            return True, f"{name} muted; the other rooms still listen (`voice unmute {name}` to undo)"
+        return True, f"{name} listening again"
 
     async def remove_room(self, device: str) -> None:
         """Stop and forget one room's session (a satellite went away)."""
@@ -709,7 +725,14 @@ class Service:
     async def _on_control(self, message) -> None:
         action = str(message.payload.get("action") or "")
         ok, detail = True, ""
-        if action == "on":
+        room_name = str(message.payload.get("name") or "").strip()
+        if action in ("mute", "unmute") and room_name:
+            # `voice mute laptop`: one room's microphone, not the house's --
+            # plain `voice mute` still stops everything. Found live on
+            # 2026-09-27: with the satellite beside the Mac both sessions
+            # answered, and muting the laptop silenced the satellite too.
+            ok, detail = self._mute_one(room_name, action == "mute")
+        elif action == "on":
             self._silenced = False
             ok, detail = await self._turn_on()
         elif action == "off":

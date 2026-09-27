@@ -389,3 +389,56 @@ class ConfiguredSatellites(unittest.IsolatedAsyncioTestCase):
         announced = ctx.bus.of(topics.VOICE_ROOM_SPEECH)
         self.assertEqual(announced[0]["ref"], "blob:1")
         self.assertEqual(announced[0]["device"], "kitchen")
+
+
+class AWakeWordIsTheAddress(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-27: "What time is it?" through the board came back from
+    whisper labelled `ic`, and the room dropped it as noise -- the rule
+    that keeps the laptop from answering the TV. On a satellite the wake
+    word already said a person is talking to Sim."""
+
+    async def test_a_turn_after_the_wake_word_is_answered_whatever_language_whisper_guessed(self):
+        from dataclasses import replace
+
+        from simorgh.voice.api import Utterance
+        from simorgh.voice.fakes import FakeRecogniser, FakeSynthesiser
+        from simorgh.voice.pipeline import Pipeline, Room
+        from simorgh.voice.session import VoiceSession
+        from tests.simorgh.voice.test_session import _Bus, _config, _Replies, _Script
+
+        class Icelandic(FakeRecogniser):
+            async def transcribe(self, audio, *, language: str = ""):
+                return Utterance(text="What time is it?", confidence=0.95, seconds=audio.seconds,
+                                 engine="fake", language="icelandic")
+
+        link, client, published = _link()
+        stop_link, link_task = await _connected(link, client)
+        config = replace(_config(), device="kitchen", stt_languages="en,fa")
+        script = _Script((True, 20), (False, 10_000))
+        stt, tts = Icelandic(), FakeSynthesiser()
+        pipeline = Pipeline(bus=_Bus(), clock=None, logger=None, ledger=None, config=config,
+                            microphone=link.microphone, speaker=link.speaker, recogniser=stt, synthesiser=tts,
+                            detector_factory=lambda: script)
+        replies = _Replies(["It is eleven."])
+        pipeline.ask = replies.ask  # type: ignore[method-assign]
+        session = VoiceSession(pipeline=pipeline, config=config, microphone=link.microphone, speaker=link.speaker,
+                               recogniser=stt, synthesiser=tts, detector_factory=lambda: script, room=Room("kitchen"))
+        await client.handlers["handle_start"]("c1", 1, None, "okay_nabu")
+        stop = asyncio.Event()
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.05), mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+            running = asyncio.create_task(session.run(stop))
+            for _ in range(500):
+                if replies.asked:
+                    break
+                await asyncio.sleep(0.01)
+            stop.set()
+            running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+        self.assertEqual(replies.asked, ["What time is it?"], "heard and asked, not dropped as noise")
+        await _close(stop_link, link_task)
+
+    def test_the_laptop_microphone_never_claims_a_wake(self):
+        from simorgh.voice.fakes import FakeMicrophone
+
+        self.assertFalse(getattr(FakeMicrophone(), "woken", False))
+        self.assertFalse(sat.SatelliteMicrophone("kitchen").woken, "and a satellite only inside a run")

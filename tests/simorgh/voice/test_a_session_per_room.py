@@ -184,3 +184,32 @@ class TheServiceHoldsTheRooms(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MutingOneRoom(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-27: with the satellite beside the Mac both sessions
+    answered, and `voice mute` -- the only mute there was -- silenced the
+    satellite as well. `voice mute <room>` mutes that room alone."""
+
+    async def test_muting_the_laptop_leaves_the_room_listening_and_back(self):
+        service = await TheServiceHoldsTheRooms._service(self)
+        room = await service.add_room("kitchen", microphone=FakeMicrophone(silence(0.03)), speaker=FakeSpeaker())
+        ok, why = await service._turn_on()  # noqa: SLF001
+        self.assertTrue(ok, why)
+        self.addAsyncCleanup(service._turn_off)  # noqa: SLF001
+        ok, detail = service._mute_one("laptop", True)  # noqa: SLF001
+        self.assertTrue(ok, detail)
+        self.assertTrue(service._session.muted)  # noqa: SLF001
+        self.assertFalse(room.muted, "the kitchen still listens")
+        self.assertIn("other rooms still listen", detail)
+        ok, _d = service._mute_one("KITCHEN", True)  # noqa: SLF001
+        self.assertTrue(ok and room.muted, "a room is named without caring about case")
+        service._mute_one("laptop", False)  # noqa: SLF001
+        self.assertFalse(service._session.muted)  # noqa: SLF001
+
+    async def test_an_unknown_room_is_named_with_the_ones_there_are(self):
+        service = await TheServiceHoldsTheRooms._service(self)
+        await service.add_room("kitchen", microphone=FakeMicrophone(silence(0.03)), speaker=FakeSpeaker())
+        ok, detail = service._mute_one("garage", True)  # noqa: SLF001
+        self.assertFalse(ok)
+        self.assertIn("kitchen", detail)

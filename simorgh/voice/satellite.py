@@ -87,6 +87,9 @@ class SatelliteMicrophone:
         self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=MAX_QUEUED_FRAMES)
         self._partial = bytearray()
         self._on_state = None
+        #: True from the board's wake word to the end of its run: the session
+        #: treats that turn as addressed to Sim (`VoiceSession._wake_addressed`).
+        self.woken = False
 
     def feed(self, pcm: bytes) -> None:
         """Audio from the board, any chunk size; kept as whole frames."""
@@ -289,6 +292,7 @@ class SatelliteLink:
         if self._ender is not None and not self._ender.done():
             self._ender.cancel()
         self._run = None
+        self.microphone.woken = False
         client, self._client = self._client, None
         if client is not None:
             with contextlib.suppress(Exception):
@@ -303,6 +307,7 @@ class SatelliteLink:
             return None
         self.microphone.clear()
         self._run = _Run(started_at=self._clock(), wake_word=wake_word or "")
+        self.microphone.woken = True
         self.runs += 1
         self.last_wake_at = time.time()
         self._event("VOICE_ASSISTANT_RUN_START")
@@ -324,6 +329,7 @@ class SatelliteLink:
         if run is not None:
             run.ended = True
             self._run = None
+        self.microphone.woken = False
         self.speaker.interrupted()
 
     def _watch(self, run: _Run) -> None:
@@ -341,6 +347,8 @@ class SatelliteLink:
             return
         if state == "thinking" and not run.vad_ended_at:
             run.vad_ended_at = self._clock()
+            self._log("info", "voice.satellite_turn", phase="heard",
+                      after_wake_s=round(run.vad_ended_at - run.started_at, 2))
             self._event("VOICE_ASSISTANT_STT_VAD_END")
             self._event("VOICE_ASSISTANT_STT_END", {"text": ""})
             self._event("VOICE_ASSISTANT_INTENT_START")
@@ -363,6 +371,7 @@ class SatelliteLink:
             self._event("VOICE_ASSISTANT_INTENT_END")
         self._event("VOICE_ASSISTANT_RUN_END")
         run.ended = True
+        self.microphone.woken = False
         if self._run is run:
             self._run = None
 
@@ -377,6 +386,10 @@ class SatelliteLink:
         run = self._run
         if run is not None and not run.ended and not run.replied:
             run.replied = True
+            now = self._clock()
+            self._log("info", "voice.satellite_turn", phase="replying",
+                      after_wake_s=round(now - run.started_at, 2),
+                      after_speech_s=round(now - run.vad_ended_at, 2) if run.vad_ended_at else None)
             self._event("VOICE_ASSISTANT_INTENT_END")
             self._event("VOICE_ASSISTANT_TTS_START", {"text": ""})
             self._event("VOICE_ASSISTANT_TTS_END", {"url": url})
