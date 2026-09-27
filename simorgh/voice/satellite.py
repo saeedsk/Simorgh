@@ -277,7 +277,15 @@ class SatelliteLink:
         #: playing a song is not listening for a next turn: the song
         #: would be the turn.
         self.playing_media = False
+        #: Seconds, or a callable giving them: read live, so `voice set`
+        #: changes a running link.
         self._follow_up_s = follow_up_s
+        #: How long a conversation stays open after the last reply or the
+        #: last thing the person said (`satellite_conversation_s`); 0 is one
+        #: follow-up only. Seconds or a callable.
+        self.conversation_s = 0.0
+        #: Until when this board's conversation is open.
+        self._conversation_until = 0.0
         #: When Sim last asked the board to listen again. The board names
         #: its last wake word on that run too, so this is how a follow-up
         #: is told from a wake.
@@ -411,11 +419,35 @@ class SatelliteLink:
             self._close_quiet_follow_up(self._run)
         return 0
 
+    @staticmethod
+    def _seconds(value) -> float:
+        try:
+            return float(value() if callable(value) else value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _keep_conversation(self) -> None:
+        """The person spoke or Sim replied: the conversation stays open
+        `conversation_s` from now."""
+        span = self._seconds(self.conversation_s)
+        if span > 0:
+            self._conversation_until = max(self._conversation_until, self._clock() + span)
+
+    def in_conversation(self) -> bool:
+        return self._clock() < self._conversation_until
+
     def _close_quiet_follow_up(self, run: _Run) -> None:
-        """A follow-up nobody answers closes after `follow_up_s`, so the
-        board does not sit listening to the room."""
+        """A follow-up nobody answers closes after `follow_up_s` -- or,
+        inside a conversation, after what is left of it (at most one run's
+        length); `_end_run` then opens the next while the conversation
+        lasts, so the board does not sit listening to an empty room."""
+        wait = self._seconds(self._follow_up_s)
+        left = self._conversation_until - self._clock()
+        if left > wait:
+            wait = min(left, MAX_RUN_S - 5.0)
+
         async def _close() -> None:
-            await asyncio.sleep(self._follow_up_s)
+            await asyncio.sleep(wait)
             if self._run is run and not run.ended and not run.speech:
                 self._log("info", "voice.satellite_turn", phase="follow-up unanswered")
                 await self._end_run(run)
@@ -508,6 +540,7 @@ class SatelliteLink:
             run.states.append((round(self._clock() - run.started_at, 2), state))
         if state == "user_speaking":
             run.speech = True
+            self._keep_conversation()
         if state == "thinking" and not run.vad_ended_at:
             run.vad_ended_at = self._clock()
             self._hold_reply_until = 0.0     # what comes now answers this turn
@@ -546,7 +579,11 @@ class SatelliteLink:
         self.microphone.streaming = False
         if self._run is run:
             self._run = None
-        if run.replied and self.follow_up():
+        # After a reply, or -- inside a conversation -- after a follow-up
+        # nobody spoke into: listen again, until the conversation's time is
+        # up with nobody talking (`satellite_conversation_s`).
+        again = run.replied or (run.follow_up and self.in_conversation())
+        if again and self.follow_up():
             asyncio.get_running_loop().create_task(self._open_follow_up())
 
     async def _open_follow_up(self) -> None:
@@ -577,6 +614,7 @@ class SatelliteLink:
         run = self._run
         if run is not None and not run.ended and not run.replied:
             run.replied = True
+            self._keep_conversation()
             now = self._clock()
             self._log("info", "voice.satellite_turn", phase="replying",
                       after_wake_s=round(now - run.started_at, 2),

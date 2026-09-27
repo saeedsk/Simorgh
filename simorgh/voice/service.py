@@ -653,7 +653,7 @@ class Service:
                                  accepting=lambda name=name: (self._enabled and not self._muted
                                                               and not getattr(self._rooms.get(name), "muted", False)),
                                  client_factory=self._satellite_client,
-                                 follow_up_s=float(self.config.follow_up_window_s or 6.0),
+                                 follow_up_s=lambda: float(self.config.follow_up_window_s or 6.0),
                                  keep_runs=str(self.config.satellite_keep_runs or ""),
                                  logger=self._ctx.logger if self._ctx else None)
             try:
@@ -661,16 +661,10 @@ class Service:
             except (ValueError, RuntimeError) as exc:
                 self._problems.append(f"satellite {name}: {exc}")
                 continue
-            mode = str(self.config.satellite_follow_up).lower()
-            if mode == "question":
-                # Sim asked something: the board listens again, no wake word.
-                link.follow_up = lambda room=room: room._voice_room.last_said.rstrip().endswith(("?", "؟"))  # noqa: SLF001
-            elif mode in ("always", "conversation"):
-                # The creator, 2026-09-27: "I only need to say the wake word
-                # once at the beginning of the conversation." Every reply
-                # listens again; a window nobody speaks into ends it. Not
-                # while the board plays music -- the song would be the turn.
-                link.follow_up = lambda link=link: not link.playing_media
+            # Read at each reply, not once here: `voice set satellite_follow_up`
+            # changes a running board (2026-09-27).
+            link.follow_up = lambda link=link, room=room: self._follows_up(link, room)
+            link.conversation_s = lambda: float(self.config.satellite_conversation_s or 0.0)
             link.on_connected = self._satellite_connected
             self._satellites[name] = link
             if self._session is not None:
@@ -719,8 +713,59 @@ class Service:
             address = socket.gethostname()
         return f"http://{address}:8765"
 
+    def _rooms_state(self) -> list[dict]:
+        """Each room's microphone and speaker, for `voice status`: the
+        laptop first, then each satellite with its settings."""
+        rooms = [{"name": "laptop", "muted": bool(getattr(self._session, "muted", False)),
+                  "kind": "laptop"}] if self._session is not None else []
+        for name, link in self._satellites.items():
+            rooms.append({
+                "name": name, "kind": "satellite", "status": link.status,
+                "muted": bool(getattr(self._rooms.get(name), "muted", False)),
+                "in_conversation": link.in_conversation(),
+                "follow_up": str(self.config.satellite_follow_up),
+                "conversation_s": float(self.config.satellite_conversation_s or 0.0),
+                "follow_up_window_s": float(self.config.follow_up_window_s or 0.0),
+                "volume": float(self.config.satellite_volume or 0.0) or link._volume,  # noqa: SLF001
+            })
+        return rooms
+
+    def _follows_up(self, link, room) -> bool:
+        """Whether a board listens again with no wake word after a reply.
+        "question": only after Sim asked something. "always": after every
+        reply (the creator, 2026-09-27: "I only need to say the wake word
+        once at the beginning of the conversation") -- never while the
+        board plays music, or the song would be the next turn. "off": never."""
+        mode = str(self.config.satellite_follow_up).lower()
+        if mode == "question":
+            return room._voice_room.last_said.rstrip().endswith(("?", "؟"))  # noqa: SLF001
+        if mode in ("always", "conversation"):
+            return not link.playing_media
+        return False
+
+    async def _apply_satellite_volume(self) -> str:
+        """`satellite_volume` onto every connected board; what happened."""
+        level = float(self.config.satellite_volume or 0.0)
+        if level <= 0:
+            return ""
+        done = []
+        for name, link in self._satellites.items():
+            try:
+                await link.set_volume(level)
+                done.append(name)
+            except Exception:  # noqa: BLE001 -- a board that is down gets it when it connects
+                pass
+        return f"; {', '.join(done)} set to {level:g}" if done else "; no board connected (applies when one connects)"
+
     async def _satellite_connected(self, name: str) -> None:
-        """The first satellite up after start mutes the laptop's microphone."""
+        """The first satellite up after start mutes the laptop's microphone;
+        every connect puts `satellite_volume` on the board."""
+        link = self._satellites.get(name)
+        if link is not None and float(self.config.satellite_volume or 0.0) > 0:
+            try:
+                await link.set_volume(float(self.config.satellite_volume))
+            except Exception:  # noqa: BLE001
+                pass
         if (self._laptop_muted_for_satellite or not self.config.mute_laptop_with_satellite
                 or self._session is None or getattr(self._session, "muted", False)):
             return
@@ -862,6 +907,8 @@ class Service:
             out["problems"] = list(out.get("problems") or []) + machine_notes()
         except Exception:  # noqa: BLE001 -- a health note is never a failed status
             pass
+        if self._satellites or self._rooms:
+            out["rooms"] = self._rooms_state()
         if session is not None:
             out["state"] = session.state
             out["interruptions"] = session.stats.interruptions
@@ -1227,6 +1274,8 @@ class Service:
                 await self._turn_on()
                 return False, f"refused: {key} = {value!r} could not be opened ({why}); kept {getattr(previous, key)!r}"
             restarted = " (engines reopened; listening again)"
+        if key == "satellite_volume":
+            restarted = await self._apply_satellite_volume()
         where = ""
         if self._ctx is not None and getattr(self._ctx, "data_dir", None):
             path = Path(self._ctx.data_dir).parent / "simorgh.toml"

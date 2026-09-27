@@ -20,6 +20,9 @@ _STATE = (
     # the last turn's latencies, and the session's counts.
     O("state", Str), O("metrics", Obj()), O("interruptions", Int), O("warmup_s", Float),
     O("last_interruption_s", Float), O("partial", Str),
+    # Each room -- the laptop, then every satellite with its connection and
+    # its settings -- so `voice status` shows how to change them (2026-09-27).
+    O("rooms", List(Obj())),
 )
 
 VoiceStatusRequest = define(t.VOICE_STATUS_REQUEST, [])

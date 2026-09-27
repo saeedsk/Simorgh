@@ -44,9 +44,40 @@ def status(payload: dict) -> str:
         last = payload.get("last_interruption_s")
         tail = f" (last stop {last * 1000:.0f} ms)" if isinstance(last, (int, float)) and last >= 0 else ""
         lines.append(f"  interruptions: {payload['interruptions']}{tail}")
+    lines += rooms(payload.get("rooms") or [])
     for problem in payload.get("problems") or []:
         lines.append(f"  ! {problem}")
     return "\n".join(lines)
+
+
+def rooms(listed: list) -> list[str]:
+    """Each room's microphone and speaker, and the command for each setting.
+
+    The creator, 2026-09-27: "from cli commands, it was not clear how to
+    change that setting. How is the user supposed to deal with satellite
+    speaker/mic configs?" -- they were in simorgh.toml only."""
+    if not listed:
+        return []
+    out = ["  rooms:"]
+    satellites = [r for r in listed if r.get("kind") == "satellite"]
+    for room in listed:
+        name = str(room.get("name") or "?")
+        mic = "muted" if room.get("muted") else "listening"
+        if room.get("kind") != "satellite":
+            out.append(f"    {name}: mic {mic}  (`{'unmute' if room.get('muted') else 'mute'}`)")
+            continue
+        talk = " · in a conversation now" if room.get("in_conversation") else ""
+        volume = room.get("volume")
+        out.append(f"    {name}: {room.get('status') or '?'} · mic {mic}"
+                   + (f" · volume {float(volume):g}" if isinstance(volume, (int, float)) else "") + talk)
+    if satellites:
+        s = satellites[0]
+        span = float(s.get("conversation_s") or 0.0)
+        out.append(f"    after a reply: {s.get('follow_up')} · conversation stays open {span:g}s after the last word"
+                   f" · each follow-up waits {float(s.get('follow_up_window_s') or 0):g}s")
+        out.append("    change: `voice set satellite_conversation_s 300` · `voice set satellite_follow_up "
+                   "always|question|off` · `voice set satellite_volume 0.7` · `mute|unmute <room>`")
+    return out
 
 
 def controlled(payload: dict) -> str:

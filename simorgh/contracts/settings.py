@@ -100,6 +100,17 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "output": (str, ("laptop", "tv", "both"), "where the voice comes out: this machine, the TV page, or both"),
     "auto_listen": (bool, None, "listen again after each reply"),
     "barge_in": (bool, None, "interrupt Sim by talking"),
+    # The satellites (stage 13). They were set only in simorgh.toml and read
+    # once at start, so "how do I change that?" had no answer at the prompt
+    # (the creator, 2026-09-27). `voice status` lists them per room.
+    "satellite_follow_up": (str, ("question", "always", "off"),
+                            "after a reply, a satellite listens again with no wake word: after a question only, "
+                            "after every reply, or never"),
+    "satellite_conversation_s": (float, (0.0, 600.0),
+                                 "how long a satellite conversation stays open after the last reply or the last "
+                                 "thing said -- no wake word needed until it passes quietly; 0 = one follow-up only"),
+    "follow_up_window_s": (float, (2.0, 60.0), "how long one satellite follow-up waits for speech before it closes"),
+    "satellite_volume": (float, (0.0, 1.0), "the satellites' speaker volume, 0.05-1.0; 0 = each board's own"),
     "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),
     "min_speech_ms": (int, (50, 2000), "shorter than this is not a turn"),
     "vad_sensitivity": (str, ("low", "balanced", "high"), "how sure the detector must be"),

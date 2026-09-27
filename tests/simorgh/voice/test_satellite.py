@@ -631,6 +631,57 @@ class OneWakeWordAConversation(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(link.follow_up())
 
 
+class AConversationStaysOpenForMinutes(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "after I say 'hey sim' I'd like sim to stay
+    and monitor for interactive conversation for longer ... like 2 to 5
+    minutes". A follow-up nobody speaks into is followed by another while
+    the conversation lasts; once it has passed quietly, the board stops."""
+
+    async def test_a_quiet_follow_up_is_followed_by_another_inside_the_window(self):
+        link, client, _p = _link()
+        link._follow_up_s = 0.05  # noqa: SLF001
+        link.follow_up = lambda: True
+        link.conversation_s = 1.0
+        stop, task = await _connected(link, client)
+        # One run lasts at most MAX_RUN_S; each quiet follow-up closes 5 s
+        # before that, so 5.2 makes each wait 0.2 s inside a 1 s window.
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.01), mock.patch.object(sat, "MAX_RUN_S", 5.2):
+            await client.handlers["handle_start"]("c1", 1, None, "hey_sim")
+            link.microphone.on_state("thinking")
+            with mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+                await link.speaker.play(silence(0.02))       # Sim replied: the conversation is open
+            link.microphone.on_state("listening")
+            await asyncio.sleep(0.4)
+            self.assertEqual(len(client.announcements), 1, "listening again after the reply")
+            await client.handlers["handle_start"]("c2", 1, None, None)   # the board opens that follow-up
+            self.assertTrue(link.in_conversation())
+            await asyncio.sleep(0.6)                          # it closes quietly; the window is still open
+            self.assertGreaterEqual(len(client.announcements), 2, "a quiet follow-up inside the window: another")
+            await asyncio.sleep(0.4)
+        self.assertFalse(link.in_conversation(), "then the window passed")
+        await _close(stop, task)
+
+    async def test_zero_is_one_follow_up_as_before(self):
+        link, client, _p = _link()
+        link._follow_up_s = 0.05  # noqa: SLF001
+        link.follow_up = lambda: True
+        link.conversation_s = 0.0
+        stop, task = await _connected(link, client)
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.01):
+            await client.handlers["handle_start"]("c2", 1, None, None)   # a follow-up nobody answers
+            await asyncio.sleep(0.4)
+        self.assertEqual(getattr(client, "announcements", []), [], "no conversation: no second follow-up")
+        await _close(stop, task)
+
+    async def test_it_is_a_setting_you_can_change_at_the_prompt(self):
+        from simorgh.contracts.settings import VOICE_SAFE_KEYS
+        from simorgh.voice.config import Config
+
+        for key in ("satellite_conversation_s", "satellite_follow_up", "follow_up_window_s", "satellite_volume"):
+            self.assertIn(key, VOICE_SAFE_KEYS, key)
+        self.assertEqual(Config().satellite_conversation_s, 180.0)
+
+
 class TheBoardDoesNotContinueOnItsOwn(unittest.IsolatedAsyncioTestCase):
     """2026-09-27, live: after one follow-up announcement the board kept
     ESPHome's `continue_conversation_` and started a new run every time a

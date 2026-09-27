@@ -104,6 +104,18 @@
             "null"
           ]
         },
+        "rooms": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {},
+            "required": [],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "speaking": {
           "type": "boolean"
         },

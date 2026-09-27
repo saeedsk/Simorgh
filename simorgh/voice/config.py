@@ -418,6 +418,17 @@ class Config:
     # music); or never ("off"). "question" is the default because an open
     # mic after a statement can take in the TV as the person's next turn.
     satellite_follow_up: str = "question"
+    # How long a conversation at a satellite stays open: after Sim's reply
+    # (or the person speaking) the board keeps listening with no wake word,
+    # one follow-up run after another, until this long passes with nobody
+    # talking. The creator, 2026-09-27: "after I say 'hey sim' I'd like sim
+    # to stay and monitor for interactive conversation for longer ... like
+    # 2 to 5 minutes". 0: one follow-up of `follow_up_window_s`, as before.
+    # Only with `satellite_follow_up` "always" or "question".
+    satellite_conversation_s: float = 180.0
+    # The satellites' speaker volume, 0.05-1.0; 0 leaves each board at its
+    # own `[[voice.satellites]] volume` (or where it was).
+    satellite_volume: float = 0.0
     # A folder to keep each satellite wake run's audio in (the last 20, as
     # WAV), for replaying a turn that went wrong; "" keeps none. Only runs
     # a wake word opened -- no room is ever recorded otherwise.
