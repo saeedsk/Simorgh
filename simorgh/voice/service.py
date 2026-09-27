@@ -1263,8 +1263,32 @@ class Service:
             return None, None, why
         return pipeline._tts, pipeline._stt, ""  # noqa: SLF001
 
+    def _spoken_form(self, text: str) -> str:
+        """`text` as the room would say it: names the way the household
+        says them, then `speakable` (planner.py) -- the same two steps, in
+        the same order, as `SpokenResponsePlanner.plan`.
+
+        The phone hands over the chat reply it shows on screen, and this
+        was the one path that skipped both: Kokoro read "star star AI
+        regulation fight heats up star star" aloud and called the creator
+        "Seed" while the satellite and the laptop said his name right
+        (live, 2026-09-27)."""
+        from .planner import SpokenResponsePlanner, speakable
+
+        try:
+            from .speakers import SpeakerBook
+
+            session = self._session
+            book = getattr(session, "_speakers", None) if session is not None else None
+            if book is None:
+                book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold)
+            text = SpokenResponsePlanner(pronunciations=book.pronunciations).pronounced(text)
+        except Exception:  # noqa: BLE001 -- a name said plainly beats no audio at all
+            pass
+        return speakable(text)[0].strip()
+
     async def _on_synthesise(self, message) -> None:
-        text = str(message.payload.get("text") or "").strip()
+        text = self._spoken_form(str(message.payload.get("text") or "").strip())
         if not text:
             await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("nothing_to_say", "nothing to say"))
             return

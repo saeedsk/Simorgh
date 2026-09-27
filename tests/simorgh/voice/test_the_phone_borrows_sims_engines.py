@@ -63,6 +63,59 @@ class ThePhoneBorrowsSimsEngines(unittest.IsolatedAsyncioTestCase):
         self.assertIn("nothing to say", reply.payload["detail"])
         self.assertEqual(reply.payload["error"]["code"], "nothing_to_say", "a refusal that passes its own contract")
 
+    async def test_what_is_synthesised_is_the_spoken_form_not_the_markdown(self):
+        """Live, 2026-09-27: the phone's reply had **bold** headlines and
+        Kokoro read the asterisks out. The engine is handed what
+        `planner.speakable` leaves, as the room's own replies are."""
+        from unittest import mock
+
+        from simorgh.voice import tts
+
+        kernel = await self._kernel()
+        said: list[str] = []
+        real = tts._with_tone
+
+        async def _spy(engine, text, **kw):
+            said.append(text)
+            return await real(engine, text, **kw)
+
+        with mock.patch.object(tts, "_with_tone", _spy):
+            reply = await kernel.bus.request(kernel.bus.new(topics.VOICE_SYNTHESISE_REQUEST, {
+                "text": "Here's the top: - **AI regulation fight heats up** -- a *bipartisan* caucus."}), timeout=60)
+        self.assertTrue(reply.payload.get("ok"), reply.payload)
+        self.assertEqual(len(said), 1)
+        self.assertNotIn("*", said[0])
+        self.assertIn("AI regulation fight heats up", said[0])
+
+    async def test_a_name_is_said_the_way_the_household_says_it(self):
+        """The phone called the creator "Seed"; the satellite and the
+        laptop, which respell names first, said it right (2026-09-27)."""
+        from unittest import mock
+
+        from simorgh.voice import tts
+        from simorgh.voice.speakers import SpeakerBook
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        kernel = await self._kernel(speakers_dir=tmp.name)
+        SpeakerBook(tmp.name).pronounce("Saeed", "Saa-eed")
+        said: list[str] = []
+        real = tts._with_tone
+
+        async def _spy(engine, text, **kw):
+            said.append(text)
+            return await real(engine, text, **kw)
+
+        with mock.patch.object(tts, "_with_tone", _spy):
+            await kernel.bus.request(kernel.bus.new(topics.VOICE_SYNTHESISE_REQUEST,
+                                                    {"text": "Here, Saeed."}), timeout=60)
+        self.assertEqual(said, ["Here, Saa-eed."])
+
+    async def test_markdown_with_nothing_speakable_is_nothing_to_say(self):
+        kernel = await self._kernel()
+        reply = await kernel.bus.request(kernel.bus.new(topics.VOICE_SYNTHESISE_REQUEST, {"text": "** **"}), timeout=30)
+        self.assertEqual(reply.payload["error"]["code"], "nothing_to_say")
+
     async def test_transcribe_reads_audio_recorded_somewhere_else(self):
         kernel = await self._kernel(fake_transcript="turn the kitchen light off")
         made = await kernel.bus.request(
