@@ -55,7 +55,12 @@ class TestTheVoiceChatProfile(unittest.TestCase):
         from simorgh.orchestration import profiles
         voice = profiles.for_percept("voice")
         self.assertIs(voice, profiles.VOICE_CHAT)
-        for tool in ("apply_source_patch", "replace_in_file", "run_script", "install_package", "run_shell",
+        # `run_shell` left this list on 2026-09-27 (the creator: "if
+        # creator asks, sim should take those action" -- "I generally would
+        # give permission if the command is not destructive"). Guardian's
+        # PersonRule decides who may; shell.py's refusal table and the
+        # scaffold keep it from deleting.
+        for tool in ("apply_source_patch", "replace_in_file", "run_script", "install_package",
                      "git_commit", "apply_skill"):
             self.assertNotIn(tool, voice.tools)
         self.assertIn("start_task", voice.tools)
@@ -81,6 +86,20 @@ class MusicByVoiceTestCase(unittest.TestCase):
         for tool in ("music_now", "music_control", "music_play"):
             self.assertIn(tool, VOICE_CHAT.tools, tool)
             self.assertIn(tool, CHAT.tools, tool)
+
+    def test_either_chat_can_look_at_the_machine_it_runs_on(self):
+        """"Check which process is using my GPU", by voice, got "I can't
+        run a shell from here" (the creator, 2026-09-27: "if creator
+        asks, sim should take those action"). Who may is Guardian's
+        PersonRule, not the profile's tool list."""
+        from simorgh.orchestration import scaffolds
+        from simorgh.orchestration.profiles import CHAT, VOICE_CHAT
+
+        self.assertIn("run_shell", CHAT.tools)
+        self.assertIn("run_shell", VOICE_CHAT.tools)
+        spoken = " ".join(scaffolds.render(VOICE_CHAT).split())
+        self.assertIn("do it with run_shell", spoken)
+        self.assertIn("never delete, erase or overwrite anything from a spoken turn", spoken)
 
     def test_sim_can_press_its_own_buttons_from_either_chat(self):
         """Built, registered, gated -- and in no profile, so "run restart" got

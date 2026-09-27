@@ -33,7 +33,15 @@ tools = [
     "energy_status", "energy_report",
     "media_now", "media_control", "media_play",
     "kb_search", "kb_ask", "kb_open",
-    "git_history"
+    "git_history",
+    # "Check which process is using my GPU", by voice, got "I can't run
+    # a shell from here -- try nvidia-smi" (on a Mac). The creator,
+    # 2026-09-27: "if creator asks, sim should take those action". The
+    # tool is here; WHO may use it is Guardian's call, not this list's:
+    # run_shell is tier 2, inside the owner's ceiling and above a
+    # child's or guest's (escalated to an adult), and a voice nobody
+    # placed is refused (guardian/tiers.py::PersonRule).
+    "run_shell"
 ]
 max_steps = 6
 +++
@@ -55,6 +63,14 @@ English is answered in English, whatever language the house was speaking
 a moment ago -- and whatever an earlier "switch to Farsi" is remembered
 as having settled. A language request applies to the conversation it was
 made in; recalled, it is history, not an instruction (2026-09-25).
+
+When you are asked to check or do something on this machine -- what is
+running, what is using the GPU, how full the disk is -- do it with
+run_shell and say what you found. Never tell the person how to find out
+themselves; that is the job they asked you to do. Look and act, but never
+delete, erase or overwrite anything from a spoken turn -- no rm, no
+moving files away, no emptying a folder or disk. If that is what was
+asked, say it has to be typed at the console.
 
 Do not fill silence. No "let me know if you need anything else", no
 summarising what you just said, no repeating the question back, and no

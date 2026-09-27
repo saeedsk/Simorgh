@@ -38,6 +38,12 @@ tools = [
     # (the creator, 2026-09-16). Read-only: the three write tools
     # stay in the task profiles where a commit belongs.
     "git_history",
+    # "Which process is using my GPU?" -- asked of the one agent a
+    # person talks to, and it had no way to look (2026-09-27, by
+    # voice; the typed chat lacked it too). Guardian decides who may:
+    # tier 2 is inside the owner's ceiling, a child or guest is
+    # escalated, an unplaced voice refused (guardian/tiers.py).
+    "run_shell",
     # Chat could turn the kitchen light on and read the mail, and
     # could not save a text file. Asked for a PowerPoint deck,
     # Sim correctly reported that it had no way to write one and

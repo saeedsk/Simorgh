@@ -162,6 +162,7 @@ A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that 
 - Traces (stage 1 item 2, 2026-09-19): every message a session sends carries `Session.trace`, which is the task id for a task and the percept's own `trace_id` for a chat turn (`run_percept_chat(trace_id=...)`), so one turn is one trace from `percept.text.received` to `turn.completed`.
 
 - `room_play` has a `_TOOL_POLICY` row (reversible), a marker note and a scaffold line, and is in `agents/chat.md` and `agents/voice_chat.md` (stage 13 item 8): asked through a satellite, music plays there.
+- `run_shell` is in `agents/chat.md` and `agents/voice_chat.md` (2026-09-27): a spoken or typed "check what is using the GPU" is done, not explained. The profile does not decide who may: `run_shell` is tier 2, so Guardian's `PersonRule` lets the owner through, escalates a child or guest to an adult, and refuses a voice nobody placed.
 
 - A voice turn's `device` (from `percept.text.received`) reaches `Session.device`; when it is a room satellite (not `laptop`), `scaffolds.render` adds `satellite_note`: the person is in that room, already called Sim by its wake word, and music or sound goes to `room_play` with no room (stage 13, 2026-09-27).
 
