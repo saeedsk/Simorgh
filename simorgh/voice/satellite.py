@@ -317,6 +317,16 @@ class SatelliteLink:
         #: `playing_media` follows it, so music a previous Sim started -- or
         #: one the board resumed by itself after an announcement -- counts.
         self.board_media = ""
+        #: The board's "Wake word sensitivity" select: its key, its value
+        #: now, and what it was before music raised it (`music_sensitivity`).
+        self._sensitivity_key: int | None = None
+        self._sensitivity = ""
+        self._sensitivity_before = ""
+        #: The sensitivity to use while the board plays music ("" = leave it):
+        #: over a song through a speaker on the jack the board's echo
+        #: cancelling cannot hear "Hey Sim" at its everyday cutoff (live,
+        #: 2026-09-27: four minutes of radio, not one wake). A callable, read live.
+        self.music_sensitivity = ""
         #: When the music was last stopped on purpose; a resume within
         #: `RESTOP_S` of that is the board's, and is stopped again.
         self._stopped_music_at = 0.0
@@ -401,11 +411,14 @@ class SatelliteLink:
         entities, _services = await client.list_entities_services()
         players = [e for e in entities if type(e).__name__ == "MediaPlayerInfo"]
         self._media_key = players[0].key if players else None
+        selects = [e for e in entities if type(e).__name__ == "SelectInfo"
+                   and "wake word sensitivity" in str(getattr(e, "name", "")).lower()]
+        self._sensitivity_key = selects[0].key if selects else None
         if self._media_key is not None and self._volume is not None:
             client.media_player_command(self._media_key, volume=float(self._volume))
         client.subscribe_voice_assistant(handle_start=self._on_start, handle_stop=self._on_stop,
                                          handle_audio=self._on_audio)
-        if self._media_key is not None and hasattr(client, "subscribe_states"):
+        if (self._media_key is not None or self._sensitivity_key is not None) and hasattr(client, "subscribe_states"):
             client.subscribe_states(self._on_entity_state)
         self.connected = True
         self._set_status("connected" if self._media_key is not None else "connected, but it has no media player")
@@ -420,7 +433,11 @@ class SatelliteLink:
         board: PLAYING or PAUSED is music (Sim's follow-ups stay shut, or
         the song would be the next turn); IDLE is none; ANNOUNCING says
         nothing about the music under it."""
-        if getattr(state, "key", None) != self._media_key or not hasattr(state, "state"):
+        key = getattr(state, "key", None)
+        if key is not None and key == self._sensitivity_key:
+            self._sensitivity = str(getattr(state, "state", "") or "")
+            return
+        if key != self._media_key or not hasattr(state, "state"):
             return
         name = str(getattr(state.state, "name", state.state)).lower()
         self.board_media = name
@@ -430,8 +447,33 @@ class SatelliteLink:
                 self._send_stop()
                 return
             self.playing_media = True
+            if name == "playing":
+                self._music_sensitivity(True)
         elif name in ("idle", "off", "none"):
             self.playing_media = False
+            self._music_sensitivity(False)
+
+    def _music_sensitivity(self, music: bool) -> None:
+        """Raise the wake word's sensitivity while music plays; put the
+        person's own choice back when it stops."""
+        if self._client is None or self._sensitivity_key is None:
+            return
+        try:
+            wanted = str(self.music_sensitivity() if callable(self.music_sensitivity) else self.music_sensitivity or "")
+        except Exception:  # noqa: BLE001
+            wanted = ""
+        if music:
+            if not wanted or self._sensitivity_before or self._sensitivity == wanted:
+                return
+            self._sensitivity_before = self._sensitivity or "Slightly sensitive"
+            target = wanted
+        else:
+            if not self._sensitivity_before:
+                return
+            target, self._sensitivity_before = self._sensitivity_before, ""
+        with contextlib.suppress(Exception):
+            self._client.select_command(self._sensitivity_key, target)
+            self._log("info", "voice.satellite_sensitivity", to=target, music=music)
 
     def _send_stop(self) -> None:
         if self._client is None or self._media_key is None:

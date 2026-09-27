@@ -112,6 +112,9 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                                  "the conversation stays open this long after the last word; 0 = one follow-up only"),
     "follow_up_window_s": (float, (2.0, 60.0), "how long one satellite follow-up waits for speech before it closes"),
     "satellite_volume": (float, (0.0, 1.0), "the satellites' speaker volume, 0.05-1.0; 0 = each board's own"),
+    "satellite_music_sensitivity": (str, ("", "Slightly sensitive", "Moderately sensitive", "Very sensitive"),
+                                    "the satellite's wake-word sensitivity while it plays music (put back after); "
+                                    "\"\" leaves it alone"),
     "satellite_lead_in_ms": (int, (0, 2000), "silence before a satellite reply that starts after a quiet spell, so "
                              "the speaker is awake before the first words; raise it if the start is still clipped"),
     "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),

@@ -433,6 +433,10 @@ class Config:
     # spell, so the board's output (and a speaker on its jack) is awake
     # before the words: the first words were being clipped (2026-09-27).
     satellite_lead_in_ms: int = 500
+    # The board's wake-word sensitivity while it plays music, put back when
+    # the music stops; "" leaves it alone. Over a song on the speaker the
+    # everyday cutoff missed every "Hey Sim" for four minutes (2026-09-27).
+    satellite_music_sensitivity: str = "Very sensitive"
     # A folder to keep each satellite wake run's audio in (the last 20, as
     # WAV), for replaying a turn that went wrong; "" keeps none. Only runs
     # a wake word opened -- no room is ever recorded otherwise.

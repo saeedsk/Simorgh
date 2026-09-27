@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import types
 import unittest
 from unittest import mock
 
@@ -819,6 +820,41 @@ class MusicFollowsTheBoard(unittest.IsolatedAsyncioTestCase):
         await link.play_media("http://jazz")                 # wanted again: not stopped
         link._on_entity_state(self._State(7, "playing"))  # noqa: SLF001
         self.assertTrue(link.playing_media)
+        await _close(stop, task)
+
+
+class TheWakeWordListensHarderOverMusic(unittest.IsolatedAsyncioTestCase):
+    """Live, 2026-09-27: after the radio started, four minutes passed with
+    not one "Hey Sim" heard over the music. While the board plays music its
+    wake-word sensitivity goes up; when the music stops it goes back."""
+
+    class _SensitiveClient(_Client):
+        async def list_entities_services(self):
+            class SelectInfo:
+                key = 42
+                name = "Wake word sensitivity"
+            return [MediaPlayerInfo(), SelectInfo()], []
+
+        def select_command(self, key, state, device_id=0):
+            self.selected = getattr(self, "selected", []) + [(key, state)]
+
+    async def test_raised_while_music_plays_and_put_back_after(self):
+        link, client, _p = _link(self._SensitiveClient())
+        link.music_sensitivity = lambda: "Very sensitive"
+        stop, task = await _connected(link, client)
+        link._on_entity_state(types.SimpleNamespace(key=42, state="Moderately sensitive"))  # noqa: SLF001 -- the person's choice
+        link._on_entity_state(MusicFollowsTheBoard._State(7, "playing"))  # noqa: SLF001
+        link._on_entity_state(MusicFollowsTheBoard._State(7, "playing"))  # noqa: SLF001 -- said once, not twice
+        link._on_entity_state(MusicFollowsTheBoard._State(7, "idle"))  # noqa: SLF001
+        self.assertEqual(client.selected, [(42, "Very sensitive"), (42, "Moderately sensitive")])
+        await _close(stop, task)
+
+    async def test_empty_leaves_it_alone(self):
+        link, client, _p = _link(self._SensitiveClient())
+        link.music_sensitivity = ""
+        stop, task = await _connected(link, client)
+        link._on_entity_state(MusicFollowsTheBoard._State(7, "playing"))  # noqa: SLF001
+        self.assertEqual(getattr(client, "selected", []), [])
         await _close(stop, task)
 
 
