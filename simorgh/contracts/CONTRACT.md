@@ -189,6 +189,7 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - 2026-09-27: `memory.forget`'s `kinds` is `FORGET_KIND` -- the memory kinds plus `facts` (schema regenerated; additive). The console has sent `facts` for `forget facts|all` since 2026-09-25 and every one was refused at publish. Producer: interface (`dispatch.py` forget), execution (`memory_forget`). Consumer: memory (`store.forget_window`).
 - 2026-09-27: `settings.VOICE_SAFE_KEYS` gains `satellite_lead_in_ms` (0-2000). Consumer: voice (`SatelliteSpeaker`).
 - 2026-09-27: `settings.VOICE_SAFE_KEYS` gains `satellite_music_sensitivity` ("", Slightly/Moderately/Very sensitive). Consumer: voice (`SatelliteLink`).
+- 2026-09-27: `settings.VOICE_SAFE_KEYS` gains `stt_model_farsi`. Consumer: voice (`stt/whisper_server.py`).
 - 2026-09-27: `household.Member` gains `fa`, the name in Persian script (all five household members set). Consumer: voice (`planner._names_in_persian`).
 - 2026-09-24: `voice.synthesise.request|reply` and `voice.transcribe.request|reply`. Speech for a client that
   has its own speaker and its own microphone: synthesise WITHOUT playing (the reply carries an `audio/wav`

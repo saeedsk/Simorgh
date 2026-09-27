@@ -186,6 +186,18 @@ class WhisperServerRecogniser:
         self._lock = asyncio.Lock()
         self.problems: list[str] = []
         self.last_took_s = 0.0
+        #: A second server for Farsi turns (`stt_model_farsi`), or None.
+        self._farsi: "WhisperServerRecogniser | None" = None
+        farsi_model = str(getattr(config, "stt_model_farsi", "") or "").strip()
+        if farsi_model and farsi_model != str(config.stt_model):
+            from dataclasses import replace
+
+            try:
+                self._farsi = WhisperServerRecogniser(
+                    replace(config, stt_model=farsi_model, stt_model_farsi="", stt_server_port=0),
+                    repo_root=repo_root, command=list(command))
+            except ImportError as exc:
+                self.problems.append(f"Farsi model {farsi_model!r} not used: {exc}")
         tag = model.name.replace("ggml-", "").replace(".bin", "")
         self.name = f"whisper_server:{tag}" + (" (test model -- run `voice models base.en`)" if model.name == _TEST_MODEL else "")
 
@@ -247,15 +259,28 @@ class WhisperServerRecogniser:
             except ProcessLookupError:
                 pass
 
+    async def draft(self, audio: Audio, *, language: str = "") -> Utterance:
+        """A draft while the person is still talking: one pass on the fast
+        model, no second model and no re-transcription -- those are for the
+        final text, and a draft every 800 ms must not queue behind them."""
+        return await self.transcribe(audio, language=language, route=False)
+
     async def close(self) -> None:
+        if self._farsi is not None:
+            await self._farsi.close()
         await self._stop()
 
     async def warmup(self) -> float:
-        """Start the server now, so the first turn does not pay for it."""
+        """Start the server now, so the first turn does not pay for it. The
+        Farsi server starts behind it, not before: hearing English first."""
         started = time.monotonic()
         async with self._lock:
             await self._start()
+        if self._farsi is not None and not self._farsi.running:
+            self._farsi_warming = asyncio.create_task(self._farsi.warmup())
         return time.monotonic() - started
+
+    _farsi_warming = None
 
     # ------------------------------------------------------------- one turn
     def _post(self, body: bytes, content_type: str) -> dict:
@@ -266,7 +291,11 @@ class WhisperServerRecogniser:
         with urllib.request.urlopen(request, timeout=120) as response:
             return json.loads(response.read().decode("utf-8") or "{}")
 
-    async def transcribe(self, audio: Audio, *, language: str = "") -> Utterance:
+    async def transcribe(self, audio: Audio, *, language: str = "", route: bool = True) -> Utterance:
+        from ..session import _language_code
+
+        if route and self._farsi is not None and _language_code(language) == "fa":
+            return await self._farsi.transcribe(audio, language="fa")
         if audio.seconds < 0.1:
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=language or self._language)
@@ -311,7 +340,12 @@ class WhisperServerRecogniser:
             # and a quiet Sim would have woken to it (measured 2026-09-26).
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=heard_language)
-        if not language and cleaned and self._house:
+        if route and not language and cleaned and self._farsi is not None and _language_code(heard_language) == "fa":
+            # Heard as Farsi: the Farsi model says what was said.
+            better = await self._farsi.transcribe(audio, language="fa")
+            if better.text.strip():
+                return better
+        if route and not language and cleaned and self._house:
             again = await self._in_a_house_language(audio, heard_language)
             if again is not None:
                 return again

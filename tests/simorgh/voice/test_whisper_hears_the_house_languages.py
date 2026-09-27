@@ -62,3 +62,39 @@ class NoEnglishPromptOnFarsi(unittest.TestCase):
         self.assertTrue(_not_english("persian"))
         for language in ("", "auto", "en", "English"):
             self.assertFalse(_not_english(language), language)
+
+
+class FarsiGoesToTheFarsiModel(unittest.IsolatedAsyncioTestCase):
+    """Measured on 18 Farsi satellite takes, 2026-09-27: large-v3 got most
+    right that large-v3-turbo turned to nonsense. A Farsi turn goes to the
+    Farsi model; a draft never does."""
+
+    def _recogniser(self):
+        rec = WhisperServerRecogniser.__new__(WhisperServerRecogniser)
+        asked = []
+
+        class _Farsi:
+            async def transcribe(self, audio, *, language=""):
+                asked.append(language)
+                return Utterance(text="الان صدای منو میشنوی؟", confidence=1.0, seconds=audio.seconds,
+                                 engine="whisper_server:large-v3", language="fa")
+
+        rec._farsi = _Farsi()                                  # noqa: SLF001
+        return rec, asked
+
+    async def test_a_turn_asked_in_farsi_goes_to_the_farsi_model(self):
+        rec, asked = self._recogniser()
+        got = await rec.transcribe(Audio(b"\\x00\\x00" * 16000), language="fa")
+        self.assertEqual((got.text, got.engine, asked), ("الان صدای منو میشنوی؟", "whisper_server:large-v3", ["fa"]))
+
+    def test_the_setting_defaults_to_large_v3(self):
+        from simorgh.contracts.settings import VOICE_SAFE_KEYS
+        from simorgh.voice.config import Config
+
+        self.assertEqual(Config().stt_model_farsi, "large-v3")
+        self.assertIn("stt_model_farsi", VOICE_SAFE_KEYS)
+
+    def test_a_draft_takes_the_quick_pass(self):
+        import inspect
+
+        self.assertIn("route=False", inspect.getsource(WhisperServerRecogniser.draft))

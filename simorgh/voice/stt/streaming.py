@@ -103,7 +103,10 @@ class IncrementalRecogniser:
                 decoded_upto = len(buffer)
                 snapshot = Audio(bytes(buffer))
                 started_at = time.monotonic()
-                self._inflight = asyncio.create_task(self._inner.transcribe(snapshot, language=language))
+                # A draft: the engine's quick pass when it has one
+                # (whisper_server.draft -- no second model, no retry).
+                drafting = getattr(self._inner, "draft", None) or self._inner.transcribe
+                self._inflight = asyncio.create_task(drafting(snapshot, language=language))
         await self.stop()
         if not buffer:
             yield TranscriptEvent("final", "", turn_id, confidence=0.0, engine=engine)

@@ -27,6 +27,13 @@ class Config:
     stt_stream_model: str = ""         # sherpa's model folder under `model_dir`; "" = the one it ships with
     stt_server_port: int = 0           # whisper_server's port; 0 = a free one
     stt_model: str = "large-v3-turbo"  # faster_whisper model name; whisper_cli: a ggml file name or path
+    # whisper_server only: the model a FARSI turn is transcribed with, in a
+    # second server beside the first; "" = the same model. Measured on 18
+    # of the creator's Farsi satellite takes, 2026-09-27: large-v3 got most
+    # sentences right that turbo turned to nonsense ("الان میتونی صدای منو
+    # میشنوی؟" vs "اینجا می توانیست دیمان و مشنوید؟"), at ~1-2.6 s a turn
+    # against turbo's ~0.8. English stays on `stt_model`.
+    stt_model_farsi: str = "large-v3"
     # "" = detect. Pinned to "en" until 2026-09-11, which made Farsi
     # unrecognisable: whisper was told every utterance was English.
     # `large-v3-turbo` detects the language reliably (measured on a

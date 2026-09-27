@@ -129,6 +129,8 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "miso_device": (str, ("", "mps", "cpu", "cuda"), "where MisoTTS runs; \"\" picks the best available"),
     "styletts2_reference": (str, None, "a WAV whose voice StyleTTS 2 follows; \"\" for its own"),
     "styletts2_embedding_scale": (float, (0.0, 3.0), "StyleTTS 2's emotion dial; 0 lets the tone table choose"),
+    "stt_model_farsi": (str, None, "whisper_server: the model a Farsi turn is transcribed with (a ggml file name, "
+                        "e.g. large-v3); \"\" = the same as stt_model"),
     "stt": (str, ("auto", "faster_whisper", "whisper_server", "whisper_cli", "sherpa", "fake"),
             "the recogniser: sherpa streams the words as you say them (English), whisper_server keeps the "
             "model loaded, whisper_cli reloads it every turn"),
