@@ -184,6 +184,8 @@ class _Run:
     first_audio_at: float = 0.0      # ...when it started...
     peak: int = 0                    # ...and the loudest 30 ms of it (s16 RMS)
     logged: bool = False
+    pcm: bytearray | None = None     # the run's audio, when `keep_runs` asks for it
+    states: list = None              # the session's turn states in this run, in order
 
 
 def _default_client(host: str, port: int, key: str):
@@ -205,7 +207,7 @@ class SatelliteLink:
 
     def __init__(self, name: str, host: str, key: str, *, publish, port: int = 6053, volume: float | None = None,
                  client_factory=None, accepting=lambda: True, logger=None, clock=time.monotonic,
-                 follow_up_s: float = 6.0) -> None:
+                 follow_up_s: float = 6.0, keep_runs: str = "") -> None:
         self.name = name
         self.host = host
         self._key = key
@@ -233,6 +235,9 @@ class SatelliteLink:
         self.follow_up = lambda: False
         self._follow_up_s = follow_up_s
         self._publish = publish
+        #: A folder to keep each wake run's audio in, as WAV (the last 20),
+        #: for replaying a turn that went wrong; "" keeps nothing.
+        self._keep_runs = keep_runs
 
     # ------------------------------------------------------------ logging
     def _log(self, level: str, event: str, **fields) -> None:
@@ -319,7 +324,8 @@ class SatelliteLink:
             self._log("info", "voice.satellite_wake_declined", wake_word=wake_word or "")
             return None
         self.microphone.clear()
-        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=not wake_word)
+        self._run = _Run(started_at=self._clock(), wake_word=wake_word or "", follow_up=not wake_word,
+                         pcm=bytearray() if self._keep_runs else None, states=[])
         self.microphone.woken = True
         self.runs += 1
         self.last_wake_at = time.time()
@@ -348,6 +354,8 @@ class SatelliteLink:
             if not run.audio_bytes:
                 run.first_audio_at = self._clock()
             run.audio_bytes += len(data)
+            if run.pcm is not None:
+                run.pcm += data
             if len(data) >= 2:
                 import audioop
 
@@ -366,7 +374,25 @@ class SatelliteLink:
         self._log("info", "voice.satellite_run", ended=how, heard=bool(run.vad_ended_at), replied=run.replied,
                   follow_up=run.follow_up, audio_s=round(run.audio_bytes / 32000, 2),
                   first_audio_after_s=round(run.first_audio_at - run.started_at, 2) if run.first_audio_at else None,
-                  peak_rms=run.peak, lasted_s=round(self._clock() - run.started_at, 2))
+                  peak_rms=run.peak, lasted_s=round(self._clock() - run.started_at, 2),
+                  states=" ".join(f"{at}:{st}" for at, st in (run.states or [])) or "none")
+        if run.pcm is not None and run.pcm:
+            self._keep(run)
+
+    def _keep(self, run: _Run) -> None:
+        import wave
+        from pathlib import Path
+
+        folder = Path(self._keep_runs)
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{self.name}.wav"
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(run.pcm))
+            for old in sorted(folder.glob("*.wav"))[:-20]:
+                old.unlink()
+        except OSError as exc:
+            self._log("warning", "voice.satellite_keep_failed", error=str(exc)[:120])
 
     async def _on_stop(self, abort: bool) -> None:
         """The board ended the run itself: its wake word again (to stop a
@@ -392,6 +418,8 @@ class SatelliteLink:
         run = self._run
         if run is None or run.ended:
             return
+        if run.states is not None and (not run.states or run.states[-1][1] != state):
+            run.states.append((round(self._clock() - run.started_at, 2), state))
         if state == "user_speaking":
             run.speech = True
         if state == "thinking" and not run.vad_ended_at:

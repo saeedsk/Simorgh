@@ -405,6 +405,10 @@ class Config:
     # ("off"). Only a question: listening after every answer would take in
     # the TV as the person's next turn.
     satellite_follow_up: str = "question"
+    # A folder to keep each satellite wake run's audio in (the last 20, as
+    # WAV), for replaying a turn that went wrong; "" keeps none. Only runs
+    # a wake word opened -- no room is ever recorded otherwise.
+    satellite_keep_runs: str = ""
     # Where whisper.cpp / Kokoro models live when a model is a bare name.
     model_dir: str = "workspace/voice/models"
     # Capture and playback paths: auto | sounddevice | ffmpeg | fake, and

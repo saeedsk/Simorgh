@@ -575,6 +575,7 @@ class Service:
                                                               and not getattr(self._rooms.get(name), "muted", False)),
                                  client_factory=self._satellite_client,
                                  follow_up_s=float(self.config.follow_up_window_s or 6.0),
+                                 keep_runs=str(self.config.satellite_keep_runs or ""),
                                  logger=self._ctx.logger if self._ctx else None)
             try:
                 room = await self.add_room(name, microphone=link.microphone, speaker=link.speaker)
