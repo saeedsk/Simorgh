@@ -768,7 +768,8 @@ class VoiceSession:
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": f"the same question again; the answer to turn {earlier} is on its way"})
         if self._config.backchannel and self._backchannel is not None:
-            if await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language_of(text))):
+            language = self._aside_language(text)
+            if language and await self._say_aside(f"ack-{turn_id}-still", self._backchannel.still(language)):
                 self._last_aside_at = self._now()
 
     def _tv_is_playing(self) -> bool:
@@ -1657,7 +1658,7 @@ class VoiceSession:
             await self._speak_reply(turn_id, reply, clock, Context(is_error=True))
             return
         language = language_of(text)
-        still = asyncio.create_task(self._still_thinking(turn_id, language))
+        still = asyncio.create_task(self._still_thinking(turn_id, self._aside_language(text)))
         self._still_task = still
         self._outstanding[turn_id] = (session_id, text)
         relation = ""
@@ -2168,13 +2169,31 @@ class VoiceSession:
         kind = classify(partial)
         if kind == GREETING:
             return  # answered in a breath anyway
-        language = language_of(partial) if partial else language_of(self._last_user_text)
+        language = self._aside_language(partial or self._last_user_text)
+        if not language:
+            return
         text = self._backchannel.pick(kind, language)
         if await self._say_aside(f"ack-{turn_id}", text, delivery=register_for_backchannel(kind)):
             self._acknowledged.add(turn_id)
             self._last_aside_at = self._now()
             self._turns_since_connector = 0
             self._previous_connector = "okay"
+
+    def _aside_language(self, heard: str) -> str:
+        """The language an aside ("aha", "one sec") is said in, or "" to
+        say none. The draft transcript is turbo's first pass, and turbo
+        writes Farsi speech as English often enough (2026-09-27: "Sim,
+        I'm not going to go." for a Farsi sentence). An English "aha"
+        is Kokoro's voice and the Farsi reply after it is Pocket's
+        cloned one: the creator heard Sim switch between a woman and a
+        man mid-answer. So when what was heard disagrees with the
+        language Sim last answered in, the aside is not said: the
+        reply decides the language, and silence has no voice."""
+        language = language_of(heard or "")
+        last = self._voice_room.last_said
+        if last and language_of(last) != language:
+            return ""
+        return language
 
     async def _tidy(self, text: str, turn_id: int) -> str:
         """What the recogniser wrote, as Sim should read it (cognition/
@@ -2431,14 +2450,14 @@ class VoiceSession:
         if self.turns.state != THINKING or turn_id in self._answered or turn_id in self._filled:
             return
         self._filled.add(turn_id)
-        language = language_of(self._last_user_text or "")
-        if await self._say_aside(f"tool-{turn_id}-{tool}", self._backchannel.looking(language)):
+        language = self._aside_language(self._last_user_text or "")
+        if language and await self._say_aside(f"tool-{turn_id}-{tool}", self._backchannel.looking(language)):
             self._last_aside_at = self._now()
 
     async def _still_thinking(self, turn_id: int, language: str) -> None:
         """`still_after_s` into a wait with no answer yet: one more short
         sound, so a long think is not a dead line."""
-        if self._config.still_after_s <= 0 or not self._config.backchannel:
+        if self._config.still_after_s <= 0 or not self._config.backchannel or not language:
             return
         await asyncio.sleep(self._config.still_after_s)
         if self.turns.state != THINKING or self.turns.turn_id != turn_id or turn_id in self._answered:

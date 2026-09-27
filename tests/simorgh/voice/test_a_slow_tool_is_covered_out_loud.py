@@ -12,6 +12,7 @@ and a turn that runs four slow tools still says it once.
 """
 
 import unittest
+from types import SimpleNamespace
 
 from simorgh.orchestration.session import SessionRunner
 from simorgh.voice.backchannel import LOOKING
@@ -43,6 +44,7 @@ class _Session:
         self._filled: set[int] = set()
         self._last_aside_at = -1e9
         self._last_user_text = "what is the weather"
+        self._voice_room = SimpleNamespace(last_said="")
         self.said: list[str] = []
 
     async def _say_aside(self, request_id: str, text: str, *, delivery=None) -> bool:
@@ -56,6 +58,7 @@ class _Session:
     from simorgh.voice.session import VoiceSession  # noqa: PLC0415
 
     _on_tool_started = VoiceSession._on_tool_started
+    _aside_language = VoiceSession._aside_language
 
 
 class ASlowToolIsCoveredOutLoud(unittest.IsolatedAsyncioTestCase):
