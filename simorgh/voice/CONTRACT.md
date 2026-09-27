@@ -269,6 +269,7 @@ A reply is cut at `max_spoken_sentences` (3) and says there is more on screen --
 - A satellite reply is FLAC by URL (the board refused WAV, 2026-09-26) and lasts its audio's length; the board's PLAYING/IDLE state lags by up to ~10 s and is not read.
 
 - A turn inside a satellite's wake run is addressed to Sim (`VoiceSession._wake_addressed`, the microphone's `woken`): whisper's language label does not drop it (live 2026-09-27: English labelled `ic` was discarded as noise), and the rules that make a voice name Sim first -- unplaced voices, the TV playing, a half-heard aside, a courtesy word -- treat the wake word as the name. The laptop's microphone never claims a wake, so its rules are unchanged.
+- Inside a wake run a QUIET verdict is spoken as a short "Sorry, I didn't catch that." (Farsi when the words were): a person who woke the board asked something, and silence answers nothing (live 2026-09-27). An empty, cancelled reply stays silent. `voice.session_listening` logs once when a session starts reading its microphone; a satellite run with no reply logs `voice.satellite_turn phase='no reply' heard=<bool>`.
 
 ## Contract tests
 

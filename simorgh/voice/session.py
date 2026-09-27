@@ -569,6 +569,10 @@ class VoiceSession:
         except Exception as exc:  # noqa: BLE001 -- the first turn starts the server instead
             self._log("warning", "voice.stt_warmup_failed", error=repr(exc))
         await self._announce(self.turns.state)
+        # Once per start: a room that never logged this never heard anything
+        # (a satellite's first wake after a restart went unanswered, 2026-09-27).
+        self._log("info", "voice.session_listening", device=self._config.device,
+                  warmup_s=round(self.stats.warmup_seconds, 2))
         stream = self._mic.stream()
         try:
             async for frame in stream:
@@ -1661,6 +1665,16 @@ class VoiceSession:
         self._answered.add(turn_id)
         from simorgh.contracts.tone import strip_tone as _strip_tone
 
+        if is_quiet(_strip_tone(reply)) and self._wake_addressed():
+            # Woken by a satellite's wake word, a person asked Sim something,
+            # and silence answers them with nothing at all. Live 2026-09-27:
+            # "play jazz in the kitchen" over music came back "Klai jaz in
+            # the kitchen.", the model said QUIET, and the board went dark.
+            # Say it was not caught; an empty (cancelled) reply stays silent.
+            reply = "ببخشید، متوجه نشدم." if language_of(text) == "fa" else "Sorry, I didn't catch that."
+            self._log("info", "voice.quiet_after_wake", turn=turn_id, text=text[:60])
+            await self._speak_reply(turn_id, reply, clock, Context(is_error=True))
+            return
         if not _strip_tone(reply).strip() or is_quiet(_strip_tone(reply)):
             # "[warm] QUIET" is QUIET: the tag came first and the word was
             # spoken aloud, in a warm voice (2026-09-13, 17:46). And an empty

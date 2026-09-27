@@ -437,6 +437,42 @@ class AWakeWordIsTheAddress(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replies.asked, ["What time is it?"], "heard and asked, not dropped as noise")
         await _close(stop_link, link_task)
 
+    async def test_a_quiet_verdict_after_the_wake_word_is_said_not_left_silent(self):
+        """Live 2026-09-27: "play jazz in the kitchen" over music came back
+        garbled, the model said QUIET, and the board said nothing at all."""
+        from dataclasses import replace
+
+        from simorgh.voice.fakes import FakeRecogniser, FakeSynthesiser
+        from simorgh.voice.pipeline import Pipeline, Room
+        from simorgh.voice.session import VoiceSession
+        from tests.simorgh.voice.test_session import _Bus, _config, _Replies, _Script
+
+        link, client, published = _link()
+        stop_link, link_task = await _connected(link, client)
+        config = replace(_config(), device="kitchen")
+        script = _Script((True, 20), (False, 10_000))
+        stt, tts = FakeRecogniser("klai jaz in the kitchen", 0.95), FakeSynthesiser()
+        pipeline = Pipeline(bus=_Bus(), clock=None, logger=None, ledger=None, config=config,
+                            microphone=link.microphone, speaker=link.speaker, recogniser=stt, synthesiser=tts,
+                            detector_factory=lambda: script)
+        pipeline.ask = _Replies(["QUIET"]).ask  # type: ignore[method-assign]
+        session = VoiceSession(pipeline=pipeline, config=config, microphone=link.microphone, speaker=link.speaker,
+                               recogniser=stt, synthesiser=tts, detector_factory=lambda: script, room=Room("kitchen"))
+        await client.handlers["handle_start"]("c1", 1, None, "okay_nabu")
+        stop = asyncio.Event()
+        with mock.patch.object(sat, "RUN_END_GAP_S", 0.05), mock.patch.object(sat, "FETCH_LEAD_S", 0.0):
+            running = asyncio.create_task(session.run(stop))
+            for _ in range(500):
+                if any("catch" in t for t in tts.spoken):
+                    break
+                await asyncio.sleep(0.01)
+            stop.set()
+            running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+        self.assertTrue(any("didn't catch that" in t for t in tts.spoken), tts.spoken)
+        self.assertTrue(published, "and it was played on the board")
+        await _close(stop_link, link_task)
+
     def test_the_laptop_microphone_never_claims_a_wake(self):
         from simorgh.voice.fakes import FakeMicrophone
 

@@ -369,6 +369,11 @@ class SatelliteLink:
             return
         if not run.replied:
             self._event("VOICE_ASSISTANT_INTENT_END")
+            # A run that ends with no reply says which way it went: Sim never
+            # heard the end of speech (nothing reached the session), or heard
+            # it and chose silence.
+            self._log("info", "voice.satellite_turn", phase="no reply",
+                      heard=bool(run.vad_ended_at), after_wake_s=round(self._clock() - run.started_at, 2))
         self._event("VOICE_ASSISTANT_RUN_END")
         run.ended = True
         self.microphone.woken = False
