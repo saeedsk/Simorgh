@@ -40,9 +40,3 @@ by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
-
-[locks.simloader]
-by = "opus-main"
-task = "the house gate writes its report to the loader notes, not docs/findings"
-since = "2026-09-22T13:49:46+00:00"
-until = "2026-09-22T21:49:46+00:00"

@@ -559,11 +559,19 @@ def gate_selection(repo: Path, *, all_tests: bool) -> list[str]:
 
 
 def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = None,
-             allow_skip: bool = False, all_tests: bool = False) -> tuple[bool, str]:
+             allow_skip: bool = False, all_tests: bool = False, behaviour: bool = True) -> tuple[bool, str]:
     """Is this checkout fit to run? Returns (ok, why).
 
     With `allow_skip`, pressing `s` at the terminal abandons the gate and
-    boots anyway -- a `run` convenience, never offered to `bless`."""
+    boots anyway -- a `run` convenience, never offered to `bless`.
+
+    `behaviour` adds the household evals and the house (about three and a
+    half minutes). `bless` always runs them; a plain start does not -- the
+    creator, 2026-09-27: "why doing this on every sim's run? it has made
+    Sim startup so lengthy" -- and the house was written for a bless
+    ("a few minutes of Sim actually living, before a commit is blessed",
+    stage 11 item 11), not for every boot. The core tests stay: they are
+    what a rollback stands on."""
     started = time.monotonic()
     scope = "all" if all_tests else "core"
     rule("gate: unit suite" if all_tests else "gate: core tests")
@@ -608,14 +616,17 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
             return False, f"unit suite failed: {unit_why} ({tail})"
         write_baseline(notes, ran, scope, seconds=time.monotonic() - started)
 
-        evals_ok, evals_why = run_evals(repo, notes)
-        if not evals_ok:
-            return False, evals_why
+        if behaviour:
+            evals_ok, evals_why = run_evals(repo, notes)
+            if not evals_ok:
+                return False, evals_why
 
-        house_ok, house_why = run_house(repo, notes)
-        if not house_ok:
-            return False, house_why
-        evals_why = f"{evals_why}; {house_why}"
+            house_ok, house_why = run_house(repo, notes)
+            if not house_ok:
+                return False, house_why
+            evals_why = f"{evals_why}; {house_why}"
+        else:
+            evals_why = "household evals and the house run at bless, not at every start"
         if not full:
             return True, f"unit suite green ({unit_why}); {evals_why}"
 
@@ -943,10 +954,14 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
         return 2
     commit = head(repo)
     existing = next((tag for _n, tag in good_tags(repo) if tag_of(repo, tag) == commit), None)
-    if existing is not None and not full:
+    if existing is not None and not full and _behaviour_checked(notes, repo):
         say(f"{commit} is already {existing}")
         return 0
-    if existing is not None:
+    if existing is not None and not full:
+        # A plain start tags on the core tests alone; a bless also means the
+        # household evals and the house. Run them for this tag.
+        say(f"{commit} is {existing} from a start's core tests; running the household evals and the house now")
+    if existing is not None and full:
         # `--full` on an already-tagged commit used to return 0 here
         # without running anything, which reads on screen exactly like
         # the full gate passing. It had not run: the tag came from the
@@ -958,10 +973,12 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
     ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes)
     if existing is not None:
         if ok:
-            say(f"trial suite green for {existing}  ({why})", "ok")
-            write_note(notes, {"kind": "full_gate_passed", "commit": commit, "tag": existing, "why": why})
+            say(f"{'trial suite' if full else 'evals and the house'} green for {existing}  ({why})", "ok")
+            write_note(notes, {"kind": "full_gate_passed" if full else "behaviour_gate_passed",
+                               "commit": commit, "tag": existing, "why": why})
+            record_green(repo, notes, full=full)
             return 0
-        say(f"the full gate FAILED for {existing}: {why}", "fail")
+        say(f"the {'full' if full else 'behaviour'} gate FAILED for {existing}: {why}", "fail")
         say(f"{existing} still stands -- it was earned by the unit suite, which still passes")
         write_note(notes, {"kind": "full_gate_failed", "commit": commit, "tag": existing, "why": why})
         return 1
@@ -971,6 +988,7 @@ def cmd_bless(repo: Path, notes: Path, *, full: bool, timeout_s: float) -> int:
         return 1
     tag = next_tag(repo)
     git("tag", "-a", tag, "-m", f"simloader: {why}", cwd=repo, check=True)
+    record_green(repo, notes, full=full)
     say(f"blessed {commit} as {tag}  ({why})", "ok")
     write_note(notes, {"kind": "blessed", "commit": commit, "tag": tag, "why": why})
     return 0
@@ -1051,15 +1069,27 @@ def source_fingerprint(repo: Path) -> str:
     return git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
-def record_green(repo: Path, notes: Path, *, full: bool, all_tests: bool = False) -> None:
+def record_green(repo: Path, notes: Path, *, full: bool, all_tests: bool = False, behaviour: bool = True) -> None:
     commit = source_fingerprint(repo)
     if not commit:
         return
     try:
         notes.mkdir(parents=True, exist_ok=True)
-        (notes / GREEN_FILE).write_text(json.dumps({"commit": commit, "full": full, "all_tests": all_tests, "ts": time.time()}))
+        (notes / GREEN_FILE).write_text(json.dumps({"commit": commit, "full": full, "all_tests": all_tests,
+                                                    "behaviour": behaviour, "ts": time.time()}))
     except OSError as exc:
         say(f"could not remember this green gate ({exc!r}); the next boot runs it again", "warn")
+
+
+def _behaviour_checked(notes: Path, repo: Path) -> bool:
+    """Did the last green gate for this exact source also run the
+    household evals and the house? Records from before the split have no
+    key, and those gates always ran them."""
+    try:
+        last = json.loads((notes / GREEN_FILE).read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(last, dict) and last.get("commit") == source_fingerprint(repo) and last.get("behaviour", True)
 
 
 def already_verified(repo: Path, notes: Path, *, full: bool, all_tests: bool = False) -> str:
@@ -1106,14 +1136,15 @@ def cmd_run(repo: Path, notes: Path, *, full: bool, timeout_s: float, max_rollba
                 say(f"gate not needed: {verified} (--force-gate runs it anyway)", "ok")
                 write_note(notes, {"kind": "gate_reused", "commit": head(repo), "why": verified})
                 break
-            ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True, all_tests=all_tests)
+            ok, why = run_gate(repo, full=full, timeout_s=timeout_s, notes=notes, allow_skip=True, all_tests=all_tests,
+                               behaviour=full)
             if ok and SKIP_SENTINEL in why:
                 say(f"gate {why}; booting unverified, and nothing is being tagged", "warn")
                 write_note(notes, {"kind": "gate_skipped", "commit": head(repo), "why": why})
                 break
             if ok:
                 say(f"gate passed: {why}", "ok")
-                record_green(repo, notes, full=full, all_tests=all_tests)
+                record_green(repo, notes, full=full, all_tests=all_tests, behaviour=full)
                 commit = head(repo)
                 stray_code = untracked_code(repo)
                 if stray_code:

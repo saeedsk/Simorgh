@@ -156,6 +156,53 @@ class LoaderTestCase(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(calls, [False], "a plain re-bless must not run the gate again")
 
+    # -- a start runs the core tests; evals and the house are for a bless ---
+    def test_a_start_does_not_run_the_evals_or_the_house(self):
+        """The creator, 2026-09-27: "why is it doing this on every sim's
+        run? it has made sim startup so lengthy" -- remove both at start."""
+        seen = []
+
+        def _gate(*a, **k):
+            seen.append(k.get("behaviour"))
+            return True, "green"
+
+        with mock.patch.object(simloader, "run_gate", side_effect=_gate), \
+             mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run()
+        self.assertEqual(seen, [False])
+
+    def test_run_gate_skips_evals_and_house_without_behaviour(self):
+        for behaviour, expected in ((False, 0), (True, 1)):
+            with mock.patch.object(simloader, "stream", return_value=(0, "3 passed in 1s\n")), \
+                 mock.patch.object(simloader, "unit_verdict", return_value=(True, "green", [])), \
+                 mock.patch.object(simloader, "write_baseline"), \
+                 mock.patch.object(simloader, "run_evals", return_value=(True, "evals")) as evals, \
+                 mock.patch.object(simloader, "run_house", return_value=(True, "house")) as house:
+                ok, _why = simloader.run_gate(self.repo.path, full=False, timeout_s=1, notes=self.notes,
+                                              behaviour=behaviour)
+            self.assertTrue(ok)
+            self.assertEqual((evals.call_count, house.call_count), (expected, expected), behaviour)
+
+    def test_a_bless_runs_the_behaviour_gates_on_a_commit_a_start_tagged(self):
+        """A start tags on the core tests alone; a later plain bless of the
+        same commit must still run the household evals and the house."""
+        with self._gate([(True, "green")]), mock.patch.object(simloader, "launch_sim", return_value=0):
+            self._run()
+        self.assertEqual(len(simloader.good_tags(self.repo.path)), 1)
+        seen = []
+
+        def _gate(*a, **k):
+            seen.append(k.get("behaviour", True))
+            return True, "evals; house"
+
+        with mock.patch.object(simloader, "run_gate", side_effect=_gate):
+            rc = simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+            rc2 = simloader.cmd_bless(self.repo.path, self.notes, full=False, timeout_s=10)
+        self.assertEqual((rc, rc2), (0, 0))
+        self.assertEqual(seen, [True], "once for the start's tag, then the cheap no-op")
+        self.assertEqual(len(simloader.good_tags(self.repo.path)), 1)
+        self.assertIn("behaviour_gate_passed", (self.notes / "decisions.jsonl").read_text())
+
     # -- rollback -----------------------------------------------------------
     def test_rollback_steps_to_the_previous_good_tag(self):
         first = self.repo.commit("two")
