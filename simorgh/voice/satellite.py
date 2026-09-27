@@ -270,6 +270,9 @@ class SatelliteLink:
         #: wake word? The service sets it: true when Sim's reply was a
         #: question. `follow_up_s` is how long a follow-up waits for speech.
         self.follow_up = lambda: False
+        #: `async (name) -> None`, awaited each time the board connects;
+        #: the service mutes the laptop on the first (`mute_laptop_with_satellite`).
+        self.on_connected = None
         #: Music or radio this link started and has not stopped. A board
         #: playing a song is not listening for a next turn: the song
         #: would be the turn.
@@ -353,6 +356,11 @@ class SatelliteLink:
                                          handle_audio=self._on_audio)
         self.connected = True
         self._set_status("connected" if self._media_key is not None else "connected, but it has no media player")
+        if self.on_connected is not None:
+            try:
+                await self.on_connected(self.name)
+            except Exception as exc:  # noqa: BLE001 -- a hook that fails must not drop the board
+                self._log("warning", "voice.satellite_hook_failed", error=repr(exc))
 
     async def _disconnect(self) -> None:
         self.connected = False

@@ -202,6 +202,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `expressive_lane` | `'auto'` | yes |
 | `expressive_min_chars` | `0` | yes |
 | `keep_audio` | `False` | yes (live config sets it true) |
+| `mute_laptop_with_satellite` | `True` | yes -- `service._satellite_connected` (`SatelliteLink.on_connected`): the first satellite to connect after start mutes the laptop session, once, with a `ui.notice`; a reconnect never undoes an `unmute` (2026-09-27) |
 | `auto_relearn` | `True` | yes -- `service._repair_loop`: hourly (first look 300 s after start), a profile under `MUDDLED_BELOW` is `tidy`-ed then relearnt, once a day per person, never during a calibration; each repair is a `ui.notice` (source `voice relearn`) and a `voice.auto_relearn` log line (2026-09-27) |
 | `keep_audio_days` | `7.0` | yes (session.py `prune_kept_audio`; 0 disables) |
 | `keep_audio_max_mb` | `500.0` | yes (same) |

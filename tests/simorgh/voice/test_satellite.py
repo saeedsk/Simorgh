@@ -227,6 +227,19 @@ class WhoMayHoldTheBoard(unittest.IsolatedAsyncioTestCase):
         self.assertIn({"volume": 1.0, "key": 7}, client.media)
         await _close(stop, task)
 
+    async def test_connecting_tells_the_service(self):
+        """The hook the laptop's auto-mute hangs on (2026-09-27)."""
+        link, client, _p = _link()
+        told: list[str] = []
+
+        async def _up(name):
+            told.append(name)
+
+        link.on_connected = _up
+        stop, task = await _connected(link, client)
+        self.assertEqual(told, ["kitchen"])
+        await _close(stop, task)
+
 
 class TheMicrophone(unittest.IsolatedAsyncioTestCase):
     async def test_any_chunk_size_comes_out_as_whole_frames(self):

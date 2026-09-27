@@ -205,6 +205,9 @@ class Service:
         #: profile was last repaired, so a profile that cannot be mended
         #: from what is on disk is tried once a day, not every hour.
         self._repair_task: asyncio.Task | None = None
+        #: Whether this start has already muted the laptop for a satellite:
+        #: once, so a reconnect does not undo the person's `unmute`.
+        self._laptop_muted_for_satellite = False
         self._repaired_at: dict[str, float] = {}
 
     # ---------------------------------------------------------- lifecycle
@@ -668,6 +671,7 @@ class Service:
                 # listens again; a window nobody speaks into ends it. Not
                 # while the board plays music -- the song would be the turn.
                 link.follow_up = lambda link=link: not link.playing_media
+            link.on_connected = self._satellite_connected
             self._satellites[name] = link
             if self._session is not None:
                 # One question, one answer: while any board's wake run is
@@ -715,6 +719,19 @@ class Service:
             address = socket.gethostname()
         return f"http://{address}:8765"
 
+    async def _satellite_connected(self, name: str) -> None:
+        """The first satellite up after start mutes the laptop's microphone."""
+        if (self._laptop_muted_for_satellite or not self.config.mute_laptop_with_satellite
+                or self._session is None or getattr(self._session, "muted", False)):
+            return
+        self._laptop_muted_for_satellite = True
+        self._session.muted = True
+        text = f"laptop muted: {name} is listening (`unmute` to listen here too)"
+        if self._ctx is not None:
+            self._ctx.logger.info("voice.laptop_muted_for_satellite", satellite=name)
+            await self._ctx.bus.publish(self._ctx.bus.new(topics.UI_NOTICE, {
+                "level": "info", "text": text, "source": "voice"}))
+
     def _mute_one(self, name: str, mute: bool) -> tuple[bool, str]:
         """Mute or unmute ONE room's session; the others keep listening."""
         key = name.lower()
@@ -727,7 +744,7 @@ class Service:
             return False, f"no room called {name!r} -- rooms: {known}"
         session.muted = mute
         if mute:
-            return True, f"{name} muted; the other rooms still listen (`voice unmute {name}` to undo)"
+            return True, f"{name} muted; the other rooms still listen (`unmute {name}` to undo)"
         return True, f"{name} listening again"
 
     #: How long after its wake word a satellite is still "the room you are

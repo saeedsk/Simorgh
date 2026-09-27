@@ -517,6 +517,11 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
 
     if name == "tv":
         return await _tv(args, bus=bus, ledger=ledger, session_id=session_id)
+    if name in ("mute", "unmute"):
+        # One word for the one room people mute: the laptop, whose
+        # microphone hears the satellite's replies (2026-09-27).
+        return await _voice(bus, f"{name} {args.strip() or 'laptop'}")
+
     if name == "pronounce":
         return await _voice(bus, f"pronounce {args}")
     if name in ("next", "skip"):

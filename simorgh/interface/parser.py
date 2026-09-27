@@ -53,6 +53,8 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("auto", "[on|off|now]", "control the idle self-improvement loop"),
     ("pause", "", "hold everything"),
     ("resume", "", "let it continue"),
+    ("mute", "[room]", "stop the laptop's microphone (or one room's); the satellites still listen (`voice mute laptop`)"),
+    ("unmute", "[room]", "the laptop listens again (or one room)"),
     ("pronounce", "<name> [as] <how>", "how Sim says a name aloud: `pronounce Ira as Eye-raa` (also `voice pronounce`)"),
     ("next", "", "skip the track playing on the TV (also: skip; `tv pause` / `tv play` for the rest)"),
     ("help", "[command]", "list everything, or one command's words: help voice"),
@@ -93,7 +95,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
-    ("Voice, screen and cameras", ("voice", "pronounce", "tv", "next", "cameras", "ring")),
+    ("Voice, screen and cameras", ("voice", "mute", "unmute", "pronounce", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "approvals", "schedule", "mcp", "pair", "devices", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
@@ -361,6 +363,10 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
         words = rest.split()
         is_command = len(words) == 2 or (3 <= len(words) <= 4 and words[1].lower() == "as")
         return not is_command
+    if name in ("mute", "unmute"):
+        # `mute` / `unmute laptop` is the command; "mute the TV please"
+        # is somebody asking, and the model should hear it.
+        return len(rest.split()) > 1
     return bool(rest.strip()) and name in NO_ARGUMENT_COMMANDS
 
 

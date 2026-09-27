@@ -102,3 +102,38 @@ class AMuddledProfileRepairsItself(unittest.IsolatedAsyncioTestCase):
 
     def test_the_setting_is_on_by_default(self):
         self.assertTrue(Config().auto_relearn)
+
+
+class TheLaptopMutesWhenASatelliteConnects(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-09-27: "make `voice mute laptop` whenever satellite
+    voice is being detected at startup". Once per start: a board that
+    reconnects must not undo the person's `unmute`."""
+
+    def _service(self, **config):
+        class _Session:
+            muted = False
+
+        svc = Service(Config(**config))
+        svc._ctx = _Ctx()                                                 # noqa: SLF001
+        svc._session = _Session()                                         # noqa: SLF001
+        return svc
+
+    async def test_the_first_board_up_mutes_the_laptop_and_says_so(self):
+        svc = self._service()
+        await svc._satellite_connected("sim-room-1")                      # noqa: SLF001
+        self.assertTrue(svc._session.muted)                               # noqa: SLF001
+        topic, payload = svc._ctx.bus.published[0]                        # noqa: SLF001
+        self.assertIn("laptop muted: sim-room-1 is listening", payload["text"])
+        self.assertIn("`unmute`", payload["text"])
+
+    async def test_a_reconnect_does_not_undo_an_unmute(self):
+        svc = self._service()
+        await svc._satellite_connected("sim-room-1")                      # noqa: SLF001
+        svc._session.muted = False                                        # noqa: SLF001 -- the person typed `unmute`
+        await svc._satellite_connected("sim-room-1")                      # noqa: SLF001
+        self.assertFalse(svc._session.muted)                              # noqa: SLF001
+
+    async def test_it_can_be_turned_off(self):
+        svc = self._service(mute_laptop_with_satellite=False)
+        await svc._satellite_connected("sim-room-1")                      # noqa: SLF001
+        self.assertFalse(svc._session.muted)                              # noqa: SLF001

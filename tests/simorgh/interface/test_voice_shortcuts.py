@@ -50,6 +50,37 @@ class PronounceIsACommand(unittest.TestCase):
         self.assertEqual(seen, {"action": "pronounce", "name": "Ira", "value": "Eye-raa"})
 
 
+class MuteIsOneWord(unittest.TestCase):
+    """The creator, 2026-09-27: "easily unmute the laptop with one command
+    'unmute' or mute it with 'mute'"."""
+
+    def _dispatched(self, line):
+        from simorgh.interface.parser import parse
+
+        command = parse(line)
+        seen = {}
+
+        async def fake(bus, topic, payload, **kw):
+            seen.update(payload)
+            return None
+
+        with mock.patch.object(dispatch, "_request", fake):
+            asyncio.run(dispatch.dispatch(command, bus=None, ledger=None, clock=__import__("types").SimpleNamespace(now=lambda: 0.0), session_id="s", vitals=None))
+        return seen
+
+    def test_bare_words_mean_the_laptop(self):
+        self.assertEqual(self._dispatched("mute"), {"action": "mute", "name": "laptop"})
+        self.assertEqual(self._dispatched("unmute"), {"action": "unmute", "name": "laptop"})
+
+    def test_a_room_can_be_named(self):
+        self.assertEqual(self._dispatched("unmute sim-room-1"), {"action": "unmute", "name": "sim-room-1"})
+
+    def test_a_sentence_is_still_a_sentence(self):
+        from simorgh.interface.parser import parse
+
+        self.assertIsNone(parse("mute the tv please").name)
+
+
 if __name__ == "__main__":
     unittest.main()
 

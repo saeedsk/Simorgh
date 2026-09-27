@@ -371,6 +371,12 @@ class Config:
     expressive_lane: str = "auto"
     expressive_min_chars: int = 0     # 0 = a spoken turn never takes the slow lane in auto (it held the floor 78 s once)
     keep_audio: bool = False
+    # A room with a satellite is heard by the satellite; the laptop's
+    # microphone in the same room only hears the board's replies and the
+    # TV. The first satellite to connect after start mutes the laptop, once
+    # (the creator, 2026-09-27: "make voice mute laptop whenever satellite
+    # voice is being detected at startup"). `unmute` undoes it and sticks.
+    mute_laptop_with_satellite: bool = True
     # A profile with two voices in it (`speakers.muddled`) repairs itself:
     # `voice tidy`, then `voice relearn`, at most once a day per person
     # (the creator, 2026-09-27: "auto relearn when ... it detects there
