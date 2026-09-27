@@ -384,8 +384,10 @@ class Service:
             why = ("it is already healthy, and none of them would make it agree with itself more"
                    if before >= MUDDLED_BELOW else
                    "none of them is clearly this person -- the right answer when the recordings are of somebody else")
+            unread = len(wavs) - len(vectors)
+            skipped = f" ({unread} could not be read: {problems[0]})" if unread and problems else ""
             return True, (f"{name}'s profile is unchanged at {before:.2f} agreement with itself: looked at "
-                          f"{where}, and {why}.")
+                          f"{where}, and {why}.{skipped}")
         swapped = f", replacing {dropped} weaker one(s)" if dropped else ""
         return True, (f"added {added} take(s) to {name} from {considered} kept recording(s){swapped}: "
                       f"agreement with itself {before:.2f} -> {after:.2f}. Nobody had to say anything.")

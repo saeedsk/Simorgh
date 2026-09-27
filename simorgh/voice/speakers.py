@@ -65,6 +65,13 @@ DEFAULT_LEAN = 0.45
 #: takes kept per person; the first three are the enrolment, the rest are
 #: learnt from confident turns (`refine`)
 MAX_TAKES = 12
+#: The most audio one embedding is made from. TitaNet's graph refuses
+#: more than 12288 feature frames (~123 s at a 10 ms hop), and
+#: `voice relearn` fed it kept satellite runs of up to 285 s: ten of 300
+#: failed, each counted as "not this person", and onnxruntime printed its
+#: error over the console prompt (live, 2026-09-27). A voice is in the
+#: first minute if it is anywhere.
+MAX_EMBED_S = 60.0
 #: a confident take closer than this to one already kept adds nothing
 REFINE_NOVELTY = 0.9
 #: a take teaches only this far above the threshold, and this clear of
@@ -142,6 +149,7 @@ class SherpaEmbedder:
             samples = np.asarray(pcm, dtype=np.float32)
         except ImportError:  # pragma: no cover -- numpy comes with sherpa-onnx
             samples = list(map(float, pcm))
+        samples = samples[: int(MAX_EMBED_S * sample_rate)]
         stream.accept_waveform(sample_rate, samples)
         stream.input_finished()
         return [float(x) for x in ext.compute(stream)]

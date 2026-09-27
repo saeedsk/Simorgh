@@ -260,3 +260,36 @@ class AMuddledProfileIsSaidOutLoud(unittest.TestCase):
 
         self.assertLess(0.54, MUDDLED_BELOW)
         self.assertLess(MUDDLED_BELOW, 0.78)
+
+
+class ALongRecordingIsEmbeddedFromItsFirstMinute(unittest.TestCase):
+    """TitaNet refuses more than 12288 frames (~123 s). `voice relearn`
+    handed it kept satellite runs of up to 285 s; each failed, counted as
+    "not this person", and onnxruntime printed over the prompt (live,
+    2026-09-27)."""
+
+    def test_the_engine_is_given_at_most_max_embed_s(self):
+        from simorgh.voice.speakers import MAX_EMBED_S, SherpaEmbedder
+
+        given: list[int] = []
+
+        class _Stream:
+            def accept_waveform(self, rate, samples):
+                given.append(len(samples))
+
+            def input_finished(self):
+                pass
+
+        class _Ext:
+            def create_stream(self):
+                return _Stream()
+
+            def compute(self, stream):
+                return [0.5, 0.5]
+
+        embedder = SherpaEmbedder("nowhere")
+        embedder._ext = _Ext()                                  # noqa: SLF001
+        embedder.embed([0.0] * (16000 * 190), 16000)
+        embedder.embed([0.0] * 16000, 16000)
+        self.assertEqual(given, [int(MAX_EMBED_S * 16000), 16000])
+        self.assertLess(MAX_EMBED_S * 100, 12288, "under TitaNet's frame limit at a 10 ms hop")
