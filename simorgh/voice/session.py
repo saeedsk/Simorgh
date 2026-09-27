@@ -411,7 +411,8 @@ class VoiceSession:
         self._player = StreamingPlayer(speaker, on_state=self._on_playback_state,
                                        stall_timeout_s=self._config.tts_stall_timeout_s)
         self._planner = SpokenResponsePlanner(max_sentences=config.max_spoken_sentences, connectors=config.connectors,
-                                              pronunciations=lambda: self._speakers.pronunciations() if self._speakers else {})
+                                              pronunciations=lambda: self._speakers.pronunciations() if self._speakers else {},
+                                              farsi_pronunciations=lambda: self._speakers.farsi_pronunciations() if self._speakers else {})
         #: What the last reply did not say aloud, so "go on" can.
         self._unspoken = ""
         self.turns = TurnManager(Policy(

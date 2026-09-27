@@ -169,6 +169,11 @@ def _mean(vectors: Sequence[Sequence[float]]) -> list[float]:
     return [sum(v[i] for v in vectors) / n for i in range(len(vectors[0]))]
 
 
+def _persian(text: str) -> bool:
+    letters = [c for c in text if c.isalpha()]
+    return bool(letters) and sum(1 for c in letters if "\u0600" <= c <= "\u06ff") * 2 > len(letters)
+
+
 @dataclass
 class Person:
     name: str
@@ -177,6 +182,11 @@ class Person:
     #: how Sim should say the name ("Ay-raa" for Ira): the TTS engines read
     #: an unusual name the English way otherwise
     say_as: str = ""
+    #: how Sim says the name inside a Farsi sentence, in Persian script
+    #: ("سَئید"): the Farsi voice reads the letters, and the written name
+    #: can carry a sound the person does not use -- سعید's ع read as
+    #: the Arabic pharyngeal (the creator, 2026-09-27)
+    say_as_fa: str = ""
     embeddings: list[list[float]] = field(default_factory=list)
     enrolled_at: float = 0.0
     last_heard: float = 0.0
@@ -187,12 +197,13 @@ class Person:
         return _mean(self.embeddings)
 
     def to_json(self) -> dict:
-        return {"name": self.name, "relation": self.relation, "say_as": self.say_as, "embeddings": self.embeddings,
+        return {"name": self.name, "relation": self.relation, "say_as": self.say_as, "say_as_fa": self.say_as_fa, "embeddings": self.embeddings,
                 "enrolled_at": self.enrolled_at, "last_heard": self.last_heard, "heard": self.heard}
 
     @classmethod
     def from_json(cls, data: dict) -> "Person":
         return cls(name=str(data.get("name") or ""), relation=str(data.get("relation") or ""), say_as=str(data.get("say_as") or ""),
+                   say_as_fa=str(data.get("say_as_fa") or ""),
                    embeddings=[[float(x) for x in v] for v in data.get("embeddings") or []],
                    enrolled_at=float(data.get("enrolled_at") or 0.0), last_heard=float(data.get("last_heard") or 0.0),
                    heard=int(data.get("heard") or 0))
@@ -300,7 +311,9 @@ class SpeakerBook:
 
     def pronounce(self, name: str, say_as: str, *, relation: str = "") -> Person:
         """Remember how to say `name` (creating the person, voiceless, if
-        they are not enrolled yet -- a name can be known before a voice)."""
+        they are not enrolled yet -- a name can be known before a voice).
+        A Persian-script `say_as` is the Farsi voice's and leaves the
+        English one alone."""
         self._load()
         name = (name or "").strip()
         if not name:
@@ -309,7 +322,11 @@ class SpeakerBook:
         if person is None:
             person = Person(name=name, relation=relation, enrolled_at=self._clock())
             self._people[name.lower()] = person
-        person.say_as = (say_as or "").strip()
+        say_as = (say_as or "").strip()
+        if _persian(say_as):
+            person.say_as_fa = say_as     # the Farsi voice's; the English one stands
+        else:
+            person.say_as = say_as
         if relation and not person.relation:
             person.relation = relation
         self._save(person)
@@ -319,6 +336,11 @@ class SpeakerBook:
         """name -> how to say it, for everyone who has one."""
         self._load()
         return {p.name: p.say_as for p in self._people.values() if p.say_as}
+
+    def farsi_pronunciations(self) -> dict[str, str]:
+        """name -> how to say it in a Farsi sentence, in Persian script."""
+        self._load()
+        return {p.name: p.say_as_fa for p in self._people.values() if p.say_as_fa}
 
     def forget(self, name: str) -> bool:
         self._load()

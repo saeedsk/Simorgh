@@ -409,6 +409,25 @@ def _names_in_persian(text: str) -> str:
     return text
 
 
+def _said_in_farsi(text: str, table: dict[str, str]) -> str:
+    """A household name in a Farsi sentence, written as the household
+    writes it (سعید), replaced by how the Farsi voice should say it
+    (`voice pronounce Saeed سَئید`): the written ع is read as the Arabic
+    pharyngeal, which is not how the creator says his name (2026-09-27)."""
+    from simorgh.contracts.household import HOUSEHOLD
+
+    written = {m.name.lower(): m.fa for m in HOUSEHOLD if m.fa}
+    for name, say in table.items():
+        if not name or not say:
+            continue
+        for form in {written.get(name.lower(), ""), name} - {""}:
+            # a letter or a vowel mark on either side is a longer word;
+            # the Persian comma after the name is not
+            text = re.sub(r"(?<![\w\u064b-\u065f])" + re.escape(form) + r"(?![\w\u064b-\u065f])",
+                          lambda _m, s=say: s, text, flags=re.I)
+    return text
+
+
 def _drop_self_respelling(text: str, name: str) -> str:
     """`Saeed -- Saa-eed`, `Saeed (SAH-eed)`, `Saeed, pronounced Sah-eed`:
     the respelling after the name goes when it is the name's own sound
@@ -647,9 +666,11 @@ class SpokenResponsePlanner:
     so it can be tested without a synthesiser."""
 
     def __init__(self, *, max_sentences: int = 6, connectors: bool = True,
-                 max_chars: int = MAX_CHUNK_CHARS, first_chars: int = FIRST_CHUNK_CHARS, pronunciations=None) -> None:
+                 max_chars: int = MAX_CHUNK_CHARS, first_chars: int = FIRST_CHUNK_CHARS, pronunciations=None,
+                 farsi_pronunciations=None) -> None:
         # name -> how to say it (voice/speakers.py); a dict, or a callable that returns one
         self._pronunciations = pronunciations
+        self._farsi_pronunciations = farsi_pronunciations
         self._max_sentences = max(1, max_sentences)
         self._connectors = connectors
         self._max_chars = max_chars
@@ -672,7 +693,10 @@ class SpokenResponsePlanner:
             # phonemes from Persian script, and "Saeed" -- or its English
             # respelling "sa'eed" -- in the middle of one was read as
             # letters (live, 2026-09-27: "اشکال داره sa'eed، ...").
-            return _names_in_persian(text)
+            text = _names_in_persian(text)
+            table = self._farsi_pronunciations
+            table = table() if callable(table) else (table or {})
+            return _said_in_farsi(text, table)
         table = self._pronunciations() if callable(self._pronunciations) else (self._pronunciations or {})
         for name, say_as in table.items():
             if not name or not say_as:

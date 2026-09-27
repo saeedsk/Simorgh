@@ -1183,6 +1183,8 @@ class Service:
 
             say_as = normalise(say_as)
             person = book.pronounce(name, say_as, relation=str(payload.get("relation") or ""))
+            if person.say_as_fa == say_as:
+                return True, f"{person.name} is said \"{say_as}\" in a Farsi sentence from now on; English is unchanged"
             how = (f"{person.name} is said \"{say_as}\" from now on -- IPA: Kokoro speaks it exactly, "
                    f"an engine that reads letters says \"{respell(say_as)}\"") if is_ipa(say_as) else \
                 f"{person.name} is said \"{say_as}\" from now on"
@@ -1566,7 +1568,8 @@ class Service:
             book = getattr(session, "_speakers", None) if session is not None else None
             if book is None:
                 book = SpeakerBook(self.config.speakers_dir, threshold=self.config.speaker_threshold)
-            text = SpokenResponsePlanner(pronunciations=book.pronunciations).pronounced(text)
+            text = SpokenResponsePlanner(pronunciations=book.pronunciations,
+                                         farsi_pronunciations=book.farsi_pronunciations).pronounced(text)
         except Exception:  # noqa: BLE001 -- a name said plainly beats no audio at all
             pass
         return speakable(text)[0].strip()
