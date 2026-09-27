@@ -118,6 +118,10 @@ class SatelliteMicrophone:
         #: The wake word that opened this run, as said ("Hey Sim"); "" for a
         #: follow-up. The session puts it back in front of the words.
         self.wake_phrase = ""
+        #: This run was opened by Sim (Follow Up Mode), not by a wake word:
+        #: nobody named Sim, so a voice the house does not know is the room
+        #: -- the TV -- and not a turn (`VoiceSession._unplaced_follow_up`).
+        self.follow_up = False
 
     def feed(self, pcm: bytes) -> None:
         """Audio from the board, any chunk size; kept as whole frames."""
@@ -452,6 +456,7 @@ class SatelliteLink:
                          pcm=bytearray() if self._keep_runs else None, states=[])
         self.microphone.woken = True
         self.microphone.streaming = True
+        self.microphone.follow_up = follow_up
         self.microphone.wake_phrase = (wake_word or "").replace("_", " ").strip().title() \
             if wake_word and not follow_up else ""
         self.runs += 1

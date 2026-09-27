@@ -916,6 +916,29 @@ class TheWakeWordIsPutBack(unittest.TestCase):
         s._mic.wake_phrase = phrase  # noqa: SLF001
         return s
 
+    def test_a_follow_up_voice_nobody_knows_is_the_room(self):
+        """Live, 2026-09-27: wrestling commentary came in during Follow Up
+        Mode as "Sim, opponents kicking out..." and was answered. In a run
+        Sim opened, a voice measured and matched to nobody is not a turn;
+        one too short to measure is not judged."""
+        import types
+
+        s = self._session(woken=True, phrase="")
+        s._mic.follow_up = True  # noqa: SLF001
+        s._turn_facts = {1: {"skip": ""}, 2: {"skip": "too_short"}}  # noqa: SLF001
+        s.turns = types.SimpleNamespace(turn_id=1)
+        nobody = types.SimpleNamespace(name="", score=0.1)
+        self.assertTrue(s._unplaced_follow_up(1, nobody))  # noqa: SLF001
+        self.assertFalse(s._unplaced_follow_up(1, types.SimpleNamespace(name="Saeed")))  # noqa: SLF001
+        self.assertFalse(s._unplaced_follow_up(2, nobody), "too short to judge")  # noqa: SLF001
+        s._unplaced_turn = 1  # noqa: SLF001
+        self.assertFalse(s._wake_addressed(), "not addressed: nobody named Sim")  # noqa: SLF001
+        self.assertEqual(s._with_wake_phrase("Opponents kicking out."), "Opponents kicking out.")  # noqa: SLF001
+        s.turns.turn_id = 2
+        self.assertTrue(s._wake_addressed(), "the next turn is judged afresh")  # noqa: SLF001
+        s._mic.follow_up = False  # noqa: SLF001
+        self.assertFalse(s._unplaced_follow_up(1, nobody), "a wake-word run is addressed whoever speaks")  # noqa: SLF001
+
     def test_a_satellite_turn_gets_its_wake_word_back(self):
         self.assertEqual(self._session(woken=True)._with_wake_phrase("Play music."), "Hey Sim, play music.")  # noqa: SLF001
 

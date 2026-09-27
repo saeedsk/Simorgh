@@ -331,6 +331,8 @@ class VoiceSession:
         #: None. While it is set every final transcript is a take of the
         #: line on screen, never a question for the model.
         self._calibrating = None
+        #: The turn a Follow Up Mode run heard nobody known on (`_unplaced_follow_up`).
+        self._unplaced_turn: int | None = None
         #: When the hush ends: None = not hushed, 0.0 = until somebody asks
         #: for Sim BY NAME, a timestamp = "be quiet for ten minutes".
         self._hush_until: float | None = None
@@ -808,8 +810,26 @@ class VoiceSession:
     def _wake_addressed(self) -> bool:
         """This turn came through a room satellite's wake word (stage 13):
         whoever is speaking has already named Sim, on the board. The
-        laptop's microphone never says so, so nothing changes there."""
+        laptop's microphone never says so, so nothing changes there.
+        Not a follow-up run's voice nobody could place: nobody named Sim
+        there (`_unplaced_follow_up`)."""
+        unplaced = getattr(self, "_unplaced_turn", None)
+        if unplaced is not None and unplaced == getattr(getattr(self, "turns", None), "turn_id", None):
+            return False
         return bool(getattr(getattr(self, "_mic", None), "woken", False))
+
+    def _unplaced_follow_up(self, turn_id: int, identification) -> bool:
+        """A Follow Up Mode run -- opened by Sim, not by a wake word -- heard
+        a voice that was measured and matched nobody. Live, 2026-09-27: with
+        wrestling on the TV, the commentary came in during the follow-up
+        window as "Sim, opponents kicking out..." and was answered. A turn
+        too short to measure (a quick "yes please") is not judged."""
+        mic = getattr(self, "_mic", None)
+        if not getattr(mic, "follow_up", False):
+            return False
+        if (self._turn_facts.get(turn_id) or {}).get("skip"):
+            return False
+        return not (getattr(identification, "name", "") or "")
 
     @staticmethod
     def _names_sim(text: str) -> bool:
@@ -1372,6 +1392,8 @@ class VoiceSession:
         clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
         identification, vector = await self._identify(turn_id)
         self._note_score(turn_id, identification)
+        #: The turn a Follow Up Mode run heard nobody known on, if this is it.
+        self._unplaced_turn = turn_id if self._unplaced_follow_up(turn_id, identification) else None
         if self._wake_addressed():
             # Satellite turns only, at info: through the board the same voice
             # was named on one turn and "unknown" on the next (2026-09-27),
@@ -1408,6 +1430,11 @@ class VoiceSession:
             # answered "what time is it" -- once from each speaker.
             self._log("info", "voice.deferred_to_room", turn=turn_id, text=text[:60])
             await self._stay_quiet(turn_id, reason="a room satellite heard its wake word for this; it answers")
+            return
+        if self._unplaced_turn == turn_id and not self._names_sim(text):
+            self._log("info", "voice.follow_up_unplaced", turn=turn_id, text=text[:60])
+            await self._stay_quiet(turn_id, reason="a follow-up heard a voice I do not know that did not name me "
+                                                   "-- the TV or the room, most likely")
             return
         if not speaker and self._tv_is_playing() and not (self._wake_addressed() or self._names_sim(text)):
             # Live 2026-09-13: a KATSEYE video's own dialogue ("my wife
