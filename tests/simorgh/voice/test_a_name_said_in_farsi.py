@@ -29,6 +29,14 @@ class ANameSaidInFarsi(unittest.TestCase):
     def test_english_keeps_the_english_pronunciation(self):
         self.assertEqual(self.planner.pronounced("Hi Saeed."), "Hi Sah-eed.")
 
+    def test_a_word_after_a_dash_is_the_sentence_going_on(self):
+        """Live 2026-09-27: "Saeed — say it again" was said "sa'eed it again"."""
+        from simorgh.voice.planner import _drop_self_respelling
+
+        self.assertEqual(_drop_self_respelling("Saeed — say it again.", "Saeed"), "Saeed — say it again.")
+        self.assertEqual(_drop_self_respelling("Saeed -- Saa-eed, hi", "Saeed"), "Saeed, hi")
+        self.assertEqual(_drop_self_respelling("Saeed (SAH-eed) here", "Saeed"), "Saeed here")
+
     def test_the_book_keeps_the_two_apart(self):
         with tempfile.TemporaryDirectory() as folder:
             book = SpeakerBook(Path(folder))

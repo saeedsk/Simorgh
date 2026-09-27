@@ -439,9 +439,21 @@ def _drop_self_respelling(text: str, name: str) -> str:
         b = re.sub(r"[^a-z]", "", candidate.lower())
         return bool(a and b) and (b[0] == a[0]) and difflib.SequenceMatcher(None, a, b).ratio() >= 0.45
 
-    pattern = re.compile(r"\b(" + re.escape(name) + r")\b\s*(?:[—–-]+|\(|,?\s*(?:pronounced|said)\s+)\s*"
+    pattern = re.compile(r"\b(" + re.escape(name) + r")\b\s*([—–-]+|\(|,?\s*(?:pronounced|said)\s+)\s*"
                          r"([A-Za-z]+(?:[-'][A-Za-z]+)*)\)?", re.IGNORECASE)
-    return pattern.sub(lambda m: m.group(1) if _alike(m.group(2)) else m.group(0), text)
+
+    def _drop(m: re.Match) -> str:
+        word = m.group(3)
+        same = difflib.SequenceMatcher(None, name.lower(), word.lower()).ratio() >= 0.9
+        if m.group(2).strip()[:1] in "—–-" and not (re.search(r"[-']", word) or word.isupper() or same):
+            # After a dash, an ordinary word is the sentence going on:
+            # "Saeed — say it again" was said "Saeed it again" (live,
+            # 2026-09-27). A respelling there has a hyphen or capitals,
+            # or is the name again.
+            return m.group(0)
+        return m.group(1) if _alike(word) else m.group(0)
+
+    return pattern.sub(_drop, text)
 
 
 #: How alike a hyphenated word must be to a name, letters only, to be
