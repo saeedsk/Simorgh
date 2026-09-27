@@ -235,3 +235,30 @@ class UnitsAndCurrencyTestCase(unittest.TestCase):
         text, _ = speakable("Latency was 120ms and oil closed at $104.32/bbl.")
         self.assertIn("120 milliseconds", text)
         self.assertIn("104 dollars and 32 cents per barrel", text)
+
+
+class TheModelsOwnSpellingOfANameIsSaidTheHouseholdsWay(unittest.TestCase):
+    """Live, 2026-09-27: replies said "Loud and clear, Sa-eed" and Kokoro
+    read it "Sah-eed", while "Saeed" got the set pronunciation."""
+
+    def _say(self, text: str) -> str:
+        from simorgh.voice.planner import SpokenResponsePlanner
+
+        return SpokenResponsePlanner(pronunciations={"Saeed": "sa-EED"}).pronounced(text)
+
+    def test_hyphenated_and_stressed_spellings_become_the_pronunciation(self):
+        for said, spoken in (("Loud and clear, Sa-eed.", "Loud and clear, sa-EED."),
+                             ("Sure, Sah-eed.", "Sure, sa-EED."), ("Yes SAH-eed.", "Yes sa-EED."),
+                             ("Hi Saa-eed!", "Hi sa-EED!")):
+            self.assertEqual(self._say(said), spoken)
+
+    def test_ordinary_hyphenated_words_are_left_alone(self):
+        for said in ("the sea-bed is deep", "a so-called fix", "self-made"):
+            self.assertEqual(self._say(said), said)
+
+    def test_the_setting_itself_is_not_mangled(self):
+        from simorgh.voice.planner import SpokenResponsePlanner
+
+        planner = SpokenResponsePlanner(pronunciations={"Saeed": "sa'eed"})
+        self.assertEqual(planner.pronounced("Right here, Saeed."), "Right here, sa'eed.")
+        self.assertEqual(planner.pronounced("Right here, Sa-eed."), "Right here, sa'eed.")

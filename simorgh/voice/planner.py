@@ -392,6 +392,40 @@ def _drop_self_respelling(text: str, name: str) -> str:
     return pattern.sub(lambda m: m.group(1) if _alike(m.group(2)) else m.group(0), text)
 
 
+#: How alike a hyphenated word must be to a name, letters only, to be
+#: the model's own spelling of it. "Sa-eed"/"Sah-eed" are 0.91-1.0
+#: against "Saeed"; "sea-bed" is 0.73.
+_OWN_RESPELLING_ALIKE = 0.8
+_SPLIT_WORD = re.compile(r"\b[A-Za-z]+(?:[-'][A-Za-z]+)+\b")
+
+
+def _own_respelling_as_name(text: str, name: str) -> str:
+    """"Sa-eed" -> "Saeed" when it is the model's own spelling of `name`,
+    so the household's pronunciation is said for it too.
+
+    The model writes the creator's name as "Sa-eed" in reply after
+    reply -- its own earlier replies come back to it from memory -- and
+    the exact-name replacement never matched it, so Kokoro said
+    "Sah-eed" there and the set pronunciation everywhere else, sometimes
+    in one sentence (live, 2026-09-27: "I felt satellite used Sah-eed").
+    Only a word with a hyphen or apostrophe in it, starting with the
+    name's letter: an ordinary word is never taken for a name."""
+    import difflib
+
+    letters = re.sub(r"[^a-z]", "", name.lower())
+    if not letters:
+        return text
+
+    def _swap(match: re.Match) -> str:
+        word = match.group(0)
+        plain = re.sub(r"[^a-z]", "", word.lower())
+        if plain[:1] != letters[:1] or difflib.SequenceMatcher(None, letters, plain).ratio() < _OWN_RESPELLING_ALIKE:
+            return word
+        return name
+
+    return _SPLIT_WORD.sub(_swap, text)
+
+
 def _split_long(sentence: str, limit: int) -> list[str]:
     if len(sentence) <= limit:
         return [sentence]
@@ -602,6 +636,7 @@ class SpokenResponsePlanner:
             if not name or not say_as:
                 continue
             text = _drop_self_respelling(text, name)
+            text = _own_respelling_as_name(text, name)
             say = mark(name, say_as) if is_ipa(say_as) else say_as
             pattern = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
             text = pattern.sub(lambda _m, s=say: s, text)
