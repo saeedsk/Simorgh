@@ -873,6 +873,20 @@ class TheWakeWordListensHarderOverMusic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.selected, [(42, "Very sensitive")], "real music, later")
         await _close(stop, task)
 
+    async def test_music_sim_starts_raises_it_at_once_and_stopping_puts_it_back(self):
+        """The board reports PLAYING once, inside the window after Sim's
+        reply, so the Persian radio played at the everyday cutoff (live,
+        2026-09-27)."""
+        link, client, _p = _link(self._SensitiveClient())
+        link.music_sensitivity = lambda: "Very sensitive"
+        stop, task = await _connected(link, client)
+        link._on_entity_state(types.SimpleNamespace(key=42, state="Moderately sensitive"))  # noqa: SLF001
+        link.speaker._last_end = sat.time.monotonic()          # noqa: SLF001 -- Sim just spoke
+        await link.play_media("http://radio")
+        await link.stop_media()
+        self.assertEqual(client.selected, [(42, "Very sensitive"), (42, "Moderately sensitive")])
+        await _close(stop, task)
+
     async def test_empty_leaves_it_alone(self):
         link, client, _p = _link(self._SensitiveClient())
         link.music_sensitivity = ""

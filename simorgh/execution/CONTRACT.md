@@ -365,3 +365,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - Camera pushes: `camera.event` is published for every channel as before, but a `ui.notice` only for more than bare motion (a person, a vehicle, an animal), at most once per camera per `NOTICE_EVERY_S` (120 s).
 
 - `execution:tools` `registered` records carry `description` and `input_schema` for builtin, MCP and skill tools, so Guardian's boot-time replay knows each tool's arguments (stage 2 item 7).
+- 2026-09-27: `Service(extra_connectors=[factory])` -- factories `(config, secrets=) -> [connector]` called at start, their connectors probed and closed like the rest. The Kernel passes `simorgh.domains.domain_connectors` (the mail/calendar accounts); the dead `.pim.accounts` import is gone.

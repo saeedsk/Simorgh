@@ -520,6 +520,25 @@ class TestConnectorsAreProbedAndClosed(_ExecutionServiceTestCase):
         self.assertIn("connector:caldav", {e.payload.get("name") for e in events})
         self.assertGreaterEqual(fake.probes, 1)
 
+    async def test_connectors_from_outside_the_package_are_probed_too(self):
+        """The mail/calendar accounts come from simorgh.domains, which
+        Execution may not import: the Kernel hands in a factory. Execution
+        imported `.pim.accounts` itself until 2026-09-27 -- a module that had
+        left the package -- and every boot logged pim_connectors_failed."""
+        from simorgh.contracts.connector import FakeConnector
+
+        made = []
+
+        def factory(config, *, secrets=None):
+            made.append(config)
+            return [FakeConnector("gmail")]
+
+        self.service = Service(config=ExecutionConfig(repo_root=self.root), extra_connectors=[factory])
+        await self.service.start(self.ctx)
+        probed = await self._wait_for(topics.TOOL_PROBED, predicate=lambda p: p.get("name") == "connector:gmail")
+        self.assertIsNotNone(probed)
+        self.assertEqual(len(made), 1)
+
     async def test_stop_closes_every_connector(self):
         from simorgh.contracts.connector import FakeConnector
 

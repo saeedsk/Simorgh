@@ -227,11 +227,15 @@ class Service:
     )
 
     def __init__(self, *, config: Config | None = None, extra_tools: list | None = None,
-                 connectors: list | None = None) -> None:
+                 connectors: list | None = None, extra_connectors: list | None = None) -> None:
         self._vision = None
         self._skill_load_locks: dict[str, asyncio.Lock] = {}  # built in start(); stop() may run without it (a failed or skipped start)
         self._config = config or Config()
         self._extra_tools = extra_tools or []
+        #: Factories `(config, secrets=) -> [connector]` from outside this
+        #: package -- the mail and calendar accounts (simorgh.domains), which
+        #: Execution may not import (tests/simorgh/test_module_boundaries.py).
+        self._extra_connectors = extra_connectors or []
         # Account-backed integrations (contracts/connector.py). Each one
         # is probed with the capabilities and listed by the CLI, so "why
         # can't Sim reach my mail" is one command; each is closed on
@@ -447,19 +451,17 @@ class Service:
         except Exception as exc:  # noqa: BLE001 -- diagnostics may not break the boot they diagnose
             ctx.logger.warning("domain_connectors_failed", error=repr(exc))
 
-        accounts = getattr(self._config, "pim_accounts", ())
-        if not accounts:
-            return
-        try:
-            from .pim.accounts import build_all
-
-            # One connector per ACCOUNT rather than one for `pim`: a
-            # mailbox failing while another works is exactly what a
-            # single row would hide.
-            for connector in build_all(accounts, secrets=ctx.secrets).values():
-                self._connectors.append(connector)
-        except Exception as exc:  # noqa: BLE001
-            ctx.logger.warning("pim_connectors_failed", error=repr(exc))
+        # The mail and calendar accounts, one connector each. This imported
+        # `.pim.accounts`, which left this package on 2026-09-20 (stage 9
+        # item 1): every boot since logged `pim_connectors_failed:
+        # No module named 'simorgh.execution.pim'` and no mailbox had a row
+        # in `capabilities` (found live, 2026-09-27). The Kernel hands the
+        # factory in, as it hands in the domain tools.
+        for factory in self._extra_connectors:
+            try:
+                self._connectors.extend(factory(self._config, secrets=ctx.secrets) or [])
+            except Exception as exc:  # noqa: BLE001 -- diagnostics may not break the boot they diagnose
+                ctx.logger.warning("extra_connectors_failed", error=repr(exc))
 
     def register_connector(self, connector) -> None:
         """Add a connector after construction (a tool module that builds

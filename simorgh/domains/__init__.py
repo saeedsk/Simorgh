@@ -50,4 +50,16 @@ def domain_tools(config, *, secrets=None) -> list:
     ]
 
 
-__all__ = ["DOMAINS", "domain_tools"]
+def domain_connectors(config, *, secrets=None) -> list:
+    """One connector per configured mail/calendar account, for Execution's
+    capability probe (`extra_connectors`): a mailbox failing while another
+    works is exactly what a single row would hide."""
+    accounts = getattr(config, "pim_accounts", ()) or ()
+    if not accounts:
+        return []
+    from .pim.accounts import build_all
+
+    return list(build_all(accounts, secrets=secrets).values())
+
+
+__all__ = ["DOMAINS", "domain_connectors", "domain_tools"]

@@ -569,9 +569,15 @@ class SatelliteLink:
         if the board brings it back within `RESTOP_S`."""
         self._stopped_music_at = self._clock()
         await self.stop_playback()
+        self._music_sensitivity(False)
 
     async def _disconnect(self) -> None:
         self.connected = False
+        # Said, so nothing reports "not connected (connected)" -- a reply
+        # sent while Sim was shutting down did (2026-09-27). Only over
+        # "connected": a refusal that says WHY stays as it is.
+        if self.status.startswith("connected"):
+            self._set_status("disconnected")
         if self._ender is not None and not self._ender.done():
             self._ender.cancel()
         self._run = None
@@ -836,6 +842,12 @@ class SatelliteLink:
         self._client.media_player_command(self._media_key, media_url=url, announcement=False)
         self._stopped_music_at = 0.0         # this music is wanted
         self.playing_media = True
+        # Now, not on the board's PLAYING: the music usually starts right
+        # after Sim's reply, inside the window where the board's reports are
+        # taken for that reply, and the board says PLAYING only once -- so
+        # the Persian radio played at the everyday cutoff and no "Hey Sim"
+        # was heard over it, shouted or not (live, 2026-09-27).
+        self._music_sensitivity(True)
 
     async def set_volume(self, level: float) -> None:
         if self._client is None or self._media_key is None:
