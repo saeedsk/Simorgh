@@ -17,6 +17,12 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
+[locks.domains]
+by = "opus-main"
+task = "home: bring Home Assistant back when it cannot be reached (UTM VM or Docker)"
+since = "2026-09-27T20:38:08+00:00"
+until = "2026-09-28T04:38:08+00:00"
+
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
