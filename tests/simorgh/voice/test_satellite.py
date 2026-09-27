@@ -662,6 +662,15 @@ class AConversationStaysOpenForMinutes(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(link.in_conversation(), "then the window passed")
         await _close(stop, task)
 
+    async def test_speech_sim_does_not_answer_does_not_keep_it_open(self):
+        link, client, _p = _link()
+        link.conversation_s = 100.0
+        stop, task = await _connected(link, client)
+        await client.handlers["handle_start"]("c2", 1, None, None)      # a follow-up
+        link.microphone.on_state("user_speaking")                        # the TV, say
+        self.assertFalse(link.in_conversation(), "only a reply opens the conversation")
+        await _close(stop, task)
+
     async def test_zero_is_one_follow_up_as_before(self):
         link, client, _p = _link()
         link._follow_up_s = 0.05  # noqa: SLF001

@@ -746,8 +746,10 @@ class SatelliteLink:
         if run.states is not None and (not run.states or run.states[-1][1] != state):
             run.states.append((round(self._clock() - run.started_at, 2), state))
         if state == "user_speaking":
+            # Speech alone does not keep the conversation open: only a reply
+            # does (`play_url`). The TV or a remark to someone else kept the
+            # board opening empty follow-ups minute after minute (2026-09-27).
             run.speech = True
-            self._keep_conversation()
         if state == "thinking" and not run.vad_ended_at:
             run.vad_ended_at = self._clock()
             self._hold_reply_until = 0.0     # what comes now answers this turn
