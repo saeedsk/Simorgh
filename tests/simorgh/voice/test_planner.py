@@ -14,7 +14,7 @@ from simorgh.voice.planner import (CONNECTOR_REST_TURNS, Context, SpokenResponse
 class TestSpeakable(unittest.TestCase):
     def test_markdown_is_stripped_not_read(self) -> None:
         text, omitted = speakable("## Result\n**Done.** It *works* now.")
-        self.assertEqual(text, "Result Done. It works now.")
+        self.assertEqual(text, "Result. Done. It works now.")
         self.assertEqual(omitted, ())
 
     def test_code_blocks_are_named_not_read(self) -> None:
@@ -277,3 +277,41 @@ class ANameInAFarsiSentenceIsSaidInPersian(unittest.TestCase):
                          "اشکال داره سعید، این رو درست نشنیدم.")
         self.assertEqual(planner.pronounced("سلام Iris و Aran، خوبید؟"), "سلام آیریس و آران، خوبید؟")
         self.assertEqual(planner.pronounced("Right here, Saeed."), "Right here, sa'eed.", "English is untouched")
+
+
+class ALineBreakIsAStop(unittest.TestCase):
+    """Live, 2026-09-27: a Khayyam quatrain -- one hemistich a line, no
+    punctuation -- was joined into one run and chunked mid-verse: "you read
+    the words jumbled, you cut the lines in the middle"."""
+
+    POEM = ("یکی از رباعی‌های خیام:\n\nاسرار ازل را نه تو دانی و نه من\n"
+            "وین حرفِ معما نه تو خوانی و نه من")
+
+    def test_the_planner_stops_at_each_line(self):
+        from simorgh.voice.planner import speakable
+
+        said, _ = speakable(self.POEM)
+        self.assertIn("نه تو دانی و نه من. وین", said)
+        self.assertTrue(said.endswith("نه تو خوانی و نه من."))
+
+    def test_a_streamed_reply_is_a_piece_a_line(self):
+        from simorgh.voice.streamreply import SentenceStream
+
+        stream = SentenceStream(max_sentences=6)
+        for part in (self.POEM[:15], self.POEM[15:50], self.POEM[50:] + "\n"):
+            stream.feed(part)
+        pieces = []
+        while not stream.queue.empty():
+            pieces.append(stream.queue.get_nowait()[0])
+        self.assertEqual(pieces, ["یکی از رباعی‌های خیام:", "اسرار ازل را نه تو دانی و نه من",
+                                  "وین حرفِ معما نه تو خوانی و نه من"])
+
+    def test_a_persian_question_mark_ends_a_sentence(self):
+        from simorgh.voice.streamreply import SentenceStream
+
+        stream = SentenceStream(max_sentences=6)
+        stream.feed("امروز هوا چطوره سعید جان؟ آفتابیه و گرم. ")
+        pieces = []
+        while not stream.queue.empty():
+            pieces.append(stream.queue.get_nowait()[0])
+        self.assertEqual(pieces, ["امروز هوا چطوره سعید جان؟", "آفتابیه و گرم."])

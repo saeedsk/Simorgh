@@ -292,10 +292,21 @@ def speakable(text: str) -> tuple[str, tuple[str, ...]]:
     out = speak_numbers(out)
     out = _SPACES.sub(" ", out)
     lines = [line.strip() for line in out.splitlines()]
-    out = " ".join(line for line in lines if line)
+    lines = [line for line in lines if line]
+    if len(lines) > 1:
+        # A line break is a stop: a poem's hemistichs, a list without
+        # bullets, an address. Joined bare, a Khayyam quatrain ran its
+        # lines together and the chunker cut one in half (live, 2026-09-27:
+        # "you read the words jumbled, you cut the lines in the middle").
+        lines = [line if line.endswith(_LINE_ENDS) else f"{line}." for line in lines]
+    out = " ".join(lines)
     out = re.sub(r"\s+([,.;:!?])", r"\1", out)
     out = re.sub(r"([.!?])\s*\1+", r"\1", out)
     return out.strip(), tuple(dict.fromkeys(omitted))
+
+
+#: Line endings that already stop or pause a sentence.
+_LINE_ENDS = (".", "!", "?", "؟", "۔", ":", ";", ",", "،", "؛", "…", "—", "-")
 
 
 def _enumerate_lists(text: str) -> str:

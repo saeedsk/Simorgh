@@ -21,7 +21,11 @@ from simorgh.contracts.tone import split_tone
 
 from .planner import MORE_ON_SCREEN
 
-_SENTENCE_END = re.compile(r"(?<=[.!?])[\"')\]]*\s+")
+#: A sentence ends at . ! ? -- and the Persian ؟ and ۔ -- before a space, or
+#: at a line break. Only . ! ? counted, so a Farsi reply (؟) or a poem (no
+#: punctuation, one hemistich a line) arrived as ONE piece, 15 s of it,
+#: its lines run together (live, 2026-09-27).
+_SENTENCE_END = re.compile(r"(?<=[.!?؟۔])[\"')\]]*\s+|\s*\n\s*")
 #: A sentence shorter than this waits for the next one ("Dr." or "1.").
 MIN_SENTENCE = 12
 PAUSE_MS = 180
