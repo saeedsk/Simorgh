@@ -91,7 +91,8 @@ WAKE_NOISE_AMPLITUDE = 64
 #: Terminal colour codes in the board's log lines.
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 #: Warnings the board prints on every reply, which say nothing.
-_BOARD_NOISE = ("No text in STT_END event", "No text in TTS_START event")
+_BOARD_NOISE = ("No text in STT_END event", "No text in TTS_START event",
+                "event 'esphome.tts_uri' dropped")      # every reply; Home Assistant is not the board's client
 
 
 def _wake_noise(samples: int) -> bytes:

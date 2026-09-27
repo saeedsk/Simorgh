@@ -910,6 +910,7 @@ class TheFirstWordsAreNotClipped(unittest.IsolatedAsyncioTestCase):
         for line in (b"\x1b[0;33m[W][voice_assistant:806]: No text in STT_END event\x1b[0m",
                      b"[D][micro_wake_word:123]: Detected wake word 'hey_sim'",
                      b"[I][esp-idf:000]: micro_decoder.http_client: Connected",
+                     b"[W][api:436]: Home Assistant event 'esphome.tts_uri' dropped; client has not subscribed",
                      b"[E][i2s_audio:77]: Failed to read microphone"):
             link._on_board_log(types.SimpleNamespace(message=line))  # noqa: SLF001
         self.assertEqual(logged, ["[D][micro_wake_word:123]: Detected wake word 'hey_sim'",
