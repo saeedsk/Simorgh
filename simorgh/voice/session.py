@@ -1372,6 +1372,17 @@ class VoiceSession:
         clock = self._clocks.get(turn_id) or TurnClock(turn_id=turn_id)
         identification, vector = await self._identify(turn_id)
         self._note_score(turn_id, identification)
+        if self._wake_addressed():
+            # Satellite turns only, at info: through the board the same voice
+            # was named on one turn and "unknown" on the next (2026-09-27),
+            # and nothing said which step decided it.
+            facts = self._turn_facts.get(turn_id) or {}
+            self._log("info", "voice.room_speaker", turn=turn_id, skip=facts.get("skip", ""),
+                      speech_s=round(float(facts.get("speech_s") or 0.0), 2),
+                      name=getattr(identification, "name", "") or "",
+                      score=round(float(getattr(identification, "score", 0.0) or 0.0), 3),
+                      probable=bool(getattr(identification, "probable", False)),
+                      reason=str(getattr(identification, "reason", "") or "")[:80])
         if self._calibrating is not None:
             self._timed.pop(turn_id, None)
             await self._calibration_take(turn_id, text, vector)
