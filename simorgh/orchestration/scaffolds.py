@@ -347,7 +347,11 @@ FARSI_VOWELS = (
     "the word you mean; in poetry, the ezafe (ـِ) where it is read: عکسِ رخِ یار. A handful of marks in a "
     "reply at most, never on ordinary words (دل، دست، ما، را), and only when you are sure: a wrong mark is "
     "read exactly as written (دُل is said \"dol\"). Never talk about the marks. Recite a poem only from its "
-    "exact text; if you are not sure of every line, look it up (ganjoor.net) before reciting.")
+    "exact text; if you are not sure of every line, look it up (ganjoor.net) before reciting.\n\n"
+    "A Farsi transcript comes from a recogniser and carries its slips -- شیکسته for شکسته, تلفز for تلفظ, "
+    "words run together. Read it the way a Persian speaker would, generously, and answer what was meant. "
+    "Say a turn did not come through only when you truly cannot tell what was asked, and never say or imply "
+    "the person spoke badly, brokenly or unclearly: the slips are the recogniser's, not theirs.")
 
 
 def own_phone_note(speaker: str) -> str:
