@@ -85,6 +85,8 @@ UNJAM_EVERY_S = 10.0
 RESTART_JAMMED_EVERY_S = 300.0
 #: How long after the board logs its wake word a run must have started.
 RUN_EXPECTED_S = 5.0
+#: Seconds of audio at exactly zero after which the board's mic is dead.
+DEAD_MIC_AFTER_S = 5.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
@@ -759,6 +761,12 @@ class SatelliteLink:
                   first_audio_after_s=round(run.first_audio_at - run.started_at, 2) if run.first_audio_at else None,
                   peak_rms=run.peak, lasted_s=round(self._clock() - run.started_at, 2),
                   states=" ".join(f"{at}:{st}" for at, st in (run.states or [])) or "none")
+        if run.peak == 0 and run.audio_bytes / 32000 >= DEAD_MIC_AFTER_S:
+            # Seconds of audio at exactly zero: no room is that quiet. The
+            # board's microphone stopped delivering sound (live, 2026-09-27:
+            # 39 s at peak 0, right after a firmware warning), and a board
+            # that cannot hear cannot hear its wake word either.
+            self._restart_jammed(reason=f"its microphone sent {run.audio_bytes / 32000:.0f} s of pure silence")
         if run.pcm is not None and run.pcm:
             self._keep(run)
 

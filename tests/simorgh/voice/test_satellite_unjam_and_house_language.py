@@ -109,6 +109,27 @@ class ABoardThatHearsItsWakeWordAndOpensNoRunIsRestarted(unittest.IsolatedAsynci
         self.assertEqual(link.pressed, [])
 
 
+class ABoardWhoseMicSendsOnlyZerosIsRestarted(unittest.TestCase):
+    """Live 2026-09-27: a run of 39 s at peak 0, right after a firmware
+    warning; the board then heard nothing at all."""
+
+    def _run(self, peak, seconds):
+        return SimpleNamespace(logged=False, vad_ended_at=0, replied=False, follow_up=True,
+                               audio_bytes=int(seconds * 32000), first_audio_at=0, started_at=0, peak=peak,
+                               states=[], pcm=None)
+
+    def test_pure_silence_restarts(self):
+        link = _Link()
+        sat.SatelliteLink._log_run(link, self._run(0, 39), "run end")
+        self.assertEqual(link.pressed, [7])
+
+    def test_a_quiet_room_does_not(self):
+        link = _Link()
+        sat.SatelliteLink._log_run(link, self._run(12, 39), "run end")
+        sat.SatelliteLink._log_run(link, self._run(0, 1), "run end")
+        self.assertEqual(link.pressed, [])
+
+
 class OnlyAHouseLanguageIsSaid(unittest.TestCase):
     def test_icelandic_is_not_passed_on(self):
         fake = SimpleNamespace(_config=SimpleNamespace(stt_languages="en,fa"))
