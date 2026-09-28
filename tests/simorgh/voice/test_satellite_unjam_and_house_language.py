@@ -16,6 +16,7 @@ class _Link:
     name = "satellite"
     _unjam = sat.SatelliteLink._unjam
     _restart_jammed = sat.SatelliteLink._restart_jammed
+    _expect_run = sat.SatelliteLink._expect_run
     _on_board_log = sat.SatelliteLink._on_board_log
 
     def __init__(self):
@@ -23,6 +24,8 @@ class _Link:
         self._unjammed_at = -1e9
         self._restarted_at = -1e9
         self._restart_key = 7
+        self._wake_heard_at = -1e9
+        self._run_started_at = -1e9
         self.pressed = []
         self._client = SimpleNamespace(button_command=self.pressed.append)
         self.stops = 0
@@ -77,6 +80,32 @@ class ABoardThatRefusesStopIsRestarted(unittest.TestCase):
         link = _Link()
         link._restart_key = None
         link._on_board_log(SimpleNamespace(message=b"Queue full, command dropped"))
+        self.assertEqual(link.pressed, [])
+
+
+class ABoardThatHearsItsWakeWordAndOpensNoRunIsRestarted(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-27: after an aborted run the board heard "Hey Sim" and
+    never opened another -- fourteen minutes deaf until unplugged."""
+
+    WAKE = SimpleNamespace(message=b"[W][api:436]: Home Assistant event 'esphome.wake_word_detected' dropped")
+
+    async def test_no_run_in_time_restarts(self):
+        from unittest import mock
+
+        link = _Link()
+        with mock.patch.object(sat, "RUN_EXPECTED_S", 0.05):
+            link._on_board_log(self.WAKE)
+            await asyncio.sleep(0.12)
+        self.assertEqual(link.pressed, [7])
+
+    async def test_a_run_that_starts_is_left_alone(self):
+        from unittest import mock
+
+        link = _Link()
+        with mock.patch.object(sat, "RUN_EXPECTED_S", 0.05):
+            link._on_board_log(self.WAKE)
+            link._run_started_at = link.now + 0.001       # the run opened
+            await asyncio.sleep(0.12)
         self.assertEqual(link.pressed, [])
 
 

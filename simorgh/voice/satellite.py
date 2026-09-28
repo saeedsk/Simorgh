@@ -83,6 +83,8 @@ RESTOP_S = 15.0
 UNJAM_EVERY_S = 10.0
 #: The least time between two restarts of a board that refused even STOP.
 RESTART_JAMMED_EVERY_S = 300.0
+#: How long after the board logs its wake word a run must have started.
+RUN_EXPECTED_S = 5.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
@@ -387,6 +389,8 @@ class SatelliteLink:
         self._unjammed_at = -1e9
         self._restarted_at = -1e9
         self._restart_key = None
+        self._wake_heard_at = -1e9
+        self._run_started_at = -1e9
         #: Seconds, or a callable giving them: read live, so `voice set`
         #: changes a running link.
         self._follow_up_s = follow_up_s
@@ -512,6 +516,25 @@ class SatelliteLink:
                 self._restart_jammed()      # it would not take even the STOP
             else:
                 self._unjam()
+        if "wake_word_detected" in text:
+            self._expect_run()
+
+    def _expect_run(self) -> None:
+        """The board heard its wake word; a run must start within
+        `RUN_EXPECTED_S`. Live, 2026-09-27: after a run the board aborted
+        mid-reply, it went on hearing "Hey Sim" and never opened another --
+        fourteen minutes deaf until it was unplugged. No run in time is that
+        state, and a restart is the only way out of it."""
+        heard_at = self._clock()
+        self._wake_heard_at = heard_at
+
+        async def check() -> None:
+            await asyncio.sleep(RUN_EXPECTED_S)
+            if self._run_started_at < heard_at and self._wake_heard_at == heard_at:
+                self._restart_jammed(reason="heard its wake word and opened no run")
+
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().create_task(check())
 
     def _unjam(self) -> None:
         """The board's media player stopped taking audio ("Queue full, URI
@@ -528,7 +551,7 @@ class SatelliteLink:
         with contextlib.suppress(RuntimeError):
             asyncio.get_running_loop().create_task(self.stop_playback())
 
-    def _restart_jammed(self) -> None:
+    def _restart_jammed(self, reason: str = "media queue full; STOP refused") -> None:
         """The board refused the STOP too ("Queue full, command dropped"):
         its player is past clearing, and only a restart empties it. Pressed
         at most once per `RESTART_JAMMED_EVERY_S`; the board is back, and the
@@ -538,7 +561,7 @@ class SatelliteLink:
         if self._restart_key is None or self._client is None or now - self._restarted_at < RESTART_JAMMED_EVERY_S:
             return
         self._restarted_at = now
-        self._log("warning", "voice.satellite_restarted", reason="media queue full; STOP refused")
+        self._log("warning", "voice.satellite_restarted", reason=reason)
         with contextlib.suppress(Exception):
             self._client.button_command(self._restart_key)
 
@@ -638,6 +661,7 @@ class SatelliteLink:
     # -------------------------------------------------------------- runs
     async def _on_start(self, conversation_id: str, flags: int, audio_settings, wake_word: str | None):
         """The board heard its wake word. 0 = stream over this connection."""
+        self._run_started_at = self._clock()
         if not self._accepting():
             self._event("VOICE_ASSISTANT_ERROR", {"code": "not-listening", "message": "Sim is not listening"})
             self._log("info", "voice.satellite_wake_declined", wake_word=wake_word or "")
