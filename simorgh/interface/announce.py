@@ -27,6 +27,7 @@ answers for names that are not Sim's, which is worse than not answering.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -77,6 +78,24 @@ def command(port: int, addresses: list[str]) -> list[str]:
     return []
 
 
+def _dies_with(pid: int, argv: list[str]) -> list[str]:
+    """`argv` under a watchdog that ends it when process `pid` is gone.
+
+    The publisher runs in its own session so a terminal's Ctrl-C does not
+    reach it, and Sim's shutdown ends in `os._exit` (kernel/cli.py), so
+    `stop()` does not always run: every such restart left a `dns-sd -R
+    Sim` behind, found three days old beside the live one (2026-09-27)."""
+    import shlex
+
+    quoted = " ".join(shlex.quote(a) for a in argv)
+    # `sleep & wait`: a trap runs as soon as the signal lands, not after
+    # a foreground sleep ends -- `stop()` waits only three seconds.
+    script = (f"{quoted} & child=$!; trap 'kill $child 2>/dev/null; exit 0' TERM INT; "
+              f"while kill -0 {int(pid)} 2>/dev/null && kill -0 $child 2>/dev/null; do sleep 2 & wait $!; done; "
+              f"kill $child 2>/dev/null")
+    return ["/bin/sh", "-c", script]
+
+
 class Announcer:
     """Keeps the registration alive for as long as Sim is up.
 
@@ -93,7 +112,16 @@ class Announcer:
         self.detail = ""
 
     def start(self) -> bool:
+        if int(self._port or 0) <= 0:
+            # Port 0 is a test server's "any free port": an advert for it
+            # sends a phone to nothing. One such, left by a test run, sat
+            # on the network beside the real one (2026-09-27).
+            self.detail = "not announced: no fixed port (0 is only for tests)"
+            return False
         argv = command(self._port, self._addresses)
+        publisher = Path(argv[0]).name if argv else ""
+        if argv:
+            argv = _dies_with(os.getpid(), argv)
         if not argv:
             self.detail = ("no mDNS publisher here (no dns-sd, no avahi-publish-service, no zeroconf "
                            "package) -- clients must be given an address")
@@ -105,7 +133,7 @@ class Announcer:
         except (OSError, subprocess.SubprocessError) as exc:
             self.detail = f"could not announce over mDNS: {exc!r}"
             return False
-        self.detail = f"announcing {INSTANCE}.{SERVICE}.local on port {self._port} via {Path(argv[0]).name}"
+        self.detail = f"announcing {INSTANCE}.{SERVICE}.local on port {self._port} via {publisher}"
         if self._log is not None:
             self._log("info", "interface.announced", service=SERVICE, port=self._port,
                       addresses=self._addresses)

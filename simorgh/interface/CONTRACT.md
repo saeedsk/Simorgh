@@ -205,7 +205,7 @@ as I have on mac with same stt and tts engines" (the creator).
 
 13b. `GET /api/console` serves the lines Sim actually PRINTED -- `contracts/console.py`'s capture, glyphs and all -- so a client can mirror the terminal rather than approximate it with a ledger tail. Token-gated: Sim's own output is not open to the LAN. `?contains=` filters, which is what makes a long tail usable on a phone. `POST /api/command` is the other half, and already existed.
 13g. A client is never required to be TOLD an address. Sim announces `_simorgh._tcp` on the local network
-for as long as it is up (`announce.py`, a supervised `dns-sd -R` / `avahi-publish-service` child, else the
+for as long as it is up and no longer (`announce.py`, a supervised `dns-sd -R` / `avahi-publish-service` child under a watchdog that ends it when Sim's process is gone -- `_dies_with`, 2026-09-27, after orphaned adverts were found days old -- and never for port 0, else the
 optional `zeroconf` package, else nothing and `interface.not_announced` says which is missing -- the same
 "optional, probed, named when absent" rule `devices.barcode()` follows). `GET /api/addresses` and the
 `POST /api/pair` reply both carry every address Sim answers on (`addresses.py`), and the mDNS TXT record
