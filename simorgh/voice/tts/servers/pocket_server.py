@@ -31,8 +31,24 @@ TO_PHONEMES = str.maketrans({"/": "a", "a": "A", "@": "?", "$": "S", "c": "C"})
 RATE = 24000
 
 
+#: The marks that say how a word is read: fatha, damma, kasra, shadda.
+VOWEL_MARKS = "\u064e\u064f\u0650\u0651"
+
+
+def keep_vowel_marks(normalize_fa) -> None:
+    """The model's normaliser drops every diacritic, so a reply written
+    «یکی تُرک می‌گه» reached the G2P as «ترک» and was said "ta-ra-k"; with
+    the damma kept the G2P says "tork", and «عکسِ رخِ» gets its ezafe
+    (measured 2026-09-27). Keep the four that say how a word is read; drop
+    the rest as before."""
+    import re as _re
+
+    normalize_fa.DIACRITICS = _re.compile(r"[\u064b-\u064d\u0652-\u065f\u0670\u06d6-\u06ed]")
+    normalize_fa.ALLOWED.update(VOWEL_MARKS)
+
+
 #: What is not part of a word when a word is looked up in the lexicon.
-_PUNCT = "،؛.!?؟:\"'«»()[]-—–"
+_PUNCT = "،؛.!?؟:\"'«»()[]-—–" + VOWEL_MARKS
 
 
 def with_lexicon(words: str, sounds: str, lexicon: dict) -> str:
@@ -48,7 +64,7 @@ def with_lexicon(words: str, sounds: str, lexicon: dict) -> str:
     if len(said) != len(heard):
         return sounds
     for i, word in enumerate(said):
-        own = lexicon.get(word.strip(_PUNCT))
+        own = lexicon.get("".join(c for c in word if c not in VOWEL_MARKS).strip(_PUNCT))
         if own:
             heard[i] = own
     return " ".join(heard)
@@ -69,7 +85,10 @@ def main() -> None:                                     # noqa: C901 -- one prot
         # `workspace/voice/engines/pocket/` -- outside this package,
         # because it is somebody else's code.
         sys.path.insert(0, os.environ.get("POCKET_ENGINE_DIR") or "workspace/voice/engines/pocket")
+        import normalize_fa
         from normalize_fa import normalize_for_model
+
+        keep_vowel_marks(normalize_fa)
     except ImportError:
         def normalize_for_model(text: str) -> str:              # noqa: D103 -- the model's own normaliser is preferred
             return text

@@ -27,6 +27,10 @@ class _Link:
         return self.now
 
     def _log(self, level, event, **fields):
+        # As the real one: it adds `satellite=` itself, and a second one
+        # raised inside the board's message handler (live, 2026-09-27).
+        if "satellite" in fields:
+            raise TypeError("got multiple values for keyword argument 'satellite'")
         self.logged.append(event)
 
     async def stop_playback(self):

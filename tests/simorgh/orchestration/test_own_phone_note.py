@@ -16,5 +16,16 @@ class OwnPhoneNote(unittest.TestCase):
         self.assertIn("never refuse ahead of it", note)
 
 
+
+class FarsiVowels(unittest.TestCase):
+    """2026-09-27: «یکی ترک می‌گه» was said "ta-ra-k" where "tork" was meant."""
+
+    def test_a_spoken_reply_is_asked_to_mark_words_that_read_two_ways(self):
+        from simorgh.orchestration import scaffolds
+
+        self.assertIn("تُرک", scaffolds.FARSI_VOWELS)
+        self.assertIn("ezafe", scaffolds.FARSI_VOWELS)
+
+
 if __name__ == "__main__":
     unittest.main()

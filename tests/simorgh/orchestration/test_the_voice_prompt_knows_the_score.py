@@ -87,5 +87,5 @@ class TheTurnsLanguageIsInThePrompt(unittest.TestCase):
         root = Path(__file__).resolve().parents[3] / "simorgh"
         self.assertIn('"heard_language"', (root / "orchestration" / "service.py").read_text())
         self.assertIn('O("heard_language", Str)', (root / "contracts" / "messages" / "percept.py").read_text())
-        self.assertIn("heard_language=clock.language", (root / "voice" / "session.py").read_text())
+        self.assertIn("heard_language=self._house_language(clock.language", (root / "voice" / "session.py").read_text())
         self.assertIn('payload["heard_language"]', (root / "voice" / "pipeline.py").read_text())

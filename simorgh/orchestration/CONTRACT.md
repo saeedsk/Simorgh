@@ -125,6 +125,8 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 
 - `scaffolds.own_phone_note(speaker)` (2026-09-27): a chat turn on channel `api` with a speaker -- a paired phone that belongs to someone -- carries a line saying it is that person asking and Guardian decides as theirs, so earlier refusals from before the phone had an owner do not make the model refuse ahead of Guardian.
 
+- `scaffolds.FARSI_VOWELS` (2026-09-27): every spoken reply's prompt (voice, and the phone's `api` channel) asks for the short vowel on a Farsi word that reads two ways (تُرک/تَرک, مُلک/مِلک…) and the ezafe in poetry; the Farsi voice now keeps those marks.
+
 ## Invariants
 
 A resumed session owns what earlier attempts WROTE, read from their steps' side effects (`resume._claim_written`), not only from the `task.edits_kept` record an attempt writes when it ends. A SIGKILL writes no such record -- which is the case resume exists for -- so a crashed attempt's file was nobody's: `git_commit` refused it with "this task did not write <path>" and the task could never finish (kill-and-resume drill, 2026-09-23).

@@ -511,7 +511,7 @@ class SatelliteLink:
         if now - self._unjammed_at < UNJAM_EVERY_S:
             return
         self._unjammed_at = now
-        self._log("warning", "voice.satellite_unjammed", satellite=self.name)
+        self._log("warning", "voice.satellite_unjammed")
         with contextlib.suppress(RuntimeError):
             asyncio.get_running_loop().create_task(self.stop_playback())
 

@@ -337,6 +337,17 @@ answer, and you do not route around it."""
 # "voice"`). The spoken-response planner (voice/planner.py) strips what
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
+#: For a reply that will be SPOKEN. Written Persian leaves out short vowels,
+#: and the Farsi voice then guesses: «یکی ترک می‌گه» was said "ta-ra-k"
+#: where "tork" was meant; with «تُرک» written it says "tork", and «عکسِ رخِ»
+#: gets its ezafe (measured 2026-09-27; the voice now keeps these marks).
+FARSI_VOWELS = (
+    "When you answer in Farsi, write the short vowel (ـَ ـِ ـُ) on any word that can be read two ways, "
+    "so the voice says the word you mean: تُرک or تَرک، مُلک or مِلک or مَلَک، کِرم or کَرَم، مُرد or مَرد، "
+    "شِعر. In poetry also write the ezafe (ـِ) where it is read: عکسِ رخِ یار. Only where it matters -- "
+    "an ordinary unambiguous word needs no marks.")
+
+
 def own_phone_note(speaker: str) -> str:
     """A turn from a paired phone that belongs to someone (`devices
     assign`, or the owner named at pairing). Live, 2026-09-27: once the
@@ -678,6 +689,7 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         said_in = language_line(heard_language)
         if said_in:
             body = f"{body}\n\n{said_in}"
+        body = f"{body}\n\n{FARSI_VOWELS}"
         if device and device != "laptop":
             # Stage 13: the creator, 2026-09-27 -- "when I say 'play music'
             # on the board, I expect the music played on the same board
@@ -688,6 +700,9 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if channel == "api" and speaker:
         body = f"{body}\n\n{own_phone_note(speaker)}" if body else own_phone_note(speaker)
+    if channel == "api":
+        # The phone reads its answers aloud too (`/api/say`).
+        body = f"{body}\n\n{FARSI_VOWELS}" if body else FARSI_VOWELS
     if task:
         # The task belongs in `task_rules` because that block is
         # *protected* -- never compacted (04 section 4.6). As a plain user
