@@ -17,6 +17,12 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
+[locks.domains]
+by = "opus-main"
+task = "home_blink paced by confirmation; per-entity command rate limit"
+since = "2026-09-28T03:02:10+00:00"
+until = "2026-09-28T11:02:10+00:00"
+
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
