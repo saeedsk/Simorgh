@@ -17,12 +17,6 @@ task = "Together stream timeouts say which phase they happened in"
 since = "2026-09-22T14:28:13+00:00"
 until = "2026-09-22T22:28:13+00:00"
 
-[locks.domains]
-by = "opus-main"
-task = "home_blink: 'all lights' means every light, and says how many"
-since = "2026-09-28T02:52:30+00:00"
-until = "2026-09-28T10:52:30+00:00"
-
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
