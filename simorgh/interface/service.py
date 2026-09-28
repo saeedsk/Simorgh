@@ -286,6 +286,8 @@ class Service:
         #: Holds the `_simorgh._tcp` registration for as long as Sim is up
         #: (`announce.py`); None when nothing here can publish one.
         self._announcer = None
+        #: Home Assistant on the tailnet for a phone away from home (`harelay.py`).
+        self._ha_relay = None
         self._telegram = None
         self._whatsapp = None
 
@@ -419,6 +421,8 @@ class Service:
                 # with no mDNS publisher still works, the phone just has to
                 # be given an address once.
                 self._announcer = self._announce(ctx)
+                self._ha_relay = await self._relay_home_assistant(ctx)
+                self._http.ha_relay = self._ha_relay
                 line = f"dashboard: {self._http.url}"
                 # Same reason as the splash: printing this from `start()`
                 # lands it in the middle of the Kernel's boot progress.
@@ -612,11 +616,34 @@ class Service:
             return None
         return announcer
 
+    async def _relay_home_assistant(self, ctx):
+        """Home Assistant's LAN address relayed on the tailnet one, so the
+        app's Home Assistant tab works away from home (2026-09-27)."""
+        from .addresses import TAILNET_PREFIX, _TAILSCALE_DNS, _source_address_for
+        from .harelay import HomeAssistantRelay
+
+        url = str(ctx.secrets.get("HOME_ASSISTANT_URL") or "") if ctx.secrets is not None else ""
+        tailnet = _source_address_for(_TAILSCALE_DNS)
+        if not url or not tailnet.startswith(TAILNET_PREFIX):
+            return None
+
+        def log(level, event, **fields):
+            getattr(ctx.logger, level)(event, **fields)
+
+        relay = HomeAssistantRelay(url, tailnet, log=log)
+        if not await relay.start():
+            ctx.logger.info("interface.ha_not_relayed", detail=relay.detail)
+            return None
+        return relay
+
     async def stop(self) -> None:
         self._stop_repl.set()
         if self._announcer is not None:
             self._announcer.stop()
             self._announcer = None
+        if self._ha_relay is not None:
+            await self._ha_relay.stop()
+            self._ha_relay = None
         if self._seed_task is not None:
             self._seed_task.cancel()
             try:

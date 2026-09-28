@@ -154,6 +154,8 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 
 - `POST /api/pair` takes an optional `person` and answers with `person` (2026-09-27): a phone says whose it is at pairing, kept when it names a household member (`devices.household_member`) and the terminal's `pair ... for X` named nobody. `DeviceBook` re-reads its file when it changed on disk (`_fresh`), so `devices assign` from another process or a hand edit takes effect without a restart instead of being overwritten by the next `last_seen` save. The iOS app asks "Who's using this phone?" when pairing and shows the owner in Settings.
 
+- `harelay.HomeAssistantRelay` (2026-09-27): Home Assistant's `HOME_ASSISTANT_URL` relayed as plain TCP on the Mac's TAILNET address only, port `RELAY_PORT` (8124), started with the HTTP server and stopped with it; `interface.ha_relayed` / `interface.ha_not_relayed` say which. `GET /api/house/assistant` answers a caller that reached Sim by a tailnet host (`on_tailnet`: `*.ts.net` or `100.x`) with the relay on that same host, so the app's Home Assistant tab works away from home; a LAN caller still gets the LAN address.
+
 ## Public Python surface
 
 - `simorgh.interface.service.Service` (`service.py:108`): the Subsystem, built by the Kernel. Constructor flags `run_repl`, `http_enabled`, `wait_for_boot` let tests run it headless.

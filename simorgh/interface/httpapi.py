@@ -878,6 +878,15 @@ class HttpApi:
                 return 403, json.dumps({"error": {
                     "code": "capability_required", "capability": "read"}}).encode("utf-8"), "application/json"
             url = self._home_assistant_url
+            # Away from home the phone reaches Sim over the tailnet, and Home
+            # Assistant's LAN address is nothing there: hand it the relay on
+            # the same host it used to reach Sim (`harelay.py`, 2026-09-27).
+            from .harelay import on_tailnet
+
+            relay = getattr(self, "ha_relay", None)
+            came_by = on_tailnet(str(headers.get("host") or headers.get("Host") or ""))
+            if url and relay is not None and relay.running and came_by:
+                url = relay.url_for(came_by)
             body = {"url": url, "configured": bool(url)}
             if not url:
                 # Said plainly, with the fix, rather than an empty string
