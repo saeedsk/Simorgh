@@ -26,6 +26,14 @@ class FarsiVowels(unittest.TestCase):
         self.assertIn("تُرک", scaffolds.FARSI_VOWELS)
         self.assertIn("ezafe", scaffolds.FARSI_VOWELS)
 
+    def test_few_marks_only_when_sure_and_poems_from_their_text(self):
+        """Live 2026-09-27: marks on nearly every word, «دُلِ» for «دلِ», a
+        misquoted Hafez, and the model talking about its marks."""
+        from simorgh.orchestration import scaffolds
+
+        for said in ("ONLY", "only when you are sure", "Never talk about the marks", "exact text"):
+            self.assertIn(said, scaffolds.FARSI_VOWELS)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -342,10 +342,12 @@ answer, and you do not route around it."""
 #: where "tork" was meant; with «تُرک» written it says "tork", and «عکسِ رخِ»
 #: gets its ezafe (measured 2026-09-27; the voice now keeps these marks).
 FARSI_VOWELS = (
-    "When you answer in Farsi, write the short vowel (ـَ ـِ ـُ) on any word that can be read two ways, "
-    "so the voice says the word you mean: تُرک or تَرک، مُلک or مِلک or مَلَک، کِرم or کَرَم، مُرد or مَرد، "
-    "شِعر. In poetry also write the ezafe (ـِ) where it is read: عکسِ رخِ یار. Only where it matters -- "
-    "an ordinary unambiguous word needs no marks.")
+    "When you answer in Farsi, mark the short vowel (ـَ ـِ ـُ) ONLY on a word that reads two ways where the "
+    "reading changes the meaning -- تُرک or تَرک، مُلک or مِلک، کِرم or کَرَم، مُرد or مَرد -- so the voice says "
+    "the word you mean; in poetry, the ezafe (ـِ) where it is read: عکسِ رخِ یار. A handful of marks in a "
+    "reply at most, never on ordinary words (دل، دست، ما، را), and only when you are sure: a wrong mark is "
+    "read exactly as written (دُل is said \"dol\"). Never talk about the marks. Recite a poem only from its "
+    "exact text; if you are not sure of every line, look it up (ganjoor.net) before reciting.")
 
 
 def own_phone_note(speaker: str) -> str:
