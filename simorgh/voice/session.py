@@ -2180,6 +2180,11 @@ class VoiceSession:
         final = await self._final_text(turn_id)
         if final is None:
             return
+        if getattr(self, "_unplaced_turn", None) == turn_id:
+            # A follow-up voice nobody knows -- the film in the room -- is
+            # answered with silence, and got "Sure thing." first (live,
+            # 2026-09-27, during Willy Wonka).
+            return
         language = self._aside_language(final)
         if not language:
             return

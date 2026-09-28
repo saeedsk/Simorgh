@@ -70,5 +70,13 @@ class TheAsideWaitsForTheFinal(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await VoiceSession._final_text(self._fake(), 7, wait_s=0.1))  # noqa: SLF001
 
 
+
+class NoAsideForAVoiceNobodyKnows(unittest.TestCase):
+    def test_the_check_is_there(self):
+        import inspect
+
+        self.assertIn("_unplaced_turn", inspect.getsource(VoiceSession._acknowledge))
+
+
 if __name__ == "__main__":
     unittest.main()
