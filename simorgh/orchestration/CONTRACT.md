@@ -129,6 +129,8 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 
 - `[orchestration] farsi_strong` (default true, 2026-09-27): a chat turn in Farsi (Persian-script text, or `heard_language` persian) asks Cognition for the strong tier (`SessionRunner._tier` -> `{"tier": "strong", "tier_reason": "a Farsi turn"}`, routed by `[cognition] routes.strong`); English keeps the fast chat model. The fast model misread clear Farsi, invented Hafez and promised work it never started.
 
+- `stophook.claimed_to_start_work` (rule `started`, 2026-09-27): a chat reply saying work is under way -- "I'm on it", "I'll let you know when it's done", «رفت سر کارش», «تموم شد خبرت می‌کنم» -- when no tool that changes anything succeeded bounces once, asking for START_TASK or a plain "I can't do this myself".
+
 ## Invariants
 
 A resumed session owns what earlier attempts WROTE, read from their steps' side effects (`resume._claim_written`), not only from the `task.edits_kept` record an attempt writes when it ends. A SIGKILL writes no such record -- which is the case resume exists for -- so a crashed attempt's file was nobody's: `git_commit` refused it with "this task did not write <path>" and the task could never finish (kill-and-resume drill, 2026-09-23).

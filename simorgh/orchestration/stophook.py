@@ -252,6 +252,32 @@ _EFFECT_CLAIM = re.compile(
     re.IGNORECASE)
 
 
+_STARTED_WORK = re.compile(
+    r"\bi'?m on it\b|\bon it now\b|\bi'?ve (?:started|begun|kicked off)\b[^.!?]{0,40}\b(?:on|fixing|working|the)\b"
+    r"|\b(?:i'?m|i am) (?:now )?(?:working on|fixing|looking into) (?:it|that|this)\b[^.!?]{0,40}"
+    r"\b(?:let you know|get back|report back|when (?:it'?s|i'?m) done)\b"
+    r"|\bi'?ll (?:let you know|get back to you|report back) when (?:it'?s|i'?m|that'?s) (?:done|finished|ready)\b"
+    # Farsi, as it was said (live 2026-09-27): «رفت سرِ کارش سعید — ... درست
+    # می‌کنم ... تموم شد خبرت می‌کنم», with no tool called and no task made.
+    r"|رفت\s*سر\s*ِ?\s*کار|شروع\s*(?:کردم|شد)\b|دارم\s*درست(?:ش)?\s*می\u200c?کنم"
+    r"|تموم\s*(?:که\s*)?شد\s*خبرت\s*می\u200c?کنم|خبرت\s*می\u200c?کنم",
+    re.IGNORECASE)
+
+
+def claimed_to_start_work(text: str, session) -> str:
+    """Words saying work is under way -- "I'm on it, I'll let you know when
+    it's done" -- when nothing was started: no task, no helper, no tool that
+    changes anything succeeded this turn. Or "".
+
+    Live 2026-09-27, asked to fix Farsi recognition: «رفت سرِ کارش سعید --
+    تشخیص گفتار رو برای فارسی درست می‌کنم ... تموم شد خبرت می‌کنم», with no
+    tool called. Nothing was ever going to report back."""
+    if not text or getattr(session.profile, "scaffold", "") != "chat" or _changed_something(session):
+        return ""
+    match = _STARTED_WORK.search(text)
+    return match.group(0).strip() if match else ""
+
+
 def _changed_something(session) -> bool:
     return any(getattr(step, "tool", None) and getattr(step, "ok", False) and not is_read_only(step.tool)
                for step in session.steps)
@@ -326,6 +352,13 @@ def check(text: str, session) -> Bounce | None:
             "of this instruction unless a tool stores it. If a setting can hold it, set it now "
             "(SIM_COMMAND: voice set <key> <value>). Otherwise say plainly that they should set it, "
             "rather than promising behaviour you cannot keep."))
+    started = claimed_to_start_work(text, session)
+    if started:
+        return Bounce("started", started, f"rejected a claim no tool backs: \"{started}\"", (
+            f"You said \"{started}\", but you started nothing this turn: no task, no tool ran, so nothing will "
+            "ever report back. If this is work you can do, start it now (START_TASK with the goal). If it is "
+            "not -- changing your own speech recognition or voice is the creator's work, not a task -- say "
+            "plainly that you cannot do it yourself and that it has been passed on, without promising a result."))
     claimed = claimed_tv_act(text, session)
     if claimed:
         return Bounce("tv", claimed, f"rejected a claim no tool backs: \"{claimed}\"", (
@@ -347,4 +380,5 @@ def check(text: str, session) -> Bounce | None:
 
 
 __all__ = ["Bounce", "check", "claimed_effect", "claimed_to_commit", "claimed_to_note_a_pronunciation",
+           "claimed_to_start_work",
            "claimed_tv_act", "promised_behaviour", "wanted_tv_act"]
