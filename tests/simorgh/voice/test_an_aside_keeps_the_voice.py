@@ -77,6 +77,16 @@ class NoAsideForAVoiceNobodyKnows(unittest.TestCase):
 
         self.assertIn("_unplaced_turn", inspect.getsource(VoiceSession._acknowledge))
 
+    def test_no_hum_in_a_follow_up_run(self):
+        fake = SimpleNamespace(
+            _config=SimpleNamespace(hum=True, backchannel=True, hum_after_ms=0, hum_gap_s=0, tts_farsi="pocket"),
+            _now=lambda: 100.0, _last_hum_at=-1e9, partial="You know, I think I believe you", _last_user_text="",
+            _voice_room=SimpleNamespace(speech_lock=SimpleNamespace(locked=lambda: False), last_said=""),
+            _hum_task=None, _mic=SimpleNamespace(follow_up=True))
+        fake._aside_language = lambda heard: VoiceSession._aside_language(fake, heard)
+        VoiceSession._maybe_hum(fake, 10_000)
+        self.assertIsNone(fake._hum_task)
+
 
 if __name__ == "__main__":
     unittest.main()

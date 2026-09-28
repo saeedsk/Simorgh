@@ -2573,8 +2573,14 @@ class VoiceSession:
             return
         if self._hum_task is not None and not self._hum_task.done():
             return
+        if getattr(getattr(self, "_mic", None), "follow_up", False):
+            # Nobody said the wake word, and whose voice it is is only known
+            # at the end: a film's long speech got "I see." (live, 2026-09-27).
+            return
+        language = self._aside_language(self.partial or self._last_user_text)
+        if not language:
+            return
         self._last_hum_at = now
-        language = language_of(self.partial) if self.partial else language_of(self._last_user_text)
         text = self._backchannel.hum(language)
         self._hum_task = asyncio.create_task(self._say_aside(f"hum-{self.turns.turn_id}", text,
                                                              delivery=REGISTERS["hum"]))
