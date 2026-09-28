@@ -337,6 +337,18 @@ answer, and you do not route around it."""
 # "voice"`). The spoken-response planner (voice/planner.py) strips what
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
+def own_phone_note(speaker: str) -> str:
+    """A turn from a paired phone that belongs to someone (`devices
+    assign`, or the owner named at pairing). Live, 2026-09-27: once the
+    creator's phone had an owner, the model still answered "this channel
+    can't verify you, actuated things stay locked" -- its own earlier
+    refusals, from before the phone was his, were all it had to go on."""
+    return (f"This turn came from {speaker}'s own paired phone: it is {speaker} asking, and Guardian "
+            f"decides on each action as {speaker}'s. Refusals earlier in this conversation came from "
+            "before the phone had an owner. Do what is asked and report what Guardian actually says; "
+            "never refuse ahead of it.")
+
+
 def who_is_here(speaker: str, relation: str, room: str, before: str = "", *, doubt: str = "",
                 score: str = "", say_as: str = "") -> str:
     """The lines that tell the model who it is talking to and what it
@@ -674,6 +686,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
             body = f"{body}\n\n{satellite_note(device)}"
     elif profile.scaffold == "chat":
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
+    if channel == "api" and speaker:
+        body = f"{body}\n\n{own_phone_note(speaker)}" if body else own_phone_note(speaker)
     if task:
         # The task belongs in `task_rules` because that block is
         # *protected* -- never compacted (04 section 4.6). As a plain user

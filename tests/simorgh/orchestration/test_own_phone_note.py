@@ -1,0 +1,20 @@
+"""A turn from someone's own paired phone says so in the prompt.
+
+Live, 2026-09-27: once the creator's phone had an owner, the model still
+answered "this channel can't verify you" -- its own earlier refusals were
+all it had to go on."""
+
+import unittest
+
+from simorgh.orchestration.scaffolds import own_phone_note
+
+
+class OwnPhoneNote(unittest.TestCase):
+    def test_names_the_owner_and_does_not_refuse_ahead_of_guardian(self):
+        note = own_phone_note("Saeed")
+        self.assertIn("Saeed's own paired phone", note)
+        self.assertIn("never refuse ahead of it", note)
+
+
+if __name__ == "__main__":
+    unittest.main()
