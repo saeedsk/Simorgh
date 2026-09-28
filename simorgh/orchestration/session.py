@@ -29,6 +29,17 @@ from simorgh.contracts import topics
 
 from . import pressure as pressure_mod
 
+def _farsi_turn(session) -> bool:
+    """A chat turn in Farsi: the person's words mostly in Persian script, or
+    the voice heard the turn as Farsi."""
+    heard = str(getattr(session, "heard_language", "") or "").lower()
+    if heard in ("fa", "persian", "farsi"):
+        return True
+    letters = [c for c in str(getattr(session, "user_text", "") or "") if c.isalpha()]
+    persian = sum(1 for c in letters if "\u0600" <= c <= "\u06ff")
+    return bool(letters) and persian * 2 > len(letters)
+
+
 @dataclass(frozen=True)
 class _CheckpointProposal:
     """The two fields `guardian.tiers.tier_of` reads, so the session can
@@ -695,6 +706,7 @@ class SessionRunner:
         escalate_below_posterior: float = 0.0, escalate_min_samples: int = 8,
         clean_revisions: bool = False, delegation: bool = False, max_depth: int = 3, max_children: int = 4,
         delegate_max_steps: int = 12, escalate_from_attempt: int = 0, parallel_read_tools: int = 1,
+        farsi_strong: bool = False,
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"), telemetry=None,
         bridge_on_slow_turns: bool = False, bridge_timeout_s: float = 2.0,
@@ -739,6 +751,7 @@ class SessionRunner:
         # helper came back without an answer, a THINK asks Cognition for the
         # strong tier. 0 is off.
         self._escalate_from_attempt = max(0, int(escalate_from_attempt))
+        self._farsi_strong = bool(farsi_strong)
         self._escalate_below = max(0.0, float(escalate_below_posterior))
         self._escalate_min_samples = max(1, int(escalate_min_samples))
         # Helper tasks (design section 5): `delegate` runs a read-only research
@@ -2039,7 +2052,11 @@ class SessionRunner:
         """`{"tier": "strong", "tier_reason": ...}` when this THINK should use
         the strong tier, else {}. Cognition falls back to the default order
         when no strong route is configured, so asking costs nothing."""
-        if not self._escalate_from_attempt or session.profile.scaffold == "chat":
+        if session.profile.scaffold == "chat":
+            if self._farsi_strong and _farsi_turn(session):
+                return {"tier": "strong", "tier_reason": "a Farsi turn"}
+            return {}
+        if not self._escalate_from_attempt:
             return {}
         if session.attempt >= self._escalate_from_attempt:
             return {"tier": "strong", "tier_reason": f"attempt {session.attempt}"}

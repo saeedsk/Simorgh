@@ -86,6 +86,10 @@ class Config:
     # From this attempt on, a task's THINKs ask Cognition for the strong tier
     # ([cognition] routes.strong). 0 is off.
     escalate_from_attempt: int = 0
+    # A Farsi chat turn asks Cognition for the strong tier ([cognition]
+    # routes.strong). The fast chat model misread clear Farsi as "garbled"
+    # and invented Hafez (live, 2026-09-27); English keeps the fast one.
+    farsi_strong: bool = True
     # Escalate to the strong tier when Sim's own record at this kind of
     # work is below this, and rests on at least `escalate_min_samples`
     # outcomes (stage 6 item 2: a consumer of `self.estimate`). A flat
