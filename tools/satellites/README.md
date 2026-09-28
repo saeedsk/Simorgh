@@ -73,5 +73,14 @@ board by name.
 
 - The board plays FLAC and MP3 by URL. It refused WAV; AAC is untested.
 - Its PLAYING/IDLE state lags real playback by up to ~10 s; Sim never reads it.
-- Wake words: okay_nabu, hey_jarvis, hey_mycroft, kenobi from upstream.
-  A custom "Hey Sim" model is being trained (stage 13 item 5).
+- Wake words: okay_nabu, hey_jarvis, hey_mycroft, kenobi from upstream, and
+  Simorgh's own "Hey Sim" (`wakewords/hey_sim/`, trained 2026-09-27; cutoff
+  0.42 by default, selectable on the board as "Wake word sensitivity").
+- The board's media player can jam: it logs "Queue full, URI dropped" and
+  plays nothing while Sim believes its replies went out. Sim clears it with
+  STOP; if the board answers "Queue full, command dropped", Sim presses the
+  firmware's own **Restart** button (the upstream package defines it; it is
+  hidden in Home Assistant's UI but present on the API) and the board is
+  back in about a minute. Keep that button if you change the packages.
+- `~/esphome-sim` was the first bring-up's scratch folder (2026-09-25); this
+  folder superseded it and is what to flash from.
