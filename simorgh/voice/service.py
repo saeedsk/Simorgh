@@ -158,6 +158,21 @@ def presence_probes() -> list[dict]:
     ]
 
 
+def _tell_conversing_in(recogniser, said: str) -> None:
+    """The language `said` is in, for a recogniser that routes by it
+    (whisper_server's `conversing_in`), through any wrapper's `_inner`."""
+    from .lang import language_of
+
+    for _ in range(3):
+        if recogniser is None:
+            return
+        tell = getattr(recogniser, "conversing_in", None)
+        if callable(tell):
+            tell(language_of(said or ""))
+            return
+        recogniser = getattr(recogniser, "_inner", None)
+
+
 #: The pause between two sentences of one answer said to the phone.
 PIECE_PAUSE_S = 0.25
 
@@ -1621,10 +1636,15 @@ class Service:
         if not text:
             await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("nothing_to_say", "nothing to say"))
             return
-        tts, _, why = await self._engines()
+        tts, stt, why = await self._engines()
         if tts is None:
             await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("engines_unavailable", why))
             return
+        # What the phone is answered in is the conversation's language, as
+        # a room's reply is (`session._tell_recogniser`): the phone's next
+        # Farsi turn then goes to the Farsi model, not turbo's guess
+        # (2026-09-27: the creator's Farsi to the phone came back Indonesian).
+        _tell_conversing_in(stt, text)
         ledger = self._ctx.ledger if self._ctx else None
         if ledger is None:
             await self._reply(message, topics.VOICE_SYNTHESISE_REPLY, self._refused("no_ledger", "no ledger to put the audio in"))

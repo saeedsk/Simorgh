@@ -37,7 +37,8 @@ class TheHouseLanguagesWin(unittest.IsolatedAsyncioTestCase):
         rec, asked = self._recogniser({"": ("Emris Şeruziye", "tr"), "fa": ("امروز چه روزیه", "fa"),
                                        "en": ("Emris", "en")})
         got = await rec.transcribe(Audio(b"\x00\x00" * 16000))
-        self.assertEqual((got.text, asked), ("امروز چه روزیه", ["", "fa"]))
+        self.assertEqual((got.text, asked), ("امروز چه روزیه", ["", "fa", "en"]),
+                         "both house languages are heard; with no odds between them, the likelier first")
 
     async def test_a_house_language_is_left_alone(self):
         rec, asked = self._recogniser({"": ("Stop the music.", "en")})
@@ -59,7 +60,7 @@ class TheHouseLanguagesWin(unittest.IsolatedAsyncioTestCase):
         rec.transcribe = transcribe
         got = await WhisperServerRecogniser._in_a_house_language(
             rec, Audio(b"\x00\x00" * 16000), "is", probabilities={"is": 0.4, "en": 0.3, "fa": 0.01})
-        self.assertEqual((got.text, asked), ("Stop the music.", ["en"]))
+        self.assertEqual((got.text, asked), ("Stop the music.", ["en", "fa"]))
 
     async def test_english_when_farsi_gives_nothing(self):
         rec, asked = self._recogniser({"": ("Stoppa tónlistina.", "is"), "fa": ("", "fa"),
@@ -108,6 +109,39 @@ class ForcedEnglishThatIsNotEnglish(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(_english_letters("A da se demanem již neví."))
         self.assertFalse(_english_letters("سلام"))
         self.assertTrue(_english_letters("A café, please.", allow=1))
+
+
+class TheLanguageWhisperIsSurerOf(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-09-27: the creator's Farsi to the phone came back as
+    Indonesian; forced English wrote "Selamat menikmati." -- plain ASCII,
+    so it passed the letter check -- and Sim answered in Indonesian."""
+
+    async def test_the_surer_transcript_wins(self):
+        rec = WhisperServerRecogniser.__new__(WhisperServerRecogniser)
+        rec._house = ("en", "fa")                          # noqa: SLF001
+        said = {"en": ("Selamat menikmati.", -0.9), "fa": ("سلام، می‌خوام سوییچ کنم فارسی.", -0.2)}
+
+        async def transcribe(audio, *, language=""):
+            text, rec.last_logprob = said[language]
+            return Utterance(text=text, confidence=1.0, seconds=audio.seconds, engine="w", language=language)
+
+        rec.transcribe = transcribe
+        got = await WhisperServerRecogniser._in_a_house_language(
+            rec, Audio(b"\x00\x00" * 16000), "id", probabilities={"id": 0.5, "en": 0.3, "fa": 0.1})
+        self.assertEqual(got.text, "سلام، می‌خوام سوییچ کنم فارسی.")
+
+
+class ThePhonesRepliesSetTheConversation(unittest.TestCase):
+    def test_a_farsi_reply_to_the_phone(self):
+        from types import SimpleNamespace
+
+        from simorgh.voice.service import _tell_conversing_in
+
+        told = []
+        inner = SimpleNamespace(conversing_in=told.append)
+        _tell_conversing_in(SimpleNamespace(_inner=inner), "آره سعید، همین‌جام.")
+        _tell_conversing_in(None, "x")
+        self.assertEqual(told, ["fa"])
 
 
 class FarsiGoesToTheFarsiModel(unittest.IsolatedAsyncioTestCase):

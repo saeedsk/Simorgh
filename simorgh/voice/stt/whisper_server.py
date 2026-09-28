@@ -201,6 +201,9 @@ class WhisperServerRecogniser:
         self._lock = asyncio.Lock()
         self.problems: list[str] = []
         self.last_took_s = 0.0
+        #: Whisper's mean `avg_logprob` over the last transcript's segments
+        #: (0 is certain, more negative less so); None when it gave none.
+        self.last_logprob: float | None = None
         #: The language Sim last answered in, and when (`conversing_in`).
         self._conversation: tuple[str, float] = ("", 0.0)
         #: A second server for Farsi turns (`stt_model_farsi`), or None.
@@ -320,7 +323,9 @@ class WhisperServerRecogniser:
         from ..session import _language_code
 
         if route and self._farsi is not None and _language_code(language) == "fa":
-            return await self._farsi.transcribe(audio, language="fa")
+            got = await self._farsi.transcribe(audio, language="fa")
+            self.last_logprob = getattr(self._farsi, "last_logprob", None)
+            return got
         if route and not language and self._farsi is not None and self._in_a_farsi_conversation():
             # Sim is talking Farsi with someone: the whole turn goes to the
             # Farsi model, which tells Farsi from English far better. Turbo
@@ -362,6 +367,9 @@ class WhisperServerRecogniser:
         self.last_took_s = round(time.monotonic() - started, 3)
         if reply.get("error"):
             raise RuntimeError(f"whisper-server: {reply['error']}")
+        probs = [float(s["avg_logprob"]) for s in (reply.get("segments") or [])
+                 if isinstance(s, dict) and isinstance(s.get("avg_logprob"), (int, float))]
+        self.last_logprob = sum(probs) / len(probs) if probs else None
         words = tuple(_words(reply))
         text = "".join(str(s.get("text") or "") for s in (reply.get("segments") or [])) if reply.get("segments") \
             else str(reply.get("text") or "")
@@ -415,18 +423,27 @@ class WhisperServerRecogniser:
                 code = _language_code(h)
                 return max((float(p) for k, p in probabilities.items() if _language_code(str(k)) == code), default=0.0)
             order = sorted(self._house, key=odds, reverse=True)
+        # Every house language, and the one whisper is surest of wins. The
+        # first with words used to win, and forced English writes SOME words
+        # for anything: "A da se demanem již neví.", then "Selamat
+        # menikmati." -- both the creator's Farsi, the second answered in
+        # Indonesian (live, 2026-09-27).
+        tried: list[tuple[float, int, Utterance, str]] = []
         fallback = None
-        for forced in order:
+        for rank, forced in enumerate(order):
             got = await self.transcribe(audio, language=forced)
             if not got.text.strip():
                 continue
             if _language_code(forced) == "en" and not _english_letters(got.text):
-                # Forced to English, whisper still wrote another language:
-                # "A da se demanem již neví." for a Farsi sentence (live,
-                # 2026-09-27), and Farsi never got its turn. Kept only if
-                # no house language does better.
+                # Forced to English, whisper still wrote another language's
+                # letters: kept only if no house language does better.
                 fallback = fallback or got
                 continue
+            logprob = getattr(self, "last_logprob", None)
+            sure = logprob if logprob is not None else -99.0
+            tried.append((sure, -rank, got, forced))
+        if tried:
+            _sure, _rank, got, forced = max(tried, key=lambda t: (t[0], t[1]))
             self.problems_heard = f"heard as {code}, transcribed as {forced}"
             return got
         return fallback
