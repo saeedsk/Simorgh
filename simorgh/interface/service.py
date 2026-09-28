@@ -145,6 +145,14 @@ _COMMAND_WAIT_S = 8.0
 _COMMAND_SAID_MAX = 20_000
 
 
+
+def _untoned(text: str) -> str:
+    """A reply as the person should read it: "[cWarm] ..." is an instruction
+    to the voice, and showed on screen (live, 2026-09-27)."""
+    from simorgh.contracts.tone import strip_tone
+
+    return strip_tone(text or "")
+
 class Service:
     name = "interface"
     version = VERSION
@@ -1555,7 +1563,7 @@ class Service:
             if message.payload.get("aside"):
                 # The "Aha." / "Let me check." said the moment a turn ends
                 # -- a beat, not a reply.
-                self._out(render_mod.style(f"  🔊 {text}", "dim", enabled=self._color))
+                self._out(render_mod.style(f"  🔊 {_untoned(text)}", "dim", enabled=self._color))
                 return
             if owner and self._voice_reply_settled(owner, tail=tail):
                 return
@@ -1569,7 +1577,7 @@ class Service:
                 return
             if getattr(self._live, "enabled", False):
                 self._voice_spoken_early += 1
-            self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
+            self._out(render_mod.style(f"🔊 sim: {_untoned(text)}{tail}", "green", enabled=self._color))
 
     async def _on_voice_listening(self, message: Message) -> None:
         # Only the moment the mic opens; `idle` and `speaking` would be
@@ -2046,7 +2054,7 @@ class Service:
                 why = self._voice_dropped.pop(session_id, "")
                 self._streaming.pop(session_id, None)
                 tail = f"  (not spoken -- {why})" if why else "  (not spoken)"
-                self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
+                self._out(render_mod.style(f"🔊 sim: {_untoned(text)}{tail}", "green", enabled=self._color))
                 self._invalidate()
                 fut = self._pending_turns.get(p.get("session_id", ""))
                 if fut is not None and not fut.done():
@@ -2088,7 +2096,7 @@ class Service:
                 return False
         sid, text = self._voice_speaking.pop(index)
         self._streaming.pop(sid, None)
-        self._out(render_mod.style(f"🔊 sim: {text}{tail}", "green", enabled=self._color))
+        self._out(render_mod.style(f"🔊 sim: {_untoned(text)}{tail}", "green", enabled=self._color))
         self._invalidate()
         return True
 

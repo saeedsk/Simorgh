@@ -128,6 +128,12 @@ def _split_one(text: str) -> tuple[str, str]:
         # prose in brackets is still untouched.
         tail = re.split(r"[.:]", word)[-1].strip()
         tone = tail if tail in TONES else _ALIASES.get(tail, "")
+    if not tone and re.fullmatch(r"c[A-Z][a-z]+", match.group(1)):
+        # "[cWarm]", "[cSorry]", "[cCalm]": the same invented prefix as
+        # "[c.bright]", written camel-case. Live 2026-09-27, on every
+        # reply of a Farsi conversation, printed on screen.
+        tail = word[1:]
+        tone = tail if tail in TONES else _ALIASES.get(tail, "")
     if not tone and not word.replace("_", "").replace("-", "").isalnum():
         # "[loud and warm]" (live 2026-09-13, spoken aloud): the feeling is
         # whichever word in it is one, and the tag goes whole.

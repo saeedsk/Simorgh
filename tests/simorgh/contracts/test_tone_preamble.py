@@ -62,3 +62,16 @@ class TwoTagsAndDashes(unittest.TestCase):
 
     def test_prose_is_untouched(self):
         self.assertEqual(split_tone("Loud and clear."), ("", "Loud and clear."))
+
+
+class CamelCaseToneTags(unittest.TestCase):
+    """Live 2026-09-27: "[cWarm]" and "[cSorry]" on every reply of a Farsi
+    conversation, printed on the console."""
+
+    def test_c_prefixed_camel_case_is_the_tone(self):
+        from simorgh.contracts.tone import split_tone
+
+        self.assertEqual(split_tone("[cWarm] خبر"), ("warm", "خبر"))
+        self.assertEqual(split_tone("[cSorry] hi"), ("sorry", "hi"))
+        self.assertEqual(split_tone("[Canada] is big"), ("", "[Canada] is big"))
+
