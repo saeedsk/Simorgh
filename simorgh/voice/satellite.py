@@ -79,6 +79,8 @@ FOLLOW_UP_START_S = 20.0
 #: 2026-09-27). Music the board starts again this soon after an explicit
 #: stop is stopped again.
 RESTOP_S = 15.0
+#: The least time between two clearings of a jammed board's media queue.
+UNJAM_EVERY_S = 10.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
@@ -380,6 +382,7 @@ class SatelliteLink:
         #: When the music was last stopped on purpose; a resume within
         #: `RESTOP_S` of that is the board's, and is stopped again.
         self._stopped_music_at = 0.0
+        self._unjammed_at = -1e9
         #: Seconds, or a callable giving them: read live, so `voice set`
         #: changes a running link.
         self._follow_up_s = follow_up_s
@@ -494,6 +497,23 @@ class SatelliteLink:
             return
         if "wake" in text.lower() or text.startswith(("[E]", "[W]")):
             self._log("info", "voice.board_log", line=text[:240])
+        if "Queue full" in text:
+            self._unjam()
+
+    def _unjam(self) -> None:
+        """The board's media player stopped taking audio ("Queue full, URI
+        dropped") and every reply after it was silent, while Sim, timing
+        each piece by its length, took it as played (live, 2026-09-27:
+        "Sim is not audible over the satellite speaker"). STOP empties the
+        queue; at most once per `UNJAM_EVERY_S`, so a board that stays
+        jammed is not hammered."""
+        now = self._clock()
+        if now - self._unjammed_at < UNJAM_EVERY_S:
+            return
+        self._unjammed_at = now
+        self._log("warning", "voice.satellite_unjammed", satellite=self.name)
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().create_task(self.stop_playback())
 
     def _on_entity_state(self, state) -> None:
         """The board's media player, as it says it is. Music follows the

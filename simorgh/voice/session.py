@@ -1349,7 +1349,7 @@ class VoiceSession:
                 verdict = await asyncio.to_thread(
                     run.consider, pcm, transcript=text, vector=vector,
                     engine=clock.engine_stt if clock is not None else "",
-                    heard_language=clock.language if clock is not None else "",
+                    heard_language=self._house_language(clock.language if clock is not None else ""),
                     confidence=clock.confidence if clock is not None else 0.0)
             except Exception as exc:  # noqa: BLE001 -- a take that cannot be filed is said, never a dead session
                 self._log("warning", "voice.calibration_take_failed", error=repr(exc))
@@ -1719,7 +1719,7 @@ class VoiceSession:
                                              speaker_name=speaker, speaker_relation=relation, room=room,
                                              speaker_before=before, speaker_doubt=doubt, speaker_score=score,
                                              trace_id=clock.trace_id, device=self._config.device,
-                                             speaker_say_as=say_as, heard_language=clock.language or "")
+                                             speaker_say_as=say_as, heard_language=self._house_language(clock.language or ""))
         finally:
             self._outstanding.pop(turn_id, None)
             self._pipeline.delta_sinks.pop(session_id, None)
@@ -2206,6 +2206,16 @@ class VoiceSession:
                 return None
             await asyncio.sleep(0.05)
             waited += 0.05
+
+    def _house_language(self, language: str) -> str:
+        """`language` when it is one the house speaks (`stt_languages`),
+        else "": the model is told to answer in the language a turn was
+        heard in, and a turn whisper labelled Icelandic was answered in
+        Icelandic (live, 2026-09-27: "Sim, you're not audible." -> "Andakillt,
+        Saeed -- eg er her"). No label is better than a wrong one."""
+        code = _language_code(language)
+        house = {_language_code(h) for h in str(self._config.stt_languages or "").split(",") if h.strip()}
+        return language if code and (not house or code in house) else ""
 
     def _tell_recogniser(self, said: str) -> None:
         """Which language Sim just answered in, for a recogniser that
