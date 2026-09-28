@@ -96,6 +96,8 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 
 - `home/client.HomeAssistantClient.fire(service, *, entity_ids, data)` and `FakeHomeAssistant.fire` (2026-09-27): send a service call and read nothing back, for a repeated act whose first call `call` already read back (`domains/home/tools.HomeBlinkTool`). `toolargs` gains `home_blink: (target, spec)`, JSON rest.
 
+- `settings.VOICE_SAFE_KEYS` gains `tts_farsi_lexicon` (2026-09-27): Farsi words the Farsi voice says in given sounds. Consumer: voice (`tts/pocket.py`); interface's `voice set` completion lists it.
+
 ## Invariants
 
 - `simorgh/contracts/` imports only the standard library and itself.

@@ -83,6 +83,8 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                   "voice cloned from tts_farsi_reference), piper (5 voices, 22 kHz) or mms (16 kHz); "
                   "auto prefers pocket and falls back"),
     "tts_farsi_reference": (str, None, "the ~5 second clip Pocket clones its Farsi voice from"),
+    "tts_farsi_lexicon": (str, None, "Farsi words the Farsi voice says in given sounds: `word=phonemes; ...` in "
+                          "Pocket's spelling (/ short a, a long a, @ glottal stop), e.g. سعید=s/id"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),

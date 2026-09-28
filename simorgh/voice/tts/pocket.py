@@ -119,6 +119,7 @@ class PocketSynthesiser(SubprocessSynthesiser):
                 f"-- `voice models pocket-fa` fetches one, or set [voice] tts_farsi_reference")
         super().__init__(config, venv_dir=venv_dir, reference=str(Path(reference).resolve()),
                          timeout_s=float(config.expressive_timeout_s))
+        self._lexicon = parse_lexicon(str(config.tts_farsi_lexicon or ""))
 
     def voices(self) -> list[str]:
         """Every reference clip beside the configured one: with cloning,
@@ -128,8 +129,20 @@ class PocketSynthesiser(SubprocessSynthesiser):
 
     def params_for(self, tone: str) -> dict:
         """Pocket has no expressiveness knobs; the reference carries the
-        manner of speaking."""
-        return {}
+        manner of speaking. What it does take is the house's word list
+        (`tts_farsi_lexicon`): sounds for words its G2P gets wrong."""
+        return {"lexicon": dict(self._lexicon)} if self._lexicon else {}
 
 
-__all__ = ["DEFAULT_REFERENCE", "PACKAGES", "PocketSynthesiser", "available", "fetch_normaliser", "install"]
+def parse_lexicon(text: str) -> dict[str, str]:
+    """`"سعید=s/id; آران=aran"` -> {"سعید": "s/id", "آران": "aran"}; a
+    malformed entry is skipped, never a failed voice."""
+    out: dict[str, str] = {}
+    for entry in text.replace("\n", ";").split(";"):
+        word, sep, sounds = entry.partition("=")
+        if sep and word.strip() and sounds.strip():
+            out[word.strip()] = sounds.strip()
+    return out
+
+
+__all__ = ["DEFAULT_REFERENCE", "parse_lexicon", "PACKAGES", "PocketSynthesiser", "available", "fetch_normaliser", "install"]

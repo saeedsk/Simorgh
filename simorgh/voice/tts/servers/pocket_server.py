@@ -31,6 +31,29 @@ TO_PHONEMES = str.maketrans({"/": "a", "a": "A", "@": "?", "$": "S", "c": "C"})
 RATE = 24000
 
 
+#: What is not part of a word when a word is looked up in the lexicon.
+_PUNCT = "،؛.!?؟:\"'«»()[]-—–"
+
+
+def with_lexicon(words: str, sounds: str, lexicon: dict) -> str:
+    """The G2P's `sounds` with every word the house gave its own sounds
+    for (`[voice] tts_farsi_lexicon`) replaced. The G2P writes one
+    sound-word per word, so the two line up by position; when they do
+    not (it merged or split one), nothing is replaced rather than the
+    wrong word. The G2P reads سعید as s/@id, the ع a glottal stop -- the
+    Arabic sound the creator did not want in his name (2026-09-27)."""
+    if not lexicon:
+        return sounds
+    said, heard = words.split(), sounds.split()
+    if len(said) != len(heard):
+        return sounds
+    for i, word in enumerate(said):
+        own = lexicon.get(word.strip(_PUNCT))
+        if own:
+            heard[i] = own
+    return " ".join(heard)
+
+
 def main() -> None:                                     # noqa: C901 -- one protocol loop, read top to bottom
     try:
         import numpy as np
@@ -65,12 +88,13 @@ def main() -> None:                                     # noqa: C901 -- one prot
                           "error": f"could not load Pocket-TTS: {exc.__class__.__name__}: {exc}"}), flush=True)
         return
 
-    def phonemise(text: str) -> str:
+    def phonemise(text: str, lexicon: dict | None = None) -> str:
         cleaned = normalize_for_model(text).replace("؟", "").replace("?", "")
         enc = g2p_tok([cleaned], add_special_tokens=False, return_tensors="pt")
         with torch.no_grad():
             out = g2p.generate(**enc, num_beams=5, max_length=512, early_stopping=True)
-        return g2p_tok.batch_decode(out, skip_special_tokens=True)[0].strip().translate(TO_PHONEMES)
+        sounds = g2p_tok.batch_decode(out, skip_special_tokens=True)[0].strip()
+        return with_lexicon(cleaned, sounds, lexicon or {}).translate(TO_PHONEMES)
 
     print(json.dumps({"ready": True, "engine": "pocket", "device": "cpu", "rate": RATE}), flush=True)
 
@@ -96,7 +120,9 @@ def main() -> None:                                     # noqa: C901 -- one prot
                 # `truncate` enforces it rather than failing on a longer
                 # clip somebody points at.
                 states[reference] = model.get_state_for_audio_prompt(reference, truncate=True)
-            phonemes = phonemise(text)
+            params = req.get("params") if isinstance(req.get("params"), dict) else {}
+            lexicon = params.get("lexicon") if isinstance(params.get("lexicon"), dict) else {}
+            phonemes = phonemise(text, lexicon)
             with torch.no_grad():
                 audio = model.generate_audio(states[reference], phonemes, max_tokens=int(req.get("max_tokens") or 700))
             wave_f32 = audio.squeeze().to(torch.float32).cpu().numpy()
