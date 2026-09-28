@@ -158,6 +158,48 @@ def presence_probes() -> list[dict]:
     ]
 
 
+#: The pause between two sentences of one answer said to the phone.
+PIECE_PAUSE_S = 0.25
+
+
+def _speech_pieces(text: str) -> list[str]:
+    """`text` as the pieces an engine is handed: sentences (a long one cut
+    at its clauses, `planner.MAX_CHUNK_CHARS`), a Farsi one
+    shorter than `streamreply.FARSI_MIN_WORDS` joined to the next (Pocket
+    says its reference clip's words for a line that short)."""
+    from .planner import MAX_CHUNK_CHARS, _split_long, sentences
+    from .streamreply import _too_short
+
+    out: list[str] = []
+    carry = ""
+    for sentence in [part for whole in (sentences(text) or [text]) for part in _split_long(whole, MAX_CHUNK_CHARS)]:
+        sentence = f"{carry} {sentence}".strip() if carry else sentence
+        if _too_short(sentence):
+            carry = sentence
+            continue
+        out.append(sentence)
+        carry = ""
+    if carry:
+        if out:
+            out[-1] = f"{out[-1]} {carry}"
+        else:
+            out.append(carry)
+    return out
+
+
+def _joined(pieces: list):
+    """One Audio from several, at the first one's rate, a short pause
+    between: two engines (English and Farsi) may speak at two rates."""
+    from .api import Audio
+    from .resample import to_mic_rate
+
+    rate = pieces[0].sample_rate
+    gap = b"\x00\x00" * int(rate * PIECE_PAUSE_S)
+    pcm = gap.join(p.pcm if p.sample_rate == rate else to_mic_rate(p.pcm, p.sample_rate, target=rate)
+                   for p in pieces)
+    return Audio(pcm=pcm, sample_rate=rate)
+
+
 class Service:
     name = NAME
     version = VERSION
@@ -1595,11 +1637,19 @@ class Service:
         from .tts import _with_tone
 
         try:
-            audio = await _with_tone(
-                tts, text,
-                voice=str(message.payload.get("voice") or self.config.tts_voice or ""),
-                speed=float(speed) if isinstance(speed, (int, float)) and speed > 0 else float(self.config.tts_speed or 1.0),
-                tone="", lane=str(message.payload.get("lane") or ""))
+            # A sentence at a time, as every other path speaks. The whole
+            # answer in one call ran Pocket past what it can hold: a long
+            # Farsi answer to the phone turned to babble at the end (live,
+            # 2026-09-27: "the voice suddenly went bad at the end, like a
+            # madman").
+            said = []
+            for piece in _speech_pieces(text):
+                said.append(await _with_tone(
+                    tts, piece,
+                    voice=str(message.payload.get("voice") or self.config.tts_voice or ""),
+                    speed=float(speed) if isinstance(speed, (int, float)) and speed > 0 else float(self.config.tts_speed or 1.0),
+                    tone="", lane=str(message.payload.get("lane") or "")))
+            audio = _joined(said)
         except Exception as exc:  # noqa: BLE001 -- an engine failure is an answer, not a crash
             await self._reply(message, topics.VOICE_SYNTHESISE_REPLY,
                               self._refused("engine_failed", f"could not synthesise: {exc!r}"))

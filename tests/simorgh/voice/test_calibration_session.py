@@ -112,7 +112,10 @@ class CalibrationInTheSession(unittest.IsolatedAsyncioTestCase):
         session, bus, tts = _session(_config(), _Script((False, 10_000)), _Replies(), self.embedder, self.book)
         session.calibrate(self._run(aloud=True))
         asyncio.get_running_loop().create_task(session.say_calibration_line())
-        await _run_until(session, lambda: any("put the charts on the TV" in s for s in tts.spoken), timeout=6.0)
+        # Synthesis starts before playback ends, and the time is set when it
+        # ends: waiting on the words alone raced it on a loaded machine.
+        await _run_until(session, lambda: any("put the charts on the TV" in s for s in tts.spoken)
+                         and session._calib_said_at > 0.0, timeout=6.0)  # noqa: SLF001
         self.assertGreater(session._calib_said_at, 0.0, "a take that starts before this is Sim's own voice")  # noqa: SLF001
 
     async def test_enrolment_and_calibration_do_not_overlap(self):

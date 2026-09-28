@@ -31,5 +31,33 @@ class AShortFarsiSentenceWaits(unittest.TestCase):
         self.assertEqual(s.spoken[0], "Yes, I hear you.")
 
 
+
+LONG = ("سعید، نکته‌ی جالب اینه. خیام و حافظ دو تا جواب متضاد به یک سؤال واحد هستن: سؤال «دنیا چیه و ما کی "
+        "هستیم»، خیام ویرانه‌گره — برای او دنیا یک چرخ بی‌رحمه و جوابش فایده نداره، پس فقط «حضور» باقی "
+        "می‌مونه: شراب، لحظه‌ی حال، و پذیرفتن مرگ. تمام.")
+
+
+class ALongFarsiSentenceIsSaidAClauseAtATime(unittest.TestCase):
+    """Live 2026-09-27: a long Farsi answer turned to babble at the end."""
+
+    def test_streamed(self):
+        from simorgh.voice.planner import MAX_CHUNK_CHARS
+
+        s = SentenceStream(max_sentences=8)
+        s.feed(LONG)
+        s.feed(" ")
+        self.assertTrue(all(len(x) <= MAX_CHUNK_CHARS for x in s.spoken), [len(x) for x in s.spoken])
+        self.assertGreaterEqual(len(s.spoken), 3)
+
+    def test_said_to_the_phone(self):
+        from simorgh.voice.planner import MAX_CHUNK_CHARS
+        from simorgh.voice.service import _speech_pieces
+
+        pieces = _speech_pieces(LONG)
+        self.assertTrue(all(len(x) <= MAX_CHUNK_CHARS for x in pieces), [len(x) for x in pieces])
+        self.assertTrue(all(len(x.split()) >= 4 for x in pieces), pieces)
+        self.assertEqual(" ".join(pieces).replace(" ", ""), LONG.replace(" ", "").replace("—", ""))
+
+
 if __name__ == "__main__":
     unittest.main()
