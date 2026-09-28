@@ -45,6 +45,28 @@ _UNDO_SERVICE = {
 }
 
 
+#: When each entity was last sent a command, for `_pace`.
+_LAST_SENT: dict[str, float] = {}
+#: The least time between two commands to one thing, from any tool. A light
+#: behind a bridge (Lutron, Zigbee) is switched over a slow radio, and what
+#: arrives faster than it can go is queued in the bridge, not dropped: a few
+#: hundred switches kept playing after everything upstream was off
+#: (2026-09-27). Waiting here means nothing can flood it again.
+MIN_COMMAND_GAP_S = 0.5
+
+
+async def _pace(entity_ids) -> None:
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    wait = max((MIN_COMMAND_GAP_S - (loop.time() - _LAST_SENT.get(e, -1e9)) for e in entity_ids), default=0.0)
+    if wait > 0:
+        await asyncio.sleep(wait)
+    now = loop.time()
+    for e in entity_ids:
+        _LAST_SENT[e] = now
+
+
 class _RecoveringClient(HomeAssistantClient):
     """A client that, when Home Assistant cannot be reached, tries once to
     bring it back (`keeper.revive`: start its VM or container) and asks
@@ -52,6 +74,14 @@ class _RecoveringClient(HomeAssistantClient):
 
     #: What `revive` did on this client's last failure, for the tool's answer.
     revived = ""
+
+    async def call(self, service: str, *, entity_ids=(), data=None, settle_s: float = 1.0):
+        await _pace(entity_ids)
+        return await super().call(service, entity_ids=entity_ids, data=data, settle_s=settle_s)
+
+    async def fire(self, service: str, *, entity_ids=(), data=None) -> None:
+        await _pace(entity_ids)
+        return await super().fire(service, entity_ids=entity_ids, data=data)
 
     async def _request(self, method: str, path: str, body):
         try:
@@ -489,6 +519,24 @@ class HomeUndoTool(_HomeTool):
                                     "changed": changed, "after": after_state})
 
 
+async def _landed(client, entity_ids, wanted: str, within_s: float) -> bool:
+    """Did every one of `entity_ids` reach `wanted` within `within_s`?"""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    until = loop.time() + within_s
+    while True:
+        try:
+            states = [await client.state(e) for e in entity_ids]
+        except HomeUnavailable:
+            return False
+        if all(s is not None and s.state == wanted for s in states):
+            return True
+        if loop.time() >= until:
+            return False
+        await asyncio.sleep(0.15)
+
+
 #: Blinks running now, by entity: a second blink of the same light
 #: replaces the first rather than the two fighting over it.
 _BLINKING: dict[str, "asyncio.Task"] = {}
@@ -514,7 +562,7 @@ class HomeBlinkTool(_HomeTool):
     name = "home_blink"
     description = (
         "Blink a light on and off at a steady rate for a while, then put it back as it was. "
-        "Takes a target name, `hz` (switches per second, up to 4) and `seconds` (up to 300). "
+        "Takes a target name, `hz` (blinks per second, up to 1) and `seconds` (up to 120). "
         "Target \"stop\" stops every blink early and puts the lights back."
     )
     read_only = False
@@ -524,8 +572,10 @@ class HomeBlinkTool(_HomeTool):
         "properties": {"target": {"type": "string"}, "hz": {"type": "number"},
                        "seconds": {"type": "number"}},
     }
-    MAX_HZ = 4.0          # a Home Assistant round trip is ~0.1 s; faster only queues calls
-    MAX_SECONDS = 300.0
+    MAX_HZ = 1.0          # a Lutron dimmer is switched over the bridge's radio; faster queues there
+    MAX_SECONDS = 120.0
+    MAX_SWITCHES = 120
+    CONFIRM_S = 3.0       # how long one switch may take to show before the blink ends
     MAX_ENTITIES = 10
     MAX_ALL = 40          # "all lights": the whole house, in one service call per switch
     _DOMAINS = ("light", "switch")
@@ -564,7 +614,7 @@ class HomeBlinkTool(_HomeTool):
             return ToolResult.refused("refused: `hz` and `seconds` must be above zero.")
         notes = []
         if hz > self.MAX_HZ:
-            notes.append(f"{hz:g} Hz is faster than Home Assistant can switch a light, so {self.MAX_HZ:g} Hz")
+            notes.append(f"{hz:g} Hz is faster than the lights can safely switch, so {self.MAX_HZ:g} Hz")
             hz = self.MAX_HZ
         if seconds > self.MAX_SECONDS:
             notes.append(f"{seconds:g} s is over the {self.MAX_SECONDS:g} s limit, so {self.MAX_SECONDS:g} s")
@@ -624,7 +674,7 @@ class HomeBlinkTool(_HomeTool):
             if running is not None:
                 running.cancel()
         half = 1.0 / (2.0 * hz)
-        switches = max(1, int(seconds / half))
+        switches = max(1, min(self.MAX_SWITCHES, int(seconds / half)))
         lit = {e: (v.state == "on") for e, v in probe.after.items()}
 
         async def blink() -> None:
@@ -633,18 +683,28 @@ class HomeBlinkTool(_HomeTool):
             # Assistant (~0.7 s live), and 240 switches meant to take 60 s
             # blinked for three minutes while the creator asked it to stop
             # (2026-09-27).
-            ends = asyncio.get_running_loop().time() + seconds
+            #
+            # And each switch waits until the light SAYS it switched before the
+            # next is sent. Sent as fast as Home Assistant took them, a few
+            # hundred queued up inside the Lutron bridge, which kept playing
+            # them to the dimmer over its radio after Sim, Home Assistant and
+            # the laptop's Wi-Fi were all off -- the bridge had to be unplugged
+            # (2026-09-27). A light that stops keeping up ends the blink.
+            loop = asyncio.get_running_loop()
+            ends = loop.time() + seconds
             try:
                 for _ in range(switches):
-                    if asyncio.get_running_loop().time() >= ends:
+                    if loop.time() >= ends:
                         break
-                    started = asyncio.get_running_loop().time()
+                    started = loop.time()
                     state = not state
                     try:
                         await client.fire(on if state else off, entity_ids=tuple(entity_ids))
                     except HomeUnavailable:
-                        pass                          # a missed switch; the next one tries again
-                    await asyncio.sleep(max(0.0, half - (asyncio.get_running_loop().time() - started)))
+                        break                         # the house is not answering: stop, put back
+                    if not await _landed(client, entity_ids, "on" if state else "off", self.CONFIRM_S):
+                        break
+                    await asyncio.sleep(max(0.0, half - (loop.time() - started)))
             finally:
                 # Put each back as it was, whatever ended the blink.
                 for entity_id, was in before.items():

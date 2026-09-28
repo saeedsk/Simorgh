@@ -499,8 +499,8 @@ _MARKER_ARG_HINT.update({
     ),
     "home_blink": (
         "first line: the light, by name. Second line, optional: a JSON object like "
-        '{"hz": 1, "seconds": 60}. It switches the light off and on at that rate (up to 4 Hz, '
-        "300 s) and puts it back as it was afterwards -- the one way to blink a light; never a "
+        '{"hz": 1, "seconds": 60}. It switches the light off and on at that rate (up to 1 Hz, '
+        "120 s), each switch waiting until the light shows it, and puts it back as it was afterwards -- the one way to blink a light; never a "
         "shell loop. It confirms the first switch before saying anything is blinking. `HOME_BLINK: "
         "stop` stops every blink early and puts the lights back -- the only way to stop one; never "
         "say a blink stopped without it.\nExample:\n"

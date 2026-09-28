@@ -32,7 +32,8 @@ class HomeBlink(unittest.IsolatedAsyncioTestCase):
         self.assertIn("first switch was confirmed", got.output)
         await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
         switched = [c for c in house.calls if c[1] == ("light.living_room",)]
-        self.assertGreaterEqual(len(switched), 8, "a toggle to check, eight switches, and the put-back")
+        self.assertGreaterEqual(len(switched), 4, "a toggle to check, two switches at the 1 Hz cap, the put-back")
+        self.assertIn("Limited", got.output)
         self.assertEqual((await house.state("light.living_room")).state, "on", "back as it was")
 
     async def test_a_light_that_does_not_move_is_not_said_to_blink(self):
@@ -92,6 +93,28 @@ class HomeBlink(unittest.IsolatedAsyncioTestCase):
         started = time.monotonic()
         await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
         self.assertLess(time.monotonic() - started, 1.5, "ends at its time, not after every switch")
+
+    async def test_a_light_that_stops_keeping_up_ends_the_blink(self):
+        """Live 2026-09-27: switches sent faster than a Lutron dimmer could
+        take them queued in the bridge and played on for minutes after
+        everything upstream was off. Each switch now waits to be seen."""
+        house = FakeHomeAssistant()
+        tool = self._tool(house)
+        tool.CONFIRM_S = 0.3
+        got = await tool.run({"target": "living room lamp", "hz": 1, "seconds": 30}, ctx=_ctx())
+        self.assertTrue(got.ok, got.error)
+        house.unavailable.add("light.living_room")                 # from here on, it stops moving
+        started = asyncio.get_running_loop().time()
+        await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
+        self.assertLess(asyncio.get_running_loop().time() - started, 3.0, "ended, not played out")
+
+    async def test_commands_to_one_light_are_spaced(self):
+        home._LAST_SENT.clear()                                    # noqa: SLF001
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        for _ in range(3):
+            await home._pace(("light.x",))                         # noqa: SLF001
+        self.assertGreaterEqual(loop.time() - started, 2 * home.MIN_COMMAND_GAP_S - 0.05)
 
     def test_it_is_registered_where_home_call_is(self):
         from simorgh.contracts.toolargs import MARKER_JSON_REST
