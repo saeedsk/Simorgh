@@ -29,6 +29,12 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
+[locks.interface]
+by = "opus-main"
+task = "a phone says whose it is at pairing; the book re-reads its file"
+since = "2026-09-28T01:19:52+00:00"
+until = "2026-09-28T09:19:52+00:00"
+
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"
