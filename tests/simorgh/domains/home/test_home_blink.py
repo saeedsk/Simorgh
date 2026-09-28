@@ -50,6 +50,17 @@ class HomeBlink(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Limited", got.output)
         await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
 
+    async def test_all_lights_means_every_light_and_says_how_many(self):
+        """Live 2026-09-27: "all lights" matched only the two lights whose
+        names say "Lights", and Sim said every light was blinking."""
+        house = FakeHomeAssistant()
+        got = await self._tool(house).run({"target": "all the lights", "hz": 4, "seconds": 0.5}, ctx=_ctx())
+        self.assertTrue(got.ok, got.error)
+        lights = [e.entity_id for e in await house.states() if e.domain == "light"]
+        self.assertEqual(sorted(got.metadata["entities"]), sorted(lights))
+        self.assertIn(f"{len(lights)} of the {len(lights)} lights", got.output)
+        await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
+
     def test_it_is_registered_where_home_call_is(self):
         from simorgh.contracts.toolargs import MARKER_JSON_REST
         from simorgh.interface.httpapi import ACTION_TOOLS

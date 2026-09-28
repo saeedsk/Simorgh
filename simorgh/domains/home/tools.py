@@ -494,6 +494,11 @@ class HomeUndoTool(_HomeTool):
 _BLINKING: dict[str, "asyncio.Task"] = {}
 
 
+#: What "every light in the house" is called, once lower-cased and without "the".
+_EVERY_LIGHT = frozenset({"all", "all lights", "every light", "everything", "whole house", "house",
+                          "all lights in house", "all house lights", "lights", "all of lights"})
+
+
 class HomeBlinkTool(_HomeTool):
     """A light (or a switch) switched off and on at a steady rate for a
     while, then put back as it was -- a signal, a light show.
@@ -521,6 +526,7 @@ class HomeBlinkTool(_HomeTool):
     MAX_HZ = 4.0          # a Home Assistant round trip is ~0.1 s; faster only queues calls
     MAX_SECONDS = 300.0
     MAX_ENTITIES = 10
+    MAX_ALL = 40          # "all lights": the whole house, in one service call per switch
     _DOMAINS = ("light", "switch")
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
@@ -547,10 +553,17 @@ class HomeBlinkTool(_HomeTool):
         client = self._client()
         if not client.configured:
             return self._unconfigured(client)
+        everything = " ".join(target.lower().replace("the ", " ").split()) in _EVERY_LIGHT
         try:
             registry = await self._registry(client)
             entity_ids, last = None, None
-            for domain in self._DOMAINS:
+            if everything:
+                # "all lights" as a NAME matched only the lights whose names
+                # say "Lights" -- two of the house's -- and Sim told the
+                # creator every light was blinking (live, 2026-09-27).
+                entity_ids = [e.entity_id for e in registry.entities
+                              if e.domain == "light" and e.state in ("on", "off")]
+            for domain in (() if everything else self._DOMAINS):
                 try:
                     entity_ids = registry.resolve(target, domain=domain)
                     break
@@ -562,7 +575,9 @@ class HomeBlinkTool(_HomeTool):
             return ToolResult.from_exception(exc, f"refused: {exc}")
         except (Ambiguous, NotFound) as exc:
             return ToolResult.refused(f"refused: {exc}")
-        if len(entity_ids) > self.MAX_ENTITIES:
+        if not entity_ids:
+            return ToolResult.refused(f"refused: no light found for {target!r}.")
+        if len(entity_ids) > (self.MAX_ALL if everything else self.MAX_ENTITIES):
             return ToolResult.refused(f"refused: {target!r} is {len(entity_ids)} things; blink at most "
                                       f"{self.MAX_ENTITIES} at once -- name them more narrowly.")
 
@@ -622,6 +637,10 @@ class HomeBlinkTool(_HomeTool):
         body = (f"blinking {', '.join(entity_ids)} at {hz:g} Hz for {seconds:g} s ({switches} switches), "
                 f"then back to {', '.join(f'{e} {s}' for e, s in before.items())}. "
                 f"The first switch was confirmed ({moved}).")
+        lights = sum(1 for e in registry.entities if e.domain == "light")
+        body += (f" That is {len(entity_ids)} of the {lights} lights in the house"
+                 + (" -- all that are reachable." if everything else "; say which ones, not \"all\", "
+                    "unless it is all of them.") if lights else "")
         if notes:
             body += " Limited: " + "; ".join(notes) + "."
         return ToolResult(ok=True, output=body,
