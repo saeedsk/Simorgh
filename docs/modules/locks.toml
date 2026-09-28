@@ -29,12 +29,6 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
-[locks.orchestration]
-by = "opus-main"
-task = "stop hook: 'I'm on it' with nothing started"
-since = "2026-09-28T04:14:48+00:00"
-until = "2026-09-28T12:14:48+00:00"
-
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"
