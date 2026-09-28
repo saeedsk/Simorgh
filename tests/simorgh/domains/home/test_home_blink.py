@@ -61,6 +61,38 @@ class HomeBlink(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"{len(lights)} of the {len(lights)} lights", got.output)
         await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
 
+    async def test_stop_ends_every_blink_and_puts_the_lights_back(self):
+        """Live 2026-09-27: "stop blinking" was answered "stopped" with no tool."""
+        house = FakeHomeAssistant()
+        tool = self._tool(house)
+        got = await tool.run({"target": "living room lamp", "hz": 1, "seconds": 60}, ctx=_ctx())
+        self.assertTrue(got.ok, got.error)
+        stopped = await tool.run({"target": "stop"}, ctx=_ctx())
+        self.assertEqual(stopped.metadata["stopped"], ["light.living_room"])
+        self.assertFalse(home._BLINKING)                           # noqa: SLF001
+        self.assertEqual((await house.state("light.living_room")).state, "on", "back as it was")
+        again = await tool.run({"target": "stop"}, ctx=_ctx())
+        self.assertIn("nothing was blinking", again.output)
+
+    async def test_a_slow_house_does_not_stretch_the_blink(self):
+        """Live 2026-09-27: each switch waited ~0.7 s on Home Assistant, and
+        a 60 s blink ran three minutes."""
+        import time
+
+        house = FakeHomeAssistant()
+        real = house.fire
+
+        async def slow(*a, **k):
+            await asyncio.sleep(0.2)
+            await real(*a, **k)
+
+        house.fire = slow
+        got = await self._tool(house).run({"target": "living room lamp", "hz": 4, "seconds": 0.6}, ctx=_ctx())
+        self.assertTrue(got.ok, got.error)
+        started = time.monotonic()
+        await asyncio.gather(*set(home._BLINKING.values()))       # noqa: SLF001
+        self.assertLess(time.monotonic() - started, 1.5, "ends at its time, not after every switch")
+
     def test_it_is_registered_where_home_call_is(self):
         from simorgh.contracts.toolargs import MARKER_JSON_REST
         from simorgh.interface.httpapi import ACTION_TOOLS

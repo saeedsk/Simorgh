@@ -514,7 +514,8 @@ class HomeBlinkTool(_HomeTool):
     name = "home_blink"
     description = (
         "Blink a light on and off at a steady rate for a while, then put it back as it was. "
-        "Takes a target name, `hz` (switches per second, up to 4) and `seconds` (up to 300)."
+        "Takes a target name, `hz` (switches per second, up to 4) and `seconds` (up to 300). "
+        "Target \"stop\" stops every blink early and puts the lights back."
     )
     read_only = False
     reversibility = "reversible"
@@ -529,10 +530,29 @@ class HomeBlinkTool(_HomeTool):
     MAX_ALL = 40          # "all lights": the whole house, in one service call per switch
     _DOMAINS = ("light", "switch")
 
+    async def _stop_all(self) -> ToolResult:
+        """Every running blink cancelled; each puts its lights back as it
+        ends. Live, 2026-09-27: asked to stop, Sim said "stopped" with no
+        tool call -- there was no way to stop one."""
+        import asyncio
+
+        running = set(_BLINKING.values())
+        lights = sorted(_BLINKING)
+        for task in running:
+            task.cancel()
+        await asyncio.gather(*running, return_exceptions=True)
+        if not running:
+            return ToolResult(ok=True, output="nothing was blinking.", metadata={"stopped": []})
+        return ToolResult(ok=True, output=f"stopped blinking {', '.join(lights)}; each is back as it was.",
+                          side_effects=tuple(f"home:blink_stop:{e}" for e in lights),
+                          metadata={"stopped": lights})
+
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
         import asyncio
 
         target = str(args.get("target") or "").strip()
+        if args.get("stop") or target.lower() in ("stop", "off", "none", "stop all", "stop blinking"):
+            return await self._stop_all()
         if not target:
             return ToolResult.refused("refused: which light? Pass a `target`, like \"family room light\".")
         try:
@@ -609,8 +629,15 @@ class HomeBlinkTool(_HomeTool):
 
         async def blink() -> None:
             state = all(lit.values())
+            # Bounded by the clock, not the count: each switch waits for Home
+            # Assistant (~0.7 s live), and 240 switches meant to take 60 s
+            # blinked for three minutes while the creator asked it to stop
+            # (2026-09-27).
+            ends = asyncio.get_running_loop().time() + seconds
             try:
                 for _ in range(switches):
+                    if asyncio.get_running_loop().time() >= ends:
+                        break
                     started = asyncio.get_running_loop().time()
                     state = not state
                     try:
@@ -632,6 +659,9 @@ class HomeBlinkTool(_HomeTool):
         task = asyncio.get_running_loop().create_task(blink())
         for entity_id in entity_ids:
             _BLINKING[entity_id] = task
+        # Let it start: a task cancelled before its first step never runs its
+        # `finally`, and a stop that came at once left the light switched.
+        await asyncio.sleep(0)
         moved = ", ".join(f"{e}: {probe.before[e].state} -> {probe.after[e].state}"
                           for e in probe.changed if e in probe.before and e in probe.after)
         body = (f"blinking {', '.join(entity_ids)} at {hz:g} Hz for {seconds:g} s ({switches} switches), "
