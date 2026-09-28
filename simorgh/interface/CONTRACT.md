@@ -152,6 +152,8 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 | `dash_majors` | `()` | yes |
 | `dash_cameras_live` | `True` | yes |
 
+- `POST /api/pair` takes an optional `person` and answers with `person` (2026-09-27): a phone says whose it is at pairing, kept when it names a household member (`devices.household_member`) and the terminal's `pair ... for X` named nobody. `DeviceBook` re-reads its file when it changed on disk (`_fresh`), so `devices assign` from another process or a hand edit takes effect without a restart instead of being overwritten by the next `last_seen` save. The iOS app asks "Who's using this phone?" when pairing and shows the owner in Settings.
+
 ## Public Python surface
 
 - `simorgh.interface.service.Service` (`service.py:108`): the Subsystem, built by the Kernel. Constructor flags `run_repl`, `http_enabled`, `wait_for_boot` let tests run it headless.

@@ -17,6 +17,9 @@ final class Store: ObservableObject {
     @Published private(set) var token: String?
     @Published private(set) var deviceName: String?
     @Published private(set) var capabilities: [String] = []
+    /// Whose phone this is on Sim ("" for a shared one): what Guardian
+    /// judges a request from this app by.
+    @Published private(set) var owner: String = ""
 
     /// Every address Sim is known to answer on, best first. Sim reports
     /// these itself (`/api/addresses`, and in the pairing reply), and
@@ -34,6 +37,7 @@ final class Store: ObservableObject {
         static let candidates = "sim.candidates"
         static let name = "sim.deviceName"
         static let caps = "sim.capabilities"
+        static let owner = "sim.owner"
         static let keychain = "sim.deviceToken"
     }
 
@@ -41,6 +45,7 @@ final class Store: ObservableObject {
         baseURL = UserDefaults.standard.string(forKey: Keys.baseURL) ?? "http://192.168.50.33:8765"
         deviceName = UserDefaults.standard.string(forKey: Keys.name)
         capabilities = UserDefaults.standard.stringArray(forKey: Keys.caps) ?? []
+        owner = UserDefaults.standard.string(forKey: Keys.owner) ?? ""
         token = Self.readKeychain(Keys.keychain)
         candidates = UserDefaults.standard.stringArray(forKey: Keys.candidates) ?? []
         if candidates.isEmpty && !baseURL.isEmpty { candidates = [baseURL] }
@@ -112,13 +117,15 @@ final class Store: ObservableObject {
     /// exists to hide a button, never to permit one.
     func may(_ capability: String) -> Bool { capabilities.contains(capability) }
 
-    func save(token: String, name: String, capabilities: [String]) {
+    func save(token: String, name: String, capabilities: [String], owner: String = "") {
         Self.writeKeychain(Keys.keychain, value: token)
         UserDefaults.standard.set(name, forKey: Keys.name)
         UserDefaults.standard.set(capabilities, forKey: Keys.caps)
+        UserDefaults.standard.set(owner, forKey: Keys.owner)
         self.token = token
         self.deviceName = name
         self.capabilities = capabilities
+        self.owner = owner
     }
 
     /// Forget this device's token locally. It does NOT revoke it on Sim --
@@ -129,9 +136,11 @@ final class Store: ObservableObject {
         Self.deleteKeychain(Keys.keychain)
         UserDefaults.standard.removeObject(forKey: Keys.name)
         UserDefaults.standard.removeObject(forKey: Keys.caps)
+        UserDefaults.standard.removeObject(forKey: Keys.owner)
         token = nil
         deviceName = nil
         capabilities = []
+        owner = ""
     }
 
     // MARK: - Keychain

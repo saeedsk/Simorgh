@@ -52,6 +52,9 @@ struct Api {
         /// phone is certainly talking to it. Pairing on the LAN and then
         /// leaving the house used to end the app's usefulness.
         let addresses: [String]?
+        /// Whose phone Sim now takes this to be; "" or absent for a
+        /// shared one (the name sent was not someone in the household).
+        let person: String?
     }
 
     struct ChatReply: Decodable {
@@ -121,8 +124,13 @@ struct Api {
 
     /// Pairing is the one call with no token: it SPENDS a code Sim minted
     /// locally and cannot create one.
-    func pair(code: String) async throws -> Paired {
-        try await send("/api/pair", method: "POST", body: ["code": code], authed: false)
+    /// `person`: who is using this phone, so Sim takes its requests as
+    /// theirs. Sim keeps it only for someone in the household, and a name
+    /// given at the terminal (`pair my phone for Saeed`) wins.
+    func pair(code: String, person: String = "") async throws -> Paired {
+        var body = ["code": code]
+        if !person.isEmpty { body["person"] = person }
+        return try await send("/api/pair", method: "POST", body: body, authed: false)
     }
 
     func status() async throws -> Status { try await send("/api/status", method: "GET") }

@@ -542,6 +542,9 @@ class HttpApi:
         self.register_route("POST", "/api/dash/key", _dash_key_post, max_body=512, rate=(300, 60.0))
         async def _pair(_query, body, _headers):
             """POST /api/pair -- spend a pairing code, get this device's own token.
+            `{"code": ..., "person": "Saeed"}`: the phone may say whose it is,
+            taken when it names a household member and the terminal's `pair
+            ... for X` named nobody.
 
             THE ONLY UNAUTHENTICATED WRITE ROUTE IN THIS SERVER, and it is
             only safe because of what it cannot do: it can SPEND a code and
@@ -558,9 +561,10 @@ class HttpApi:
             try:
                 parsed = json.loads(body or b"{}")
                 code = str(parsed.get("code") or "").strip()
+                claimed = str(parsed.get("person") or "").strip()
             except (json.JSONDecodeError, AttributeError):
                 return 400, b'{"error":{"code":"invalid_json"}}', "application/json"
-            got = self._devices.redeem(code)
+            got = self._devices.redeem(code, person=claimed)
             if isinstance(got, str):
                 # The reason is deliberately specific -- an expired code and
                 # a wrong code are different problems for the person holding
@@ -574,7 +578,8 @@ class HttpApi:
                 # noticing.
                 with contextlib.suppress(Exception):
                     self._logger.info("interface.device_paired", device=device.id, name=device.name,
-                                      capabilities=list(device.capabilities))
+                                      capabilities=list(device.capabilities), person=device.person,
+                                      claimed=claimed)
             from .addresses import reachable
 
             # Every address Sim answers on, at the one moment the phone is
@@ -584,6 +589,10 @@ class HttpApi:
             return 200, json.dumps({
                 "token": token, "device_id": device.id, "name": device.name,
                 "capabilities": list(device.capabilities),
+                # Whose phone this now is ("" for a shared one), so the app
+                # can say so -- and say when the name it sent was not
+                # taken (not someone in the household).
+                "person": device.person,
                 "addresses": reachable(self._port),
             }).encode("utf-8"), "application/json"
 

@@ -11,6 +11,8 @@ struct SettingsView: View {
             List {
                 Section("This device") {
                     LabeledContent("Name", value: store.deviceName ?? "not paired")
+                    LabeledContent("Belongs to",
+                                   value: store.owner.isEmpty ? "nobody yet: on Sim, devices assign phone <name>" : store.owner)
                     LabeledContent("May") {
                         Text(store.capabilities.isEmpty ? "—" : store.capabilities.joined(separator: ", "))
                     }

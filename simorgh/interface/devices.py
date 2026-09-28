@@ -134,6 +134,15 @@ def normalise(capabilities) -> tuple[str, ...]:
     return tuple(c for c in CAPABILITIES if c in wanted)
 
 
+def household_member(name: str) -> str:
+    """`name` as the household writes it, when it is one of the household
+    (`contracts.household`), else ""."""
+    from simorgh.contracts.household import HOUSEHOLD
+
+    wanted = " ".join(str(name or "").split()).lower()
+    return next((m.name for m in HOUSEHOLD if wanted and m.name.lower() == wanted), "")
+
+
 @dataclass
 class DeviceBook:
     """The devices, on disk, and the one pairing code in flight."""
@@ -142,13 +151,31 @@ class DeviceBook:
     clock = time.time
     _devices: dict[str, Device] = field(default_factory=dict)
     _pairing: Pairing | None = None
+    #: The file's mtime when this book last read or wrote it (`_fresh`).
+    _seen_mtime: float = 0.0
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
         self._load()
 
     # ------------------------------------------------------------- storage
+    def _mtime(self) -> float:
+        try:
+            return self.path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _fresh(self) -> None:
+        """Re-read the file when something else changed it -- `simorgh
+        devices assign` in another process, or a hand edit. Every request
+        saves `last_seen` from memory, so an outside change was
+        overwritten within seconds and never took effect until a restart
+        (2026-09-27: a phone's owner could not be set while Sim ran)."""
+        if self._mtime() != self._seen_mtime:
+            self._load()
+
     def _load(self) -> None:
+        self._seen_mtime = self._mtime()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -173,9 +200,11 @@ class DeviceBook:
         tmp.write_text(json.dumps({"devices": [d.to_dict() for d in self._devices.values()]}, indent=2),
                        encoding="utf-8")
         tmp.replace(self.path)
+        self._seen_mtime = self._mtime()
 
     # ------------------------------------------------------------- reading
     def devices(self, *, include_revoked: bool = False) -> list[Device]:
+        self._fresh()
         rows = sorted(self._devices.values(), key=lambda d: d.created_at)
         return rows if include_revoked else [d for d in rows if not d.revoked]
 
@@ -188,6 +217,7 @@ class DeviceBook:
         """
         if not token:
             return None
+        self._fresh()
         digest = _hash(token)
         found: Device | None = None
         for device in self._devices.values():
@@ -222,7 +252,7 @@ class DeviceBook:
     def cancel_pairing(self) -> None:
         self._pairing = None
 
-    def redeem(self, code: str) -> tuple[Device, str] | str:
+    def redeem(self, code: str, *, person: str = "") -> tuple[Device, str] | str:
         """`(device, token)` on success, or a sentence saying why not.
 
         The token is returned ONCE, here, and never stored. The failure
@@ -241,9 +271,15 @@ class DeviceBook:
             return "that is not the code on the screen"
         now = self.clock()
         token = secrets.token_urlsafe(32)
+        # Whose phone this is: the terminal's word when `pair ... for X`
+        # gave one, else the phone's own, if it names someone in the
+        # household. The code was handed over at the terminal, so whoever
+        # spends it was trusted with it there (2026-09-27: "when I install
+        # the app I identify who I am").
+        owner = pending.person or household_member(person)
         device = Device(id=secrets.token_hex(8), name=pending.name, token_sha256=_hash(token),
                         capabilities=pending.capabilities, created_at=now, last_seen=now,
-                        person=pending.person)
+                        person=owner)
         self._devices[device.id] = device
         self._pairing = None          # single use
         self._save()

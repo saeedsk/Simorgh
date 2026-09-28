@@ -10,6 +10,8 @@ import SwiftUI
 struct PairingView: View {
     @EnvironmentObject var store: Store
     @State private var typed = ""
+    /// Who is using this phone -- what Sim judges its requests by.
+    @AppStorage("sim.pairingPerson") private var who = ""
     @State private var problem: String?
     @State private var busy = false
     @State private var scanning = true
@@ -51,6 +53,13 @@ struct PairingView: View {
                 }
 
                 VStack(spacing: 12) {
+                    LabeledContent("Who's using this phone?") {
+                        TextField("your name, e.g. Saeed", text: $who)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Divider()
                     LabeledContent("Sim's address") {
                         TextField("http://…", text: $store.baseURL)
                             .textInputAutocapitalization(.never)
@@ -94,12 +103,14 @@ struct PairingView: View {
         busy = true
         defer { busy = false }
         do {
-            let paired = try await Api(baseURL: store.baseURL, token: nil).pair(code: code)
+            let asked = who.trimmingCharacters(in: .whitespaces)
+            let paired = try await Api(baseURL: store.baseURL, token: nil).pair(code: code, person: asked)
             // Learn every address BEFORE saving, so the very first launch
             // after pairing already knows the tailnet one.
             store.adopt(paired.addresses ?? [])
             store.working(store.baseURL)
-            store.save(token: paired.token, name: paired.name, capabilities: paired.capabilities)
+            store.save(token: paired.token, name: paired.name, capabilities: paired.capabilities,
+                       owner: paired.person ?? "")
         } catch {
             problem = error.localizedDescription
             scanning = false
