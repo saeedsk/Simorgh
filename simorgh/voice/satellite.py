@@ -81,6 +81,8 @@ FOLLOW_UP_START_S = 20.0
 RESTOP_S = 15.0
 #: The least time between two clearings of a jammed board's media queue.
 UNJAM_EVERY_S = 10.0
+#: The least time between two restarts of a board that refused even STOP.
+RESTART_JAMMED_EVERY_S = 300.0
 #: A reply piece that starts this long after the last one ended gets the
 #: lead-in silence (`SatelliteSpeaker.lead_in_s`).
 IDLE_BEFORE_LEAD_S = 2.0
@@ -383,6 +385,8 @@ class SatelliteLink:
         #: `RESTOP_S` of that is the board's, and is stopped again.
         self._stopped_music_at = 0.0
         self._unjammed_at = -1e9
+        self._restarted_at = -1e9
+        self._restart_key = None
         #: Seconds, or a callable giving them: read live, so `voice set`
         #: changes a running link.
         self._follow_up_s = follow_up_s
@@ -467,6 +471,12 @@ class SatelliteLink:
         selects = [e for e in entities if type(e).__name__ == "SelectInfo"
                    and "wake word sensitivity" in str(getattr(e, "name", "")).lower()]
         self._sensitivity_key = selects[0].key if selects else None
+        # The firmware's own Restart button (hidden in HA's UI, there on the
+        # API): the one thing that clears a media player that refuses even
+        # STOP (`_restart_jammed`).
+        restarts = [e for e in entities if type(e).__name__ == "ButtonInfo"
+                    and str(getattr(e, "object_id", "") or getattr(e, "name", "")).lower() == "restart"]
+        self._restart_key = restarts[0].key if restarts else None
         if self._media_key is not None and self._volume is not None:
             client.media_player_command(self._media_key, volume=float(self._volume))
         client.subscribe_voice_assistant(handle_start=self._on_start, handle_stop=self._on_stop,
@@ -498,7 +508,10 @@ class SatelliteLink:
         if "wake" in text.lower() or text.startswith(("[E]", "[W]")):
             self._log("info", "voice.board_log", line=text[:240])
         if "Queue full" in text:
-            self._unjam()
+            if "command dropped" in text:
+                self._restart_jammed()      # it would not take even the STOP
+            else:
+                self._unjam()
 
     def _unjam(self) -> None:
         """The board's media player stopped taking audio ("Queue full, URI
@@ -514,6 +527,20 @@ class SatelliteLink:
         self._log("warning", "voice.satellite_unjammed")
         with contextlib.suppress(RuntimeError):
             asyncio.get_running_loop().create_task(self.stop_playback())
+
+    def _restart_jammed(self) -> None:
+        """The board refused the STOP too ("Queue full, command dropped"):
+        its player is past clearing, and only a restart empties it. Pressed
+        at most once per `RESTART_JAMMED_EVERY_S`; the board is back, and the
+        link reconnects, within about a minute (live, 2026-09-27: the queue
+        stayed full until the board was unplugged)."""
+        now = self._clock()
+        if self._restart_key is None or self._client is None or now - self._restarted_at < RESTART_JAMMED_EVERY_S:
+            return
+        self._restarted_at = now
+        self._log("warning", "voice.satellite_restarted", reason="media queue full; STOP refused")
+        with contextlib.suppress(Exception):
+            self._client.button_command(self._restart_key)
 
     def _on_entity_state(self, state) -> None:
         """The board's media player, as it says it is. Music follows the

@@ -15,11 +15,16 @@ from simorgh.voice.session import VoiceSession
 class _Link:
     name = "satellite"
     _unjam = sat.SatelliteLink._unjam
+    _restart_jammed = sat.SatelliteLink._restart_jammed
     _on_board_log = sat.SatelliteLink._on_board_log
 
     def __init__(self):
         self.now = 100.0
         self._unjammed_at = -1e9
+        self._restarted_at = -1e9
+        self._restart_key = 7
+        self.pressed = []
+        self._client = SimpleNamespace(button_command=self.pressed.append)
         self.stops = 0
         self.logged = []
 
@@ -50,6 +55,29 @@ class AJammedBoardIsCleared(unittest.IsolatedAsyncioTestCase):
         link._on_board_log(line)
         await asyncio.sleep(0)
         self.assertEqual(link.stops, 2)
+
+
+class ABoardThatRefusesStopIsRestarted(unittest.TestCase):
+    """Live 2026-09-27: after the STOP, the board said "Queue full, command
+    dropped" and stayed jammed until it was unplugged. Its firmware has a
+    Restart button (hidden in HA's UI, there on the API)."""
+
+    def test_command_dropped_presses_restart_once_per_window(self):
+        link = _Link()
+        line = SimpleNamespace(message=b"[E][speaker_source_media_player:749]: Queue full, command dropped")
+        link._on_board_log(line)
+        link._on_board_log(line)
+        self.assertEqual(link.pressed, [7])
+        self.assertIn("voice.satellite_restarted", link.logged)
+        link.now += sat.RESTART_JAMMED_EVERY_S + 1
+        link._on_board_log(line)
+        self.assertEqual(link.pressed, [7, 7])
+
+    def test_no_button_no_press(self):
+        link = _Link()
+        link._restart_key = None
+        link._on_board_log(SimpleNamespace(message=b"Queue full, command dropped"))
+        self.assertEqual(link.pressed, [])
 
 
 class OnlyAHouseLanguageIsSaid(unittest.TestCase):
