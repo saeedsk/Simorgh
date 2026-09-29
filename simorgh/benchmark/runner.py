@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import re
 import shutil
 import time
 from pathlib import Path
@@ -73,6 +74,28 @@ def _free_gb(path: Path) -> float | None:
         return None
 
 
+#: What an answer says when it was looked up rather than found. Bench wave
+#: 2026-09-29, GAIA 72e110e7: web_search "GAIA BASE DDC 633 ... answer",
+#: then "the GAIA ground truth was confirmed as Nigeria across independent
+#: mirrors (AgentRx, aidan.blog)". It only catches an answer that admits
+#: it; the prompt is the first defence.
+_LOOKED_UP = re.compile(r"ground[ -]truth|answer (?:key|set|sheet)|(?:leaked|published) (?:answer|solution)s?",
+                        re.IGNORECASE)
+
+
+def looked_up(answer: str, suite: str) -> str:
+    """Why `answer` reads as taken from the benchmark itself, or ""."""
+    text = answer or ""
+    name = (suite or "").split("-")[0]
+    # The name alone is not enough: a GAIA question may be about the Gaia
+    # spacecraft. Near a benchmark word, it is the benchmark.
+    if name and re.search(rf"\b{re.escape(name)}\b.{{0,25}}\b(?:benchmark|ground[ -]truth|(?<!final )answers?|dataset|"
+                          rf"validation|leaderboard)", text, re.IGNORECASE | re.DOTALL):
+        return f"it names the {name} benchmark"
+    match = _LOOKED_UP.search(text)
+    return f"it cites a {match.group(0).lower()}" if match else ""
+
+
 class Runner:
     def __init__(self, bus, *, config: Config | None = None, clock=None,
                  on_progress=None, on_start=None, repo_root: Path | None = None, sleep=None) -> None:
@@ -117,6 +140,9 @@ class Runner:
             parts.append(f"The file this question is about is at `{attachment}`. Read it.")
         parts.append("Save anything you download or produce on the way -- a video, frames, crops, a table -- "
                      "under workspace/scratch/, never in the repository root.")
+        parts.append("Work it out from the sources the question is about. Do not look up this benchmark, its "
+                     "answer sets or anyone's published solutions to it: an answer found that way is not yours "
+                     "and is scored as wrong.")
         if case.functions:
             parts.append(f"Functions you may call:\n{case.functions}")
         parts.append(answer_format(case.mode))
@@ -173,6 +199,12 @@ class Runner:
         # of GAIA. Record the block, so "our verifier rejected a right
         # answer" is visible rather than indistinguishable from "wrong".
         correct, extracted = score_case(answer_text, case.answer, mode=case.mode)
+        leaked = looked_up(answer_text, case.suite)
+        if leaked:
+            # Not the system's answer, whatever it says: scored wrong and
+            # said so, never quietly counted.
+            correct, error = False, (f"not scored: the answer came from the benchmark itself ({leaked}) -- "
+                                     + (error or "")).rstrip(" -")
         return CaseResult(
             case_id=case.id, level=case.level, correct=correct, answer=extracted,
             question=case.question, tokens=self._tokens_of.get(case.id, 0),
