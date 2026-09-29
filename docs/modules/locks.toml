@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.verification]
-by = "opus-main"
-task = "an inverted checklist question is feedback, not a requirement"
-since = "2026-09-29T17:22:54+00:00"
-until = "2026-09-30T01:22:54+00:00"
