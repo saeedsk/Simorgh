@@ -31,7 +31,7 @@ class FarsiVowels(unittest.TestCase):
         misquoted Hafez, and the model talking about its marks."""
         from simorgh.orchestration import scaffolds
 
-        for said in ("ONLY", "only when you are sure", "Never talk about the marks", "exact text",
+        for said in ("wherever it is read", "only when you are", "Never talk about the marks", "exact text",
                      "generously", "the slips are the recogniser's"):
             self.assertIn(said, scaffolds.FARSI_VOWELS)
 

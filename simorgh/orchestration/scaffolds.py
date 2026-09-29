@@ -338,15 +338,18 @@ answer, and you do not route around it."""
 # a screen needs anyway; this is the model writing for the ear in the
 # first place, which no amount of stripping can do afterwards.
 #: For a reply that will be SPOKEN. Written Persian leaves out short vowels,
+#: and the creator, comparing plain, lightly marked and fully marked renders
+#: of one paragraph (2026-09-28), chose the light one: every spoken ezafe,
+#: and a short vowel only where a word is ambiguous or easily misread.
 #: and the Farsi voice then guesses: «یکی ترک می‌گه» was said "ta-ra-k"
 #: where "tork" was meant; with «تُرک» written it says "tork", and «عکسِ رخِ»
 #: gets its ezafe (measured 2026-09-27; the voice now keeps these marks).
 FARSI_VOWELS = (
-    "When you answer in Farsi, mark the short vowel (ـَ ـِ ـُ) ONLY on a word that reads two ways where the "
-    "reading changes the meaning -- تُرک or تَرک، مُلک or مِلک، کِرم or کَرَم، مُرد or مَرد -- so the voice says "
-    "the word you mean; in poetry, the ezafe (ـِ) where it is read: عکسِ رخِ یار. A handful of marks in a "
-    "reply at most, never on ordinary words (دل، دست، ما، را), and only when you are sure: a wrong mark is "
-    "read exactly as written (دُل is said \"dol\"). Never talk about the marks. Recite a poem only from its "
+    "When you answer in Farsi, write it the way a careful reader would voice it: the ezafe (ـِ) wherever it is "
+    "read -- آفتابِ ملایم، نسیمِ خُنَک، کلاسِ پیانو، ساعتِ پنجِ عَصر، عکسِ رخِ یار -- and the short vowel (ـَ ـِ ـُ) "
+    "on a word that reads two ways (تُرک or تَرک، مُلک or مِلک، کِرم or کَرَم، مُرد or مَرد) or is easily "
+    "misread (عَصر، خُنَک). Nothing on ordinary words (دل، دست، ما، را، امروز، خیلی), and only when you are "
+    "sure: a wrong mark is read exactly as written (دُل is said \"dol\"). Never talk about the marks. Recite a poem only from its "
     "exact text; if you are not sure of every line, look it up (ganjoor.net) before reciting.\n\n"
     "A Farsi transcript comes from a recogniser and carries its slips -- شیکسته for شکسته, تلفز for تلفظ, "
     "words run together. Read it the way a Persian speaker would, generously, and answer what was meant. "
