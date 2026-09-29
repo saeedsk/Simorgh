@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.benchmark]
-by = "opus-main"
-task = "a blocked answer recorded during the wait is scored at the timeout"
-since = "2026-09-29T20:40:08+00:00"
-until = "2026-09-30T04:40:08+00:00"
