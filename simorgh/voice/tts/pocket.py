@@ -127,11 +127,42 @@ class PocketSynthesiser(SubprocessSynthesiser):
         here = Path(self._reference).parent
         return sorted({Path(self._reference).stem, *(p.stem for p in here.glob("*.wav"))})
 
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = ""):
+        return trim_silence(await super().synthesise(text, voice=voice, speed=speed, tone=tone))
+
     def params_for(self, tone: str) -> dict:
         """Pocket has no expressiveness knobs; the reference carries the
         manner of speaking. What it does take is the house's word list
         (`tts_farsi_lexicon`): sounds for words its G2P gets wrong."""
         return {"lexicon": dict(self._lexicon)} if self._lexicon else {}
+
+
+#: The silence a piece keeps at each end once trimmed: a breath, not a gap.
+KEEP_LEAD_S = 0.06
+KEEP_TAIL_S = 0.12
+
+
+def trim_silence(audio):
+    """`audio` without Pocket's dead air at each end. Every piece came with
+    about 0.2 s of silence before and 0.35-0.7 s after, and a reply is said
+    a sentence at a time: on the satellite, with the board fetching each
+    sentence, that was one to one and a half seconds of nothing between
+    sentences -- "hop hop" (the creator, 2026-09-28)."""
+    import audioop
+
+    from ..api import Audio
+
+    pcm, rate = audio.pcm, audio.sample_rate
+    frame = max(2, int(rate * 0.02)) * 2
+    levels = [audioop.rms(pcm[i:i + frame], 2) for i in range(0, max(0, len(pcm) - frame + 1), frame)]
+    if not levels or max(levels) == 0:
+        return audio
+    bar = max(levels) * 0.05
+    first = next(i for i, level in enumerate(levels) if level > bar)
+    last = len(levels) - 1 - next(i for i, level in enumerate(reversed(levels)) if level > bar)
+    start = max(0, first * frame - int(KEEP_LEAD_S * rate) * 2)
+    end = min(len(pcm), (last + 1) * frame + int(KEEP_TAIL_S * rate) * 2)
+    return Audio(pcm=pcm[start:end], sample_rate=rate)
 
 
 def parse_lexicon(text: str) -> dict[str, str]:
@@ -145,4 +176,4 @@ def parse_lexicon(text: str) -> dict[str, str]:
     return out
 
 
-__all__ = ["DEFAULT_REFERENCE", "parse_lexicon", "PACKAGES", "PocketSynthesiser", "available", "fetch_normaliser", "install"]
+__all__ = ["DEFAULT_REFERENCE", "parse_lexicon", "trim_silence", "PACKAGES", "PocketSynthesiser", "available", "fetch_normaliser", "install"]
