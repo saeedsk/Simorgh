@@ -222,9 +222,38 @@ class Service:
             await ctx.bus.subscribe(topics.ACTION_DENIED, self._on_action_denied),
             await ctx.bus.subscribe(topics.SYSTEM_TICK_IDLE, self._on_idle_tick),
         ]
+        await self._reload_patterns()
         if self.config.reflect_after_start_s > 0:
             self._reflect_loop = asyncio.create_task(self._reflect_periodically(), name="reflection-pass")
         ctx.logger.info("growth.monitors.started")
+
+    async def _reload_patterns(self) -> None:
+        """The pattern window's outcomes, read back from `learn:outcomes`.
+
+        The miner is in memory and was fed only by live events, so every
+        restart emptied it: the night's diagnose saw what had happened
+        since the last boot, and the creator restarts Sim several times a
+        day -- 138 outcomes in a week, and a night that found nothing
+        (2026-09-29). An unreadable stream is a quiet start, not a failed one.
+        """
+        ledger = getattr(self._ctx, "ledger", None)
+        if ledger is None:
+            return
+        try:
+            events = await ledger.read("learn:outcomes")
+        except Exception as exc:  # noqa: BLE001
+            self._ctx.logger.warning("growth.monitors.patterns_unreadable", error=repr(exc))
+            return
+        cutoff = self._ctx.clock.now() - self.config.pattern_window_seconds
+        reloaded = 0
+        for event in events:
+            p = event.payload or {}
+            if event.ts < cutoff or not p.get("task_type") or not isinstance(p.get("succeeded"), bool):
+                continue
+            self._patterns.add(p["task_type"], p["succeeded"], p.get("strategy"), event.ts)
+            reloaded += 1
+        if reloaded:
+            self._ctx.logger.info("growth.monitors.patterns_reloaded", outcomes=reloaded)
 
     async def stop(self) -> None:
         if self._reflect_loop is not None:
