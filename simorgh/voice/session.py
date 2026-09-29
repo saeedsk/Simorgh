@@ -318,6 +318,11 @@ def prune_kept_audio(folder, *, days: float, max_mb: float, now: float) -> int:
 #: (`VoiceSession._final_text`).
 ACK_WAITS_FOR_FINAL_S = 3.0
 
+#: How long Sim counts itself as still talking with the last voice it
+#: placed: within it, the same voice again needs no name in the reply.
+NAME_AGAIN_AFTER_S = 600.0
+
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None, room=None) -> None:
@@ -364,6 +369,7 @@ class VoiceSession:
         #: whether the last words Sim answered were properly for it: named, or from a voice it knows
         self._last_ask_addressed = False
         self._last_asked_speaker = ""
+        self._last_asked_at = -1e9
         self.last_speaker = ""
         self.last_identification = None
         # Per-turn facts from `_identify`, keyed by turn id: the speech
@@ -1672,7 +1678,14 @@ class VoiceSession:
             relation = person.relation if person is not None else ""
         room = self._room_lines(exclude_text=text, speaker=speaker)
         self._room.append((speaker or "someone", text, self._now(), "asked"))
-        before, self._last_asked_speaker = self._last_asked_speaker, speaker or ""
+        # Who asked last, if within NAME_AGAIN_AFTER_S. A turn Sim could
+        # not place (speaker "") used to reset this, so the next turn from
+        # the same person read as "the first thing in a while" and the reply
+        # opened with their name again -- nearly every reply (live, 2026-09-29).
+        now = self._now()
+        before = self._last_asked_speaker if now - self._last_asked_at <= NAME_AGAIN_AFTER_S else ""
+        if speaker:
+            self._last_asked_speaker, self._last_asked_at = speaker, now
         self._last_ask_addressed = bool(speaker) or (self._wake_addressed() or addressed(text, since_sim_spoke_s=-1.0, exchange_window_s=0.0))
         live = None
         early: asyncio.Task | None = None

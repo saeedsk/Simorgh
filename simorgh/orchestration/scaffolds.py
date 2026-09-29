@@ -369,7 +369,8 @@ def own_phone_note(speaker: str) -> str:
     return (f"This turn came from {speaker}'s own paired phone: it is {speaker} asking, and Guardian "
             f"decides on each action as {speaker}'s. Refusals earlier in this conversation came from "
             "before the phone had an owner. Do what is asked and report what Guardian actually says; "
-            "never refuse ahead of it.")
+            f"never refuse ahead of it. You know who you are talking to; do not open replies with {speaker}'s "
+            "name or repeat it.")
 
 
 def who_is_here(speaker: str, relation: str, room: str, before: str = "", *, doubt: str = "",
@@ -405,7 +406,7 @@ def who_is_here(speaker: str, relation: str, room: str, before: str = "", *, dou
                          "matters to the answer, ask.")
         else:
             lines.append(f"You are speaking with {who}. You know their voice. Use their name the way a person would -- "
-                         "now and then, not every sentence -- and when you do, it is THIS name: the words may mention "
+                         "rarely: not in every reply and never to open one -- and when you do, it is THIS name: the words may mention "
                          "other people, but the one talking to you is {speaker}. What you remember with them is in your "
                          "memory, labelled with their name; what others told you stays theirs.".replace("{speaker}", speaker))
             lines.append(_turned_to(speaker, before))
@@ -450,8 +451,10 @@ def _turned_to(speaker: str, before: str) -> str:
     if before != speaker:
         return (f"You were just talking with {before}; now {speaker} is speaking. Turn to them: say "
                 f"\"{speaker}\" once in this reply so everyone hears who you are answering.")
-    return (f"You have been talking with {speaker} already, so their name is not needed in this reply -- "
-            "use it only where it falls naturally.")
+    # Live 2026-09-29, the creator: "sim doesn't need to repeat my name in
+    # every message" -- "only where it falls naturally" read as permission.
+    return (f"You have been talking with {speaker} already: do not use their name in this reply, and "
+            "never open a reply with it.")
 
 
 VOICE = """\

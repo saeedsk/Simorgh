@@ -212,6 +212,26 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         # ...and each ask says who Sim answered before it: nobody, then Ira again
         self.assertEqual([c["before"] for c in replies.calls], ["", "Ira"])
 
+    async def test_a_voice_sim_could_not_place_does_not_make_the_next_turn_a_fresh_start(self):
+        # Live 2026-09-29, the creator: "sim doesn't need to repeat my name in
+        # every message". An unplaced turn in between reset who Sim was
+        # talking with, so every reply opened with "Saeed, ...".
+        self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
+        voices = iter([_vec(2.02), _vec(4.5), _vec(2.03)])
+        heard = iter(["Sim, what time is it", "Sim, is it raining", "Sim, and tomorrow"])
+        script = _Script(*[(True, 60), (False, 110)] * 3, (False, 10_000))
+        replies = _Replies("Fine.")
+        session, _bus, _tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            self.embedder.vector = next(voices, _vec(2.0))
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 3, timeout=12.0)
+        self.assertEqual([a[1] for a in replies.asked], ["Saeed", "", "Saeed"])
+        self.assertEqual([c["before"] for c in replies.calls], ["", "Saeed", "Saeed"])
+
     async def test_an_unknown_voice_that_keeps_talking_is_background_until_it_names_sim(self):
         """An interview on the TV (2026-09-14): the model rightly stayed
         quiet on two fragments, then answered the third aloud. After two

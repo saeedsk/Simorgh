@@ -219,5 +219,6 @@ class ScaffoldTestCase(unittest.TestCase):
         self.assertIn("You were just talking with Ira; now Iris is speaking", turned)
         self.assertIn('say "Iris" once', turned)
         same = who_is_here("Ira", "", "", before="Ira")
-        self.assertIn("name is not needed in this reply", same)
+        self.assertIn("do not use their name in this reply", same)
+        self.assertIn("never open a reply with it", same)
         self.assertNotIn("Turn to them", same)
