@@ -120,6 +120,8 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
                                     "\"\" leaves it alone"),
     "satellite_lead_in_ms": (int, (0, 2000), "silence before a satellite reply that starts after a quiet spell, so "
                              "the speaker is awake before the first words; raise it if the start is still clipped"),
+    "satellite_lead_in_level": (int, (0, 3000), "the loudness of the satellite's lead-in tone (0-3000; 900 default); "
+                                "lower it if the Echo Dot hums, raise it if first words are clipped"),
     "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),
     "min_speech_ms": (int, (50, 2000), "shorter than this is not a turn"),
     "vad_sensitivity": (str, ("low", "balanced", "high"), "how sure the detector must be"),

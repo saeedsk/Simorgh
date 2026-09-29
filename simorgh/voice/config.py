@@ -447,6 +447,10 @@ class Config:
     # spell, so the board's output (and a speaker on its jack) is awake
     # before the words: the first words were being clipped (2026-09-27).
     satellite_lead_in_ms: int = 500
+    # The lead-in tone's amplitude (int16; 900 is about -31 dBFS). The Echo Dot
+    # plays its 20 Hz as a low hum: turn it down until the hum goes but the
+    # first word still arrives (2026-09-29).
+    satellite_lead_in_level: int = 900
     # The board's wake-word sensitivity while it plays music, put back when
     # the music stops; "" leaves it alone. Over a song on the speaker the
     # everyday cutoff missed every "Hey Sim" for four minutes (2026-09-27).

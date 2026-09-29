@@ -130,6 +130,26 @@ class ABoardWhoseMicSendsOnlyZerosIsRestarted(unittest.TestCase):
         self.assertEqual(link.pressed, [])
 
 
+class TheLeadInToneLevel(unittest.TestCase):
+    """2026-09-29: the Echo Dot plays the 20 Hz lead-in as a hum the creator
+    can hear; its level is a setting."""
+
+    def test_the_level_sets_the_peak(self):
+        import array
+
+        quiet = array.array("h", sat._wake_noise(16000, 16000, 300))
+        loud = array.array("h", sat._wake_noise(16000, 16000, 900))
+        self.assertLessEqual(max(abs(v) for v in quiet), 300)
+        self.assertGreater(max(abs(v) for v in loud), 800)
+
+    def test_it_is_a_safe_setting(self):
+        from simorgh.contracts.settings import VOICE_SAFE_KEYS
+        from simorgh.voice.config import Config
+
+        self.assertIn("satellite_lead_in_level", VOICE_SAFE_KEYS)
+        self.assertEqual(Config().satellite_lead_in_level, 900)
+
+
 class OnlyAHouseLanguageIsSaid(unittest.TestCase):
     def test_icelandic_is_not_passed_on(self):
         fake = SimpleNamespace(_config=SimpleNamespace(stt_languages="en,fa"))

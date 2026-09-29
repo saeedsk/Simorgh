@@ -730,6 +730,7 @@ class Service:
             link.follow_up = lambda link=link, room=room: self._follows_up(link, room)
             link.conversation_s = lambda name=name: self._conversation_for(name)
             link.speaker.lead_in_s = lambda: float(self.config.satellite_lead_in_ms or 0) / 1000.0
+            link.speaker.lead_level = lambda: int(self.config.satellite_lead_in_level)
             link.music_sensitivity = lambda: str(self.config.satellite_music_sensitivity or "")
             link.on_connected = self._satellite_connected
             self._satellites[name] = link

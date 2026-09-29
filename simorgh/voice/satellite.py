@@ -104,7 +104,7 @@ WAKE_TONE_AMPLITUDE = 900           # about -31 dBFS on the wire, inaudible at 2
 WAKE_TONE_FADE_S = 0.05
 
 
-def _wake_noise(samples: int, sample_rate: int = 16000) -> bytes:
+def _wake_noise(samples: int, sample_rate: int = 16000, amplitude: int = WAKE_TONE_AMPLITUDE) -> bytes:
     """`samples` of the lead-in tone as int16 PCM (name kept for callers)."""
     import array
     import math
@@ -114,7 +114,7 @@ def _wake_noise(samples: int, sample_rate: int = 16000) -> bytes:
     step = 2.0 * math.pi * WAKE_TONE_HZ / sample_rate
     for i in range(samples):
         edge = min(1.0, i / fade, (samples - 1 - i) / fade) if samples > 1 else 0.0
-        out[i] = int(WAKE_TONE_AMPLITUDE * max(0.0, edge) * math.sin(step * i))
+        out[i] = int(amplitude * max(0.0, edge) * math.sin(step * i))
     if sys.byteorder != "little":
         out.byteswap()
     return out.tobytes()
@@ -248,6 +248,10 @@ class SatelliteSpeaker:
         #: "the first few characters of its reply are chopped out" (the
         #: creator, 2026-09-27, with an Echo Dot on the board's 3.5 mm jack).
         self.lead_in_s = 0.0
+        #: The lead-in tone's amplitude (`satellite_lead_in_level`; a callable,
+        #: read per reply). The Echo Dot plays a 20 Hz tone as a low hum --
+        #: the creator heard it (2026-09-29) -- so quieter where it still wakes.
+        self.lead_level = WAKE_TONE_AMPLITUDE
         self._last_end = 0.0
 
     def _lead_in(self) -> float:
@@ -269,7 +273,9 @@ class SatelliteSpeaker:
             padded = True
             # Only after a quiet spell: the pieces inside one reply follow
             # each other closely and the speaker is already awake.
-            audio = Audio(_wake_noise(int(lead * audio.sample_rate), audio.sample_rate) + audio.pcm, audio.sample_rate)
+            level = self.lead_level() if callable(self.lead_level) else self.lead_level
+            audio = Audio(_wake_noise(int(lead * audio.sample_rate), audio.sample_rate, int(level or 0)) + audio.pcm,
+                          audio.sample_rate)
         self._stop = asyncio.Event()
         started = time.monotonic()
         stopped = False

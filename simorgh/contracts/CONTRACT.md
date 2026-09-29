@@ -100,6 +100,8 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 
 - `settings.VOICE_SAFE_KEYS["tts_farsi"]` gains `chatterbox` (2026-09-29). Consumer: voice (`tts/__init__._farsi_synthesiser`).
 
+- `settings.VOICE_SAFE_KEYS` gains `satellite_lead_in_level` (2026-09-29). Consumer: voice (`satellite.SatelliteSpeaker.lead_level`).
+
 ## Invariants
 
 - `simorgh/contracts/` imports only the standard library and itself.
