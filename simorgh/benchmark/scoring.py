@@ -41,8 +41,13 @@ ANSWER_FORMAT = (
     "where <answer> is a number, or as few words as possible, or a comma "
     "separated list of numbers and/or strings. Do not use units, commas in "
     "numbers, or the % sign unless the question asks for them. Write digits "
-    "for numbers unless the question says otherwise."
+    "for numbers unless the question says otherwise. Use plain keyboard "
+    "punctuation in the answer: a hyphen (-), not a dash."
 )
+# "a hyphen, not a dash": the official scorer strips ASCII punctuation
+# only, so "Russian–German Legion" (en dash) never matched "Russian-German
+# Legion" -- a right answer scored wrong in the 2026-09-29 wave. The scorer
+# stays the official one; the answer is asked for in its alphabet.
 
 _ARTICLES = {"a", "an", "the"}
 _NUMBER = re.compile(r"^[-+]?\d{1,3}(,\d{3})*(\.\d+)?$|^[-+]?\d*\.?\d+$")
