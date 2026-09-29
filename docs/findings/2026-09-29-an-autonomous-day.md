@@ -41,6 +41,8 @@ gate once under load; it now waits for its answer (`ce9e349d`).
 | The full tier (every landing gate) was red on `main`: a missing live-status verb (mine), 135 `getattr(config)` reads against a ratchet of 127, four contradicting fallbacks, and an undeclared `voice.room.speech` subscription | a trial landing listed them as "also fail on main" | `e7af3f2f`, `df7b8896` |
 | Gemini could never see: the Router asked for an attribute Gemini did not have, and Gemini's `complete` dropped pictures. Fixed with `[cognition.providers.gemini] images` (default off -- camera stills would otherwise go to the cloud) | a GAIA copy: "nothing here can look at a picture (tried: together, gemini, floor)" | `b8437bb9` |
 | A red boot gate rolled back even for a failure that passes alone; two such load flakes seen today | the gate under load | `712fd967` |
+| **Security:** `web_fetch` checked only the first URL; a public redirect to `http://127.0.0.1:8765/api/status` returned the live Sim's status, and a bearer token would have followed a redirect to any host | reading why a GAIA level-3 case could not reach ctdbase.org | this commit series, "web_fetch checks every redirect hop" |
+| The verifier committed to its verdict before reasoning ("NO ... actually it rounds to 17000, the answer stands"), and a "Does the evidence contradict X?" question failed a correct answer on a required NO | GAIA verification records | two `verification:` commits |
 
 The creator's phone voice lagged ("something is hogging the CPU"): four
 benchmark copies, the trial suite and my gates had the load average near
