@@ -40,6 +40,20 @@ from dataclasses import dataclass, field
 #: cap that is too high.
 DEFAULT_NIGHTLY_USD = 0.50
 
+#: Every key `[growth]` itself is read for, beside its three parts'
+#: tables (estimate, monitors, explore). The kernel's config check warns
+#: about any other key as "nothing reads it" -- and until 2026-09-29 its
+#: own list stopped at `nightly_usd`, so switching the paid propose and
+#: measure steps on was reported as a setting with no effect.
+#: `tests/simorgh/growth/test_growth_names_the_keys_it_reads.py` keeps it
+#: honest against the code.
+TOP_LEVEL_KEYS = frozenset({
+    "nightly_usd",
+    "propose_policies", "propose_max", "propose_usd_per_draft", "propose_timeout_s",
+    "measure_policies", "held_out", "measure_repeats", "measure_usd_per_run", "measure_cases",
+    "measure_timeout_s",
+})
+
 
 @dataclass(frozen=True)
 class Step:

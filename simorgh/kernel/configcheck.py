@@ -323,12 +323,19 @@ def _section(config, name: str) -> dict:
     return dict(section) if isinstance(section, dict) else {}
 
 
-#: What `[growth]` itself may hold: its one key and its three parts' tables.
-GROWTH_KEYS = frozenset({"nightly_usd", "estimate", "monitors", "explore"})
+def _growth_keys() -> frozenset[str]:
+    """What `[growth]` itself may hold: the keys growth says it reads
+    (`growth/night.py::TOP_LEVEL_KEYS`) and its three parts' tables."""
+    from simorgh.growth.night import TOP_LEVEL_KEYS
+
+    return TOP_LEVEL_KEYS | {"estimate", "monitors", "explore"}
+
+
+GROWTH_KEYS = _growth_keys()
 
 
 def unknown_growth_keys(config) -> list[str]:
-    """Keys in `[growth]` that are neither `nightly_usd` nor a part."""
+    """Keys in `[growth]` that growth does not read and that name no part."""
     return sorted(set(config.section("growth")) - GROWTH_KEYS)
 
 
@@ -443,8 +450,9 @@ def report(config, logger) -> list[str]:
         logger.warning(
             "config.section_had_no_effect", section="growth", keys=stray,
             detail=f"[growth] {', '.join(stray)} in simorgh.toml: nothing reads "
-                   f"{'it' if len(stray) == 1 else 'them'} -- [growth] holds nightly_usd and the "
-                   f"[growth.estimate], [growth.monitors] and [growth.explore] tables",
+                   f"{'it' if len(stray) == 1 else 'them'} -- [growth] holds the keys in "
+                   f"simorgh/growth/night.py TOP_LEVEL_KEYS and the [growth.estimate], "
+                   f"[growth.monitors] and [growth.explore] tables",
         )
     for moved in renamed_sections(config):
         # A rename that says nothing is the silent half of a move: the

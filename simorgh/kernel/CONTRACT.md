@@ -186,3 +186,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 
 - Config check (2026-09-19): a section is reported only when it holds a key nothing reads, found by perturbing each key (`configcheck.unread_keys`); the warning names the keys. A correct key set to its default is no longer reported as a typo.
 - 2026-09-27: `registry` builds Execution with `extra_connectors=[domain_connectors]` beside `extra_tools=[domain_tools]`.
+- `configcheck.GROWTH_KEYS` (2026-09-29) comes from `simorgh.growth.night.TOP_LEVEL_KEYS` plus the three part tables. Its hard-coded list stopped at `nightly_usd`, so `propose_policies`/`measure_policies`/`held_out` -- read by growth/service.py -- were reported as "nothing reads them".
