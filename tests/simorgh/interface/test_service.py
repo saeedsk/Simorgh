@@ -357,7 +357,14 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         await self.bus.publish(self.bus.new(topics.UI_PROMPT, {
             "prompt_id": "p4", "question": "Approve?", "options": ["yes", "no"], "timeout_s": 0.05, "default": "no",
         }))
-        await asyncio.sleep(0.15)
+        # Wait for the answer rather than a fixed 0.15 s: on a loaded machine
+        # (four benchmark Sims beside the loader's gate, 2026-09-29) the
+        # watchdog's 0.05 s landed late and this failed the boot gate.
+        for _ in range(100):
+            if answers:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.05)   # and no second answer behind it
         await sub.unsubscribe()
         self.assertEqual(answers, [{"prompt_id": "p4", "answer": "no"}])
 
