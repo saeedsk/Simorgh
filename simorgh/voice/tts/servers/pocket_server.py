@@ -51,6 +51,27 @@ def keep_vowel_marks(normalize_fa) -> None:
 _PUNCT = "،؛.!?؟:\"'«»()[]-—–" + VOWEL_MARKS
 
 
+def aligned_sounds(words: str, g2p) -> str:
+    """The G2P's sounds for `words`, one sound-word per word.
+
+    On a very short line the G2P loops: «سعید، سعید.» came back as s/@id
+    six times, Pocket said the name stuttered and mangled ("سگیده"), and the
+    lexicon -- which lines words and sounds up by position -- could not fix
+    it (live, 2026-09-28). When the count is wrong the line is redone a word
+    at a time, keeping each word's first sound-word: a single word cannot
+    loop into its neighbours."""
+    said = words.split()
+    sounds = g2p(words)
+    if len(sounds.split()) == len(said) or not said:
+        return sounds
+    one_by_one = []
+    for word in said:
+        bare = word.strip(_PUNCT)
+        got = g2p(bare).split() if bare else []
+        one_by_one.append(got[0] if got else "")
+    return " ".join(s for s in one_by_one if s)
+
+
 def with_lexicon(words: str, sounds: str, lexicon: dict) -> str:
     """The G2P's `sounds` with every word the house gave its own sounds
     for (`[voice] tts_farsi_lexicon`) replaced. The G2P writes one
@@ -107,12 +128,15 @@ def main() -> None:                                     # noqa: C901 -- one prot
                           "error": f"could not load Pocket-TTS: {exc.__class__.__name__}: {exc}"}), flush=True)
         return
 
-    def phonemise(text: str, lexicon: dict | None = None) -> str:
-        cleaned = normalize_for_model(text).replace("؟", "").replace("?", "")
-        enc = g2p_tok([cleaned], add_special_tokens=False, return_tensors="pt")
+    def g2p_once(text: str) -> str:
+        enc = g2p_tok([text], add_special_tokens=False, return_tensors="pt")
         with torch.no_grad():
             out = g2p.generate(**enc, num_beams=5, max_length=512, early_stopping=True)
-        sounds = g2p_tok.batch_decode(out, skip_special_tokens=True)[0].strip()
+        return g2p_tok.batch_decode(out, skip_special_tokens=True)[0].strip()
+
+    def phonemise(text: str, lexicon: dict | None = None) -> str:
+        cleaned = normalize_for_model(text).replace("؟", "").replace("?", "")
+        sounds = aligned_sounds(cleaned, g2p_once)
         return with_lexicon(cleaned, sounds, lexicon or {}).translate(TO_PHONEMES)
 
     print(json.dumps({"ready": True, "engine": "pocket", "device": "cpu", "rate": RATE}), flush=True)

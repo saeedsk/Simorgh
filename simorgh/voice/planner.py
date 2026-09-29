@@ -404,6 +404,42 @@ def _persian_script(text: str) -> bool:
     return persian / len(letters) > 0.5
 
 
+#: Short-vowel marks (fatha, damma, kasra, shadda).
+_MARKS = "\u064e\u064f\u0650\u0651"
+#: Words whose reading turns on a short vowel, or that the Farsi voice
+#: misreads without one: their marks are kept even in an over-marked reply.
+_TWO_WAY = frozenset({"ترک", "ملک", "کرم", "مرد", "شعر", "عصر", "خنک", "گل", "کشتی", "سر", "در", "بر",
+                      "خرد", "شکر", "مهر", "دم", "کشت", "پر", "حرف", "خط"})
+#: Above this share of marked words, a reply is over-marked.
+OVER_MARKED = 0.35
+
+
+def _lightly_marked(text: str) -> str:
+    """A Farsi reply marked on nearly every word -- «اَصلاً دُرُست نیست؛
+    سیستمِ صِدا کَلَمه را غَلَط خواند» (live, 2026-09-28), against the
+    prompt's "a few marks" -- keeps only the ezafe at a word's end and the
+    marks on two-way words (`_TWO_WAY`). Every mark is read as written, and
+    the creator chose the light style by ear. A lightly marked reply is
+    left as it is."""
+    words = text.split()
+    persian = [w for w in words if _persian_script(w)]
+    marked = [w for w in persian if any(m in w for m in _MARKS)]
+    if not persian or len(marked) / len(persian) <= OVER_MARKED:
+        return text
+
+    def light(word: str) -> str:
+        bare = "".join(c for c in word if c not in _MARKS)
+        if bare.strip("،؛.!?؟:«»()") in _TWO_WAY:
+            return word
+        core = word.rstrip("،؛.!?؟:«»()")
+        tail = word[len(core):]
+        ezafe = core.endswith("\u0650")
+        core = "".join(c for c in core if c not in _MARKS)
+        return core + ("\u0650" if ezafe else "") + tail
+
+    return " ".join(light(w) if _persian_script(w) else w for w in words)
+
+
 def _names_in_persian(text: str) -> str:
     """Household names written in Latin letters -- or as the model's own
     respelling of them -- replaced by their Persian spelling."""
@@ -713,7 +749,7 @@ class SpokenResponsePlanner:
             # phonemes from Persian script, and "Saeed" -- or its English
             # respelling "sa'eed" -- in the middle of one was read as
             # letters (live, 2026-09-27: "اشکال داره sa'eed، ...").
-            text = _names_in_persian(text)
+            text = _lightly_marked(_names_in_persian(text))
             table = self._farsi_pronunciations
             table = table() if callable(table) else (table or {})
             return _said_in_farsi(text, table)
