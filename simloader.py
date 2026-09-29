@@ -602,6 +602,16 @@ def run_gate(repo: Path, *, full: bool, timeout_s: float, notes: Path | None = N
             (notes / "last_unit.txt").write_text(tests.stdout)
         unit_ok, unit_why, ran = unit_verdict(tests.returncode, tests.stdout, baseline=read_baseline(notes, scope))
         if not unit_ok:
+            alone = passes_alone(repo, tests.returncode, tests.stdout, timeout_s=min(300.0, timeout_s))
+            if alone:
+                # Timing, not code: a failure that passes on its own must
+                # not roll the checkout back (2026-09-29: two different
+                # tests failed once each under load, beside four benchmark
+                # copies, and passed alone every time).
+                say(f"{len(alone)} failure(s) passed when run alone -- load, not code: "
+                    + ", ".join(alone), "note")
+                unit_ok, unit_why = True, f"{ran} tests ran; {len(alone)} failed under load and passed alone"
+        if not unit_ok:
             # Name them. "9 failed" alone sent the human off to re-run
             # the whole suite to learn which nine (2026-09-07). `ERROR `
             # is what a collection failure looks like -- exactly the
@@ -795,6 +805,44 @@ def unit_summary(text: str) -> dict[str, int]:
             counts["error" if word.startswith("error") else word] = int(number)
         return counts
     return {}
+
+
+#: At most this many failures are re-run alone. More than a handful is not
+#: a timing flake, and re-running a broken suite test by test would only
+#: make a red gate slow.
+MAX_RERUN_ALONE = 5
+
+
+def failed_nodeids(text: str) -> list[str] | None:
+    """The node ids of `FAILED` lines, or None when anything else went
+    wrong -- a collection `ERROR` (an import broken) is never a flake."""
+    ids: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("ERROR "):
+            return None
+        if line.startswith("FAILED "):
+            nodeid = line[len("FAILED "):].split(" - ", 1)[0].strip()
+            if "::" not in nodeid:
+                return None
+            ids.append(nodeid)
+    return ids
+
+
+def passes_alone(repo: Path, code: int, text: str, *, timeout_s: float = 300.0) -> list[str]:
+    """The failures, when every one of them passes run on its own, one
+    process, no parallel workers; else []. The re-run is judged by
+    `unit_verdict` like the suite, so a hook that rewrites the exit code
+    buys nothing here either."""
+    ids = failed_nodeids(text) if code == 1 else None
+    if not ids or len(ids) > MAX_RERUN_ALONE:
+        return []
+    try:
+        again = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *ids],
+                               cwd=repo, capture_output=True, text=True, timeout=timeout_s)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    ok, _why, ran = unit_verdict(again.returncode, again.stdout, baseline=None)
+    return ids if ok and ran == len(ids) else []
 
 
 def unit_verdict(code: int, text: str, *, baseline: int | None) -> tuple[bool, str, int]:

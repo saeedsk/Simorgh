@@ -992,3 +992,36 @@ class TheHouseGateLeavesTheRepoAlone(unittest.TestCase):
         target = argv[argv.index("--findings") + 1]
         self.assertTrue(target.startswith(str(notes)), target)
         self.assertNotIn("docs/findings", target)
+
+
+class AFailureThatPassesAloneIsLoadNotCodeTestCase(unittest.TestCase):
+    """2026-09-29: two different gate tests failed once each under load
+    (four benchmark copies running) and passed alone every time. At boot,
+    a red gate rolls the checkout back -- for a timing flake."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name)
+        (self.repo / "test_x.py").write_text(
+            "def test_fine():\n    assert True\n\ndef test_broken():\n    assert False\n")
+
+    def test_a_test_that_passes_alone_is_forgiven(self):
+        suite = "F.\nFAILED test_x.py::test_fine - AssertionError: slow under load\n1 failed, 1 passed\n"
+        self.assertEqual(simloader.passes_alone(self.repo, 1, suite), ["test_x.py::test_fine"])
+
+    def test_a_test_that_fails_alone_too_is_not(self):
+        suite = "F.\nFAILED test_x.py::test_broken - AssertionError\n1 failed, 1 passed\n"
+        self.assertEqual(simloader.passes_alone(self.repo, 1, suite), [])
+
+    def test_a_collection_error_is_never_a_flake(self):
+        suite = "ERROR test_y.py\nFAILED test_x.py::test_fine - x\n1 failed, 1 error\n"
+        self.assertEqual(simloader.passes_alone(self.repo, 1, suite), [])
+
+    def test_more_than_a_handful_is_not_timing(self):
+        lines = "".join(f"FAILED test_x.py::test_fine[{i}] - x\n" for i in range(simloader.MAX_RERUN_ALONE + 1))
+        self.assertEqual(simloader.passes_alone(self.repo, 1, lines), [])
+
+    def test_only_exit_code_one(self):
+        suite = "FAILED test_x.py::test_fine - x\n1 failed\n"
+        self.assertEqual(simloader.passes_alone(self.repo, 2, suite), [])

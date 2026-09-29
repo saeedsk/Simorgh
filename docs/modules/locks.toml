@@ -4,3 +4,15 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.docs]
+by = "opus-main"
+task = "architecture: the gate forgives a failure that passes alone"
+since = "2026-09-29T16:45:12+00:00"
+until = "2026-09-30T00:45:12+00:00"
+
+[locks.simloader]
+by = "opus-main"
+task = "a failure that passes alone does not roll the checkout back"
+since = "2026-09-29T16:43:29+00:00"
+until = "2026-09-30T00:43:29+00:00"
