@@ -366,3 +366,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 
 - `execution:tools` `registered` records carry `description` and `input_schema` for builtin, MCP and skill tools, so Guardian's boot-time replay knows each tool's arguments (stage 2 item 7).
 - 2026-09-27: `Service(extra_connectors=[factory])` -- factories `(config, secrets=) -> [connector]` called at start, their connectors probed and closed like the rest. The Kernel passes `simorgh.domains.domain_connectors` (the mail/calendar accounts); the dead `.pim.accounts` import is gone.
+- The `people` tool gains `set_tool` (2026-09-29, stage 6 item 5): `tool` and `answer` (allow | ask | deny, "" to clear) -- one tool for one person above or below their role, through the same tier-3 path as a link.

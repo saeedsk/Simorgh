@@ -12,9 +12,16 @@
         "grant",
         "revoke",
         "add_interest",
-        "remove_interest"
+        "remove_interest",
+        "set_tool"
       ],
       "type": "string"
+    },
+    "answer": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "identity": {
       "type": [
@@ -41,6 +48,12 @@
       ]
     },
     "role": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
       "type": [
         "string",
         "null"

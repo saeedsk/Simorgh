@@ -178,6 +178,13 @@ class PeopleFacet:
     def remove_interest(self, name: str, topic: str) -> Person | None:
         return self._change(name, lambda p: p.without_interest(topic))
 
+    def set_tool(self, name: str, tool: str, answer: str) -> Person | None:
+        """The per-person matrix (stage 6 item 5): `answer` "" clears the
+        entry, so their role decides again. Confirmed by a person first."""
+        if not (answer or "").strip():
+            return self._change(name, lambda p: p.without_tool(tool))
+        return self._change(name, lambda p: p.with_tool(tool, answer))
+
     def consented(self, name: str, permission: str) -> bool:
         """Whether the named person granted `permission`. The role gate is
         `contracts.people.may_check_in` / `may_share_interest`; this is

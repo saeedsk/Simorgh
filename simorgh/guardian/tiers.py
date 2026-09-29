@@ -93,9 +93,26 @@ class PersonRule:
             stored = await ctx.role(requester.strip())
         role = stored or role_of(requester, channel=getattr(proposal, "requester_channel", "") or "")
         tier, why = tier_of(proposal, getattr(ctx, "tool", None))
+        who = getattr(proposal, "requester", "") or "a voice I cannot place"
+        # The per-person matrix (stage 6 item 5) before the ceiling: a
+        # person's own answer for this tool, set by a person with `people
+        # set_tool`. Never for a voice Sim cannot place -- a record is found
+        # by name, and "unknown" has no name to find.
+        answer = ""
+        if requester.strip() and role not in ("unknown", "sim") and getattr(ctx, "tool_answer", None) is not None:
+            answer = await ctx.tool_answer(requester.strip(), proposal.tool)
+        if answer == "deny":
+            return Decision("deny", self.layer, (f"{who} may not use {proposal.tool} -- a person said so",))
+        if answer == "ask":
+            return Decision("escalate", self.layer,
+                            (f"{who} asks an adult before {proposal.tool} -- a person said so",))
+        if answer == "allow" and tier <= 2:
+            # Up to tier 2. Tier 3 -- outside the house, physical, money --
+            # stays a person's yes whoever asks (TierRule), and an allow
+            # here must not read as the matrix having waved it through.
+            return Decision("abstain", self.layer)
         if tier <= CEILING.get(role, 0):
             return Decision("abstain", self.layer)
-        who = getattr(proposal, "requester", "") or "a voice I cannot place"
         if role == "unknown":
             return Decision("deny", self.layer,
                             (f"{who} is not someone I know, and this {why}",))

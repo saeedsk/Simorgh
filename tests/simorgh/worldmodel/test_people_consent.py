@@ -94,6 +94,21 @@ class ConsentOverTheBus(unittest.IsolatedAsyncioTestCase):
         await self._update(action="remove_interest", name="Aran", interest="lego robotics")
         self.assertEqual((await self._person("Aran"))["interests"], [])
 
+    async def test_one_tool_for_one_person_is_set_read_back_and_cleared(self):
+        # Stage 6 item 5, the per-person matrix.
+        reply = await self._update(action="set_tool", name="Iris", tool="music_play", answer="allow")
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual((await self._person("Iris"))["tools"], {"music_play": "allow"})
+        self.assertIn('"music_play"', (self.data_dir / "people.json").read_text())
+        reply = await self._update(action="set_tool", name="Iris", tool="music_play", answer="")
+        self.assertIn("follows their role", reply["detail"])
+        self.assertEqual((await self._person("Iris"))["tools"], {})
+
+    async def test_an_answer_that_is_not_allow_ask_or_deny_is_refused(self):
+        reply = await self._update(action="set_tool", name="Iris", tool="music_play", answer="alow")
+        self.assertIs(reply.get("ok"), False)
+        self.assertIn("not an answer", reply["error"]["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

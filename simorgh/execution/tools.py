@@ -3365,20 +3365,23 @@ class PeopleTool:
     description = ("Who somebody is to Sim: link a chat handle or voice to a household person, "
                    "unlink one, set a role, record what they said yes to (grant | revoke a "
                    "permission: wellbeing_checkins, interest_shares) or what they care about "
-                   "(add_interest | remove_interest). `identity` looks like telegram:<handle>, "
+                   "(add_interest | remove_interest), or one tool for one person above or below their "
+                   "role (set_tool with `tool` and `answer` allow | ask | deny, \"\" to clear -- e.g. Iris may "
+                   "music_play without asking). `identity` looks like telegram:<handle>, "
                    "whatsapp:<number> or voice:<name>. Every action asks a person.")
     read_only = False
     reversibility = "reversible"     # a link can be unlinked; the tier is what gates it
     args_schema = {
         "type": "object", "required": ["action"],
         "properties": {"action": {"type": "string", "enum": ["link", "unlink", "set_role", "grant", "revoke",
-                                                             "add_interest", "remove_interest"]},
+                                                             "add_interest", "remove_interest", "set_tool"]},
                        "name": {"type": "string"}, "identity": {"type": "string"},
                        "role": {"type": "string", "enum": ["owner", "adult", "child", "guest", "unknown"]},
                        # Consent (stage 10) travels the same tier-3 path as a link:
                        # a permission is never inferred from a turn.
                        "permission": {"type": "string", "enum": ["wellbeing_checkins", "interest_shares"]},
-                       "interest": {"type": "string"}},
+                       "interest": {"type": "string"},
+                       "tool": {"type": "string"}, "answer": {"type": "string", "enum": ["allow", "ask", "deny", ""]}},
     }
 
     def __init__(self, config: Config) -> None:
@@ -3391,7 +3394,8 @@ class PeopleTool:
         payload = {"action": str(args.get("action") or ""),
                    "name": str(args.get("name") or ""), "identity": str(args.get("identity") or ""),
                    "role": str(args.get("role") or ""),
-                   "permission": str(args.get("permission") or ""), "interest": str(args.get("interest") or "")}
+                   "permission": str(args.get("permission") or ""), "interest": str(args.get("interest") or ""),
+                   "tool": str(args.get("tool") or ""), "answer": str(args.get("answer") or "")}
         try:
             reply = await ctx.bus.request(ctx.bus.new(topics.WORLD_PEOPLE_UPDATE, payload), timeout=5.0)
         except TimeoutError:

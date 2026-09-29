@@ -88,6 +88,11 @@ class DecisionContext:
     #: Without it a role set through the `people` tool changed nothing
     #: Guardian decided.
     role: Callable[[str], Awaitable[str | None]] | None = None
+    #: `(person, tool) -> "allow" | "ask" | "deny" | ""` from the same
+    #: store's per-person matrix (stage 6 item 5): "" when they have no
+    #: entry for that tool, the store has no record, or cannot be asked --
+    #: then the role's ceiling decides, as before.
+    tool_answer: Callable[[str, str], Awaitable[str]] | None = None
 
 
 @dataclass(frozen=True)

@@ -98,6 +98,7 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 
 - `settings.VOICE_SAFE_KEYS` gains `tts_farsi_lexicon` (2026-09-27): Farsi words the Farsi voice says in given sounds. Consumer: voice (`tts/pocket.py`); interface's `voice set` completion lists it.
 - `settings.VOICE_SAFE_KEYS` gains `tts_farsi_respell` (2026-09-29): Farsi words Chatterbox Persian says wrong, respelled (`word=spelling; ...`). Consumer: voice (`tts/chatterbox_fa.py`); interface's `voice set` completion lists it.
+- `people.Person.tools` and `people.TOOL_ANSWERS` (2026-09-29, stage 6 item 5 -- the per-person matrix): `{tool: allow|ask|deny}`, `tool_answer`, `with_tool`, `without_tool`; `to_dict`/`from_dict` carry it (a file without it reads as empty). `world.people.update` gains `action: set_tool` with `tool` and `answer`. Consumers: worldmodel (store, `set_tool`), guardian (`PersonRule` via `DecisionContext.tool_answer`), execution (`people` tool).
 
 - `settings.VOICE_SAFE_KEYS["tts_farsi"]` gains `chatterbox` (2026-09-29). Consumer: voice (`tts/__init__._farsi_synthesiser`).
 

@@ -23,12 +23,16 @@ WorldPeopleUpdate = define(t.WORLD_PEOPLE_UPDATE, [
     # grant/revoke and add_interest/remove_interest: what a person said yes
     # to and what they care about (stage 10). The same write, the same
     # tier: consent is never inferred from a turn.
-    F("action", Enum("link", "unlink", "set_role", "grant", "revoke", "add_interest", "remove_interest")),
+    F("action", Enum("link", "unlink", "set_role", "grant", "revoke", "add_interest", "remove_interest", "set_tool")),
     O("name", Str),        # the household name; required for everything but unlink
     O("identity", Str),    # "telegram:irak", "whatsapp:1555...", "voice:ira"
     O("role", Str),        # owner | adult | child | guest | unknown
     O("permission", Str),  # of contracts.people.PERMISSIONS; for grant and revoke
     O("interest", Str),    # a short topic; for add_interest and remove_interest
+    # set_tool (stage 6 item 5, the per-person matrix): one tool, and
+    # allow | ask | deny, or "" to let the person's role decide again.
+    O("tool", Str),
+    O("answer", Str),
 ], doc="Change who a person is as far as Sim is concerned (stage 6 item 4), what they said yes to and "
        "what they care about (stage 10). A write: tier 3 on the way in, so a person confirms it.")
 WorldPeopleUpdateReply = define(t.WORLD_PEOPLE_UPDATE_REPLY, [

@@ -699,6 +699,7 @@ class Service:
             # the belief; Guardian keeps no presence of its own.
             presence=self._presence_of,
             role=self._role_in_store,
+            tool_answer=self._tool_answer_in_store,
         )
 
         stream = f"action:{action_id}"
@@ -877,6 +878,32 @@ class Service:
         # whether it could tell one voice from another has not said yes.
         return (float(payload.get("belief") or 0.0), bool(payload.get("verified", False)))
 
+    async def _record_in_store(self, person: str) -> dict | None:
+        """`person`'s People-store record, or None: no record, or World
+        Model slow or absent (then the household file decides)."""
+        from simorgh.contracts import topics
+        from simorgh.contracts.envelope import Message
+
+        try:
+            reply = await self._ctx.bus.request(
+                Message.new(topics.WORLD_ENV_QUERY, source=self._ctx.source,
+                            payload={"what": "people", "args": {"name": person}}),
+                timeout=0.5)
+        except Exception:  # noqa: BLE001 -- no answer: the household file decides
+            return None
+        payload = reply.payload or {}
+        return payload if payload.get("person") else None
+
+    async def _tool_answer_in_store(self, person: str, tool: str) -> str:
+        """The per-person matrix (stage 6 item 5): "allow", "ask", "deny",
+        or "" -- no entry, no record, no answer -- and the role decides."""
+        from simorgh.contracts.people import TOOL_ANSWERS
+
+        record = await self._record_in_store(person)
+        tools = ((record or {}).get("person") or {}).get("tools") or {}
+        answer = str(tools.get(tool, "") if isinstance(tools, dict) else "").strip().lower()
+        return answer if answer in TOOL_ANSWERS else ""
+
     async def _role_in_store(self, person: str) -> str | None:
         """`person`'s role in the People store, or None for no record.
 
@@ -887,19 +914,10 @@ class Service:
         absent or has never heard of them: `PersonRule` then uses the
         household file, which is what it did before.
         """
-        from simorgh.contracts import topics
-        from simorgh.contracts.envelope import Message
         from simorgh.contracts.people import ROLES
 
-        try:
-            reply = await self._ctx.bus.request(
-                Message.new(topics.WORLD_ENV_QUERY, source=self._ctx.source,
-                            payload={"what": "people", "args": {"name": person}}),
-                timeout=0.5)
-        except Exception:  # noqa: BLE001 -- no answer: the household file decides
-            return None
-        payload = reply.payload or {}
-        if not payload.get("person"):
+        payload = await self._record_in_store(person)
+        if payload is None:
             return None
         role = str(payload.get("role") or "")
         return role if role in ROLES else None

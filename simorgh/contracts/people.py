@@ -63,6 +63,14 @@ CHECK_IN_ROLES: tuple[str, ...] = ("owner", "adult")
 #: child's permission is granted by a parent through the same tool.
 INTEREST_SHARE_ROLES: tuple[str, ...] = ("owner", "adult", "child")
 
+#: A person's answer for one tool, above or below their role's ceiling
+#: (stage 6 item 5, the per-person matrix): `allow` lets them use it
+#: without asking up to tier 2 (tier 3 stays a person's yes whoever asks),
+#: `ask` sends it to an adult even within their ceiling, `deny` refuses it.
+#: Set with the `people` tool (`set_tool`), a tier-3 action a person
+#: confirms. Nothing here is inferred: no entry means the role decides.
+TOOL_ANSWERS: tuple[str, ...] = ("allow", "ask", "deny")
+
 #: An interest is a short topic, not a paragraph.
 INTEREST_MAX_CHARS = 60
 
@@ -78,6 +86,7 @@ class Person:
     preferences: dict = field(default_factory=dict)
     permissions: tuple[str, ...] = ()       # of PERMISSIONS; granted by a person, never inferred
     interests: tuple[str, ...] = ()         # short topics, normalised
+    tools: dict = field(default_factory=dict)  # tool name -> one of TOOL_ANSWERS
 
     @property
     def namespace(self) -> str:
@@ -112,6 +121,24 @@ class Person:
         permission = (permission or "").strip().lower()
         return replace(self, permissions=tuple(p for p in self.permissions if p != permission))
 
+    # -- the per-person matrix (stage 6 item 5) -------------------------------------------
+    def tool_answer(self, tool: str) -> str:
+        """`allow`, `ask`, `deny`, or "" when their role decides."""
+        return str(self.tools.get((tool or "").strip(), ""))
+
+    def with_tool(self, tool: str, answer: str) -> "Person":
+        """Raises `ValueError` for an answer that is not one of
+        TOOL_ANSWERS, so "alow" is refused rather than silently nothing."""
+        tool, answer = (tool or "").strip(), (answer or "").strip().lower()
+        if not tool:
+            raise ValueError("which tool?")
+        if answer not in TOOL_ANSWERS:
+            raise ValueError(f"{answer!r} is not an answer; one of {', '.join(TOOL_ANSWERS)}")
+        return replace(self, tools={**self.tools, tool: answer})
+
+    def without_tool(self, tool: str) -> "Person":
+        return replace(self, tools={k: v for k, v in self.tools.items() if k != (tool or "").strip()})
+
     # -- what they care about --------------------------------------------------------
     def with_interest(self, topic: str) -> "Person":
         topic = normalise_interest(topic)
@@ -126,7 +153,8 @@ class Person:
     def to_dict(self) -> dict:
         return {"person_id": self.person_id, "name": self.name, "role": self.role,
                 "identities": list(self.identities), "preferences": dict(self.preferences),
-                "permissions": list(self.permissions), "interests": list(self.interests)}
+                "permissions": list(self.permissions), "interests": list(self.interests),
+                "tools": dict(self.tools)}
 
 
 def from_dict(data: dict) -> Person:
@@ -142,6 +170,9 @@ def from_dict(data: dict) -> Person:
                           if p in PERMISSIONS),
         interests=tuple(dict.fromkeys(t for t in (normalise_interest(x) for x in (data.get("interests") or ()))
                                       if t)),
+        # A file from before the matrix has none: the role decides, as it did.
+        tools={str(k).strip(): str(v).strip().lower() for k, v in dict(data.get("tools") or {}).items()
+               if str(k).strip() and str(v).strip().lower() in TOOL_ANSWERS},
     )
 
 
@@ -220,6 +251,6 @@ def household_people() -> tuple[Person, ...]:
     return tuple(out)
 
 
-__all__ = ["CHECK_IN_ROLES", "INTEREST_MAX_CHARS", "INTEREST_SHARE_ROLES", "KINDS", "PERMISSIONS", "Person",
+__all__ = ["CHECK_IN_ROLES", "INTEREST_MAX_CHARS", "INTEREST_SHARE_ROLES", "KINDS", "PERMISSIONS", "Person", "TOOL_ANSWERS",
            "ROLES", "from_dict", "household_people", "may_check_in", "may_share_interest", "normalise_identity",
            "normalise_interest"]
