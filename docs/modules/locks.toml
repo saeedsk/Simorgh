@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.tools]
-by = "opus-main"
-task = "bench_instance --providers"
-since = "2026-09-29T16:16:06+00:00"
-until = "2026-09-30T00:16:06+00:00"
