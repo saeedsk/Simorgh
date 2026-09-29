@@ -54,12 +54,16 @@ class _Response:
 
 
 def _pypi_payload(name="homeharvest", first="2023-10-02", homepage="https://github.com/x/y"):
+    # The latest upload is never before `first`: a fixed 2026-08-30 here made
+    # `first=<3 days ago>` read as 30 days old once the calendar passed
+    # 2026-09-29, and the age test (and the loader gate) failed on the date.
+    latest = max(first, "2026-08-30")
     return json.dumps({
         "info": {"name": name, "summary": "Real estate scraping", "version": "0.8.18",
                  "license": "MIT", "home_page": homepage, "project_urls": {}},
         "releases": {
             "0.1.0": [{"upload_time_iso_8601": f"{first}T00:00:00Z"}],
-            "0.8.18": [{"upload_time_iso_8601": "2026-08-30T00:00:00Z"}],
+            "0.8.18": [{"upload_time_iso_8601": f"{latest}T00:00:00Z"}],
         },
     })
 
