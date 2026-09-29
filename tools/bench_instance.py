@@ -114,7 +114,7 @@ async def run(args) -> int:
     # --out, not here, so nothing worth keeping is lost.
     shutil.rmtree(data, ignore_errors=True)
     os.environ["SIMORGH_RUNTIME_DATA_DIR"] = str(data)
-    os.environ["SIMORGH_COGNITION_PROVIDER_ORDER"] = "together,floor"
+    os.environ["SIMORGH_COGNITION_PROVIDER_ORDER"] = args.providers
     kernel = Kernel(LoadedConfig({
         "runtime": {"data_dir": str(data)},
         "execution": {"repo_root": str(repo)},
@@ -288,6 +288,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--orch", action="append", default=[], help="orchestration setting key=value, repeatable")
     parser.add_argument("--arm", default="", help="comparison arm label recorded on every row")
     parser.add_argument("--max-runs", type=int, default=0, help="stop after this many runs (0: until --until)")
+    parser.add_argument("--providers", default="together,floor",
+                        help="cognition provider order; add gemini for a provider that can see images "
+                             "(look_at_image) -- rows then list it under served_by_others")
     return asyncio.run(run(parser.parse_args(argv)))
 
 
