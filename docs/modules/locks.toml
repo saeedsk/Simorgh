@@ -11,12 +11,6 @@ task = "a swebench case works in its checkout, not a worktree of this repo"
 since = "2026-09-22T20:59:38+00:00"
 until = "2026-09-23T04:59:38+00:00"
 
-[locks.contracts]
-by = "opus-main"
-task = "tts_farsi chatterbox option"
-since = "2026-09-29T07:42:33+00:00"
-until = "2026-09-29T15:42:33+00:00"
-
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
@@ -34,9 +28,3 @@ by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "Chatterbox Persian as the Farsi engine"
-since = "2026-09-29T07:42:33+00:00"
-until = "2026-09-29T15:42:33+00:00"
