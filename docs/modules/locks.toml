@@ -11,12 +11,6 @@ task = "a swebench case works in its checkout, not a worktree of this repo"
 since = "2026-09-22T20:59:38+00:00"
 until = "2026-09-23T04:59:38+00:00"
 
-[locks.docs]
-by = "opus-main"
-task = "plan status truth: stage 12, stage 3 item 6 decision"
-since = "2026-09-29T14:50:46+00:00"
-until = "2026-09-29T22:50:46+00:00"
-
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
