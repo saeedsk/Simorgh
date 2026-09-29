@@ -158,3 +158,29 @@ trial's own copy; on the checkout both pass.
 - GAIA level 2, 10 cases: 7/10. The misses are the model's (a p-value
   reasoning slip, 1.4564 Å rounded to 1.46 where 1.456 is expected, EC
   numbers of chemicals where enzymes were meant).
+
+## End of day
+
+Blessed `sim-good-0057` (core 4467 green, household 3/3, house 10/10);
+the full tier is 8049 passed with one flake. A final GAIA level-1 slice
+with every fix: 7/12, no benchmark lookups.
+
+**Open, and why:**
+- The live Sim still runs the code it booted at 06:24; none of today's
+  fixes reach it until a restart.
+- `[cognition.providers.gemini] images = true` is the creator's call:
+  it lets camera stills and other pictures go to Google. Off by default.
+- Stage 12 item 4 (push an unanswered prompt) needs a channel chosen:
+  none of ntfy, Gotify or a Home Assistant notify service is configured.
+- Measuring a `patch` rule (stage 8 item 5) needs about 20 GB free for
+  SWE-bench images, or a container-free held-out suite for `patch`.
+- A family of kernel tests that boot two kernels on one SQLite file
+  (`TestWorkerKernel`, `TestLocalMultiMode`) fails once in a while under
+  parallel load and passes alone; three seen today, none reproduced in
+  six concurrent runs. The loader forgives them now; the cause is not
+  found.
+- Pocket's author rules were not applied: Pocket is only the fallback
+  behind Chatterbox, and changing it without an A/B the creator can hear
+  is against his rule for the Farsi voice.
+- Silent benchmark lookups (an answer that does not admit it) are still
+  invisible; treat GAIA numbers as an upper bound.
