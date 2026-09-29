@@ -149,6 +149,10 @@ trial's own copy; on the checkout both pass.
   Legion" (en dash). The scorer strips ASCII punctuation only, as the
   official one does, so the answer format now asks for a hyphen; the
   scorer is unchanged.
+- A case that answered three times, each blocked by our verifier, was
+  recorded "no answer within 600s": a block does not wake the runner's
+  wait, and the timeout asked whether one had arrived before the wait
+  began. Fixed, and the latest blocked answer (not the first) is scored.
 - A `web_fetch` of ctdbase.org loops on 302 whatever is sent (cookies
   included): a bot wall, not a Sim fault.
 - GAIA level 2, 10 cases: 7/10. The misses are the model's (a p-value
