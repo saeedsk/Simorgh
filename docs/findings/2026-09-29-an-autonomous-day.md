@@ -36,6 +36,20 @@ gate once under load; it now waits for its answer (`ce9e349d`).
 | The config check called `propose_policies`/`measure_policies`/`held_out` "nothing reads them" while growth read each one | same | `9ef27e19` |
 | SWE-bench pulled ~3 GB images with no disk check outside `bench_instance` | the growth night filled the disk to 10 GB | `c170f9d4` |
 | Chatterbox said عصرت "asrat": vowel marks did not move it; an alef spelling did (whisper forced to English: "Asrat" x6 vs "Asred"/"Astrid") | the creator, then measured | `1ef5dc5c` |
+| `look_at_image` failed its schema on every call, and `people` (roles, consent, the matrix) had never worked from a marker reply: several fields, no mapping, JSON passed on as `{"argument": ...}` | the GAIA copy's verifier: "all three look_at_image attempts failed with schema validation errors" | `56d307d7` |
+| From the phone: "I can't reach the MacBook's processes from here" and "Tailscale isn't installed on this host" -- nothing told the model where it runs, and the Tailscale CLI lives inside its app | the creator's phone conversation | `1c741fbc` |
+| The full tier (every landing gate) was red on `main`: a missing live-status verb (mine), 135 `getattr(config)` reads against a ratchet of 127, four contradicting fallbacks, and an undeclared `voice.room.speech` subscription | a trial landing listed them as "also fail on main" | `e7af3f2f`, `df7b8896` |
+| Gemini could never see: the Router asked for an attribute Gemini did not have, and Gemini's `complete` dropped pictures. Fixed with `[cognition.providers.gemini] images` (default off -- camera stills would otherwise go to the cloud) | a GAIA copy: "nothing here can look at a picture (tried: together, gemini, floor)" | `b8437bb9` |
+| A red boot gate rolled back even for a failure that passes alone; two such load flakes seen today | the gate under load | `712fd967` |
+
+The creator's phone voice lagged ("something is hogging the CPU"): four
+benchmark copies, the trial suite and my gates had the load average near
+30. The wave was cut to two copies. My own scratch gate script also
+exited 0 on a red run, so one commit went in on a (flaky) red gate; the
+script is fixed.
+
+Blessed `sim-good-0055` at 09:30 (core 4450 green, household 3/3, house
+10/10) so a rollback no longer lands on the morning's old tag.
 
 Also done: the per-person permission matrix, the last open piece of stage 6
 item 5 (`bb3a437e`); stage 12's status line brought up to the code, and
