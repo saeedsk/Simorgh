@@ -113,3 +113,25 @@ a clean worktree. The rule in memory ("never beside another pytest")
 held; I broke it. The watched `create-a-file` trial passed on its own
 (wrote, tested, committed, landed). The suite is to be re-run on a quiet
 machine.
+
+**Re-run on a quiet machine (10:40, no gates of mine, one BFCL copy):
+6/7 clean, $0.073.** create-a-file, edit-an-existing-file, write-a-skill,
+research-a-question, continues-across-attempts and breaks-the-suite
+passed. `already-done` "failed" by expanding `vitals.py`'s docstring --
+the existing one explains the design but not what the cache holds, which
+is what the task asked; the trial's premise is weaker than its name, and
+this is not counted as a Sim fault. The two tests its landing excused
+(`test_it_is_gitignored`, an unnamed-repo worktree test) fail only in the
+trial's own copy; on the checkout both pass.
+
+## GAIA with eyes, and the verifier
+
+- GAIA level 1, the same 12 cases, with `look_at_image` answered by Gemini
+  (`--providers together,gemini,floor`): 9/12, and the penguin video is
+  now answered from frames ("3 distinct bird species") instead of from
+  the page's metadata.
+- The same 12 after the evidence-first verdict (`verification`, today):
+  verification blocks 4 -> 2, score unchanged at 9/12. Small n; a hint.
+- GAIA level 2, 10 cases: 7/10. The misses are the model's (a p-value
+  reasoning slip, 1.4564 Å rounded to 1.46 where 1.456 is expected, EC
+  numbers of chemicals where enzymes were meant).
