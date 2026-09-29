@@ -201,9 +201,13 @@ class RunnerSwebenchCaseTestCase(unittest.IsolatedAsyncioTestCase):
         return Runner(mock.MagicMock(), repo_root=Path("/tmp/does-not-matter"))
 
     async def _run(self, case, *, verdict, ask=("done", 4, 0.02, ""), patch="diff --git a/x b/x\n",
-                   materialize="", available=(True, "")):
+                   materialize="", available=(True, ""), free_gb=100.0):
+        from simorgh.benchmark import runner as runner_mod
         runner = self._runner()
-        with mock.patch.object(swebench, "available", return_value=available), \
+        # A fixed free-disk figure: this machine's own would make the
+        # suite depend on how full the disk is (2026-09-29).
+        with mock.patch.object(runner_mod, "_free_gb", return_value=free_gb), \
+                mock.patch.object(swebench, "available", return_value=available), \
                 mock.patch.object(swebench, "materialize", return_value=materialize), \
                 mock.patch.object(swebench, "diff_of", return_value=(patch, "")), \
                 mock.patch.object(swebench, "evaluate", return_value=(verdict, "log")), \
@@ -229,6 +233,13 @@ class RunnerSwebenchCaseTestCase(unittest.IsolatedAsyncioTestCase):
                                  available=(False, "the Docker daemon is not running"))
         self.assertTrue(result.skipped)
         self.assertIn("Docker", result.error)
+
+    async def test_a_case_the_disk_cannot_hold_is_skipped_before_anything_is_pulled(self):
+        # verdict=True: had it got past the guard, the case would read correct.
+        result = await self._run(self._case(), verdict=swebench.Verdict(True, ""), free_gb=9.0)
+        self.assertTrue(result.skipped, "unmeasured, not wrong")
+        self.assertFalse(result.correct)
+        self.assertIn("9 GB free", result.error)
 
     async def test_a_checkout_that_cannot_be_made_is_skipped(self):
         result = await self._run(self._case(), verdict=swebench.Verdict(True, ""),

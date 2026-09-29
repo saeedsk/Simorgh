@@ -65,6 +65,14 @@ BLOCKED_GRACE_S = 30.0
 _FLOORED = "not the model --"
 
 
+def _free_gb(path: Path) -> float | None:
+    """Free disk where `path` lives, or None when it cannot be read."""
+    try:
+        return shutil.disk_usage(path if path.exists() else path.parent).free / 1024 ** 3
+    except OSError:
+        return None
+
+
 class Runner:
     def __init__(self, bus, *, config: Config | None = None, clock=None,
                  on_progress=None, on_start=None, repo_root: Path | None = None, sleep=None) -> None:
@@ -341,6 +349,12 @@ class Runner:
                 error="this case carries no container image or eval script -- reload the suite "
                       "(`benchmark load swebench-verified`), which now stores both")
 
+        free_gb = _free_gb(self._repo_root)
+        if free_gb is not None and free_gb < self._config.swebench_min_free_gb:
+            return CaseResult(
+                case_id=case.id, level=case.level, correct=False, skipped=True, expected=case.answer,
+                error=(f"not run: {free_gb:.0f} GB free, under swebench_min_free_gb "
+                       f"({self._config.swebench_min_free_gb:.0f}) -- a case pulls a ~3 GB image"))
         relative = f"{self._config.swebench_checkout_dir}/{case.id}"
         checkout = self._repo_root / relative
         problem = await asyncio.to_thread(

@@ -70,6 +70,12 @@ class Config:
     # and searched the whole disk.
     repo_root: str = ""
     swebench_checkout_dir: str = "workspace/swebench"
+    # A case pulls its ~3 GB image and copies out a checkout; under this
+    # much free disk it is skipped as unmeasured instead. Nothing checked
+    # before 2026-09-29, when a growth night's `evals run code` (the SWE-bench
+    # slice) pulled images into a disk with 10 GB left, beside the live Sim
+    # whose ledger stops at 5 GB.
+    swebench_min_free_gb: float = 12.0
     # Where each case's test log is kept. This is the evidence behind
     # the score, and the only place a disputed result can be settled.
     swebench_log_dir: str = "results/swebench"
