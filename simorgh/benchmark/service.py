@@ -171,6 +171,13 @@ class Service:
 
         return Path(self._config.cache_dir).expanduser() if self._config.cache_dir else None
 
+    def _repo_root(self) -> Path:
+        """Where attachments and SWE-bench checkouts go: `[benchmark]
+        repo_root`, else this package's own checkout (the live Sim's)."""
+        if self._config.repo_root:
+            return Path(self._config.repo_root).expanduser()
+        return Path(__file__).resolve().parents[2]
+
     # -- handlers ------------------------------------------------------
     async def _on_provider(self, message: Message) -> None:
         payload = message.payload
@@ -432,7 +439,7 @@ class Service:
         # resolve paths (found writing benchmark's CONTRACT.md, 2026-09-19).
         runner = Runner(ctx.bus, config=self._config, clock=ctx.clock.now,
                         on_progress=_progress, on_start=_starting,
-                        repo_root=Path(__file__).resolve().parents[2])
+                        repo_root=self._repo_root())
         try:
             finished = await runner.run(suite, model=self._model, note=record.note, record=record)
         except asyncio.CancelledError:

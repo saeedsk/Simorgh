@@ -61,6 +61,14 @@ class Config:
     # open it: under the workspace, the one directory the file tools may
     # both read and write.
     attachment_dir: str = "workspace/benchmark"
+    # The repository `attachment_dir` and `swebench_checkout_dir` are
+    # under: the tree the file tools read, which is `[execution]
+    # repo_root`. "" is this package's own checkout -- right for the live
+    # Sim, wrong for a benchmark copy that imports this code from the main
+    # repo: every GAIA attachment of the 2026-09-29 wave landed in the
+    # live checkout while Sim looked for it in the copy, found nothing,
+    # and searched the whole disk.
+    repo_root: str = ""
     swebench_checkout_dir: str = "workspace/swebench"
     # Where each case's test log is kept. This is the evidence behind
     # the score, and the only place a disputed result can be settled.

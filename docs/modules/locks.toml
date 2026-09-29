@@ -4,3 +4,15 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.benchmark]
+by = "opus-main"
+task = "attachments land in the repo the file tools read"
+since = "2026-09-29T15:54:04+00:00"
+until = "2026-09-29T23:54:04+00:00"
+
+[locks.tools]
+by = "opus-main"
+task = "bench_instance names its repo to benchmark"
+since = "2026-09-29T15:54:04+00:00"
+until = "2026-09-29T23:54:04+00:00"

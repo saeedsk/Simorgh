@@ -118,6 +118,10 @@ async def run(args) -> int:
     kernel = Kernel(LoadedConfig({
         "runtime": {"data_dir": str(data)},
         "execution": {"repo_root": str(repo)},
+        # Where attachments and checkouts go: the copy the file tools read.
+        # This process imports `simorgh` from the main repo, so benchmark's
+        # own default was the live checkout (2026-09-29).
+        "benchmark": {"repo_root": str(repo)},
         # Reflection's own self-improvement work, off. Its hourly pass turns
         # mined patterns into patch tasks and distillation turns solved cases
         # into skill tasks; in a benchmark copy those queued beside the cases,
