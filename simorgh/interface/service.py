@@ -178,6 +178,10 @@ class Service:
         topics.VOICE_LISTENING,
         topics.VOICE_SPOKEN,
         topics.VOICE_TRANSCRIPT,
+        # A room satellite's reply piece (httpapi.py `_on_room_speech`,
+        # stage 13 item 3); undeclared until 2026-09-29, when the full tier's
+        # manifest test caught it.
+        topics.VOICE_ROOM_SPEECH,
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.SYSTEM_PAUSE,
