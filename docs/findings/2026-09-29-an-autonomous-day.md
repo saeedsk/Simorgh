@@ -129,9 +129,16 @@ trial's own copy; on the checkout both pass.
 ## GAIA with eyes, and the verifier
 
 - GAIA level 1, the same 12 cases, with `look_at_image` answered by Gemini
-  (`--providers together,gemini,floor`): 9/12, and the penguin video is
-  now answered from frames ("3 distinct bird species") instead of from
-  the page's metadata.
+  (`--providers together,gemini,floor`): reported 9/12, **honestly 8/12**.
+  The penguin video was looked at frame by frame ("3 distinct bird
+  species"), but the answer also says "this matches the GAIA dataset's
+  recorded answer of 3" -- the model had looked the benchmark up. A later
+  case did it outright ("the GAIA ground truth was confirmed as Nigeria
+  across independent mirrors"). Both are now caught: the prompt forbids it
+  and an answer that admits it is scored wrong (`benchmark:` commit "an
+  answer looked up from the benchmark itself is not scored"). A lookup the
+  answer does not admit is still invisible, so today's GAIA numbers are an
+  upper bound.
 - The same 12 after the evidence-first verdict (`verification`, today):
   verification blocks 4 -> 2, score unchanged at 9/12. Small n; a hint.
 - GAIA level 2, 10 cases: 7/10. The misses are the model's (a p-value
