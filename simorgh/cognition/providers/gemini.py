@@ -38,6 +38,28 @@ def _client_closed(exc: BaseException) -> bool:
 MIN_SERVER_DEADLINE_S = 10.0
 
 
+_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+         ".gif": "image/gif", ".bmp": "image/bmp"}
+
+
+def _image_parts(paths) -> list[dict]:
+    """Each picture as an inline part (`{"inline_data": {mime_type, data}}`,
+    which the SDK takes as a Part). An unreadable file is refused, never
+    skipped: an answer about three pictures when four were asked for is a
+    wrong answer that reads right."""
+    from pathlib import Path
+
+    parts = []
+    for raw in paths:
+        path = Path(raw)
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise ProviderUnavailable(f"could not read the picture {raw}: {exc}") from exc
+        parts.append({"inline_data": {"mime_type": _MIME.get(path.suffix.lower(), "image/png"), "data": data}})
+    return parts
+
+
 def _server_deadline_ms(timeout: float) -> int:
     return int(max(float(timeout), MIN_SERVER_DEADLINE_S) * 1000)
 
@@ -47,10 +69,18 @@ class GeminiProvider:
     capabilities = Capabilities(supports_tools=True, supports_streaming=True, supports_images=True,
                                 context_window=1_000_000, cache_prefix=True)
 
-    def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL, client: Any | None = None) -> None:
+    def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL, client: Any | None = None,
+                 *, images: bool = False) -> None:
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         self._model = model
         self._client = client
+        self._images = bool(images)
+
+    @property
+    def supports_images(self) -> bool:
+        """The API can see; this house lets it only when `[cognition.providers.
+        gemini] images = true` -- a picture sent here leaves the house."""
+        return self._images
 
     @property
     def model(self) -> str:
@@ -61,8 +91,15 @@ class GeminiProvider:
 
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
+        images: list[str] | None = None,
     ) -> ProviderResponse:
         prompt = "\n\n".join(m.get("content", "") for m in messages if m.get("content"))
+        if images:
+            if not self._images:
+                # Never answer about a picture this provider was not given.
+                raise ProviderUnavailable("Gemini is not allowed pictures here ([cognition.providers.gemini] images)")
+            return await asyncio.to_thread(self._complete_sync, [prompt, *_image_parts(images)],
+                                           max_tokens, timeout, tools)
         return await asyncio.to_thread(self._complete_sync, prompt, max_tokens, timeout, tools)
 
     async def stream(self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int,
@@ -139,7 +176,7 @@ class GeminiProvider:
         yield Delta(STOP, usage=usage)
 
     def _complete_sync(
-        self, prompt: str, max_tokens: int = 0, timeout: float | None = None, tools: list[dict] | None = None,
+        self, prompt, max_tokens: int = 0, timeout: float | None = None, tools: list[dict] | None = None,
         _fresh_client: bool = False,
     ) -> ProviderResponse:
         if not self._api_key:

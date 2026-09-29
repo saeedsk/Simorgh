@@ -17,7 +17,7 @@ import re
 
 from simorgh.contracts.protocols import Clock, Logger, Provider, ProviderResponse
 
-from .api import Budget, BudgetExceeded, NoRealProvider, ProviderUnavailable, Purpose
+from .api import Budget, BudgetExceeded, NoRealProvider, ProviderUnavailable, Purpose, capabilities_of
 from .budget import RollingWindowBudget
 from .providers.base import FloorProvider
 from .tokens import estimate_tokens
@@ -146,7 +146,12 @@ class Router:
         # the guard, and an empty list here is an honest "no eyes" below.
         blind = ()
         if images:
-            blind = tuple(n for n in names if not getattr(self._by_name.get(n), "supports_images", False))
+            # The declared capability, with a provider's own property winning
+            # (`api.capabilities_of`). The bare attribute missed Gemini, which
+            # declares it in `capabilities` -- harmless only because Gemini
+            # dropped the pictures anyway (2026-09-29).
+            blind = tuple(n for n in names
+                          if not capabilities_of(self._by_name.get(n)).supports_images)
             names = tuple(n for n in names if n not in blind)
         for name in names:
             provider = self._by_name.get(name)

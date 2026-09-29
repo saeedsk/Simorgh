@@ -73,6 +73,11 @@ class ProviderConfig:
     # specs and returns typed calls (stage 2 item 9); only honoured for a
     # provider whose API has native tools (`Capabilities.supports_tools`).
     tool_dialect: str = "markers"
+    # A cloud provider whose API can see pictures is sent them only when
+    # this is true (`[cognition.providers.gemini] images = true`). Off by
+    # default: camera stills of the house would otherwise leave for the
+    # cloud the day the router learnt Gemini could see (2026-09-29).
+    images: bool = False
 
 
 @dataclass(frozen=True)
