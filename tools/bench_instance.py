@@ -137,6 +137,10 @@ async def run(args) -> int:
         # measuring one change against the baseline on the same cases
         # (docs/plans/long-run-context-design.md section 9).
         "orchestration": orchestration_overrides(args.orch),
+        # A GAIA copy given Gemini may send it the case's pictures -- the
+        # house's own default keeps pictures local (2026-09-29).
+        **({"cognition": {"providers": {"gemini": {"images": True}}}}
+           if "gemini" in args.providers.split(",") else {}),
     }, None), secrets=EnvSecretStore(dict(os.environ)))
     say(args.id, f"arm {args.arm or '-'}: orchestration {orchestration_overrides(args.orch)}")
     await kernel.boot()
