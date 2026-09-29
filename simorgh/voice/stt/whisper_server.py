@@ -192,11 +192,11 @@ class WhisperServerRecogniser:
         self._language = config.stt_language or "auto"
         #: The languages this house speaks (`[voice] stt_languages`): a turn
         #: whisper hears as another is transcribed again in one of these.
-        self._house = tuple(c.strip().lower() for c in str(getattr(config, "stt_languages", "") or "").split(",")
+        self._house = tuple(c.strip().lower() for c in str(config.stt_languages or "").split(",")
                             if c.strip())
-        self._prompt = str(getattr(config, "stt_prompt", "") or "")
-        self._port = int(port or getattr(config, "stt_server_port", 0) or 0)
-        self._by_word = bool(getattr(config, "diarize_words", False))
+        self._prompt = str(config.stt_prompt or "")
+        self._port = int(port or config.stt_server_port or 0)
+        self._by_word = bool(config.diarize_words)
         self._proc: asyncio.subprocess.Process | None = None
         self._lock = asyncio.Lock()
         self.problems: list[str] = []
@@ -208,7 +208,7 @@ class WhisperServerRecogniser:
         self._conversation: tuple[str, float] = ("", 0.0)
         #: A second server for Farsi turns (`stt_model_farsi`), or None.
         self._farsi: "WhisperServerRecogniser | None" = None
-        farsi_model = str(getattr(config, "stt_model_farsi", "") or "").strip()
+        farsi_model = str(config.stt_model_farsi or "").strip()
         if farsi_model and farsi_model != str(config.stt_model):
             from dataclasses import replace
 

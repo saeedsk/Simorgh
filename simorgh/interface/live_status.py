@@ -87,6 +87,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "cam_state"): "Checking the cameras",
     ("act", "cam_snapshot"): "Taking a picture",
     ("act", "camera_describe"): "Looking at a camera",
+    ("act", "look_at_image"): "Looking at a picture",
     ("act", "console_tail"): "Reading its own console",
     ("act", "remember_place"): "Remembering where this is",
     ("act", "overheard"): "Checking what it heard",

@@ -24,7 +24,7 @@ import pytest
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[2]
-MAX_GETATTR_READS = 127
+MAX_GETATTR_READS = 113
 
 #: (file, key) -> why the fallback may differ from the default.
 ALLOWED = {

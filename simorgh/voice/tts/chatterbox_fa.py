@@ -62,10 +62,10 @@ class ChatterboxFarsiSynthesiser(SubprocessSynthesiser):
             raise ImportError(f"Chatterbox Persian needs its weights at {weights} -- fetch "
                               "Thomcles/Chatterbox-TTS-Persian-Farsi (gated; `hf auth login` first)")
         reference = str(config.tts_farsi_reference or "")
-        super().__init__(config, venv_dir=getattr(config, "venv_dir", DEFAULT_VENV_DIR),
+        super().__init__(config, venv_dir=config.venv_dir or DEFAULT_VENV_DIR,
                          reference=str(Path(reference).resolve()) if reference and Path(reference).is_file() else "",
                          timeout_s=float(config.expressive_timeout_s))
-        self._respell = parse_lexicon(str(getattr(config, "tts_farsi_respell", "") or ""))
+        self._respell = parse_lexicon(str(config.tts_farsi_respell or ""))
         self.extra_env = {"CHATTERBOX_FA_WEIGHTS": str(weights.resolve()), "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
 
     def voices(self) -> list[str]:

@@ -222,7 +222,7 @@ class CameraDescribeTool:
             wanted = max(1, min(4, int(args.get("stills") or self._config.camera_vision_stills)))
         except (TypeError, ValueError):
             wanted = 2
-        gap = float(getattr(self._config, "camera_vision_gap_s", 1.5))
+        gap = float(self._config.camera_vision_gap_s)
         root = Path(self._config.repo_root)
 
         paths: list[str] = []
@@ -249,7 +249,7 @@ class CameraDescribeTool:
 
         said, problem = await describe_stills(
             paths, camera=camera, bus=ctx.bus,
-            timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
+            timeout=float(self._config.camera_vision_timeout_s))
         if problem or not said:
             why = problem or "the model returned nothing"
             return ToolResult(ok=False, error=f"took {len(paths)} still(s) but could not look at them: {why}")
@@ -321,7 +321,7 @@ class LookAtImageTool:
             },
         )
         reply = await ctx.bus.request_or_error(
-            request, timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
+            request, timeout=float(self._config.camera_vision_timeout_s))
         body = reply.payload or {}
         if body.get("ok") is False:
             # Said as what it is: no provider that can see, or it failed --
@@ -383,12 +383,12 @@ class CameraVision:
     async def on_camera_event(self, message: Message) -> None:
         """Never blocks the bus: looking takes a model call, and the
         events keep coming while it runs."""
-        if not getattr(self._config, "camera_vision", True):
+        if not self._config.camera_vision:
             return
         payload = message.payload or {}
         camera = str(payload.get("camera") or "").strip() or "a camera"
         now = self._ctx.clock.now()
-        cooldown = float(getattr(self._config, "camera_vision_cooldown_s", 90.0))
+        cooldown = float(self._config.camera_vision_cooldown_s)
         if camera in self._busy or now - self._last_look.get(camera, 0.0) < cooldown:
             return
         self._last_look[camera] = now
@@ -399,7 +399,7 @@ class CameraVision:
 
     def _gate(self) -> asyncio.Semaphore:
         if self._looking is None:
-            width = max(1, int(getattr(self._config, "camera_vision_concurrency", 1) or 1))
+            width = max(1, int(self._config.camera_vision_concurrency or 1))
             self._looking = asyncio.Semaphore(width)
         return self._looking
 
@@ -430,7 +430,7 @@ class CameraVision:
                 # So sample several separate events and keep only what
                 # survives all of them.
                 samples = record["samples"]
-                want = max(1, int(getattr(self._config, "camera_vision_baseline_samples", 3)))
+                want = max(1, int(self._config.camera_vision_baseline_samples))
                 if len(samples) + 1 >= want:
                     if samples:
                         prior = "\n".join(f"- {text}" for text in samples)
@@ -491,9 +491,9 @@ class CameraVision:
         the local vision model -- and the sweep returns for good the
         moment every camera knows its scene.
         """
-        if not getattr(self._config, "camera_vision", True):
+        if not self._config.camera_vision:
             return
-        if not getattr(self._config, "camera_vision_baseline_sweep", True):
+        if not self._config.camera_vision_baseline_sweep:
             return
         if self._sweep is None or self._sweep.done():
             self._sweep = asyncio.create_task(self._learn_baselines(), name="camera-vision:baselines")
@@ -514,10 +514,10 @@ class CameraVision:
         are three different moments, which is what makes "only what
         survives every sample" mean anything.
         """
-        every = max(30.0, float(getattr(self._config, "camera_vision_baseline_every_s", 300.0)))
+        every = max(30.0, float(self._config.camera_vision_baseline_every_s))
         # No floor here: `every` is floored at 30s, so the loop cannot spin,
         # and a setting that accepts 0 should mean 0 rather than quietly 1.
-        await asyncio.sleep(max(0.0, float(getattr(self._config, "camera_vision_baseline_first_s", 30.0))))
+        await asyncio.sleep(max(0.0, float(self._config.camera_vision_baseline_first_s)))
         while True:
             try:
                 todo = await self._unlearned()
@@ -571,8 +571,8 @@ class CameraVision:
         if self._registry.get(tool_name) is None:
             return []
         root = Path(self._config.repo_root)
-        wanted = max(1, int(getattr(self._config, "camera_vision_stills", 2)))
-        gap = float(getattr(self._config, "camera_vision_gap_s", 1.5))
+        wanted = max(1, int(self._config.camera_vision_stills))
+        gap = float(self._config.camera_vision_gap_s)
         if ring:
             # Ring throttles. Three cameras firing at once, two stills each,
             # is six snapshot calls in a few seconds and every one of them
@@ -610,14 +610,14 @@ class CameraVision:
         # nothing true" shape Sim is not allowed to have.
         return await describe_stills(
             stills, camera=camera, bus=self._ctx.bus, kinds=payload.get("kinds") or (),
-            timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)),
+            timeout=float(self._config.camera_vision_timeout_s),
             template=template, baseline=baseline)
 
     # -- the telling ------------------------------------------------------
     async def _announce(self, said: str, camera: str) -> None:
         stamp = time.strftime("%a %d %b %H:%M", time.localtime(self._ctx.clock.now()))
         await self._notice(f"📷 {stamp} — {camera}: {said}")
-        if not getattr(self._config, "camera_vision_speak", True):
+        if not self._config.camera_vision_speak:
             return
         # Offered, not spoken. This used to publish `voice.speak.request`
         # directly, so a camera described the street aloud in the room
