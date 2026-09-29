@@ -11,12 +11,6 @@ task = "a swebench case works in its checkout, not a worktree of this repo"
 since = "2026-09-22T20:59:38+00:00"
 until = "2026-09-23T04:59:38+00:00"
 
-[locks.cognition]
-by = "opus-main"
-task = "a named tier takes its own route (farsi)"
-since = "2026-09-29T06:20:23+00:00"
-until = "2026-09-29T14:20:23+00:00"
-
 [locks.evals]
 by = "opus-main"
 task = "voice replay harness: calibration takes through the real listening path"
@@ -29,20 +23,8 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
-[locks.orchestration]
-by = "opus-main"
-task = "a Farsi turn asks the farsi tier"
-since = "2026-09-29T06:20:23+00:00"
-until = "2026-09-29T14:20:23+00:00"
-
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"
 since = "2026-09-22T20:53:16+00:00"
 until = "2026-09-23T04:53:16+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "no English number words in Farsi; an em dash is not a minus"
-since = "2026-09-29T06:17:24+00:00"
-until = "2026-09-29T14:17:24+00:00"
