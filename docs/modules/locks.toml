@@ -4,21 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.contracts]
-by = "opus-main"
-task = "tts_farsi_respell setting"
-since = "2026-09-29T15:02:30+00:00"
-until = "2026-09-29T23:02:30+00:00"
-
-[locks.interface]
-by = "opus-main"
-task = "voice set completes tts_farsi_respell"
-since = "2026-09-29T15:06:44+00:00"
-until = "2026-09-29T23:06:44+00:00"
-
-[locks.voice]
-by = "opus-main"
-task = "tts_farsi_respell for Chatterbox Persian"
-since = "2026-09-29T15:02:30+00:00"
-until = "2026-09-29T23:02:30+00:00"
