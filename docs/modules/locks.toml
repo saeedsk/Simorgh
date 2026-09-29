@@ -4,9 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.orchestration]
-by = "opus-main"
-task = "look_at_image reads its marker argument"
-since = "2026-09-29T16:11:42+00:00"
-until = "2026-09-30T00:11:42+00:00"
