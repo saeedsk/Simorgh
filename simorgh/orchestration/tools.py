@@ -301,6 +301,14 @@ def _one_value(key: str, raw) -> object:
 # has real internal structure need an entry; a bare path/url/code
 # argument is self-explanatory from the tool's own name.
 _MARKER_ARG_HINT: dict[str, str] = {
+    "people": (
+        'one JSON object: {"action": "set_role", "name": "Ira", "role": "child"}; actions link, unlink, '
+        "set_role, grant, revoke, add_interest, remove_interest, set_tool (with tool and answer)"
+    ),
+    "look_at_image": (
+        "one to four image paths, then the question: `workspace/scratch/a.png workspace/scratch/b.png "
+        "-- which species are in frame?`, or JSON {\"paths\": [...], \"question\": \"...\"}"
+    ),
     "self_map": (
         "leave this blank for the full map, or name one real subsystem "
         "(e.g. worldmodel, cognition) to see just its files -- do not "
@@ -723,6 +731,45 @@ def register_tool_policy(name: str, *, reversibility: str, provider: str,
         _MARKER_ARG_KEY[name] = "input"
 
 
+_IMAGE_PATH = re.compile(r"[\w./~-]+\.(?:png|jpe?g|webp|gif|bmp)\b", re.IGNORECASE)
+
+
+def _look_args(raw) -> dict:
+    """`look_at_image`'s one marker string as `{paths, question}`.
+
+    Bench wave 2026-09-29: with no mapping, every call reached Execution
+    as `{"argument": ...}` and failed its schema -- the model tried a bare
+    path, "path -- question", "paths=... question=...", "paths: ..." and
+    finally the JSON object, and none of them got through."""
+    text = str(raw or "").strip()
+    if text.startswith("{"):
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+        if isinstance(data, dict):
+            paths = data.get("paths") or data.get("path") or []
+            paths = [paths] if isinstance(paths, str) else [str(p) for p in paths]
+            return {"paths": paths, "question": str(data.get("question") or "")}
+    paths = list(dict.fromkeys(_IMAGE_PATH.findall(text)))
+    question = _IMAGE_PATH.sub(" ", text)
+    question = re.sub(r"\b(?:paths?|question)\s*[:=]\s*", " ", question, flags=re.IGNORECASE)
+    question = " ".join(question.split()).strip(" -\u2014\u2013:,;")
+    return {"paths": paths, "question": question}
+
+
+def _json_object(text: str) -> dict | None:
+    """`text` as a JSON object (a code fence allowed), else None."""
+    text = _strip_code_fence(text.strip()) if text.strip().startswith("```") else text.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def marker_hint(tool: str) -> str | None:
     return _MARKER_ARG_HINT.get(tool)
 
@@ -751,11 +798,22 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
             args = {first: head.strip(), second: rest}
             if tool in _MARKER_JSON_REST:
                 args = {first: head.strip(), **_json_rest(rest, second)}
+        elif tool == "look_at_image":
+            args = _look_args(raw)
         elif tool in _MARKER_NO_ARGS:
             args = {}
         elif tool in _MARKER_ARG_KEY:
             key = _MARKER_ARG_KEY[tool]
             args = {key: _one_value(key, raw)}
+        else:
+            # A tool with several fields and no mapping of its own: the
+            # model's JSON object IS the arguments. Until 2026-09-29 it went
+            # through as {"argument": "<json>"} and failed the tool's schema
+            # -- `people` (roles, consent, the per-person matrix) had never
+            # once worked from a marker reply.
+            decoded = _json_object(str(raw))
+            if decoded is not None:
+                args = decoded
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
     if tool == "home_call" and isinstance(args, dict):
         # Per-call safety (home-automation-design.md section 7). The
