@@ -6,6 +6,7 @@ What changes next, and in what order, lives in `docs/plan/`. The 2026-09-14 benc
 
 | Date | File | Covers |
 |---|---|---|
+| 2026-09-29 | [2026-09-29-an-autonomous-day.md](2026-09-29-an-autonomous-day.md) | A loader rollback from a calendar-dated test; Farsi answers to English from a stored "Farsi only"; four benchmark Sims whose GAIA attachments landed in the live checkout; a shell call carrying the model's invented reply; the first policy Sim ever proposed, and why it was not measured |
 | 2026-09-27 | [2026-09-27-live-farsi-satellite-and-phone.md](2026-09-27-live-farsi-satellite-and-phone.md) | A live evening watched from behind: Farsi (hearing, the label, the brain, the voice -- which layer was wrong), three self-healing satellite faults, the phone given an owner and HA over the tailnet, the Lutron bridge flood |
 | 2026-09-22 | [2026-09-22-model-written-tests-confined.md](2026-09-22-model-written-tests-confined.md) | Stage 0 item 32: the three pytest runs over a model's own tests confined by `sandbox-exec` (socket and `$HOME` write fail with EPERM; macOS only), and a pause that now holds a verification |
 | 2026-09-22 | [2026-09-22-context-assembly-is-not-the-cost.md](2026-09-22-context-assembly-is-not-the-cost.md) | Stage 4 item 4 measured and deferred (about 5 ms of bus round trips per think against a 4,460 ms provider call, over 1,548 thinks; `world.env.query` about 37,000 a day, poller unknown); item 8, retries judged on the whole task stream |
