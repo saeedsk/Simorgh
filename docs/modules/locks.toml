@@ -4,3 +4,9 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.cognition]
+by = "opus-main"
+task = "a marker's payload stops at an invented transcript turn"
+since = "2026-09-29T15:58:34+00:00"
+until = "2026-09-29T23:58:34+00:00"

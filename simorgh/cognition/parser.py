@@ -244,6 +244,27 @@ def cut_at_next_marker(payload: str, markers: tuple[str, ...]) -> tuple[str, boo
     return payload, False
 
 
+#: Lines that only ever come from US: the turn labels of a flattened
+#: transcript and the header every tool result is given. A model that
+#: writes one inside a call is writing the conversation's next turns
+#: itself. Live, bench wave 2026-09-29: "RUN_SHELL: pwd; find / ...",
+#: then "[user] Result of run_shell:\n/\nfind: '/proc/1/map_files'..." --
+#: an invented Linux answer -- all ran as ONE shell command, and the model
+#: went on believing its own invented "/" and empty directory.
+#: `[user]: https://...` is a Markdown link reference, not a turn.
+_INVENTED_TURN = re.compile(r"^\s*(?:\[(?:user|assistant|system)\](?!:)|Result of [a-z_]+:\s*$)", re.IGNORECASE)
+
+
+def _without_invented_turns(payload: str) -> str:
+    """`payload` up to the first line that is one of our transcript
+    headers: what follows is the model imagining the reply."""
+    lines = payload.splitlines()
+    for index, line in enumerate(lines):
+        if index and _INVENTED_TURN.match(line):
+            return "\n".join(lines[:index]).rstrip()
+    return payload
+
+
 def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     """Find a tool call in `text`. Returns (marker.lower(), payload), or
     (None, text) meaning "final answer, no tool call".
@@ -274,7 +295,7 @@ def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     for marker in markers:
         prefix = f"{marker}:"
         if stripped[: len(prefix)].upper() == prefix.upper():
-            return marker.lower(), stripped[len(prefix):].strip()
+            return marker.lower(), _without_invented_turns(stripped[len(prefix):].strip())
 
     lines = stripped.splitlines()
     for index, line in enumerate(lines):
@@ -285,7 +306,7 @@ def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
                 continue
             rest = candidate[len(prefix):].strip()
             tail = "\n".join(lines[index + 1:]).strip()
-            return marker.lower(), f"{rest}\n{tail}".strip() if tail else rest
+            return marker.lower(), _without_invented_turns(f"{rest}\n{tail}".strip() if tail else rest)
     return None, stripped
 
 
