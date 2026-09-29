@@ -568,6 +568,32 @@ def _bearer_for(url: str, bearers: "tuple[tuple[str, str], ...]", env) -> str:
     return ""
 
 
+class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
+    """Every redirect hop passes the same SSRF check as the first URL, and
+    a bearer token never follows a redirect to another host.
+
+    Confirmed 2026-09-29: `web_fetch` of a public redirector pointed at
+    `http://127.0.0.1:8765/api/status` returned the live Sim's own status
+    -- `urlopen` followed the 302 and only the FIRST address had been
+    checked. A page Sim reads could have walked it into the NVR, Home
+    Assistant or its own API."""
+
+    def __init__(self, check) -> None:
+        super().__init__()
+        self._check = check
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            self._check(newurl)
+        except FetchRefused as exc:
+            raise FetchRefused(f"refused a redirect to {newurl}: {exc}") from exc
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and (urllib.parse.urlsplit(newurl).hostname or "") != (
+                urllib.parse.urlsplit(req.full_url).hostname or ""):
+            new.remove_header("Authorization")
+        return new
+
+
 class WebFetchTool:
     """Port of v1's `src/tools/web_fetch.py` -- the one reviewed path for
     real outbound network access (Guardian's own denylist,
@@ -605,8 +631,8 @@ class WebFetchTool:
 
     def __init__(self, config: Config, *, opener=None, resolver=None) -> None:
         self._config = config
-        self._opener = opener or urllib.request.urlopen
         self._resolver = resolver or socket.getaddrinfo
+        self._opener = opener or urllib.request.build_opener(_CheckedRedirects(self._validate_url)).open
         # Per host, plus a whole-tool ceiling. See `_enforce_rate_limit`.
         self._recent_calls: deque[float] = deque()
         self._recent_by_host: dict[str, deque[float]] = {}
