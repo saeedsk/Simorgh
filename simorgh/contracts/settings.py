@@ -86,6 +86,8 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "tts_farsi_reference": (str, None, "the ~5 second clip the Farsi voice (Pocket or Chatterbox) is cloned from"),
     "tts_farsi_lexicon": (str, None, "Farsi words the Farsi voice says in given sounds: `word=phonemes; ...` in "
                           "Pocket's spelling (/ short a, a long a, @ glottal stop), e.g. سعید=s/id"),
+    "tts_farsi_respell": (str, None, "Farsi words Chatterbox says wrong, respelled: `word=spelling; ...` (vowel marks "
+                          "ignored when matching), e.g. عصرت=اَسرِت -- an alef where ع kept the wrong vowel"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),
     "stt_languages": (str, None, "the languages the house speaks, e.g. en,fa -- a turn heard in another is not answered; \"\" for any"),
     "tts_speed": (float, (0.5, 2.0), "speaking rate, 1.0 = normal"),

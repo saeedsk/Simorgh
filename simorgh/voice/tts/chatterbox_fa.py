@@ -16,9 +16,10 @@ Chatterbox venv as a line server (voice/tts/subproc.py).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from .pocket import trim_silence
+from .pocket import parse_lexicon, trim_silence
 from .subproc import DEFAULT_VENV_DIR, SubprocessSynthesiser, engine_available
 
 ENGINE = "chatterbox_fa"
@@ -26,6 +27,21 @@ DEFAULT_WEIGHTS = "workspace/voice/engines/chatterbox-fa/t3_fa.safetensors"
 #: The fine-tune author's own settings (his inference notebook); lower
 #: cfg_weight or top_p 1.0 cut sentences short or wandered in the tests.
 PARAMS = {"temperature": 0.7, "cfg_weight": 0.5, "top_p": 0.5, "exaggeration": 0.6}
+#: Short vowels, tanvin, shadda, sukun and the tatweel: what a respelling
+#: entry is matched without, since the model writes the same word marked.
+_MARKS = re.compile("[\u064b-\u0652\u0640]")
+#: Letters and marks only: the Persian comma, semicolon and question mark
+#: share the block, and "عصرت،" must still be the word عصرت.
+_WORD = re.compile("[\u0621-\u0652\u0670-\u06d3\u200c]+")
+
+
+def respelled(text: str, table: dict[str, str]) -> str:
+    """Each Persian word whose bare letters match a key, replaced by its
+    spelling -- whole words only, marks or none."""
+    if not table:
+        return text
+    bare = {_MARKS.sub("", key): spelling for key, spelling in table.items()}
+    return _WORD.sub(lambda m: bare.get(_MARKS.sub("", m.group(0)), m.group(0)), text)
 
 
 def available(venv_dir: str = DEFAULT_VENV_DIR) -> tuple[bool, str]:
@@ -49,6 +65,7 @@ class ChatterboxFarsiSynthesiser(SubprocessSynthesiser):
         super().__init__(config, venv_dir=getattr(config, "venv_dir", DEFAULT_VENV_DIR),
                          reference=str(Path(reference).resolve()) if reference and Path(reference).is_file() else "",
                          timeout_s=float(config.expressive_timeout_s))
+        self._respell = parse_lexicon(str(getattr(config, "tts_farsi_respell", "") or ""))
         self.extra_env = {"CHATTERBOX_FA_WEIGHTS": str(weights.resolve()), "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
 
     def voices(self) -> list[str]:
@@ -58,7 +75,8 @@ class ChatterboxFarsiSynthesiser(SubprocessSynthesiser):
         return dict(PARAMS)
 
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = ""):
+        text = respelled(text, self._respell)
         return trim_silence(await super().synthesise(text, voice=voice, speed=speed, tone=tone))
 
 
-__all__ = ["ChatterboxFarsiSynthesiser", "DEFAULT_WEIGHTS", "ENGINE", "PARAMS", "available"]
+__all__ = ["ChatterboxFarsiSynthesiser", "DEFAULT_WEIGHTS", "ENGINE", "PARAMS", "available", "respelled"]

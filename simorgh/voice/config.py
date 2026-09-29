@@ -86,6 +86,11 @@ class Config:
     # `word=phonemes; word=phonemes`. Its G2P reads سعید as s/@id, the ع a
     # glottal stop -- the Arabic sound the creator objected to (2026-09-27).
     tts_farsi_lexicon: str = "سعید=s/id"
+    # Words Chatterbox Persian says wrong, respelled so it says them right:
+    # `word=spelling; ...`, matched with the vowel marks ignored. Marks alone
+    # did not move it -- عَصرِت stayed "asrat" in every take; spelled with an
+    # alef, اَسرِت came back "Asred" / "Astrid" through whisper (2026-09-29).
+    tts_farsi_respell: str = "عصرت=اَسرِت"
     # Chatterbox Persian's T3 weights (`tts_farsi = "chatterbox"`, 2026-09-29).
     tts_farsi_chatterbox_weights: str = "workspace/voice/engines/chatterbox-fa/t3_fa.safetensors"
     # Endpointing (section 4.2).
