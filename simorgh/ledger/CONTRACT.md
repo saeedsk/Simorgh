@@ -88,7 +88,7 @@ Env overrides: `SIMORGH_LEDGER_BACKEND`, `SIMORGH_LEDGER_DIR` (`config.py:48-53`
 
 ## Public Python surface
 
-- `simorgh.ledger.Service` (`service.py`): `name="ledger"`, `consumes=(system.tick.sleep,)`, `produces=(system.metrics,)`, `__init__(client, config=None)`; reads `ctx.config` at `start` when no config was passed. Health: `down` before start or after a `LedgerUnavailable`; `degraded` under 5% free disk.
+- `simorgh.ledger.Service` (`service.py`): `name="ledger"`, `consumes=(system.tick.sleep,)`, `produces=(system.metrics,)`, `__init__(client, config=None)`; reads `ctx.config` at `start` when no config was passed. Health: `down` before start or after a `LedgerUnavailable`; `degraded` under `LOW_DISK_BYTES` (5 GB) free, from the backend's `stat()["free_bytes"]`; a backend with no byte count falls back to 5% (`free_fraction`). 5% of a 460 GB disk (23 GB) had the boot tests fail at 15 GB free and the loader roll back code for a disk problem (2026-09-29).
 - `simorgh.ledger.client.LedgerClient`: the only ledger module other packages may import; implements `contracts.protocols.Ledger`: `append(stream, event, *, expected_seq)`, `head`, `read`, `streams(prefix)`, `delete_stream`, `tail(stream_or_prefix, handler)`, `snapshot`, `load_snapshot`, `rebuild`, `materialize`, `put_blob`, `get_blob`, `compact`; attributes `counters`, `last_error`, `started`, `backend`.
 - Kernel-only: `make_ledger`, `make_backend`, `Config`.
 - Exceptions: `ConflictError` (CAS lost), `ValidationError`, `LedgerUnavailable`, `BackendUnavailable`, `BlobNotFound`, all subclasses of `LedgerError` (`api.py`).

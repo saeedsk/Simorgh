@@ -46,6 +46,35 @@ class TestLedgerServiceHealth(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ENOSPC", health.detail)
         await service.stop()
 
+    async def _health_with(self, stat: dict):
+        clock = FakeClock()
+        client = LedgerClient(InMemoryBackend(), clock=clock)
+        service = Service(client)
+        await service.start(make_context(bus=FakeBus(), ledger=client, clock=clock))
+
+        async def _stat() -> dict:
+            return stat
+        client.backend.stat = _stat  # type: ignore[method-assign]
+        health = await service.health()
+        await service.stop()
+        return health
+
+    async def test_a_big_disk_with_room_to_spare_is_ok_under_five_percent(self) -> None:
+        # 2026-09-29: 15 GB free of 460 GB (3.3 %) read as degraded, the boot
+        # tests failed, and the loader rolled Sim's code back for it.
+        health = await self._health_with({"free_fraction": 0.033, "free_bytes": 15 * 1024 ** 3})
+        self.assertEqual(health.status, "ok")
+
+    async def test_a_few_gigabytes_left_is_degraded_and_says_the_disk(self) -> None:
+        health = await self._health_with({"free_fraction": 0.007, "free_bytes": 3 * 1024 ** 3})
+        self.assertEqual(health.status, "degraded")
+        self.assertIn("free disk 3.0 GB", health.detail)
+
+    async def test_without_a_byte_count_the_fraction_still_decides(self) -> None:
+        health = await self._health_with({"free_fraction": 0.01})
+        self.assertEqual(health.status, "degraded")
+        self.assertIn("free disk", health.detail)
+
 
 class TestLedgerServiceSleepTick(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:

@@ -23,6 +23,12 @@ from .streams import COMPACTION_STREAM
 NAME = "ledger"
 VERSION = "0.1.0"
 LOW_DISK_FRACTION = 0.05
+#: Degraded only when this little is left. 5 % of a 460 GB disk is 23 GB,
+#: which a ledger writing megabytes a day never needs; at 15 GB free the
+#: boot tests failed and the loader rolled Sim's CODE back for a disk it
+#: could not fix (2026-09-29). The fraction still applies to a backend that
+#: reports no byte count.
+LOW_DISK_BYTES = 5 * 1024 ** 3
 
 
 class Service:
@@ -114,6 +120,11 @@ class Service:
             stat = await self.client.backend.stat()
         except Exception as exc:  # noqa: BLE001
             return Health.down(f"stat failed: {exc}")
+        left = stat.get("free_bytes")
+        if isinstance(left, (int, float)):
+            if left < LOW_DISK_BYTES:
+                return Health.degraded(f"free disk {left / 1024 ** 3:.1f} GB < {LOW_DISK_BYTES / 1024 ** 3:.0f} GB")
+            return Health.ok()
         free = stat.get("free_fraction")
         if isinstance(free, (int, float)) and free < LOW_DISK_FRACTION:
             return Health.degraded(f"free disk {free:.1%} < {LOW_DISK_FRACTION:.0%}")

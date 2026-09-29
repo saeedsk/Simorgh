@@ -781,10 +781,11 @@ class JsonlBackend:
         for stream, meta in self._meta.items():
             head, sep, _ = stream.partition(":")
             by_prefix[head + sep] = by_prefix.get(head + sep, 0) + meta.bytes
-        free_fraction = None
+        free_fraction = free_bytes = None
         try:
             usage = shutil.disk_usage(self.root)
             free_fraction = usage.free / usage.total if usage.total else None
+            free_bytes = usage.free
         except OSError:
             pass
         return {
@@ -794,6 +795,7 @@ class JsonlBackend:
             "bytes_total": sum(m.bytes for m in self._meta.values()),
             "bytes_by_prefix": by_prefix,
             "free_fraction": free_fraction,
+            "free_bytes": free_bytes,
             **self._blobs.stat(),
         }
 
