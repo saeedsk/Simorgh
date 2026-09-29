@@ -194,7 +194,10 @@ def speak_units(text: str) -> str:
 
 
 #: A minus sign in front of a number, in any of the dashes a model writes.
-_SIGNED = re.compile(r"(?<![\w])[-\u2212\u2013\u2014]\s*(?=\d)")
+#: Only a hyphen or minus directly against the number: "-8.2%". An em dash
+#: with a space is punctuation -- «سعید — ۲۸ سپتامبر» was said "Saeed minus
+#: 28 September", in English, inside Farsi (live, 2026-09-28).
+_SIGNED = re.compile(r"(?<![\w\u2014])(?:(?<=\s)|^|(?<=[(\[]))[-\u2212](?=[0-9])")
 _DECIMAL = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})*|\d+)\.(\d+)(?![\w.])")
 _PERCENT = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?%")
 
@@ -217,6 +220,11 @@ def speak_numbers(text: str) -> str:
     # whisper writes that back as "minus 8.2%". Saying it explicitly makes
     # the spoken form Sim's decision rather than the synthesiser's, and lets
     # the echo check compare like with like (voice/pipeline.py::_spoken_words).
+    if _persian_script(text):
+        # These are English words; in a Farsi sentence they are read by the
+        # Farsi voice as Latin letters. The Farsi voice's own normaliser
+        # spells numbers in Persian.
+        return text
     text = _SIGNED.sub("minus ", text)
     text = _PERCENT.sub(_percent, text)
     return _DECIMAL.sub(_decimal, text)
