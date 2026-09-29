@@ -41,22 +41,22 @@ class ALongFarsiSentenceIsSaidAClauseAtATime(unittest.TestCase):
     """Live 2026-09-27: a long Farsi answer turned to babble at the end."""
 
     def test_streamed(self):
-        from simorgh.voice.planner import MAX_CHUNK_CHARS
+        from simorgh.voice.planner import FARSI_MAX_LETTERS, _letters
 
         s = SentenceStream(max_sentences=8)
         s.feed(LONG)
         s.feed(" ")
-        self.assertTrue(all(len(x) <= MAX_CHUNK_CHARS for x in s.spoken), [len(x) for x in s.spoken])
-        self.assertGreaterEqual(len(s.spoken), 3)
+        self.assertTrue(all(_letters(x) <= FARSI_MAX_LETTERS for x in s.spoken), [len(x) for x in s.spoken])
+        self.assertGreaterEqual(len(s.spoken), 2)
 
     def test_said_to_the_phone(self):
-        from simorgh.voice.planner import MAX_CHUNK_CHARS
+        from simorgh.voice.planner import FARSI_MAX_LETTERS, _letters
         from simorgh.voice.service import _speech_pieces
 
         pieces = _speech_pieces(LONG)
-        self.assertTrue(all(len(x) <= MAX_CHUNK_CHARS for x in pieces), [len(x) for x in pieces])
+        self.assertTrue(all(_letters(x) <= FARSI_MAX_LETTERS for x in pieces), [len(x) for x in pieces])
         self.assertTrue(all(len(x.split()) >= 4 for x in pieces), pieces)
-        self.assertEqual(" ".join(pieces).replace(" ", ""), LONG.replace(" ", "").replace("—", ""))
+        self.assertEqual(" ".join(pieces).replace(" ", "").replace("—", ""), LONG.replace(" ", "").replace("—", ""))
 
 
 if __name__ == "__main__":

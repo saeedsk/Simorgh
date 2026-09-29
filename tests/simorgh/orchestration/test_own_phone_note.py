@@ -32,7 +32,7 @@ class FarsiVowels(unittest.TestCase):
         from simorgh.orchestration import scaffolds
 
         for said in ("wherever it is read", "only when you are", "Never talk about the marks", "exact text",
-                     "generously", "the slips are the recogniser's"):
+                     "generously", "the slips are the recogniser's", "foreign word"):
             self.assertIn(said, scaffolds.FARSI_VOWELS)
 
 

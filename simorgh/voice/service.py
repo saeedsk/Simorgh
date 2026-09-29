@@ -182,12 +182,13 @@ def _speech_pieces(text: str) -> list[str]:
     at its clauses, `planner.MAX_CHUNK_CHARS`), a Farsi one
     shorter than `streamreply.FARSI_MIN_WORDS` joined to the next (Pocket
     says its reference clip's words for a line that short)."""
-    from .planner import MAX_CHUNK_CHARS, _split_long, sentences
+    from .planner import MAX_CHUNK_CHARS, _persian_script, _split_long, farsi_parts, sentences
     from .streamreply import _too_short
 
     out: list[str] = []
     carry = ""
-    for sentence in [part for whole in (sentences(text) or [text]) for part in _split_long(whole, MAX_CHUNK_CHARS)]:
+    cut = farsi_parts if _persian_script(text) else (lambda whole: _split_long(whole, MAX_CHUNK_CHARS))
+    for sentence in [part for whole in (sentences(text) or [text]) for part in cut(whole)]:
         sentence = f"{carry} {sentence}".strip() if carry else sentence
         if _too_short(sentence):
             carry = sentence

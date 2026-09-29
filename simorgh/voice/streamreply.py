@@ -92,14 +92,14 @@ class SentenceStream:
     def _put(self, sentence: str) -> None:
         if not sentence or self._capped:
             return
-        from .planner import MAX_CHUNK_CHARS, _persian_script, _split_long
+        from .planner import _persian_script, farsi_parts
 
-        if _persian_script(sentence) and len(sentence) > MAX_CHUNK_CHARS and self.spoken:
+        if _persian_script(sentence) and len(farsi_parts(sentence)) > 1 and self.spoken:
             # A long Farsi sentence is said a clause at a time: Pocket drifts
             # to babble past fifteen seconds or so (live, 2026-09-27). Only
             # after the first sentence, which `split_tone` still has to see
             # whole; each clause counts as one of the sentences said.
-            for part in _split_long(sentence, MAX_CHUNK_CHARS):
+            for part in farsi_parts(sentence):
                 self._put_one(part)
             return
         self._put_one(sentence)

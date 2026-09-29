@@ -7,7 +7,6 @@ every word was read mark by mark."""
 
 import unittest
 
-from simorgh.voice.planner import _lightly_marked
 from simorgh.voice.tts.servers.pocket_server import aligned_sounds, with_lexicon
 
 
@@ -27,17 +26,21 @@ class ShortFarsi(unittest.TestCase):
         self.assertEqual(aligned_sounds("a b", lambda t: "1 2"), "1 2")
 
 
-class LightMarks(unittest.TestCase):
-    def test_an_over_marked_reply_keeps_the_ezafe_and_two_way_words(self):
-        got = _lightly_marked("نه، اَصلاً دُرُست نیست؛ سیستمِ صِدا کَلَمه را غَلَط خواند و تُرک هَمان اَست.")
-        self.assertIn("سیستمِ", got)
-        self.assertIn("تُرک", got)
-        for bare in ("درست", "صدا", "کلمه", "غلط", "همان"):
-            self.assertIn(bare, got)
+class AFarsiVerseIsOnePiece(unittest.TestCase):
+    """Live 2026-09-28: a fully marked verse came out "in three pieces,
+    choppy" -- the marks counted as length, and the first piece was kept
+    short on purpose."""
 
-    def test_a_lightly_marked_reply_is_untouched(self):
-        light = "امروز هوا خیلی دلپذیر بود؛ آفتابِ ملایم و یه نسیمِ خُنَک از سمتِ کوه."
-        self.assertEqual(_lightly_marked(light), light)
+    def test_a_marked_verse_is_one_chunk(self):
+        from simorgh.voice.planner import chunk
+
+        verse = "اَگَر آن تُرکِ شیرازی به دَست آرَد دِلِ ما را، به خالِ هِندویَش بَخشَم سَمَرقَند و بُخارا را."
+        self.assertEqual(len(chunk(verse)), 1)
+
+    def test_marks_are_not_letters(self):
+        from simorgh.voice.planner import _letters
+
+        self.assertEqual(_letters("دِلِ"), _letters("دل"))
 
 
 if __name__ == "__main__":
