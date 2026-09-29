@@ -103,7 +103,7 @@ Environment: `SIMORGH_COGNITION_PROVIDER_ORDER` (the test session sets it to `fl
 - Protected blocks are never compacted; if they alone exceed the input budget, or compaction leaves the context over budget, the reply is `context_too_large` and no provider is called.
 - The input ceiling comes from the purpose (`max_tokens_in`), not from the caller's `max_tokens`, unless the caller sets `max_tokens_in`.
 - A provider whose rolling window is exhausted (calls or spend) is skipped; one provider's spend never counts against another's cap.
-- Candidates are tried in route order (a per-purpose route, or `routes.strong` for `tier: "strong"`) then `provider_order`, all within one call deadline; the floor answers last unless `require_real_provider`, which yields `no_real_provider`.
+- Candidates are tried in route order (a per-purpose route; for a request with a `tier`, `routes.<tier>` when configured, else `routes.strong` -- `tier: "farsi"` for a Farsi chat turn, 2026-09-28) then `provider_order`, all within one call deadline; the floor answers last unless `require_real_provider`, which yields `no_real_provider`.
 - A provider with `only_purposes` is never dialled for another purpose; a call with images goes only to a provider that can see.
 - Every billed call, including a failed-but-billable one, is recorded on `cognition:budget:<provider>`; the window is read from the ledger once and then kept in memory.
 - A change of answering provider between text calls publishes one `ui.notice`.

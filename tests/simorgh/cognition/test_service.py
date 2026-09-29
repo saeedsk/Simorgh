@@ -128,6 +128,27 @@ class CognitionServiceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await ask("draft"), "strong", "the draft route")
         self.assertEqual(await ask("chat", tier="strong", tier_reason="attempt 2"), "strong", "escalated")
 
+    async def test_a_named_tier_takes_its_own_route_else_the_strong_one(self):
+        # 2026-09-28: a Farsi turn asks tier "farsi"; routes.farsi sends it to
+        # the model best at Persian, and without that route it still lands on
+        # the strong one, never lower.
+        cheap, strong, persian = (_FakeProvider("cheap", text="c"), _FakeProvider("strong", text="s"),
+                                  _FakeProvider("persian", text="p"))
+        providers = {n: ProviderConfig(max_calls=100, window_seconds=3600.0) for n in ("cheap", "strong", "persian")}
+
+        async def ask(routes, **extra):
+            await self._make(providers=[cheap, strong, persian], config=CognitionConfig(
+                provider_order=("cheap", "strong", "persian", "floor"), assembly_request_timeout=0.05,
+                providers=providers, routes=routes))
+            reply = await self.bus.request(Message.new(topics.COGNITION_THINK, source="test", payload={
+                "purpose": "chat", "messages": [{"role": "user", "content": "q"}],
+                "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False, **extra,
+            }), timeout=5.0)
+            return reply.payload["provider"]
+
+        self.assertEqual(await ask({"strong": ("strong",), "farsi": ("persian", "strong")}, tier="farsi"), "persian")
+        self.assertEqual(await ask({"strong": ("strong",)}, tier="farsi"), "strong", "no farsi route: the strong one")
+
     async def test_think_with_a_fake_provider_returns_its_answer_not_the_floor(self):
         await self._make(providers=[_FakeProvider(text="42")])
         request = Message.new(topics.COGNITION_THINK, source="test", payload={

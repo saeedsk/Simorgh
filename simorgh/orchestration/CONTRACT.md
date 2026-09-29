@@ -127,7 +127,7 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 
 - `scaffolds.FARSI_VOWELS` (2026-09-27): every spoken reply's prompt (voice, and the phone's `api` channel) asks for the short vowel on a Farsi word that reads two ways (تُرک/تَرک, مُلک/مِلک…) and the ezafe in poetry; the Farsi voice now keeps those marks.
 
-- `[orchestration] farsi_strong` (default true, 2026-09-27): a chat turn in Farsi (Persian-script text, or `heard_language` persian) asks Cognition for the strong tier (`SessionRunner._tier` -> `{"tier": "strong", "tier_reason": "a Farsi turn"}`, routed by `[cognition] routes.strong`); English keeps the fast chat model. The fast model misread clear Farsi, invented Hafez and promised work it never started.
+- `[orchestration] farsi_strong` (default true, 2026-09-27): a chat turn in Farsi (Persian-script text, or `heard_language` persian) asks Cognition for tier `farsi` (`SessionRunner._tier` -> `{"tier": "farsi", "tier_reason": "a Farsi turn"}`), routed by `[cognition] routes.farsi` when set and `routes.strong` otherwise; English keeps the fast chat model. The fast model misread clear Farsi, invented Hafez and promised work it never started.
 
 - `stophook.claimed_to_start_work` (rule `started`, 2026-09-27): a chat reply saying work is under way -- "I'm on it", "I'll let you know when it's done", «رفت سر کارش», «تموم شد خبرت می‌کنم» -- when no tool that changes anything succeeded bounces once, asking for START_TASK or a plain "I can't do this myself".
 

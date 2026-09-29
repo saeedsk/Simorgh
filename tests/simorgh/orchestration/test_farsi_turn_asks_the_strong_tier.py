@@ -22,10 +22,10 @@ def _chat(text: str, heard: str = ""):
 class FarsiTurnAsksTheStrongTier(unittest.TestCase):
     def test_farsi_is_strong(self):
         got = SessionRunner._tier(_runner(True), _chat("Sim, خب درستش کن یه چیز بذار که فارسی بفهمه"))
-        self.assertEqual(got.get("tier"), "strong")
+        self.assertEqual(got.get("tier"), "farsi")
 
     def test_heard_as_farsi_is_strong_even_in_latin_letters(self):
-        self.assertEqual(SessionRunner._tier(_runner(True), _chat("Sim, ha'aretz huvesi", "persian")).get("tier"), "strong")
+        self.assertEqual(SessionRunner._tier(_runner(True), _chat("Sim, ha'aretz huvesi", "persian")).get("tier"), "farsi")
 
     def test_english_keeps_the_fast_model(self):
         self.assertEqual(SessionRunner._tier(_runner(True), _chat("Sim, turn on the kitchen light")), {})

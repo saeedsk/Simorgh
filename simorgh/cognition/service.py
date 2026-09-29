@@ -552,8 +552,13 @@ class Service:
 
             # A per-purpose route, or the strong route when the caller escalates,
             # tried before the default order (design section 7).
-            strong = payload.get("tier") == "strong"
-            route = (self._config.routes.get("strong") if strong else None) or self._config.routes.get(purpose.value)
+            # A named tier takes its own route when there is one (`routes.farsi`
+            # for a Farsi turn, 2026-09-28), else the strong route: asking for
+            # a tier never lands lower than asking for "strong" did.
+            tier = str(payload.get("tier") or "")
+            strong = bool(tier)
+            route = ((self._config.routes.get(tier) or self._config.routes.get("strong")) if tier else None) \
+                or self._config.routes.get(purpose.value)
             order = tuple(dict.fromkeys(tuple(route) + tuple(self._config.provider_order))) if route else None
             if strong and route and self._ctx is not None:
                 self._ctx.logger.info("cognition.escalated", purpose=purpose.value, route=list(route),

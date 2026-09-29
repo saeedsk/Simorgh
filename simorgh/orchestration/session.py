@@ -2054,7 +2054,7 @@ class SessionRunner:
         when no strong route is configured, so asking costs nothing."""
         if session.profile.scaffold == "chat":
             if self._farsi_strong and _farsi_turn(session):
-                return {"tier": "strong", "tier_reason": "a Farsi turn"}
+                return {"tier": "farsi", "tier_reason": "a Farsi turn"}
             return {}
         if not self._escalate_from_attempt:
             return {}
