@@ -62,6 +62,35 @@ class TheFactsBlock(unittest.TestCase):
             await sub.unsubscribe()
         self.assertFalse([m for m in messages if m["content"].startswith(FACTS_BLOCK_HEADER)])
 
+    @run
+    async def test_the_turns_language_comes_after_a_remembered_language_preference(self):
+        # Live 2026-09-29: "language_preference: Farsi only", stored on the
+        # 27th, had English questions answered in Farsi; the turn's own
+        # language sat in the system prefix, above the facts.
+        async with Harness() as h:
+            memory_bus = h.client("memory")
+
+            async def _responder(message):
+                payload = {"items": [], "truncated": False}
+                if message.payload.get("query"):
+                    payload["facts"] = [{**FACT, "subject": "Saeed", "predicate": "language_preference",
+                                         "object": "Farsi only", "was": "", "was_until": None}]
+                await memory_bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY, payload=payload)
+
+            sub = await memory_bus.subscribe(topics.MEMORY_RETRIEVE, _responder)
+            assembler = Assembler(h.client("orchestration"))
+            session = Session(task_id="t1", kind="chat", mode="execute", profile=profiles.CHAT,
+                              user_text="what's the weather", speaker="Saeed")
+            session.heard_language = "english"
+            messages = await assembler.assemble(session, "chat", user_text="what's the weather")
+            await sub.unsubscribe()
+        texts = [m["content"] for m in messages]
+        facts = next(i for i, t in enumerate(texts) if t.startswith(FACTS_BLOCK_HEADER))
+        said = next(i for i, t in enumerate(texts) if t.startswith("This turn was spoken in English"))
+        self.assertLess(facts, said)
+        self.assertIn("remembered preference", texts[said])
+        self.assertEqual(texts[said + 1], "what's the weather", "the language note is the last word before the question")
+
 
 if __name__ == "__main__":
     unittest.main()

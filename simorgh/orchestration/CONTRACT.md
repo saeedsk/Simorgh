@@ -125,6 +125,7 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 
 - `scaffolds.own_phone_note(speaker)` (2026-09-27): a chat turn on channel `api` with a speaker -- a paired phone that belongs to someone -- carries a line saying it is that person asking and Guardian decides as theirs, so earlier refusals from before the phone had an owner do not make the model refuse ahead of Guardian.
 - The name (2026-09-29, the creator: "sim doesn't need to repeat my name in every message"): `who_is_here` asks for the speaker's name rarely and never to open a reply; `_turned_to` with the same voice as `before` says not to use it at all; `own_phone_note` says not to open with it. A new or changed voice still gets it once.
+- The turn's language (2026-09-29): `scaffolds.language_line(heard_language)` is rendered twice for a chat turn -- in the voice prefix and, by `context.Assembler.assemble`, as the last system block before the question, after the facts block. It outranks "a remembered preference": stored facts "Farsi only" / "Sim only speak Farsi" had English questions answered in Farsi.
 
 - `scaffolds.FARSI_VOWELS` (2026-09-27): every spoken reply's prompt (voice, and the phone's `api` channel) asks for the short vowel on a Farsi word that reads two ways (تُرک/تَرک, مُلک/مِلک…) and the ezafe in poetry; the Farsi voice now keeps those marks.
 

@@ -662,8 +662,11 @@ def language_line(heard: str) -> str:
     name = _LANGUAGE_NAMES.get((heard or "").strip().lower())
     if not name:
         return ""
+    # "a remembered preference": live 2026-09-29, two facts stored on the
+    # 27th ("language_preference: Farsi only", "requested: Sim only speak
+    # Farsi") had English questions answered in Farsi for two days.
     return (f"This turn was spoken in {name}: answer in {name}, whatever language an earlier turn asked "
-            f"for or the conversation was in.")
+            f"for, a remembered preference says, or the conversation was in.")
 
 
 def satellite_note(device: str) -> str:

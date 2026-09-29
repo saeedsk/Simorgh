@@ -17,6 +17,7 @@ from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
 
 from .api import Session
+from .scaffolds import language_line
 
 DEFAULT_TIMEOUT_S = 0.25
 # Live-caught (context_too_large, real use -- 07-post-cutover-review.md
@@ -250,6 +251,13 @@ class Assembler:
             # kind (2026-09-10). This is the normal case, not an edge.
             blocks.append({"role": "system", "content": MEMORY_UNAVAILABLE_NOTE.format(
                 why=unavailable)})
+
+        said_in = language_line(str(getattr(session, "heard_language", "") or "")) if chat else ""
+        if said_in:
+            # Again, last before the question: the copy in the system prefix
+            # sat above the facts block, and a remembered "Farsi only" there
+            # won -- English questions answered in Farsi (live, 2026-09-29).
+            blocks.append({"role": "system", "content": said_in})
 
         # Live-caught by the same audit: this was sent on the *first* step
         # only (`session.py` clears `pending_user_text` after one use) and

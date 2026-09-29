@@ -23,6 +23,18 @@ task = "diagnose sees real task failures"
 since = "2026-09-22T11:51:15+00:00"
 until = "2026-09-22T19:51:15+00:00"
 
+[locks.ledger]
+by = "opus-main"
+task = "disk floor in bytes, not 5% of the disk"
+since = "2026-09-29T14:46:44+00:00"
+until = "2026-09-29T22:46:44+00:00"
+
+[locks.orchestration]
+by = "opus-main"
+task = "turn language outranks remembered language facts"
+since = "2026-09-29T14:38:41+00:00"
+until = "2026-09-29T22:38:41+00:00"
+
 [locks.planning]
 by = "opus-main"
 task = "the dispatch window counts only offerable work"
