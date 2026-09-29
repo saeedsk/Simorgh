@@ -585,7 +585,13 @@ class _AnswerWatch:
                     # ids completed with answers, one of them the
                     # correct one -- so the suite reported 1/5 for a
                     # run it had not finished watching.
-                    if not terminal or self._outcomes[task_id][0] in TERMINAL:
+                    if self._outcomes[task_id][0] in TERMINAL:
+                        return
+                    if not terminal:
+                        # A later block replaces an earlier one: its answer
+                        # is the system's latest word, and the latest is the
+                        # one scored if nothing terminal follows.
+                        self._outcomes[task_id] = (kind, message.payload)
                         return
                 self._outcomes[task_id] = (kind, message.payload)
                 self._mark_started(task_id)  # finished is as started as it gets
@@ -672,7 +678,11 @@ class _AnswerWatch:
             try:
                 await asyncio.wait_for(waiter, timeout=min(timeout_s, self._grace_s) if blocked else timeout_s)
             except asyncio.TimeoutError:
-                if not blocked:
+                # Asked afresh, not from `blocked` above: a block does not
+                # wake this wait, so one recorded DURING it was invisible and
+                # a case that answered three times, blocked each time, was
+                # reported "no answer within 600s" (bench wave 2026-09-29).
+                if task_id not in self._outcomes:
                     return "", self._steps.get(task_id, 0), f"no answer within {timeout_s:.0f}s"
                 break      # it blocked and stayed blocked: score what it had
             finally:

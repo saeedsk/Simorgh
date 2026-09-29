@@ -607,6 +607,48 @@ class ABlockedCaseThatResumesIsScoredOnWhatItFinallySaidTestCase(unittest.Isolat
         self.assertFalse(result.correct, "the last word is the answer, right or wrong")
 
 
+class ABlockDuringTheWaitIsNotLostAtTheTimeoutTestCase(unittest.IsolatedAsyncioTestCase):
+    """Bench wave 2026-09-29, GAIA 305ac316: the case answered three times,
+    each blocked by our verifier, and was recorded "no answer within
+    600s" -- a block does not wake the wait, and the timeout branch asked
+    whether one had arrived BEFORE the wait began. The latest block's
+    answer is what is scored now."""
+
+    async def test_blocks_that_arrive_while_waiting_are_scored_on_the_latest(self):
+        async with Harness() as h:
+            other = h.client("orchestration")
+            later: list = []
+
+            async def _blocks() -> None:
+                await asyncio.sleep(0.3)
+                await other.publish(other.new(topics.TASK_BLOCKED, {
+                    "task_id": "tw", "reason": "verification failed after max revisions",
+                    "result_summary": "FINAL ANSWER: Paris"}))
+
+            async def _on_create(message: Message) -> None:
+                await other.reply(message, type=topics.TASK_CREATE_REPLY, payload={"task_id": "tw"})
+                await other.publish(other.new(topics.TASK_BLOCKED, {
+                    "task_id": "tw", "reason": "verification failed after max revisions",
+                    "result_summary": "FINAL ANSWER: Lyon"}))
+                later.append(asyncio.create_task(_blocks()))
+
+            sub = await other.subscribe(topics.TASK_CREATE, _on_create)
+            try:
+                runner = Runner(h.client("benchmark"), config=Config(case_timeout_s=2.0, blocked_grace_s=0.5),
+                                clock=h.clock.now)
+                one = Suite(name="toy", version="v1", cases=(
+                    Case(id="c1", question="capital of France", answer="Paris", level="1", suite="toy"),))
+                record = await runner.run(one, model="m")
+            finally:
+                await sub.unsubscribe()
+                for task in later:
+                    task.cancel()
+        [result] = record.results
+        self.assertNotIn("no answer within", result.error)
+        self.assertEqual(result.answer, "Paris", "the latest word, not the first")
+        self.assertTrue(result.correct)
+
+
 class BlockedAnswersAreStillScoredTestCase(unittest.IsolatedAsyncioTestCase):
     """A task our own pipeline blocked still carries the answer it had.
     Scoring it is what tells us whether our verifier is throwing away
