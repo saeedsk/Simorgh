@@ -160,9 +160,24 @@ def _is_secret_env(name: str) -> bool:
     return upper in _SECRET_ENV_NAMES or upper.endswith(_SECRET_ENV_SUFFIXES)
 
 
+#: Command-line tools that ship inside a macOS app rather than on PATH.
+#: Live, 2026-09-29: asked whether Home Assistant had a Tailscale address,
+#: Sim answered "Tailscale isn't installed on this host (no binary)" --
+#: the Mac is on the tailnet, and its CLI is `Tailscale.app/.../Tailscale`
+#: (the file system is case-insensitive, so `tailscale` finds it).
+APP_CLI_DIRS: tuple[str, ...] = ("/Applications/Tailscale.app/Contents/MacOS",)
+
+
 def _child_env() -> dict:
-    """`os.environ` with the credentials taken out."""
-    return {name: value for name, value in os.environ.items() if not _is_secret_env(name)}
+    """`os.environ` with the credentials taken out, and the app-bundled
+    command-line tools that exist here put on PATH."""
+    env = {name: value for name, value in os.environ.items() if not _is_secret_env(name)}
+    have = [d for d in APP_CLI_DIRS if os.path.isdir(d)]
+    path = env.get("PATH", "")
+    extra = [d for d in have if d not in path.split(os.pathsep)]
+    if extra:
+        env["PATH"] = os.pathsep.join([path, *extra]) if path else os.pathsep.join(extra)
+    return env
 
 
 def _head(command: str) -> str:

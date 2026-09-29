@@ -38,3 +38,24 @@ class FarsiVowels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhereYouRun(unittest.TestCase):
+    """Live, 2026-09-29, from the phone: "I can't reach the MacBook's
+    processes from here" and "Tailscale isn't installed on this host"."""
+
+    def test_a_phone_or_spoken_turn_is_told_which_machine_sim_is(self):
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.scaffolds import render
+
+        for channel, profile in (("api", profiles.CHAT), ("voice", profiles.VOICE_CHAT)):
+            with self.subTest(channel=channel):
+                body = render(profile, channel=channel, speaker="Saeed")
+                self.assertIn("You run on the computer called", body)
+                self.assertIn("never say you cannot reach it", body)
+
+    def test_a_task_session_is_not(self):
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.scaffolds import render
+
+        self.assertNotIn("You run on the computer called", render(profiles.PATCH, task="x", subject="a.py"))

@@ -361,6 +361,23 @@ FARSI_VOWELS = (
     "the person spoke badly, brokenly or unclearly: the slips are the recogniser's, not theirs.")
 
 
+def where_you_run() -> str:
+    """Which machine Sim is. Live, 2026-09-29, from the phone: "what's the
+    CPU usage on the MacBook Pro?" -- "I can't reach the MacBook's
+    processes from here, no tool in my kit touches it" (it runs ON it, with
+    run_shell), and "Tailscale isn't installed on this host" (it is; Sim's
+    own Home Assistant relay listens on its tailnet address). Nothing had
+    told the model where it was, and on the phone it assumed far away."""
+    import platform
+
+    system = {"Darwin": "macOS", "Linux": "Linux", "Windows": "Windows"}.get(platform.system(), platform.system())
+    host = platform.node().split(".")[0] or "this computer"
+    return (f"You run on the computer called {host!r} ({system}), the one at the creator's home -- wherever the person is "
+            "talking from, a phone or a room. Its CPU, memory, processes, disk and network (Tailscale "
+            "included) are the machine you are on: look with run_shell before saying anything about them, "
+            "and never say you cannot reach it.")
+
+
 def own_phone_note(speaker: str) -> str:
     """A turn from a paired phone that belongs to someone (`devices
     assign`, or the owner named at pairing). Live, 2026-09-27: once the
@@ -719,6 +736,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
     if channel == "api" and speaker:
         body = f"{body}\n\n{own_phone_note(speaker)}" if body else own_phone_note(speaker)
+    if channel in ("api", "voice", "cli", "telegram", "whatsapp") and "run_shell" in profile.tools:
+        body = f"{body}\n\n{where_you_run()}" if body else where_you_run()
     if channel == "api":
         # The phone reads its answers aloud too (`/api/say`).
         body = f"{body}\n\n{FARSI_VOWELS}" if body else FARSI_VOWELS
