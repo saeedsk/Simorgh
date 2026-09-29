@@ -4,15 +4,3 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
-
-[locks.execution]
-by = "opus-main"
-task = "run_shell finds the Tailscale CLI inside its app"
-since = "2026-09-29T16:18:35+00:00"
-until = "2026-09-30T00:18:35+00:00"
-
-[locks.orchestration]
-by = "opus-main"
-task = "a chat turn knows which machine Sim runs on"
-since = "2026-09-29T16:17:51+00:00"
-until = "2026-09-30T00:17:51+00:00"
