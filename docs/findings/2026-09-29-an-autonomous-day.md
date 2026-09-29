@@ -141,6 +141,16 @@ trial's own copy; on the checkout both pass.
   upper bound.
 - The same 12 after the evidence-first verdict (`verification`, today):
   verification blocks 4 -> 2, score unchanged at 9/12. Small n; a hint.
+- After the no-lookup prompt: GAIA level 1, 12 new cases, 9/12; level 2,
+  10 new cases, 5/10; level 3, 6 cases, 1/6 (before the prompt). Zero
+  searches mentioning GAIA and zero answers citing it in the no-lookup
+  runs.
+- One right answer was scored wrong for its alphabet: "Russian–German
+  Legion" (en dash). The scorer strips ASCII punctuation only, as the
+  official one does, so the answer format now asks for a hyphen; the
+  scorer is unchanged.
+- A `web_fetch` of ctdbase.org loops on 302 whatever is sent (cookies
+  included): a bot wall, not a Sim fault.
 - GAIA level 2, 10 cases: 7/10. The misses are the model's (a p-value
   reasoning slip, 1.4564 Å rounded to 1.46 where 1.456 is expected, EC
   numbers of chemicals where enzymes were meant).
