@@ -122,6 +122,9 @@ such thing exists" is a perfectly good answer to a research question,
 and a question whose honest answer is "no" would fail the task for
 being right. Ask about the answer, never about the world it describes.
 
+Phrase every question so that YES means the answer is good: ask "is X
+supported by the evidence?", never "does the evidence contradict X?".
+
 Mark each question [required] (a "no" means the answer fails) or
 [optional] (a "no" is useful feedback but not disqualifying).
 
@@ -225,6 +228,10 @@ async def generate_checklist(think, req: VerifyRequest, config, max_items: int |
     return accepted + generated
 
 
+#: A question whose YES means the answer is wrong.
+_INVERTED = re.compile(r"\bcontradict", re.IGNORECASE)
+
+
 async def _generated_checklist(think, req: VerifyRequest, config, max_items: int | None = None) -> list[ChecklistItem]:
     max_items = max_items or config.checklist_max_items
     if req.checklist_hint:
@@ -247,6 +254,12 @@ async def _generated_checklist(think, req: VerifyRequest, config, max_items: int
         question, required = split_tag(match.group(1))
         if not question:
             continue
+        if required and _INVERTED.search(question):
+            # Its YES is the failure. Bench wave, 2026-09-29: "Does the
+            # evidence contradict the claim that the three species
+            # co-occur?" -- the reviewer found it supported, answered NO,
+            # and a required NO failed a correct answer. Kept as feedback.
+            required = False
         items.append(ChecklistItem(question=question, required=required))
         if len(items) >= max_items:
             break

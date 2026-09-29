@@ -150,3 +150,4 @@ Lock it first (`python tools/modlock.py claim verification --by <you> --task "..
 
 - Telemetry (stage 1 item 4, 2026-09-19): each verification is a span `verification.verify`, parented to the `verify.requested` message.
 - The checklist answer prompt asks for the evidence first and the verdict word on its own last line (2026-09-29); `parsing.parse_final_verdict` reads that line and falls back to `parse_verdict` for a reply in the old shape. Asked for the word first, a reviewer wrote "NO ... actually it rounds to 17000, so the answer stands" and failed a required check.
+- A generated checklist question containing "contradict" is never [required] (2026-09-29): its YES is the failure, so a required NO failed a correct answer ("Does the evidence contradict the three-species claim?" -- supported, NO). The research checklist prompt also says to phrase every question so YES means good.

@@ -32,6 +32,16 @@ class TestGenerateChecklist(unittest.IsolatedAsyncioTestCase):
             ChecklistItem(question="has a test?", required=False),
         ])
 
+    async def test_a_question_whose_yes_is_the_failure_is_only_feedback(self):
+        """Bench wave 2026-09-29: "Does the evidence contradict the claim
+        ...?" answered NO (it was supported) failed a correct answer."""
+        async def think(*, purpose, prompt):
+            return ThinkReply(text="1. [required] Does the evidence contradict the three-species claim?\n"
+                                   "2. [required] Is the three-species claim supported by a frame?\n")
+
+        items = await generate_checklist(think, _req(), VerificationConfig())
+        self.assertEqual([i.required for i in items], [False, True])
+
     async def test_unmarked_item_defaults_to_required(self):
         async def think(*, purpose, prompt):
             return ThinkReply(text="1. handles empty list?\n")
