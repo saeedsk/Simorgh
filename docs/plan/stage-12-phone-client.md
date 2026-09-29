@@ -1,6 +1,6 @@
 # Stage 12 -- The phone client
 
-Status: **designed, not started** (2026-09-24) · Depends on: stage 3 (streaming voice), stage 10 (companion) for the notification channel · Estimated: server 2 weeks, a web client 3 days, a native client 3 weeks after that · Modules touched: interface, voice, contracts, execution, docs
+Status: **in progress** (2026-09-29, from the code: item 2 per-device tokens with an owner named at pairing (`interface/devices.py`, `/api/pair`, `/pair`); item 3 open prompts and their answers (`/api/prompts`); item 3a one action route (`/api/action`); item 5's voice through Sim's engines (`/api/say`, `/api/listen`, hands-free in the app); items 6-7 the native client in `ios/` (discovery by mDNS, the tailnet address off-LAN, Home Assistant through `interface/harelay.py`). Not built: item 1's public rendezvous -- the phone reaches Sim over Tailscale, the path this file argues against; item 4's push of an unanswered prompt; APNs.) · Depends on: stage 3 (streaming voice), stage 10 (companion) for the notification channel · Modules touched: interface, voice, contracts, execution, docs
 
 ## Outcome
 
