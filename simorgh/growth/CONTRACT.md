@@ -131,3 +131,4 @@ Cheapest first, deliberately: stopping early is the ordinary outcome, and the or
 ## Working on this module
 
 Lock it first (`python tools/modlock.py claim growth --by <you> --task "..."`), commit the lock, edit only `simorgh/growth/`, `tests/simorgh/growth/` and this file. Run `python tools/modtest.py growth`; commit subject `growth: <what changed>`.
+- A `patch:<area>` subject is the patch agent's work (2026-09-29): `propose_from` files it under `patch` (the prefix before `:`) with the area left in the draft prompt. 57 of the live 113 candidates were `patch:simorgh/growth`, `patch:simorgh/interface` and the like, and every one had been passed over as "no agent named"; an unknown prefix is still passed over.

@@ -239,7 +239,14 @@ async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, a
             passed.append(f"{label} -- about a {'tool' if cand.source == 'denials' else 'nothing'}, "
                           "not a kind of work")
             continue
-        if subject not in agents:
+        # `patch:simorgh/growth` is the patch agent's work in one area: the
+        # pattern miner keys a patch by what it touched. Filed under the
+        # agent, with the area kept in the draft so the advice can name it.
+        # Before this, 57 of the live 113 candidates -- the commonest kind,
+        # patches to growth and interface -- could never be proposed:
+        # "no agent named 'patch:simorgh/growth'" (2026-09-29).
+        agent = subject if subject in agents else subject.partition(":")[0]
+        if agent not in agents:
             passed.append(f"{label} -- no agent named {subject!r}; rules/{subject}.md would reach no body")
             continue
         refs = tuple(r for r in (getattr(cand, "refs", ()) or ()) if r)
@@ -247,7 +254,7 @@ async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, a
             passed.append(f"{label} -- no evidence refs to cite")
             continue
         tag = cause_tag(cand.what)
-        if any(p.kind == "rule" and p.task_type == subject and (p.status == "proposed" or p.live)
+        if any(p.kind == "rule" and p.task_type == agent and (p.status == "proposed" or p.live)
                and _cause_of(p.why) == _norm(cand.what) for p in store.all()):
             passed.append(f"{label} -- already has a proposed or live rule")
             continue
@@ -279,11 +286,11 @@ async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, a
         if why_not:
             passed.append(f"{label} -- rejected: {why_not}")
             continue
-        twin = _blocking(store, subject, text)
+        twin = _blocking(store, agent, text)
         if twin is not None:
             passed.append(f"{label} -- the same as {twin.status} rule {twin.id}")
             continue
-        policy = await store.propose(kind="rule", task_type=subject, body=text, evidence_refs=refs,
+        policy = await store.propose(kind="rule", task_type=agent, body=text, evidence_refs=refs,
                                      why=f"{tag} ({cand.count}x, from {cand.source})")
         proposed.append(policy.id)
     detail = f"{len(proposed)} proposed, {drafts} drafted"

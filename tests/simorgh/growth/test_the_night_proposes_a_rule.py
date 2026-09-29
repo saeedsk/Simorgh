@@ -154,6 +154,25 @@ class TheDraftStep(unittest.TestCase):
         self.assertEqual((store.all(), calls), ([], []))
         self.assertIn("no agent named 'benchmark_gaia'", result["detail"])
 
+    def test_a_patch_in_one_area_is_the_patch_agents_work(self):
+        """Live, 2026-09-29: 57 of 113 candidates were `patch:simorgh/growth`
+        and the like, and every one was passed over as "no agent named"."""
+        area = Candidate(source="patterns", what="failure_rate 89%", count=1, subject="patch:simorgh/growth",
+                         evidence=("'patch:simorgh/growth' tasks failed 8/9 recent outcomes",),
+                         refs=("reflect:patterns:patch:simorgh/growth",))
+        calls = []
+        store, result = _propose([area], think=_think(RULE, calls=calls))
+        (policy,) = store.all()
+        self.assertEqual(policy.task_type, "patch", "filed where rules/patch.md reaches the patch agent")
+        self.assertIn("Kind of work: patch:simorgh/growth", calls[0], "the draft still sees the area")
+
+    def test_an_unknown_prefix_is_still_no_agent(self):
+        odd = Candidate(source="patterns", what="failure_rate 90%", count=1, subject="gaia:level1",
+                        refs=("reflect:patterns:gaia:level1",))
+        store, result = _propose([odd])
+        self.assertEqual(store.all(), [])
+        self.assertIn("no agent named 'gaia:level1'", result["detail"])
+
     def test_a_denial_is_about_a_tool_not_a_kind_of_work(self):
         denial = Candidate(source="denials", what="outside scope", count=9, subject="run_shell",
                            refs=("x",))
