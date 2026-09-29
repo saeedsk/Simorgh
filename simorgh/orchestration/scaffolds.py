@@ -212,6 +212,7 @@ _TOOL_NOTES: dict[str, str] = {
     "cam_state": "what a camera sees right now (motion, person, vehicle, animal) and what it has on",
     "cam_snapshot": "a still from a camera, saved under workspace/cameras/",
     "camera_describe": "what a camera can see right now, in words: `<camera>` (NVR or Ring)",
+    "look_at_image": "look at up to four image files and answer a question about them (for a video, extract frames first)",
     "remember_place": "keep what a place is called so it survives a restart: `house <name>`, `network <name> is <place>`, `forget network <name>`, or `places` to list",
     "overheard": "what was said near you that was not said TO you, and kept memos: `2 hours`, `from Ira`, `memos`; kept two days then gone",
     "overheard_note": "`memo <text>` pins one line of overheard speech for 48 hours -- a voice memo, "

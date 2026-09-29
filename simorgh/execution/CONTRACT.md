@@ -45,7 +45,7 @@ Since 2026-09-20 `run_tests` runs the suite through `procs.run_child`: its own p
 | `simorgh/execution/geocode.py` | `geocode` via Nominatim |
 | `simorgh/execution/realestate.py` | `search_listings` |
 | `simorgh/execution/listingsources.py` | the listing data sources behind `search_listings` |
-| `simorgh/execution/vision.py` | `CameraVision` (describes `world.camera.event`, speaks it) and `camera_describe` |
+| `simorgh/execution/vision.py` | `CameraVision` (describes `world.camera.event`, speaks it), `camera_describe`, and `look_at_image` (2026-09-29: up to four image files under `readable_roots`, a question, `cognition.think` with `images` and `require_real_provider`; read-only; no provider that can see is an error, never a blank answer) |
 
 Domain subpackages (stage 9 moves each to `simorgh/domains/<name>/`):
 

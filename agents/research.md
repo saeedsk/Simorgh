@@ -14,6 +14,8 @@ tools = [
     # The one profile that should be able to actually run the
     # check, not just read what it found.
     "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",
+    # A chart, a scanned page, frames pulled from a video (bench wave, 2026-09-29).
+    "look_at_image",
     "home_find", "home_state", "home_describe",
     "energy_status", "energy_report", "energy_tariff", "media_now"
 ]

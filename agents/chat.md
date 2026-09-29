@@ -22,7 +22,7 @@ tools = [
     # "this room is the study", "grant Ira interest shares" -- all
     # ordinary chat questions, and none of them was reachable by any
     # agent until 2026-09-22 (the tools were registered and orphaned).
-    "overheard", "overheard_note", "camera_describe", "remember_place", "people",
+    "overheard", "overheard_note", "camera_describe", "look_at_image", "remember_place", "people",
     # "turn the kitchen light off" is the most ordinary chat
     # request there is.
     "home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",

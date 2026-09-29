@@ -257,8 +257,84 @@ class CameraDescribeTool:
                           metadata={"camera": camera, "stills": len(paths), "description": said})
 
 
+#: What `look_at_image` will open. A video is not one: extract frames first.
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+MAX_IMAGES = 4
+
+
+class LookAtImageTool:
+    """Any picture file, looked at: a GAIA chart, frames pulled from a
+    video, a photo someone saved. Before this the eyes existed only behind
+    the cameras -- a benchmark session extracted 60 frames from a video
+    and then said "without a vision tool in this session I cannot
+    classify species" (bench wave, 2026-09-29)."""
+
+    name = "look_at_image"
+    read_only = True
+    reversibility = "read_only"
+    description = ("Look at up to four image files (png, jpg, webp, gif, bmp) under the readable folders and "
+                   "answer a question about them: `paths` and `question`. For a video, extract frames first "
+                   "(ffmpeg) and look at a few. Needs a provider that can see.")
+    args_schema = {"type": "object", "required": ["paths", "question"],
+                   "properties": {"paths": {"type": "array", "items": {"type": "string"}},
+                                  "question": {"type": "string"}}}
+
+    def __init__(self, config, **_kwargs) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        from .pathsafety import resolve_safe_path
+        from .tools import tool_root
+
+        raw = args.get("paths") or args.get("path") or []
+        wanted = [raw] if isinstance(raw, str) else [str(p) for p in raw if str(p).strip()]
+        question = str(args.get("question") or "").strip() or "Describe what this image shows."
+        if not wanted:
+            return ToolResult(ok=False, error="which image? give `paths`, e.g. [\"workspace/scratch/frame_01.png\"]")
+        if len(wanted) > MAX_IMAGES:
+            return ToolResult(ok=False, error=f"{len(wanted)} images; at most {MAX_IMAGES} per look -- pick the ones that matter")
+        if ctx.bus is None:
+            return ToolResult.unconfigured("refused: no bus, so there is nothing to ask about the picture")
+        found: list[str] = []
+        for raw_path in wanted:
+            path, refusal = resolve_safe_path(
+                tool_root(self._config, ctx, raw_path), raw_path,
+                readable_roots=self._config.readable_roots, root_files=self._config.readable_root_files)
+            if refusal:
+                return ToolResult.refused(refusal)
+            if path is None or not path.is_file():
+                return ToolResult(ok=False, error=f"no such file: {raw_path}")
+            if path.suffix.lower() not in IMAGE_SUFFIXES:
+                return ToolResult(ok=False, error=(f"{raw_path} is not an image ({', '.join(IMAGE_SUFFIXES)}); "
+                                                   "for a video, extract frames first"))
+            found.append(str(path))
+        request = Message.new(
+            topics.COGNITION_THINK, source="execution",
+            payload={
+                "purpose": "chat",
+                "messages": [{"role": "user", "content": (
+                    f"{question}\n\nAnswer from what is visible in the {len(found)} image(s); say plainly what "
+                    "you cannot make out rather than guessing.")}],
+                "budget": {"max_tokens": 600, "max_cost_usd": 0.05},
+                "require_real_provider": True,
+                "images": found,
+            },
+        )
+        reply = await ctx.bus.request_or_error(
+            request, timeout=float(getattr(self._config, "camera_vision_timeout_s", 60.0)))
+        body = reply.payload or {}
+        if body.get("ok") is False:
+            # Said as what it is: no provider that can see, or it failed --
+            # never an empty "success" the model would read as a blank image.
+            return ToolResult(ok=False, error=f"could not look: {str(body.get('error') or '')[:200]}")
+        said = str(body.get("text") or "").strip()
+        if not said:
+            return ToolResult(ok=False, error="the vision model returned nothing")
+        return ToolResult(ok=True, output=said, metadata={"images": len(found)})
+
+
 def vision_tools(config, **kwargs) -> list:
-    return [CameraDescribeTool(config, **kwargs)]
+    return [CameraDescribeTool(config, **kwargs), LookAtImageTool(config, **kwargs)]
 
 
 class _NullLock:

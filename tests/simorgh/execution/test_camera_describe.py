@@ -108,7 +108,7 @@ class CameraDescribeTestCase(unittest.IsolatedAsyncioTestCase):
         reversible for that reason and so is this, because Guardian gates
         on the label rather than on what the tool happens to do."""
         tools = vision_tools(Config(repo_root=self.root))
-        self.assertEqual([t.name for t in tools], ["camera_describe"])
+        self.assertEqual([t.name for t in tools], ["camera_describe", "look_at_image"])
         self.assertFalse(tools[0].read_only)
         self.assertEqual(tools[0].reversibility, "reversible")
 

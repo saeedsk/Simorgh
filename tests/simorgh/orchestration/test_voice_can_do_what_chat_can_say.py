@@ -85,6 +85,8 @@ class VoiceHasTheSpokenToolsTestCase(unittest.TestCase):
         allowed_absent = set(BUILDING) | {
             "geocode", "list_dir", "propose_mcp_server", "render_page", "search_listings",
             "sec_findings", "sec_posture", "sec_show",
+            # Takes file paths; a spoken turn does not name one.
+            "look_at_image",
         }
         surprise = sorted((self.typed - self.voice) - allowed_absent)
         self.assertEqual(surprise, [], f"missing from voice with no reason given: {surprise}")
