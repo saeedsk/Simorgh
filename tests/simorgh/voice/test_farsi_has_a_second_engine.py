@@ -47,15 +47,24 @@ def _config(**kw) -> Config:
 
 
 class ChoosingAFarsiEngine(unittest.TestCase):
-    def _open(self, config, *, pocket=_Pocket, piper=_Piper, mms=_Mms):
+    def _open(self, config, *, pocket=_Pocket, piper=_Piper, mms=_Mms, chatterbox=_Refuses):
         """Every engine faked: which one `auto` picks must not depend on
         what happens to be installed on the machine running the test."""
         with mock.patch("simorgh.voice.tts.pocket.PocketSynthesiser", pocket), \
              mock.patch("simorgh.voice.tts.piper.PiperSynthesiser", piper), \
-             mock.patch("simorgh.voice.tts.mms.MmsSynthesiser", mms):
+             mock.patch("simorgh.voice.tts.mms.MmsSynthesiser", mms), \
+             mock.patch("simorgh.voice.tts.chatterbox_fa.ChatterboxFarsiSynthesiser", chatterbox):
             return tts_mod._farsi_synthesiser(config)      # noqa: SLF001
 
-    def test_auto_prefers_the_one_the_creator_chose(self):
+    def test_auto_prefers_chatterbox_persian_when_it_is_here(self):
+        """2026-09-29, by ear over Pocket: "Chatterbox for everything in Farsi"."""
+        class _Chatterbox:
+            def __init__(self, *a, **kw):
+                pass
+
+        self.assertIsInstance(self._open(_config(tts_farsi="auto"), chatterbox=_Chatterbox), _Chatterbox)
+
+    def test_auto_takes_pocket_when_chatterbox_is_not_there(self):
         """2026-09-22, having heard all three: "I like
         pocket-farsi-v2.wav, make it as default farsi tts voice and
         model"."""

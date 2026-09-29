@@ -150,6 +150,12 @@ async def _with_tone(engine, text: str, *, voice: str, speed: float, tone: str, 
 _LANGUAGE_NAMES = {"fa": "Farsi", "en": "English"}
 
 
+def _chatterbox_fa(config):
+    from .chatterbox_fa import ChatterboxFarsiSynthesiser
+
+    return ChatterboxFarsiSynthesiser(config)
+
+
 def _farsi_synthesiser(config):
     """Whichever engine `[voice] tts_farsi` names, or the one that works.
 
@@ -171,15 +177,16 @@ def _farsi_synthesiser(config):
         "pocket": lambda: PocketSynthesiser(config),
         "piper": lambda: PiperSynthesiser(config, voice=config.tts_farsi_voice),
         "mms": lambda: MmsSynthesiser(config, model_id=config.tts_farsi_mms_model or MMS_DEFAULT),
+        "chatterbox": lambda: _chatterbox_fa(config),
     }
     choice = (config.tts_farsi or "auto").strip().lower()
     if choice in named:
         return named[choice]()
-    # auto: the one the creator chose, then the one that is always
-    # there. Pocket needs a venv and a reference clip, and a house
-    # whose Farsi has gone silent because a model was not downloaded is
-    # worse than a house whose Farsi sounds like Piper.
-    for engine in ("pocket", "piper", "mms"):
+    # auto: the one the creator chose -- Chatterbox Persian since
+    # 2026-09-29, when its weights are here -- then Pocket, then the one
+    # that is always there. A house whose Farsi has gone silent because a
+    # model was not downloaded is worse than one whose Farsi sounds like Piper.
+    for engine in ("chatterbox", "pocket", "piper", "mms"):
         try:
             return named[engine]()
         except ImportError:

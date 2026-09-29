@@ -98,6 +98,8 @@ No `[contracts]` section and no config dataclass. `settings.py::config_path()` r
 
 - `settings.VOICE_SAFE_KEYS` gains `tts_farsi_lexicon` (2026-09-27): Farsi words the Farsi voice says in given sounds. Consumer: voice (`tts/pocket.py`); interface's `voice set` completion lists it.
 
+- `settings.VOICE_SAFE_KEYS["tts_farsi"]` gains `chatterbox` (2026-09-29). Consumer: voice (`tts/__init__._farsi_synthesiser`).
+
 ## Invariants
 
 - `simorgh/contracts/` imports only the standard library and itself.

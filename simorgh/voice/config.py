@@ -74,18 +74,20 @@ class Config:
     # pocket-farsi-v2.wav, make it as default farsi tts voice and
     # model." So "auto" reaches for Pocket first and falls back to
     # Piper, which needs no venv and is always there.
-    tts_farsi: str = "auto"            # auto | pocket | piper | mms
+    tts_farsi: str = "auto"            # auto | pocket | piper | mms | chatterbox
     tts_farsi_mms_model: str = "facebook/mms-tts-fas"
     #: The five-second clip Pocket-TTS clones its Farsi voice from. Any
     #: WAV will do, including a family member's -- which is the point of
     #: choosing an engine that clones rather than one with five fixed
     #: voices.
-    tts_farsi_reference: str = "workspace/voice/prompts/farsi.wav"
+    tts_farsi_reference: str = "workspace/voice/prompts/ref-roya.wav"
     # Words Pocket says the way the house does, in its own phoneme spelling
     # ("/" is the short a, "a" the long one, "@" the glottal stop):
     # `word=phonemes; word=phonemes`. Its G2P reads سعید as s/@id, the ع a
     # glottal stop -- the Arabic sound the creator objected to (2026-09-27).
     tts_farsi_lexicon: str = "سعید=s/id"
+    # Chatterbox Persian's T3 weights (`tts_farsi = "chatterbox"`, 2026-09-29).
+    tts_farsi_chatterbox_weights: str = "workspace/voice/engines/chatterbox-fa/t3_fa.safetensors"
     # Endpointing (section 4.2).
     vad: str = "auto"                  # auto | silero | energy | fake
     vad_threshold: float = 0.5

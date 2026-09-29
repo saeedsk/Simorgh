@@ -79,12 +79,13 @@ def engine_env(extra: dict | None = None) -> dict:
     return env
 
 
-def engine_available(engine: str, module: str, venv_dir: Path | str = DEFAULT_VENV_DIR) -> tuple[bool, str]:
+def engine_available(engine: str, module: str, venv_dir: Path | str = DEFAULT_VENV_DIR, *,
+                     server: str = "") -> tuple[bool, str]:
     """Whether the engine's environment exists and imports its package."""
     python = venv_python(venv_dir, engine)
     if not python.is_file():
         return False, f"needs its environment: `voice models {engine}` installs it under {Path(venv_dir) / engine}"
-    server = SERVERS_DIR / f"{engine}_server.py"
+    server = SERVERS_DIR / (server or f"{engine}_server.py")
     if not server.is_file():
         return False, f"the server script {server} is missing"
     try:
@@ -132,7 +133,9 @@ class SubprocessSynthesiser:
 
     def __init__(self, config, *, venv_dir: str | None = None, reference: str = "", timeout_s: float = 180.0) -> None:
         self._venv_dir = Path(venv_dir or getattr(config, "venv_dir", DEFAULT_VENV_DIR)).expanduser()
-        self._python = venv_python(self._venv_dir, self.name)
+        # An engine may live in another's venv (`venv_name`): Chatterbox
+        # Persian runs in the English Chatterbox's.
+        self._python = venv_python(self._venv_dir, getattr(self, "venv_name", "") or self.name)
         self._reference = reference
         self._timeout = float(timeout_s)
         self._proc: asyncio.subprocess.Process | None = None
@@ -142,7 +145,8 @@ class SubprocessSynthesiser:
         self.problems: list[str] = []
         self.last_seconds = 0.0
         self.last_took_s = 0.0
-        ok, why = engine_available(self.name, self.module, self._venv_dir)
+        ok, why = engine_available(getattr(self, "venv_name", "") or self.name, self.module, self._venv_dir,
+                                   server=self.server)
         if not ok:
             raise ImportError(why)
 
