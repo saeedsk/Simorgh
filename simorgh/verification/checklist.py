@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 
 from .api import CheckContext, ThinkReply, VerifyRequest
-from .parsing import parse_verdict
+from .parsing import parse_final_verdict
 
 _ITEM_LINE = re.compile(r"^\s*\d+[.):]\s*(.+)$")
 
@@ -138,9 +138,9 @@ Result reported by the pipeline that made it:
 {evidence}
 Question: {question}
 
-Judge from the evidence and the result above. Answer with exactly one
-word first -- YES, NO, or UNKNOWN if neither shows it either way -- then,
-on a new line, one short sentence of evidence."""
+Judge from the evidence and the result above. First write one or two
+short sentences of evidence; then, on a line of its own at the end, exactly
+one word: YES, NO, or UNKNOWN if neither shows it either way."""
 
 _STEP_LIMIT = 12
 # `session.py::_put_verify_subject` already cuts each step's summary to
@@ -263,6 +263,6 @@ async def evaluate_checklist(think, req: VerifyRequest, items: list[ChecklistIte
                 evidence=_evidence(req.subject),
             ),
         )
-        answer = None if (reply.floor or not reply.ok) else parse_verdict(reply.text)
+        answer = None if (reply.floor or not reply.ok) else parse_final_verdict(reply.text)
         answered.append(AnsweredItem(question=item.question, required=item.required, answer=answer, evidence=reply.text.strip()))
     return answered

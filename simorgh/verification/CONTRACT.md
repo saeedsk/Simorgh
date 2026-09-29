@@ -149,3 +149,4 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 Lock it first (`python tools/modlock.py claim verification --by <you> --task "..."`), commit the lock, edit only `simorgh/verification/`, `tests/simorgh/verification/` and this file; a change to `simorgh/contracts/` needs the `contracts` lock and a note in every consumer's Consumes table. Run `python tools/modtest.py verification` before committing; commit subject `verification: <what changed>`.
 
 - Telemetry (stage 1 item 4, 2026-09-19): each verification is a span `verification.verify`, parented to the `verify.requested` message.
+- The checklist answer prompt asks for the evidence first and the verdict word on its own last line (2026-09-29); `parsing.parse_final_verdict` reads that line and falls back to `parse_verdict` for a reply in the old shape. Asked for the word first, a reviewer wrote "NO ... actually it rounds to 17000, so the answer stands" and failed a required check.

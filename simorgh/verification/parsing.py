@@ -93,3 +93,25 @@ def _is_determiner(line: str, at: int, *, at_line_start: bool = False) -> bool:
     if at == 0 and not at_line_start:
         return False
     return _DETERMINER_NO.match(line[at:].lower()) is not None
+
+
+_LAST_WORD = re.compile(r"^\W*(YES|NO|UNKNOWN)\W*$", re.IGNORECASE)
+
+
+def parse_final_verdict(text: str) -> Literal["yes", "no"] | None:
+    """The verdict on the answer's own last line, where the checklist
+    prompt now asks for it -- after the evidence, not before.
+
+    Asked for the word FIRST, a reviewer committed before it had reasoned:
+    "NO -- 16847.7 is less than 16850 ... actually 16847.7 rounds to
+    17000, so the pipeline's answer stands" failed a required check, and a
+    GAIA case with it (bench wave, 2026-09-29). A reply that ignores the
+    format falls back to `parse_verdict`."""
+    lines = [line.strip() for line in (text or "").strip().splitlines() if line.strip()]
+    if lines:
+        match = _LAST_WORD.match(lines[-1])
+        if match:
+            word = match.group(1).lower()
+            return None if word == "unknown" else word  # type: ignore[return-value]
+    return parse_verdict(text)
+
