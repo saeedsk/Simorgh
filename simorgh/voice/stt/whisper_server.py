@@ -218,6 +218,20 @@ class WhisperServerRecogniser:
                     repo_root=repo_root, command=list(command))
             except ImportError as exc:
                 self.problems.append(f"Farsi model {farsi_model!r} not used: {exc}")
+        #: Shenava for turns already known to be Farsi (`stt_farsi_fast`), or None.
+        self._farsi_fast = None
+        fast_dir = str(config.stt_farsi_fast or "").strip()
+        # A relative folder is the repository's: without a `repo_root` (a
+        # test's engine) there is none to find, and the model on this
+        # machine's disk must not decide what a test hears.
+        if fast_dir and self._farsi is not None and (Path(fast_dir).is_absolute() or repo_root is not None):
+            from .shenava import ShenavaRecogniser
+
+            try:
+                self._farsi_fast = ShenavaRecogniser(Path(fast_dir) if Path(fast_dir).is_absolute()
+                                                     else Path(repo_root) / fast_dir)
+            except ImportError as exc:
+                self.problems.append(f"Shenava not used for Farsi: {exc}")
         tag = model.name.replace("ggml-", "").replace(".bin", "")
         self.name = f"whisper_server:{tag}" + (" (test model -- run `voice models base.en`)" if model.name == _TEST_MODEL else "")
 
@@ -288,6 +302,8 @@ class WhisperServerRecogniser:
     async def close(self) -> None:
         if self._farsi is not None:
             await self._farsi.close()
+        if self._farsi_fast is not None:
+            await self._farsi_fast.close()
         await self._stop()
 
     async def warmup(self) -> float:
@@ -298,9 +314,14 @@ class WhisperServerRecogniser:
             await self._start()
         if self._farsi is not None and not self._farsi.running:
             self._farsi_warming = asyncio.create_task(self._farsi.warmup())
+        if self._farsi_fast is not None and not self._farsi_fast.running:
+            self._farsi_fast_warming = asyncio.create_task(self._farsi_fast.warmup())
         return time.monotonic() - started
 
     _farsi_warming = None
+    _farsi_fast_warming = None
+    _farsi_fast = None
+    _comparing = False
 
     # ------------------------------------------------------------- one turn
     def _post(self, body: bytes, content_type: str) -> dict:
@@ -322,9 +343,12 @@ class WhisperServerRecogniser:
     async def transcribe(self, audio: Audio, *, language: str = "", route: bool = True) -> Utterance:
         from ..session import _language_code
 
+        # Not while whisper's confidence is being compared across languages
+        # (`_in_a_house_language`): Shenava gives none to compare.
+        farsi = (None if self._comparing else self._farsi_fast) or self._farsi
         if route and self._farsi is not None and _language_code(language) == "fa":
-            got = await self._farsi.transcribe(audio, language="fa")
-            self.last_logprob = getattr(self._farsi, "last_logprob", None)
+            got = await farsi.transcribe(audio, language="fa")
+            self.last_logprob = getattr(farsi, "last_logprob", None)
             return got
         if route and not language and self._farsi is not None and self._in_a_farsi_conversation():
             # Sim is talking Farsi with someone: the whole turn goes to the
@@ -333,7 +357,7 @@ class WhisperServerRecogniser:
             # letters, turn after turn ("Sustu Farsi? Only speak Farsi.",
             # "alain, se der man imisnevi" -- live, 2026-09-27). An English
             # turn here costs the bigger model's two to four seconds.
-            return await self._farsi.transcribe(audio)
+            return await farsi.transcribe(audio, language="fa" if farsi is self._farsi_fast else "")
         if audio.seconds < 0.1:
             return Utterance(text="", confidence=0.0, seconds=audio.seconds, engine=self.name,
                              language=language or self._language)
@@ -387,7 +411,7 @@ class WhisperServerRecogniser:
             # Heard as Farsi -- or as "English" in letters English does
             # not use, which is Farsi misheard more often than not: the
             # Farsi model says what was said.
-            better = await self._farsi.transcribe(audio, language="fa")
+            better = await farsi.transcribe(audio, language="fa")
             if better.text.strip():
                 return better
         if route and not language and cleaned and self._house:
@@ -431,7 +455,11 @@ class WhisperServerRecogniser:
         tried: list[tuple[float, int, Utterance, str]] = []
         fallback = None
         for rank, forced in enumerate(order):
-            got = await self.transcribe(audio, language=forced)
+            self._comparing = True
+            try:
+                got = await self.transcribe(audio, language=forced)
+            finally:
+                self._comparing = False
             if not got.text.strip():
                 continue
             if _language_code(forced) == "en" and not _english_letters(got.text):

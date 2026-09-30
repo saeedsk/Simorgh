@@ -34,6 +34,13 @@ class Config:
     # میشنوی؟" vs "اینجا می توانیست دیمان و مشنوید؟"), at ~1-2.6 s a turn
     # against turbo's ~0.8. English stays on `stt_model`.
     stt_model_farsi: str = "large-v3"
+    # whisper_server only: a Farsi-only recogniser for turns already known
+    # to be Farsi (a Farsi conversation, a turn whisper labelled Farsi) --
+    # the Shenava Koochik folder (voice/stt/shenava.py); "" = large-v3 for
+    # those too. Measured 2026-09-29 on 12 of the creator's Farsi turns:
+    # 1.1 s for all twelve against large-v3's 24.3 s, and at least as right.
+    # large-v3 still settles "Farsi or English?", where its confidence counts.
+    stt_farsi_fast: str = "workspace/voice/models/shenava-koochik"
     # "" = detect. Pinned to "en" until 2026-09-11, which made Farsi
     # unrecognisable: whisper was told every utterance was English.
     # `large-v3-turbo` detects the language reliably (measured on a
