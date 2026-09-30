@@ -81,7 +81,10 @@ class Config:
     # pocket-farsi-v2.wav, make it as default farsi tts voice and
     # model." So "auto" reaches for Pocket first and falls back to
     # Piper, which needs no venv and is always there.
-    tts_farsi: str = "auto"            # auto | pocket | piper | mms | chatterbox
+    # mana since 2026-09-29: the creator's pick of the fast Farsi voices
+    # ("ezafe-slow-bright"), ~40x real time where chatterbox is 0.4x --
+    # replies started 11-16 s late on Chatterbox (voice/tts/mana.py).
+    tts_farsi: str = "mana"            # auto | mana | chatterbox | pocket | piper | mms
     tts_farsi_mms_model: str = "facebook/mms-tts-fas"
     #: The five-second clip Pocket-TTS clones its Farsi voice from. Any
     #: WAV will do, including a family member's -- which is the point of
@@ -98,6 +101,10 @@ class Config:
     # did not move it -- عَصرِت stayed "asrat" in every take; spelled with an
     # alef, اَسرِت came back "Asred" / "Astrid" through whisper (2026-09-29).
     tts_farsi_respell: str = "عصرت=اَسرِت"
+    # The Mana voice (`tts_farsi = "mana"`): its Piper model under model_dir,
+    # and the ezafe model beside it (voice/tts/mana.py).
+    tts_farsi_mana_model: str = "fa_IR-mana-medium"
+    tts_farsi_ezafe_model: str = "workspace/voice/models/persian-ezafe-albert"
     # Chatterbox Persian's T3 weights (`tts_farsi = "chatterbox"`, 2026-09-29).
     tts_farsi_chatterbox_weights: str = "workspace/voice/engines/chatterbox-fa/t3_fa.safetensors"
     # Endpointing (section 4.2).

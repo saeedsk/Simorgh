@@ -47,14 +47,29 @@ def _config(**kw) -> Config:
 
 
 class ChoosingAFarsiEngine(unittest.TestCase):
-    def _open(self, config, *, pocket=_Pocket, piper=_Piper, mms=_Mms, chatterbox=_Refuses):
+    def _open(self, config, *, pocket=_Pocket, piper=_Piper, mms=_Mms, chatterbox=_Refuses, mana=_Refuses):
         """Every engine faked: which one `auto` picks must not depend on
         what happens to be installed on the machine running the test."""
         with mock.patch("simorgh.voice.tts.pocket.PocketSynthesiser", pocket), \
              mock.patch("simorgh.voice.tts.piper.PiperSynthesiser", piper), \
              mock.patch("simorgh.voice.tts.mms.MmsSynthesiser", mms), \
-             mock.patch("simorgh.voice.tts.chatterbox_fa.ChatterboxFarsiSynthesiser", chatterbox):
+             mock.patch("simorgh.voice.tts.chatterbox_fa.ChatterboxFarsiSynthesiser", chatterbox), \
+             mock.patch("simorgh.voice.tts.mana.ManaSynthesiser", mana):
             return tts_mod._farsi_synthesiser(config)      # noqa: SLF001
+
+    def test_auto_prefers_mana_when_it_is_here(self):
+        """2026-09-29, by ear among the fast voices: "ezafe-slow-bright"."""
+        class _Mana:
+            def __init__(self, *a, **kw):
+                pass
+
+        class _Chatterbox(_Mana):
+            pass
+
+        self.assertIsInstance(self._open(_config(tts_farsi="auto"), mana=_Mana, chatterbox=_Chatterbox), _Mana)
+
+    def test_the_default_is_mana(self):
+        self.assertEqual(Config().tts_farsi, "mana")
 
     def test_auto_prefers_chatterbox_persian_when_it_is_here(self):
         """2026-09-29, by ear over Pocket: "Chatterbox for everything in Farsi"."""

@@ -178,6 +178,7 @@ def _farsi_synthesiser(config):
         "piper": lambda: PiperSynthesiser(config, voice=config.tts_farsi_voice),
         "mms": lambda: MmsSynthesiser(config, model_id=config.tts_farsi_mms_model or MMS_DEFAULT),
         "chatterbox": lambda: _chatterbox_fa(config),
+        "mana": lambda: _mana(config),
     }
     choice = (config.tts_farsi or "auto").strip().lower()
     if choice in named:
@@ -186,12 +187,18 @@ def _farsi_synthesiser(config):
     # 2026-09-29, when its weights are here -- then Pocket, then the one
     # that is always there. A house whose Farsi has gone silent because a
     # model was not downloaded is worse than one whose Farsi sounds like Piper.
-    for engine in ("chatterbox", "pocket", "piper", "mms"):
+    for engine in ("mana", "chatterbox", "pocket", "piper", "mms"):
         try:
             return named[engine]()
         except ImportError:
             continue
     return PiperSynthesiser(config, voice=config.tts_farsi_voice)   # its refusal is the one worth raising
+
+
+def _mana(config):
+    from .mana import ManaSynthesiser
+
+    return ManaSynthesiser(config)
 
 
 def _default_openers() -> dict:
