@@ -149,7 +149,7 @@ Blobs: `ui.tv.speech` audio (`ledger.put_blob`). Files outside the ledger: the c
 | `stt_partials` | `True` | yes |
 | `stt_partial_every_ms` | `1500` | yes, and live since 2026-09-23: it is in `contracts.settings.VOICE_SAFE_KEYS` and grouped under "Listening", so `voice set stt_partial_every_ms 800` works and the settings screen shows it. It was readable and unsettable before, and therefore invisible -- the creator asked why it was not in `voice` help. The value that matters: a whisper draft is a WHOLE decode, and when one takes longer than this cadence the turn stops asking for drafts (`stt/streaming.py`, `partials_outpaced`). large-v3-turbo answers a 4 s buffer in ~630 ms through `whisper-server` on the M3 Pro (measured 2026-09-23), so 1500 asks for far fewer drafts than it can afford. In `_SESSION_KEYS` since the same day, and it has to be: `VoiceSession.__init__` passes it to `IncrementalRecogniser(partial_every_ms=...)`, so it decides how that object is BUILT. Made settable without it first, it went stale exactly as `expressive_lane` had -- accepted, saved, shown, inert. Note what the cadence CANNOT fix: a whisper draft re-decodes the whole buffer, so on a long utterance it outgrows any cadence and the turn stops asking (`partials_outpaced`). Word-by-word over a 20-second sentence is not reachable with a whole-utterance engine; that is what `stt sherpa` is for, and it has no Farsi |
 | `connectors` | `True` | yes |
-| `max_spoken_sentences` | `3` | yes |
+| `max_spoken_sentences` | `40` (was 3 until 2026-10-04) | yes |
 | `tts_lookahead` | `2` | yes |
 | `tts_stall_timeout_s` | `20.0` | yes |
 | `tidy` | `True` | yes |
@@ -317,6 +317,7 @@ A reply is cut at `max_spoken_sentences` (3) and says there is more on screen --
 - Inside a wake run a QUIET verdict is spoken as a short "Sorry, I didn't catch that." (Farsi when the words were): a person who woke the board asked something, and silence answers nothing (live 2026-09-27). An empty, cancelled reply stays silent. `voice.session_listening` logs once when a session starts reading its microphone; a satellite run with no reply logs `voice.satellite_turn phase='no reply' heard=<bool>`.
 - One question, one answer: while any satellite's wake run is open, the laptop's session defers (`VoiceSession.defer`, set by the service) and stays quiet on that speech with the reason given; the room answers. Rooms do not defer to each other -- two boards woken at once each answer their own run.
 - In a satellite's Follow Up Mode run, a scrap (`session._fragment`: one word, or up to five with a stray single letter, «ش است», «ای ق») that is not a spoken command, does not name Sim and does not answer a question Sim just asked (`_sim_just_asked`, 30 s) stays quiet (`voice.fragment_ignored`, 2026-10-04): it was being asked back «جانم، دوباره می‌گی؟» again and again.
+- `max_spoken_sentences` defaults to 40 (2026-10-04): a wall, not a length -- the VOICE prompt keeps answers short, and "say 5 jokes for the kids" had been cut to one joke and "the rest is on screen". `narration_wanted` also knows jokes, riddles, rhymes, "say/tell/give N ..." and «جوک/لطیفه/چیستان».
 
 ## Contract tests
 

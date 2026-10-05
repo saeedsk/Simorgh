@@ -672,6 +672,11 @@ _NARRATION = re.compile(
     r"|\bstory\s+(?:from|about|of)\b"
     r"|\bread\s+(?:it|this|that|the\s+\w+)\s+(?:out|aloud|to\s+me)\b"
     r"|\b(?:in\s+full|at\s+length|the\s+whole\s+thing)\b"
+    # Jokes, riddles, facts, "say five ...": a list asked for aloud (2026-10-04,
+    # "say 5 jokes for kid" got one joke and "the rest are on screen").
+    r"|\b(?:jokes?|riddles?|limericks?|tongue\s+twisters?|fun\s+facts?|rhymes?|songs?)\b"
+    r"|\b(?:say|tell|give|read|list)\s+(?:me\s+|us\s+)?(?:\d+|two|three|four|five|six|seven|eight|nine|ten|some|a\s+few)\b"
+    r"|(?:جوک|لطیفه|چیستان|معما|شعر|ترانه)"
     # Farsi: a poem, a ghazal, a story -- read, told, recited (2026-10-04,
     # the creator: "when I ask sim to read a poem I expect it to continue
     # reading instead of saying a short part"; «حالا از حافظ بخون» got one

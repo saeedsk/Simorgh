@@ -212,7 +212,11 @@ class Config:
     stt_partials: bool = True          # provisional transcripts while the person is still talking
     stt_partial_every_ms: int = 1500
     connectors: bool = True            # the planner's rare "Okay," / "Yeah," lead-ins
-    max_spoken_sentences: int = 3      # longer answers are cut here and say there is more on screen
+    # A wall, not a length: the VOICE prompt keeps answers short, and what a
+    # person asked to hear is read whole. At 3 "say 5 jokes for the kids"
+    # got one joke and "the rest is on screen" (the creator, 2026-10-04:
+    # "when I ask Sim to do or say something I expect to hear it").
+    max_spoken_sentences: int = 40     # longer answers are cut here and say there is more on screen
     # Speak a reply while it is still being written (stage 3 item 4): the
     # first sentence starts as soon as it is complete. On since 2026-09-19:
     # the creator asked for words, speech and screen at once rather than
