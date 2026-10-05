@@ -108,6 +108,8 @@ class Config:
     # instead. The key is ELEVENLABS_API_KEY in secrets.toml, listed in
     # `[voice] secrets`. The text of each reply goes to ElevenLabs.
     tts_elevenlabs_voice: str = "Roya"
+    # `tts = "elevenlabs"`: the voice English replies use ("" = the same one).
+    tts_elevenlabs_voice_english: str = ""
     tts_elevenlabs_model: str = "eleven_v3"
     tts_elevenlabs_language: str = "fa"
     tts_elevenlabs_timeout_s: float = 6.0

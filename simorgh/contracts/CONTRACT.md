@@ -210,3 +210,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - 2026-09-22: `guardian.standing.request{action: list|revoke, key?}` and `guardian.standing.reply{standing: [obj], revoked?}` (Interface asks, Guardian answers). `action.needs_human`/`ui.prompt` `options` may now include `always`.
 - `settings` `tts_farsi` gains "mana" (2026-09-29): the fast Farsi voice, now the default. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).
 - `settings` `tts_farsi` gains "elevenlabs" (2026-10-04): the cloud Farsi voice over Mana. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).
+- `settings` `tts` gains "elevenlabs" (2026-10-04). Consumer: voice (`tts/__init__.py::open_synthesiser`).

@@ -129,7 +129,7 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "endpoint_silence_ms": (int, (200, 3000), "silence that ends your turn"),
     "min_speech_ms": (int, (50, 2000), "shorter than this is not a turn"),
     "vad_sensitivity": (str, ("low", "balanced", "high"), "how sure the detector must be"),
-    "tts": (str, ("auto", "kokoro", "piper", "say", "chatterbox", "styletts2", "miso", "fake"),
+    "tts": (str, ("auto", "kokoro", "piper", "say", "chatterbox", "styletts2", "miso", "elevenlabs", "fake"),
             "the voice engine: kokoro (fast), styletts2 (expressive AND fast), chatterbox / miso "
             "(expressive but slower than speech); the last three live in their own venvs, `voice models <name>` first"),
     "chatterbox_exaggeration": (float, (0.0, 1.0), "Chatterbox's feeling dial; 0 lets the tone table choose"),

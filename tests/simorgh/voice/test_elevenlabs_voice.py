@@ -99,3 +99,27 @@ class ElevenLabsVoice(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnglishToo(unittest.TestCase):
+    """The creator, 2026-10-04: "how can I use farsi and english voice chat
+    with sim where it uses eleven_v4?" -- `tts = "elevenlabs"`."""
+
+    def test_the_primary_is_elevenlabs_over_the_local_voice(self):
+        from unittest import mock
+
+        from simorgh.voice import tts as tts_mod
+
+        class _Local:
+            name = "styletts2"
+
+            def __init__(self, *a, **kw):
+                pass
+
+        with mock.patch("simorgh.voice.tts.styletts2.StyleTTS2Synthesiser", _Local):
+            engine, _why = tts_mod.open_synthesiser(dataclasses.replace(Config(), tts="elevenlabs",
+                                                                        tts_by_language=False))
+        cloud = engine._primary                                   # noqa: SLF001
+        self.assertIsInstance(cloud, ElevenLabsSynthesiser)
+        self.assertEqual(cloud._config.tts_elevenlabs_language, "")   # noqa: SLF001 -- English: no "fa" pinned
+        self.assertEqual(cloud._fallback.name, "styletts2")        # noqa: SLF001

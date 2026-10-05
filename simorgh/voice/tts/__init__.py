@@ -230,6 +230,29 @@ def open_synthesiser(config: Config, *, secrets=None) -> tuple[object | None, st
         from ..fakes import FakeSynthesiser
 
         return FakeSynthesiser(), ""
+    if config.tts == "elevenlabs":
+        # ElevenLabs for every language the primary speaks (English here),
+        # the local engine underneath it: StyleTTS 2, else Kokoro, else
+        # `say` -- the same never-silent rule as the Farsi one.
+        from dataclasses import replace
+
+        from .elevenlabs import KEY_NAME, ElevenLabsSynthesiser
+
+        local, why = open_synthesiser(replace(config, tts="styletts2"), secrets=secrets)
+        if local is None:
+            return None, why
+        inner = getattr(local, "_primary", local)
+
+        def key():
+            try:
+                return secrets.get(KEY_NAME) if secrets is not None else None
+            except Exception:  # noqa: BLE001
+                return None
+        cloud = ElevenLabsSynthesiser(replace(config, tts_elevenlabs_language="",
+                                              tts_elevenlabs_voice=config.tts_elevenlabs_voice_english
+                                              or config.tts_elevenlabs_voice),
+                                      key=key, fallback=inner)
+        return PolyglotSynthesiser(cloud, config, openers=_default_openers(secrets)), why
     from .chatterbox import ChatterboxSynthesiser
     from .miso import MisoSynthesiser
     from .styletts2 import StyleTTS2Synthesiser
