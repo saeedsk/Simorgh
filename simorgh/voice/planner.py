@@ -671,7 +671,15 @@ _NARRATION = re.compile(
     r"|\b(?:tell|read)\s+(?:me\s+)?(?:a|an|the)\s+(?:story|tale|poem|chapter|passage|joke|book)\b"
     r"|\bstory\s+(?:from|about|of)\b"
     r"|\bread\s+(?:it|this|that|the\s+\w+)\s+(?:out|aloud|to\s+me)\b"
-    r"|\b(?:in\s+full|at\s+length|the\s+whole\s+thing)\b", re.I)
+    r"|\b(?:in\s+full|at\s+length|the\s+whole\s+thing)\b"
+    # Farsi: a poem, a ghazal, a story -- read, told, recited (2026-10-04,
+    # the creator: "when I ask sim to read a poem I expect it to continue
+    # reading instead of saying a short part"; «حالا از حافظ بخون» got one
+    # couplet, because this pattern knew only English).
+    r"|(?:شعر|غزل|رباعی|قصه|داستان|حکایت|مثنوی|ترانه)[^.?!؟]{0,40}(?:بخون|بخوان|بگو|تعریف\s*کن|بخونی|بگی)"
+    r"|(?:بخون|بخوان|بگو|تعریف\s*کن)[^.?!؟]{0,20}(?:شعر|غزل|رباعی|قصه|داستان|حکایت)"
+    r"|(?:از|اثر)\s+(?:حافظ|سعدی|مولانا|مولوی|خیام|فردوسی|سنایی|عطار|نظامی|شهریار|سهراب|فروغ|اخوان)[^.?!؟]{0,30}(?:بخون|بخوان|بگو)",
+    re.I)
 
 #: And asking for the rest of what was cut.
 #: The whole turn, not a phrase inside one. "Continue the washing
@@ -679,7 +687,9 @@ _NARRATION = re.compile(
 #: verb anywhere in the sentence caught it (caught by its own test).
 _GO_ON = re.compile(
     r"^\s*(?:go on|keep going|carry on|continue|and then\?*|finish it|don'?t stop|more please|"
-    r"(?:read|tell)\s+(?:me\s+)?the\s+rest|the\s+rest(?:\s+please)?)"
+    r"(?:read|tell)\s+(?:me\s+)?the\s+rest|the\s+rest(?:\s+please)?"
+    r"|ادامه(?:[\s\u200c]*(?:بده|بدید|بدین|ش\s*بده|اش\s*را\s*بخوان))?"
+    r"|بقیه(?:[\s\u200c]*(?:ش|اش|شو|شم))?(?:\s*(?:رو|را))?(?:\s*(?:بخون|بخوان|بگو))?)"
     r"(?:\s+(?:please|reading|with\s+(?:it|the\s+\w+)|the\s+(?:story|tale|chapter)))?"
     r"\s*[.!?]*\s*$", re.I)
 

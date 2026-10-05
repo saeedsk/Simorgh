@@ -4,3 +4,15 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.orchestration]
+by = "opus-main"
+task = "voice prompt: a poem asked for is recited whole"
+since = "2026-10-05T05:58:25+00:00"
+until = "2026-10-05T13:58:25+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "poems and stories are read in full, in Farsi too"
+since = "2026-10-05T05:58:25+00:00"
+until = "2026-10-05T13:58:25+00:00"

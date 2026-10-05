@@ -1695,7 +1695,15 @@ class VoiceSession:
             # less what is only known at the end.
             from .streamreply import SentenceStream
 
-            live = SentenceStream(max_sentences=self._config.max_spoken_sentences,
+            # A poem or a story asked for is told whole, not cut at three
+            # sentences with "the rest is on screen" (2026-10-04): the planner
+            # already knew this; the streaming path, which speaks every live
+            # reply, did not.
+            from .planner import NARRATION_SENTENCES, asked_to_continue, narration_wanted
+
+            spoken_max = (NARRATION_SENTENCES if (narration_wanted(text) or asked_to_continue(text))
+                          else self._config.max_spoken_sentences)
+            live = SentenceStream(max_sentences=spoken_max,
                                   on_sentence=self._voice_room.recent_said.append, language=language,
                                   transform=self._planner.pronounced)
             self._pipeline.delta_sinks[session_id] = live.feed
