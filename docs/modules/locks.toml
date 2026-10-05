@@ -5,12 +5,6 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.contracts]
-by = "opus-main"
-task = "tts gains elevenlabs"
-since = "2026-10-05T02:58:14+00:00"
-until = "2026-10-05T10:58:14+00:00"
-
 [locks.voice]
 by = "opus-main"
 task = "ElevenLabs Farsi voice with Mana fallback"
