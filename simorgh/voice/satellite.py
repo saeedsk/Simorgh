@@ -397,6 +397,13 @@ class SatelliteLink:
         self._unjammed_at = -1e9
         self._restarted_at = -1e9
         self._restart_key = None
+        #: The board's "Microphone Mute" switch -- the button on the
+        #: XVF3800 -- its key, and whether it is on. While it is, Sim says
+        #: nothing on this satellite (the creator, 2026-10-04: "when I press
+        #: that button and turn on mute, sim on satellite goes mute and
+        #: stops saying"); the firmware already ignores the wake word.
+        self._mute_key: int | None = None
+        self.muted = False
         self._wake_heard_at = -1e9
         self._run_started_at = -1e9
         #: Seconds, or a callable giving them: read live, so `voice set`
@@ -489,11 +496,16 @@ class SatelliteLink:
         restarts = [e for e in entities if type(e).__name__ == "ButtonInfo"
                     and str(getattr(e, "object_id", "") or getattr(e, "name", "")).lower() == "restart"]
         self._restart_key = restarts[0].key if restarts else None
+        mutes = [e for e in entities if type(e).__name__ == "SwitchInfo"
+                 and str(getattr(e, "object_id", "") or getattr(e, "name", "")).lower().replace(" ", "_")
+                 in ("microphone_mute", "mic_mute", "mute")]
+        self._mute_key = mutes[0].key if mutes else None
         if self._media_key is not None and self._volume is not None:
             client.media_player_command(self._media_key, volume=float(self._volume))
         client.subscribe_voice_assistant(handle_start=self._on_start, handle_stop=self._on_stop,
                                          handle_audio=self._on_audio)
-        if (self._media_key is not None or self._sensitivity_key is not None) and hasattr(client, "subscribe_states"):
+        if (self._media_key is not None or self._sensitivity_key is not None or self._mute_key is not None) \
+                and hasattr(client, "subscribe_states"):
             client.subscribe_states(self._on_entity_state)
         if hasattr(client, "subscribe_logs") and api is not None and hasattr(api, "LogLevel"):
             # The board's own account, into Sim's log: for three minutes on
@@ -579,6 +591,9 @@ class SatelliteLink:
         the song would be the next turn); IDLE is none; ANNOUNCING says
         nothing about the music under it."""
         key = getattr(state, "key", None)
+        if key is not None and key == self._mute_key:
+            self._on_mute(bool(getattr(state, "state", False)))
+            return
         if key is not None and key == self._sensitivity_key:
             self._sensitivity = str(getattr(state, "state", "") or "")
             return
@@ -812,8 +827,22 @@ class SatelliteLink:
         self.speaker.interrupted()
         self._log("info", "voice.satellite_barge_in")
 
+    def _on_mute(self, muted: bool) -> None:
+        """The mute button: on, the reply playing here stops now and the
+        rest of it -- and anything else -- is not said here until it is off."""
+        if muted == self.muted:
+            return
+        self.muted = muted
+        self._log("info", "voice.satellite_muted" if muted else "voice.satellite_unmuted")
+        if muted:
+            # Sim's own words stop; music somebody put on is theirs to stop.
+            speaking = self._speaking_now()
+            self.speaker.interrupted()
+            if speaking:
+                self._send_stop()
+
     def holding_reply(self) -> bool:
-        return self._hold_reply_until > self._clock()
+        return self.muted or self._hold_reply_until > self._clock()
 
     def _watch(self, run: _Run) -> None:
         async def _expire() -> None:

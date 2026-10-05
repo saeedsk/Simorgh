@@ -1174,3 +1174,41 @@ class NoSilenceIsMadeUpInsideARun(unittest.IsolatedAsyncioTestCase):
         frame = await stream.__anext__()
         self.assertEqual(frame, b"\x00" * FRAME_BYTES)
         self.assertLess(loop.time() - began, 0.2, "no run: a quiet room, frame by frame")
+
+
+class TheMuteButtonSilencesSimHere(unittest.IsolatedAsyncioTestCase):
+    """The creator, 2026-10-04: "the satellite microphone has a mic button,
+    I'd like when I press that button and turn on mute, sim on satellite
+    goes mute and stops saying"."""
+
+    class _MuteClient(_Client):
+        async def list_entities_services(self):
+            class SwitchInfo:
+                key = 55
+                object_id = "microphone_mute"
+                name = "Microphone Mute"
+            return [MediaPlayerInfo(), SwitchInfo()], []
+
+        def subscribe_states(self, handler):
+            self.on_state = handler
+
+    async def test_a_reply_stops_and_nothing_more_is_said_until_unmuted(self):
+        link, client, published = _link(self._MuteClient())
+        stop, task = await _connected(link, client)
+        await client.handlers["handle_start"]("c1", 1, None, "hey_sim")      # Sim is answering here
+        client.on_state(types.SimpleNamespace(key=55, state=True))
+        self.assertTrue(link.muted)
+        self.assertIn({"command": "STOP", "key": 7}, client.media)
+        await link.speaker.play(Audio(b"\x00\x00" * 2400, 24000))
+        self.assertEqual(published, [], "nothing is said on a muted satellite")
+        client.on_state(types.SimpleNamespace(key=55, state=False))
+        self.assertFalse(link.muted)
+        self.assertFalse(link.holding_reply())
+        await _close(stop, task)
+
+    async def test_muting_does_not_stop_music_sim_is_not_speaking_over(self):
+        link, client, _p = _link(self._MuteClient())
+        stop, task = await _connected(link, client)
+        client.on_state(types.SimpleNamespace(key=55, state=True))
+        self.assertNotIn({"command": "STOP", "key": 7}, client.media)
+        await _close(stop, task)
