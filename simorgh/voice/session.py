@@ -323,6 +323,19 @@ ACK_WAITS_FOR_FINAL_S = 3.0
 NAME_AGAIN_AFTER_S = 600.0
 
 
+_WORDS = re.compile(r"[\w\u0600-\u06ff\u200c]+")
+
+
+def _fragment(text: str) -> bool:
+    """One word, or up to five with a stray single letter among them («ش
+    است», «ای ق»): the shape of half-heard noise, not of a request. Two real
+    words ("about nine", «سعید کجاست») are not -- the model judges those."""
+    words = _WORDS.findall(text or "")
+    if len(words) <= 1:
+        return True
+    return len(words) <= 5 and any(len(w) == 1 and w.lower() not in ("و", "a", "i") for w in words)
+
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None, room=None) -> None:
@@ -1448,6 +1461,16 @@ class VoiceSession:
             await self._stay_quiet(turn_id, reason="another device in the room is answering this")
             return
         self.answering_at = time.monotonic()
+        if _fragment(text) and spoken_command(text) is None and not self._names_sim(text) \
+                and not self._sim_just_asked() and getattr(self._mic, "follow_up", False):
+            # A scrap -- «ش است», «پراپین», «ای ق» -- heard in a satellite's
+            # follow-up window, with no wake word and no name: the TV, the kids, the tail of a sentence. Asked back
+            # every time, it became «جانم، دوباره می‌گی؟» over and over (the
+            # creator, 2026-10-04: "sim can be annoying, multiple times asking
+            # can you repeat it"). Nobody asked; nothing is said.
+            self._log("info", "voice.fragment_ignored", turn=turn_id, text=text[:40])
+            await self._stay_quiet(turn_id, reason="a scrap of speech nobody addressed to me")
+            return
         if self._unplaced_turn == turn_id and not self._names_sim(text):
             self._log("info", "voice.follow_up_unplaced", turn=turn_id, text=text[:60])
             await self._stay_quiet(turn_id, reason="a follow-up heard a voice I do not know that did not name me "
@@ -1829,6 +1852,15 @@ class VoiceSession:
                              folder=self._overheard_dir)
         except Exception:  # never let the log break the voice loop
             pass
+
+    def _sim_just_asked(self, within_s: float = 30.0) -> bool:
+        """Sim's last words were a question, a moment ago: "yes", «آره»,
+        «نه» are its answer, not a scrap."""
+        now = self._now()
+        for who, said, at, kind in reversed(self._room):
+            if kind == "reply":
+                return now - at <= within_s and said.rstrip().endswith(("?", "؟"))
+        return False
 
     def _room_lines(self, *, exclude_text: str = "", within_s: float = 180.0, speaker: str = "") -> str:
         """What the model is told of the room: asides that were not for

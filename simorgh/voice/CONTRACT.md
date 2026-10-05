@@ -316,6 +316,7 @@ A reply is cut at `max_spoken_sentences` (3) and says there is more on screen --
 - A satellite turn is sent to Sim with its wake word put back in front (`VoiceSession._with_wake_phrase`: "Hey Sim, play music."): the board streams only what follows the wake word, and without it the model refused an unplaced voice for not naming Sim (live 2026-09-27). The screen and memory show what was actually said.
 - Inside a wake run a QUIET verdict is spoken as a short "Sorry, I didn't catch that." (Farsi when the words were): a person who woke the board asked something, and silence answers nothing (live 2026-09-27). An empty, cancelled reply stays silent. `voice.session_listening` logs once when a session starts reading its microphone; a satellite run with no reply logs `voice.satellite_turn phase='no reply' heard=<bool>`.
 - One question, one answer: while any satellite's wake run is open, the laptop's session defers (`VoiceSession.defer`, set by the service) and stays quiet on that speech with the reason given; the room answers. Rooms do not defer to each other -- two boards woken at once each answer their own run.
+- In a satellite's Follow Up Mode run, a scrap (`session._fragment`: one word, or up to five with a stray single letter, «ش است», «ای ق») that is not a spoken command, does not name Sim and does not answer a question Sim just asked (`_sim_just_asked`, 30 s) stays quiet (`voice.fragment_ignored`, 2026-10-04): it was being asked back «جانم، دوباره می‌گی؟» again and again.
 
 ## Contract tests
 
