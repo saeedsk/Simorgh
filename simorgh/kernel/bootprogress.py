@@ -25,10 +25,17 @@ import sys
 import time
 from typing import Callable
 
-TOTAL_STAGES = 9  # ledger + bus + the six subsystem layers + the tick/status services
+TOTAL_STAGES = 10  # ledger + bus + the seven subsystem layers + the tick/status services
 SLOW_STAGE_S = 2.0
 _BAR_WIDTH = 24
-_FILLED, _EMPTY = "█", "░"
+_FILLED, _EMPTY = "━", "─"
+#: The look (the creator, 2026-10-04: "more visually pleasant, elegant,
+#: modern and futuristic"): one live line with a cyan-to-violet bar while a
+#: stage runs; each finished stage collapses to a quiet aligned row.
+_RUNNING, _DONE, _FAILED, _READY = "◇", "◆", "✕", "✦"
+_GRADIENT = (51, 45, 39, 33, 63, 99, 135, 171)      # xterm-256: cyan -> violet
+_LABEL_W = 9
+_MAX_WIDTH = 96
 
 
 class NullBootProgress:
@@ -43,13 +50,21 @@ class NullBootProgress:
     def finish(self, detail: str = "") -> None: ...
 
 
+def _terminal_width() -> int:
+    import shutil
+
+    return shutil.get_terminal_size((_MAX_WIDTH, 24)).columns
+
+
 class BootProgress:
     def __init__(self, *, out: Callable[[str], None] | None = None, color: bool = True,
-                 total: int = TOTAL_STAGES, now: Callable[[], float] = time.monotonic) -> None:
+                 total: int = TOTAL_STAGES, now: Callable[[], float] = time.monotonic,
+                 width: int | None = None) -> None:
         self._out = out or (lambda s: sys.stdout.write(s))
         self._color = color
         self._total = max(1, total)
         self._now = now
+        self._width = max(40, min(_MAX_WIDTH, width or _terminal_width()))
         self._n = 0
         self._label = ""
         self._detail = ""
@@ -67,7 +82,7 @@ class BootProgress:
         self._label, self._detail = label, detail
         self._stage_started_at = self._now()
         self._open = True
-        self._render(end="")
+        self._live()
 
     def detail(self, detail: str) -> None:
         """Replace the current stage's detail mid-flight -- what a stage
@@ -76,36 +91,65 @@ class BootProgress:
         if not self._open:
             return
         self._detail = detail
-        self._render(end="")
+        self._live()
 
     def done(self, detail: str = "") -> None:
         if not self._open:
             return
         if detail:
             self._detail = detail
-        self._render(end="\n", elapsed=self._now() - self._stage_started_at)
+        elapsed = self._now() - self._stage_started_at
+        failed = detail == "failed"
+        stamp = f"{elapsed:.1f}s"
+        slow = elapsed >= SLOW_STAGE_S
+        tail = f"{stamp}  ▲ slow" if slow else stamp
+        room = self._width - 4 - _LABEL_W - 2 - len(tail) - 2
+        text = self._fit(self._detail, room)
+        glyph = self._paint(_FAILED, "1;31") if failed else self._paint(_DONE, "38;5;43")
+        line = (f"  {glyph} {self._paint(self._label.ljust(_LABEL_W), '1')}  {self._dim(text.ljust(room))}  "
+                + (self._paint(tail, "38;5;214") if slow else self._dim(tail)))
+        self._out("\r\033[K" + line + "\n")
         self._open = False
 
     def finish(self, detail: str = "") -> None:
-        """Close the last stage and print the total."""
+        """Close the last stage, draw the closing rule and the total."""
         if self._open:
             self.done()
         total = self._now() - self._started_at
-        tail = f"  {detail}" if detail else ""
-        self._out(f"{self._dim('  ready in')} {self._bold(f'{total:.1f}s')}{self._dim(tail)}\n")
+        rule = self._gradient(_FILLED * (self._width - 4), self._width - 4)
+        tail = f"  ·  {detail}" if detail else ""
+        self._out(f"  {rule}\n  {self._paint(_READY, '1;38;5;171')} {self._bold('Sim is ready')}"
+                  f"{self._dim(' in ')}{self._bold(f'{total:.1f}s')}{self._dim(tail)}\n")
 
     # -- rendering ----------------------------------------------------------
-    def _render(self, *, end: str, elapsed: float | None = None) -> None:
+    def _live(self) -> None:
+        """The stage running now, rewritten in place: what it is, what it
+        is doing, and the whole boot's bar with a count."""
         filled = round(_BAR_WIDTH * self._n / self._total)
-        bar = _FILLED * filled + _EMPTY * (_BAR_WIDTH - filled)
-        line = f"\r  {self._cyan(bar)} {self._label}"
-        if self._detail:
-            line += self._dim(f"  {self._detail}")
-        if elapsed is not None:
-            stamp = f"  {elapsed:.1f}s"
-            line += self._yellow(stamp + "  slow") if elapsed >= SLOW_STAGE_S else self._dim(stamp)
-        # Pad past whatever the previous, possibly longer, line left behind.
-        self._out(line + " " * 8 + end)
+        bar = self._gradient(_FILLED * filled, _BAR_WIDTH) + self._paint(_EMPTY * (_BAR_WIDTH - filled), "38;5;238")
+        count = f"{self._n}/{self._total}"
+        room = self._width - 4 - _LABEL_W - 2 - _BAR_WIDTH - len(count) - 4
+        text = self._fit(self._detail, room)
+        line = (f"  {self._paint(_RUNNING, '38;5;45')} {self._paint(self._label.ljust(_LABEL_W), '1')}  "
+                f"{self._dim(text.ljust(room))}  {bar}  {self._dim(count)}")
+        self._out("\r\033[K" + line)
+
+    @staticmethod
+    def _fit(text: str, room: int) -> str:
+        text = " ".join(str(text or "").split())
+        room = max(0, room)
+        return text if len(text) <= room else text[: max(0, room - 1)] + "…"
+
+    def _gradient(self, text: str, span: int) -> str:
+        """`text` coloured cell by cell along the cyan-to-violet ramp, as
+        if it were `span` cells long."""
+        if not self._color:
+            return text
+        out = []
+        for i, ch in enumerate(text):
+            code = _GRADIENT[min(len(_GRADIENT) - 1, i * len(_GRADIENT) // max(1, span))]
+            out.append(f"\033[38;5;{code}m{ch}")
+        return "".join(out) + ("\033[0m" if out else "")
 
     def _paint(self, text: str, code: str) -> str:
         return f"\033[{code}m{text}\033[0m" if self._color else text
@@ -115,12 +159,6 @@ class BootProgress:
 
     def _bold(self, text: str) -> str:
         return self._paint(text, "1")
-
-    def _cyan(self, text: str) -> str:
-        return self._paint(text, "36")
-
-    def _yellow(self, text: str) -> str:
-        return self._paint(text, "33")
 
 
 def make_boot_progress(interactive: bool, *, stream=None) -> BootProgress | NullBootProgress:

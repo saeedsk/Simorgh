@@ -133,6 +133,7 @@ Other environment the package reads: `SIMORGH_CONFIG`, `SIMORGH_RUNTIME_DATA_DIR
 - The first signal publishes `system.stop`; a second signal, or a shutdown that overruns `stop_grace_s + 10` s, exits the process with `os._exit`.
 - A `[runtime] mode = "local-multi"` with a `memory` bus or ledger backend is refused at boot.
 - The test suite never inherits `SIMORGH_*` from the operator's environment (`conftest.py`).
+- Boot progress (2026-10-04, the creator: "more visually pleasant, elegant, modern and futuristic"): one live line per stage (◇, a cyan-to-violet bar, `n/total`) rewritten in place by a quiet aligned row (◆ label, detail, time; amber `▲ slow` at `SLOW_STAGE_S`); a gradient rule and "✦ Sim is ready in Ns" close it. Stages are `ledger`, `bus`, `layer N` (its subsystems joined by ·) and `services`; the width follows the terminal, capped at 96. Plain text with no colour; silent off a TTY, as before.
 
 ## Contract tests
 

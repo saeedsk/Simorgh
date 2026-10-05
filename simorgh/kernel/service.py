@@ -300,7 +300,7 @@ class Kernel:
             for layer in self._own_layers(factories):
                 if not layer:
                     continue
-                self.progress.stage("subsystems", ", ".join(layer))
+                self.progress.stage(f"layer {len(started) + 1}", " · ".join(layer))
                 await self._supervisor.start_layer(layer, lambda name: ctx_factory.build(name), factories)
                 self.progress.done()
                 started.append(layer)
@@ -309,7 +309,7 @@ class Kernel:
             await self._append_state(self.state.boot_failed(str(exc)))
             raise KernelBootError(str(exc)) from exc
 
-        self.progress.stage("ticks, status, metrics")
+        self.progress.stage("services", "ticks · status · metrics")
         self._scheduler = Scheduler(
             bus=self.bus, ledger=self.ledger, clock=self._clock, logger=make_logger("kernel"),
             idle_threshold_s=self.runtime.idle_threshold_s, idle_tick_cooldown_s=self.runtime.idle_tick_cooldown_s,
@@ -375,7 +375,7 @@ class Kernel:
             topics.SYSTEM_STATE_CHANGED, source="kernel", payload=boot_state,
             clock=self._clock.now,
         )))
-        self.progress.finish(f"{len(self._supervisor.services)} subsystems, run {self.run_id}")
+        self.progress.finish(f"{len(self._supervisor.services)} subsystems · run {self.run_id}")
 
     def _ledger_detail(self) -> str:
         """What the Ledger actually did: how many streams it trusted from

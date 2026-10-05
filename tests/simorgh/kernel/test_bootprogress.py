@@ -85,7 +85,7 @@ class TestWhatItPrints(unittest.TestCase):
         self.p._out = last.append  # noqa: SLF001
         for name in ("two", "three", "four"):
             self.p.stage(name)
-        self.assertGreater(_plain(last).count("█"), _plain(first).count("█"))
+        self.assertGreater(_plain(last).count("━"), _plain(first).count("━"))
 
     def test_finish_reports_the_total_and_closes_an_open_stage(self):
         self.p.stage("ledger")
