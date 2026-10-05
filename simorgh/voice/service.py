@@ -16,6 +16,7 @@ import asyncio
 import importlib.util
 import shutil
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -217,6 +218,10 @@ def _joined(pieces: list):
                    for p in pieces)
     return Audio(pcm=pcm, sample_rate=rate)
 
+
+#: How long a device that began answering owns what the other heard
+#: (`_laptop_defers` and each room's `defer`).
+CLAIM_S = 6.0
 
 class Service:
     name = NAME
@@ -685,9 +690,28 @@ class Service:
             room=Room(device),
         )
         self._rooms[device] = session
+        # In its follow-up window -- no wake word heard -- a room leaves a
+        # sentence the laptop has just begun answering to the laptop.
+        session.defer = lambda mic=microphone: bool(getattr(mic, "follow_up", False)) and laptop is not None \
+            and time.monotonic() - getattr(laptop, "answering_at", -1e9) < CLAIM_S
         if self._enabled:
             self._start_room(device)
         return session
+
+    def _laptop_defers(self) -> bool:
+        """One sentence, one answer, when the laptop and a room both hear it.
+
+        A board that heard its wake word for it: the room answers. A board
+        only in its follow-up window: whichever began answering first owns
+        the sentence. Until 2026-10-04 any open board won -- and with Follow
+        Up Mode a board is open after every reply, so the creator, at the
+        laptop with its microphone on, was answered from the satellite's
+        speaker every time ("sim hears from laptop but replies from the
+        satellite's speaker")."""
+        woken = any(sat.microphone.woken and not getattr(sat.microphone, "follow_up", False)
+                    for sat in self._satellites.values())
+        return woken or any(time.monotonic() - getattr(room, "answering_at", -1e9) < CLAIM_S
+                            for room in self._rooms.values())
 
     async def _start_satellites(self) -> None:
         """`[[voice.satellites]]`: connect each board and give its room a
@@ -737,9 +761,7 @@ class Service:
             link.on_connected = self._satellite_connected
             self._satellites[name] = link
             if self._session is not None:
-                # One question, one answer: while any board's wake run is
-                # open, the laptop leaves that speech to the room.
-                self._session.defer = lambda: any(sat.microphone.woken for sat in self._satellites.values())
+                self._session.defer = self._laptop_defers
             self._satellite_tasks.append(asyncio.create_task(link.run(self._satellite_stop),
                                                              name=f"voice-satellite-{name}"))
 

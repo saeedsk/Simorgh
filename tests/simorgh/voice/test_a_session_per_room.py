@@ -235,4 +235,4 @@ class OneQuestionOneAnswer(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("laptop", asked_by, "the laptop deferred to the woken room")
         self.assertIn("kitchen", asked_by)
         quiet = [p for p in bus.of(topics.VOICE_SPOKEN) if p.get("device") == "laptop" and p.get("quiet")]
-        self.assertTrue(any("room satellite" in (p.get("reason") or "") for p in quiet), quiet)
+        self.assertTrue(any("another device" in (p.get("reason") or "") for p in quiet), quiet)

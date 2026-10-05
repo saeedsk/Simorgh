@@ -436,6 +436,10 @@ class VoiceSession:
         #: a room satellite's wake run is open, so that room answers and
         #: this one stays quiet (stage 13). None: never defer.
         self.defer = None
+        #: When this session last began answering (monotonic): the laptop and
+        #: a room satellite in its follow-up window both hear one sentence,
+        #: and the first to answer it owns it (voice/service.py's `defer`s).
+        self.answering_at = -1e9
         self.partial = ""
         self._clocks: dict[int, TurnClock] = {}
         self._frames: asyncio.Queue | None = None
@@ -1441,8 +1445,9 @@ class VoiceSession:
             # 2026-09-27: with the board beside the Mac, both sessions
             # answered "what time is it" -- once from each speaker.
             self._log("info", "voice.deferred_to_room", turn=turn_id, text=text[:60])
-            await self._stay_quiet(turn_id, reason="a room satellite heard its wake word for this; it answers")
+            await self._stay_quiet(turn_id, reason="another device in the room is answering this")
             return
+        self.answering_at = time.monotonic()
         if self._unplaced_turn == turn_id and not self._names_sim(text):
             self._log("info", "voice.follow_up_unplaced", turn=turn_id, text=text[:60])
             await self._stay_quiet(turn_id, reason="a follow-up heard a voice I do not know that did not name me "

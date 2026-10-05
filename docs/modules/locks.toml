@@ -4,3 +4,9 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.voice]
+by = "opus-main"
+task = "laptop answers what was said to it; satellite only on a real wake word"
+since = "2026-10-05T06:20:13+00:00"
+until = "2026-10-05T14:20:13+00:00"
