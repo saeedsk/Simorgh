@@ -88,6 +88,12 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     "tts_farsi_reference": (str, None, "the ~5 second clip the Farsi voice (Pocket or Chatterbox) is cloned from"),
     "tts_farsi_lexicon": (str, None, "Farsi words the Farsi voice says in given sounds: `word=phonemes; ...` in "
                           "Pocket's spelling (/ short a, a long a, @ glottal stop), e.g. سعید=s/id"),
+    "tts_elevenlabs_voice": (str, None, "the ElevenLabs voice (an id, or a name in your library) for Farsi -- and for "
+                             "English when tts_elevenlabs_voice_english is empty"),
+    "tts_elevenlabs_voice_english": (str, None, "the ElevenLabs voice for English (tts = elevenlabs); \"\" = tts_elevenlabs_voice"),
+    "tts_elevenlabs_model": (str, ("eleven_v4", "eleven_v4_turbo", "eleven_v3", "eleven_v3_conversational"),
+                             "the ElevenLabs model; v4_turbo costs half of v4 and starts sooner"),
+    "tts_elevenlabs_language": (str, None, "a language code pinned for Farsi pieces (\"fa\"), or \"\" to let the model decide"),
     "tts_farsi_respell": (str, None, "Farsi words Chatterbox says wrong, respelled: `word=spelling; ...` (vowel marks "
                           "ignored when matching), e.g. عصرت=اَسرِت -- an alef where ع kept the wrong vowel"),
     "stt_language": (str, None, "\"\" to detect, or a code such as en, fa"),

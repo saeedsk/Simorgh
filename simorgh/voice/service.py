@@ -83,6 +83,8 @@ _PRODUCES = (
 # nothing, so `voice set microphone fake` would deafen the house and
 # report success.
 _ENGINE_KEYS = frozenset({"stt", "stt_stream_model", "stt_model_farsi", "tts", "tts_farsi", "tts_farsi_voice",
+                          "tts_elevenlabs_voice", "tts_elevenlabs_voice_english", "tts_elevenlabs_model",
+                          "tts_elevenlabs_language",
                           "tts_farsi_reference", "vad_sensitivity", "expressive_lane"})
 # `stt_partial_every_ms` belongs here for the same reason `expressive_lane`
 # belongs in `_ENGINE_KEYS`: `VoiceSession.__init__` passes it to

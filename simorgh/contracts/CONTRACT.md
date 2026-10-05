@@ -211,3 +211,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `settings` `tts_farsi` gains "mana" (2026-09-29): the fast Farsi voice, now the default. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).
 - `settings` `tts_farsi` gains "elevenlabs" (2026-10-04): the cloud Farsi voice over Mana. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).
 - `settings` `tts` gains "elevenlabs" (2026-10-04). Consumer: voice (`tts/__init__.py::open_synthesiser`).
+- `settings.VOICE_SAFE_KEYS` gains `tts_elevenlabs_voice`, `tts_elevenlabs_voice_english`, `tts_elevenlabs_model` (eleven_v4 | eleven_v4_turbo | eleven_v3 | eleven_v3_conversational), `tts_elevenlabs_language` (2026-10-04). Consumer: voice; interface's `voice set` completion lists them.

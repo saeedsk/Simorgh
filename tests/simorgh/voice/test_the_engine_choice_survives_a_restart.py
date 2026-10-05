@@ -96,7 +96,7 @@ class TheEngineIsACheckedChoiceTestCase(unittest.TestCase):
     def test_an_engine_that_does_not_exist_is_refused_before_it_is_stored(self):
         """A typo must not be written into the file and then fail every
         boot afterwards."""
-        value, problem = settings.parse("tts", "elevenlabs")
+        value, problem = settings.parse("tts", "nosuchengine")   # "elevenlabs" was the example until it became real
         self.assertIsNone(value)
         self.assertIn("one of", problem)
 
