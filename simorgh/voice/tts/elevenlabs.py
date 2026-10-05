@@ -34,6 +34,21 @@ ENGINE = "elevenlabs"
 API = "https://api.elevenlabs.io"
 RATE = 24000
 KEY_NAME = "ELEVENLABS_API_KEY"
+#: Sim's tones (contracts/tone.py) as ElevenLabs audio tags -- a bracketed
+#: direction the v3/v4 models act on and never say aloud. Every one made an
+#: audible difference in both voices, Farsi and English (the creator's A/B,
+#: 2026-10-04, workspace/voice/listen/elevenlabs-tones/). Neutral has none.
+TONE_TAGS = {"warm": "[warmly]", "bright": "[excited]", "calm": "[calmly]", "serious": "[seriously]",
+             "playful": "[playfully]", "sorry": "[apologetically]"}
+
+
+def tagged(text: str, tone: str, model: str) -> str:
+    """`text` with its tone's audio tag in front -- only for a model that
+    reads tags (eleven_v3*, eleven_v4*); an older one would say "warmly"."""
+    tag = TONE_TAGS.get((tone or "").strip().lower(), "")
+    if not tag or not str(model or "").startswith(("eleven_v3", "eleven_v4")):
+        return text
+    return f"{tag} {text}"
 
 
 class ElevenLabsSynthesiser:
@@ -97,8 +112,9 @@ class ElevenLabsSynthesiser:
                 return self._resolved
         raise RuntimeError(f"no ElevenLabs voice named {wanted!r} in the account or the shared library")
 
-    def _speak(self, text: str) -> Audio:
-        body = {"text": text, "model_id": self._config.tts_elevenlabs_model}
+    def _speak(self, text: str, tone: str = "") -> Audio:
+        model = self._config.tts_elevenlabs_model
+        body = {"text": tagged(text, tone, model), "model_id": model}
         language = str(self._config.tts_elevenlabs_language or "").strip()
         if language:
             body["language_code"] = language
@@ -113,7 +129,7 @@ class ElevenLabsSynthesiser:
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         started = time.monotonic()
         try:
-            audio = await asyncio.wait_for(asyncio.to_thread(self._speak, text),
+            audio = await asyncio.wait_for(asyncio.to_thread(self._speak, text, tone),
                                            timeout=float(self._config.tts_elevenlabs_timeout_s) + 1.0)
             self.last_engine = ENGINE
             return audio
@@ -129,4 +145,4 @@ class ElevenLabsSynthesiser:
             await warm()
 
 
-__all__ = ["API", "ENGINE", "ElevenLabsSynthesiser", "KEY_NAME", "RATE"]
+__all__ = ["API", "ENGINE", "ElevenLabsSynthesiser", "KEY_NAME", "RATE", "TONE_TAGS", "tagged"]

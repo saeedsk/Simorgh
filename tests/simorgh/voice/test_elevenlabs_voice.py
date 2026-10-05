@@ -123,3 +123,21 @@ class EnglishToo(unittest.TestCase):
         self.assertIsInstance(cloud, ElevenLabsSynthesiser)
         self.assertEqual(cloud._config.tts_elevenlabs_language, "")   # noqa: SLF001 -- English: no "fa" pinned
         self.assertEqual(cloud._fallback.name, "styletts2")        # noqa: SLF001
+
+
+class TheToneIsHeard(unittest.TestCase):
+    """2026-10-04: every tone tag made an audible difference, in Farideh's
+    Farsi and Alexandra's English."""
+
+    def test_a_warm_reply_goes_out_with_its_tag(self):
+        api = _Api()
+        engine, _ = _engine(api, tts_elevenlabs_voice="abcdefghijklmnopqrstu", tts_elevenlabs_model="eleven_v4_turbo")
+        asyncio.run(engine.synthesise("عزیزم، نگران نباش.", tone="warm"))
+        self.assertEqual(api.calls[-1][3]["text"], "[warmly] عزیزم، نگران نباش.")
+
+    def test_neutral_and_older_models_get_no_tag(self):
+        from simorgh.voice.tts.elevenlabs import tagged
+
+        self.assertEqual(tagged("Hi.", "neutral", "eleven_v4_turbo"), "Hi.")
+        self.assertEqual(tagged("Hi.", "warm", "eleven_multilingual_v2"), "Hi.", "it would say 'warmly' aloud")
+        self.assertEqual(tagged("Hi.", "sorry", "eleven_v3"), "[apologetically] Hi.")
