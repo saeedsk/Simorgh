@@ -4,3 +4,15 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.contracts]
+by = "opus-main"
+task = "tts_farsi gains elevenlabs"
+since = "2026-10-05T02:50:09+00:00"
+until = "2026-10-05T10:50:09+00:00"
+
+[locks.voice]
+by = "opus-main"
+task = "ElevenLabs Farsi voice with Mana fallback"
+since = "2026-10-05T02:50:09+00:00"
+until = "2026-10-05T10:50:09+00:00"

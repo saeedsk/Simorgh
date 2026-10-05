@@ -209,3 +209,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - 2026-09-22: `voice.control.request` gains the action `calibrate` (`value` is the calibration verb: start [options] | status | stop | keep | accept | skip; `name` the person). Interface sends it, Voice handles it (`voice/calibration.py`). It first travelled as `enroll` + key=calibrate while the enum had no word for it.
 - 2026-09-22: `guardian.standing.request{action: list|revoke, key?}` and `guardian.standing.reply{standing: [obj], revoked?}` (Interface asks, Guardian answers). `action.needs_human`/`ui.prompt` `options` may now include `always`.
 - `settings` `tts_farsi` gains "mana" (2026-09-29): the fast Farsi voice, now the default. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).
+- `settings` `tts_farsi` gains "elevenlabs" (2026-10-04): the cloud Farsi voice over Mana. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).

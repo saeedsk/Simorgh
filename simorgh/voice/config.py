@@ -101,6 +101,16 @@ class Config:
     # did not move it -- عَصرِت stayed "asrat" in every take; spelled with an
     # alef, اَسرِت came back "Asred" / "Astrid" through whisper (2026-09-29).
     tts_farsi_respell: str = "عصرت=اَسرِت"
+    # ElevenLabs (`tts_farsi = "elevenlabs"`, voice/tts/elevenlabs.py): a voice
+    # id or a name looked up in the account, then the shared library; the
+    # model (eleven_v3 speaks Persian); a language code to pin ("" = the
+    # model decides); how long a piece may take before Mana speaks it
+    # instead. The key is ELEVENLABS_API_KEY in secrets.toml, listed in
+    # `[voice] secrets`. The text of each reply goes to ElevenLabs.
+    tts_elevenlabs_voice: str = "Roya"
+    tts_elevenlabs_model: str = "eleven_v3"
+    tts_elevenlabs_language: str = "fa"
+    tts_elevenlabs_timeout_s: float = 6.0
     # The Mana voice (`tts_farsi = "mana"`): its Piper model under model_dir,
     # and the ezafe model beside it (voice/tts/mana.py).
     tts_farsi_mana_model: str = "fa_IR-mana-medium"

@@ -156,7 +156,7 @@ def _chatterbox_fa(config):
     return ChatterboxFarsiSynthesiser(config)
 
 
-def _farsi_synthesiser(config):
+def _farsi_synthesiser(config, secrets=None):
     """Whichever engine `[voice] tts_farsi` names, or the one that works.
 
     "auto" takes Pocket first -- the creator heard all three read the
@@ -179,6 +179,7 @@ def _farsi_synthesiser(config):
         "mms": lambda: MmsSynthesiser(config, model_id=config.tts_farsi_mms_model or MMS_DEFAULT),
         "chatterbox": lambda: _chatterbox_fa(config),
         "mana": lambda: _mana(config),
+        "elevenlabs": lambda: _elevenlabs(config, secrets),
     }
     choice = (config.tts_farsi or "auto").strip().lower()
     if choice in named:
@@ -195,19 +196,32 @@ def _farsi_synthesiser(config):
     return PiperSynthesiser(config, voice=config.tts_farsi_voice)   # its refusal is the one worth raising
 
 
+def _elevenlabs(config, secrets):
+    """ElevenLabs over Mana: Mana speaks whenever the cloud cannot. A
+    named choice only -- `auto` never sends replies to the cloud."""
+    from .elevenlabs import KEY_NAME, ElevenLabsSynthesiser
+
+    def key():
+        try:
+            return secrets.get(KEY_NAME) if secrets is not None else None
+        except Exception:  # noqa: BLE001 -- a key not scoped to voice is no key
+            return None
+    return ElevenLabsSynthesiser(config, key=key, fallback=_mana(config))
+
+
 def _mana(config):
     from .mana import ManaSynthesiser
 
     return ManaSynthesiser(config)
 
 
-def _default_openers() -> dict:
+def _default_openers(secrets=None) -> dict:
     from ..lang import FARSI
 
-    return {FARSI: _farsi_synthesiser}
+    return {FARSI: lambda config: _farsi_synthesiser(config, secrets)}
 
 
-def open_synthesiser(config: Config) -> tuple[object | None, str]:
+def open_synthesiser(config: Config, *, secrets=None) -> tuple[object | None, str]:
     from .kokoro import KokoroSynthesiser
     from .piper import PiperSynthesiser
     from .say import SaySynthesiser
@@ -264,7 +278,7 @@ def open_synthesiser(config: Config) -> tuple[object | None, str]:
     why = "; ".join(reasons) if reasons else ""
     if not config.tts_by_language or config.tts == "piper":
         return primary, why
-    return PolyglotSynthesiser(primary, config), why
+    return PolyglotSynthesiser(primary, config, openers=_default_openers(secrets)), why
 
 
 __all__ = ["PolyglotSynthesiser", "open_synthesiser"]

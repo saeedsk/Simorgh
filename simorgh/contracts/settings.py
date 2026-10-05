@@ -79,7 +79,8 @@ VOICE_SAFE_KEYS: dict[str, tuple[type, object, str]] = {
     # are my options?" -- and then, of the answer, "how to change the
     # farsi tts?". A setting nobody can change without editing a file
     # and restarting is not really a choice.
-    "tts_farsi": (str, ("auto", "mana", "pocket", "piper", "mms", "chatterbox"), "which engine speaks Farsi: mana (fast, "
+    "tts_farsi": (str, ("auto", "mana", "elevenlabs", "pocket", "piper", "mms", "chatterbox"), "which engine speaks Farsi: "
+                  "elevenlabs (cloud, tts_elevenlabs_voice; Mana speaks when it cannot; the reply text leaves the house), mana (fast, "
                   "Piper on Mana-TTS with ezafe; the default), pocket (24 kHz, its "
                   "voice cloned from tts_farsi_reference), chatterbox (Chatterbox Persian, cloned from "
                   "tts_farsi_reference; best by ear, slower), piper (5 voices, 22 kHz) or mms (16 kHz); "

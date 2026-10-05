@@ -579,7 +579,7 @@ class Service:
                 problems.append(why)
         tts = self._injected["synthesiser"]
         if tts is None:
-            tts, why = open_synthesiser(cfg)
+            tts, why = open_synthesiser(cfg, secrets=self._ctx.secrets)
             if tts is None or why:
                 problems.append(why if tts is None else f"tts {cfg.tts!r} fell back to {getattr(tts, 'name', '?')}: {why}")
         mic = self._injected["microphone"]
