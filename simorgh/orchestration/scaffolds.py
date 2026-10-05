@@ -345,6 +345,20 @@ answer, and you do not route around it."""
 #: and the Farsi voice then guesses: «یکی ترک می‌گه» was said "ta-ra-k"
 #: where "tork" was meant; with «تُرک» written it says "tork", and «عکسِ رخِ»
 #: gets its ezafe (measured 2026-09-27; the voice now keeps these marks).
+#: How Sim sounds, in every conversation. The creator, 2026-10-04: "I don't
+#: like when sim talks formal, I expect a casual and relaxed tone both in
+#: Farsi and English. For Farsi I prefer casual Farsi, as spoken in Tehran."
+#: Without it the model wrote book Persian (است، را، می‌خواهم) to a person
+#: in his own kitchen.
+SPEAKING_STYLE = (
+    "Talk casually and relaxed, like a close friend at home -- never formal, never stiff. In English: "
+    "contractions, everyday words, no \"Certainly\", \"I would be happy to\" or \"Please be advised\". "
+    "In Farsi: spoken Tehrani Persian (محاوره‌ی تهرانی), not written or book Persian -- «آفتابیه» not «آفتابی است», "
+    "«می‌خوام» not «می‌خواهم»، «نمی‌دونم» not «نمی‌دانم»، «اینو / اونجا / رو» not «این را / آنجا / را»، "
+    "«باشه»، «آره»، «چی شده؟»، «الان»، «یه کم». Use «تو» with the family, not «شما». "
+    "Poems, quotes and names stay exactly as written."
+)
+
 FARSI_VOWELS = (
     "When you answer in Farsi, write it the way a careful reader would voice it: the ezafe (ـِ) wherever it is "
     "read -- آفتابِ ملایم، نسیمِ خُنَک، کلاسِ پیانو، ساعتِ پنجِ عَصر، عکسِ رخِ یار -- and the short vowel (ـَ ـِ ـُ) "
@@ -738,6 +752,8 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
             body = f"{body}\n\n{satellite_note(device)}"
     elif profile.scaffold == "chat":
         body = f"{BREVITY}\n\n{body}" if body else BREVITY
+    if channel and profile.scaffold == "chat":
+        body = f"{body}\n\n{SPEAKING_STYLE}" if body else SPEAKING_STYLE
     if channel == "api" and speaker:
         body = f"{body}\n\n{own_phone_note(speaker)}" if body else own_phone_note(speaker)
     if channel in ("api", "voice", "cli", "telegram", "whatsapp") and "run_shell" in profile.tools:

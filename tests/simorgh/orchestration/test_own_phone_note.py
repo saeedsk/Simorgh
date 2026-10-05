@@ -59,3 +59,24 @@ class WhereYouRun(unittest.TestCase):
         from simorgh.orchestration.scaffolds import render
 
         self.assertNotIn("You run on the computer called", render(profiles.PATCH, task="x", subject="a.py"))
+
+
+class CasualTehraniNotFormal(unittest.TestCase):
+    """The creator, 2026-10-04: "I don't like when sim talks formal ... for
+    Farsi I prefer casual Farsi, as spoken in Tehran"."""
+
+    def test_every_conversation_is_told_to_talk_casually(self):
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.scaffolds import SPEAKING_STYLE, render
+
+        for channel, profile in (("voice", profiles.VOICE_CHAT), ("api", profiles.CHAT), ("cli", profiles.CHAT)):
+            with self.subTest(channel=channel):
+                self.assertIn(SPEAKING_STYLE, render(profile, channel=channel, speaker="Saeed"))
+        self.assertIn("محاوره‌ی تهرانی", SPEAKING_STYLE)
+        self.assertIn("Poems, quotes and names stay exactly as written", SPEAKING_STYLE)
+
+    def test_a_code_task_is_not(self):
+        from simorgh.orchestration import profiles
+        from simorgh.orchestration.scaffolds import SPEAKING_STYLE, render
+
+        self.assertNotIn(SPEAKING_STYLE, render(profiles.PATCH, task="x", subject="a.py"))
