@@ -100,6 +100,9 @@ def edged(pcm: bytes, sample_rate: int, *, ms: int = EDGE_MS) -> bytes:
 
 #: characters of text per second of speech, for guessing how long a
 #: reply will take to say before any of it is rendered
+#: How long a run of already-written sentences may grow when joined into
+#: one synthesiser request (`_pieces_of`): about 20-30 s of speech.
+JOIN_CHARS = 320
 CHARS_PER_SECOND = 14.0
 #: the most a slow engine may make the listener wait for a gapless reply
 MAX_HOLD_S = 25.0
@@ -376,7 +379,7 @@ class StreamingSynthesiser:
             self._cancelled.discard(request.request_id)
 
 
-__all__ = ["CHARS_PER_SECOND", "EDGE_MS", "MAX_HOLD_S", "StreamingSynthesiser", "TARGET_RMS", "edged", "levelled", "silence"]
+__all__ = ["CHARS_PER_SECOND", "EDGE_MS", "JOIN_CHARS", "MAX_HOLD_S", "StreamingSynthesiser", "TARGET_RMS", "edged", "levelled", "silence"]
 
 
 async def _pieces_of(request):
@@ -401,5 +404,24 @@ async def _pieces_of(request):
         if item is None:
             yield seq, "", 0, True
             return
-        yield seq, item[0], item[1], False
+        text, pause_ms = item[0], item[1]
+        ended = False
+        if seq > 0:
+            # After the first piece, the sentences already written go as ONE
+            # request. Every request is a fresh reading: ElevenLabs pitched an
+            # exclamation ~100 Hz above the verse after it, and the creator
+            # heard "two different Farsi voices, one calm, one excited"
+            # (2026-10-05). Fewer seams, fewer jumps. Nothing waits for this:
+            # only what is already queued is joined, and the first sentence
+            # still goes alone, at once.
+            while len(text) < JOIN_CHARS and not live.empty():
+                more = live.get_nowait()
+                if more is None:
+                    ended = True
+                    break
+                text, pause_ms = f"{text} {more[0]}", more[1]
+        yield seq, text, pause_ms, False
         seq += 1
+        if ended:
+            yield seq, "", 0, True
+            return

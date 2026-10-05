@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import urllib.error
 import urllib.parse
@@ -33,6 +34,10 @@ from ..api import Audio
 ENGINE = "elevenlabs"
 API = "https://api.elevenlabs.io"
 RATE = 24000
+#: Extra seconds a request may take per 100 characters, over
+#: `tts_elevenlabs_timeout_s`: a joined run of sentences is longer than one,
+#: and a timeout falls back to another voice mid-reply.
+SECONDS_PER_100_CHARS = 1.5
 KEY_NAME = "ELEVENLABS_API_KEY"
 #: Sim's tones (contracts/tone.py) as ElevenLabs audio tags -- a bracketed
 #: direction the v3/v4 models act on and never say aloud. Every one made an
@@ -119,23 +124,28 @@ class ElevenLabsSynthesiser:
         if language:
             body["language_code"] = language
         pcm = self._request("POST", f"/v1/text-to-speech/{self._voice()}", body=body,
-                            query={"output_format": f"pcm_{RATE}"},
-                            timeout=float(self._config.tts_elevenlabs_timeout_s))
+                            query={"output_format": f"pcm_{RATE}"}, timeout=self._timeout(text))
         if len(pcm) < 2:
             raise RuntimeError("ElevenLabs returned no audio")
         return Audio(pcm=pcm[: len(pcm) - len(pcm) % 2], sample_rate=RATE)
+
+    def _timeout(self, text: str) -> float:
+        return float(self._config.tts_elevenlabs_timeout_s) + SECONDS_PER_100_CHARS * len(text or "") / 100
 
     # -- the synthesiser ---------------------------------------------------------------
     async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
         started = time.monotonic()
         try:
             audio = await asyncio.wait_for(asyncio.to_thread(self._speak, text, tone),
-                                           timeout=float(self._config.tts_elevenlabs_timeout_s) + 1.0)
+                                           timeout=self._timeout(text) + 1.0)
             self.last_engine = ENGINE
             return audio
         except Exception as exc:  # noqa: BLE001 -- any failure is the fallback's turn, never silence
             why = f"ElevenLabs failed after {time.monotonic() - started:.1f}s ({exc}); spoke with {self._fallback.name}"
             self.problems = (self.problems + [why[:300]])[-5:]
+            # Logged, not only kept: a reply that switched voices mid-way
+            # could not be traced afterwards (2026-10-05).
+            logging.getLogger("simorgh.voice").warning("voice.tts_fallback %s", why[:300])
             self.last_engine = getattr(self._fallback, "name", "fallback")
             return await self._fallback.synthesise(text, voice=voice, speed=speed, tone=tone)
 
@@ -145,4 +155,4 @@ class ElevenLabsSynthesiser:
             await warm()
 
 
-__all__ = ["API", "ENGINE", "ElevenLabsSynthesiser", "KEY_NAME", "RATE", "TONE_TAGS", "tagged"]
+__all__ = ["API", "ENGINE", "SECONDS_PER_100_CHARS", "ElevenLabsSynthesiser", "KEY_NAME", "RATE", "TONE_TAGS", "tagged"]
