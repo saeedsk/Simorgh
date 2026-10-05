@@ -607,7 +607,11 @@ async def _room_list(bus) -> list | None:
         return None
     if reply.payload.get("ok") is False:
         return None
-    return list(reply.payload.get("rooms") or [])
+    from . import roomnames
+
+    rooms = list(reply.payload.get("rooms") or [])
+    roomnames.remember(rooms)
+    return rooms
 
 
 async def _rooms(bus, verb: str = "") -> Outcome:

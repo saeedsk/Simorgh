@@ -306,6 +306,10 @@ class Service:
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
         self._loop = asyncio.get_running_loop()
+        # Tab completes room names from a cache this keeps fresh (roomnames.py).
+        from . import dispatch as dispatch_mod, roomnames
+
+        roomnames.attach(self._loop, lambda: dispatch_mod._room_list(ctx.bus))  # noqa: SLF001
         # A config passed by the caller still wins, so a test that
         # constructs the service with one is unaffected (same pattern as
         # `persona.Service.start` / `curiosity.Service.start`).

@@ -9,6 +9,10 @@ def _engines(payload: dict) -> str:
 
 
 def status(payload: dict) -> str:
+    from . import roomnames
+
+    if payload.get("rooms"):
+        roomnames.remember(payload["rooms"])
     if not payload.get("enabled"):
         line = "voice is off"
         problems = payload.get("problems") or []

@@ -175,6 +175,22 @@ def _next_words(before: str) -> list[tuple[str, str]]:
         # `help ta<Tab>` and `? ta<Tab>` complete a command's name, the way
         # the first word does (the creator, 2026-09-19).
         return [(name, desc) for name, desc in COMMANDS]
+    if command in ("mute", "unmute", "room") or (command == "voice" and words[1:2] in (["mute"], ["unmute"])):
+        # Room names, live (the creator, 2026-10-04): `mute <Tab>`,
+        # `room <Tab>`, `room mute <Tab>`, `voice mute <Tab>`.
+        from . import roomnames
+
+        verb = command if command != "voice" else words[1]
+        if command == "room" and len(words) == 1:
+            return [(w, f"room {w}") for w in ("list", "mute", "unmute")] + roomnames.choices()
+        if command == "room" and len(words) == 2 and words[1] in ("mute", "unmute"):
+            return roomnames.choices(words[1])
+        if command in ("mute", "unmute") and len(words) == 1:
+            return roomnames.choices(verb)
+        if command == "voice" and len(words) == 2:
+            return roomnames.choices(verb)
+        if command != "voice":
+            return []
     if len(words) == 1:
         return [(w, f"{command} {w}") for w in subcommands(command)]
     if command == "voice" and words[1] == "set" and len(words) == 2:

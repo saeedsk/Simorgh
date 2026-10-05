@@ -4,3 +4,9 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.interface]
+by = "opus-main"
+task = "Tab completes room names for room/mute/unmute"
+since = "2026-10-05T06:59:48+00:00"
+until = "2026-10-05T14:59:48+00:00"

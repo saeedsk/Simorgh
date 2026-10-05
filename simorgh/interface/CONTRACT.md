@@ -31,6 +31,7 @@ Interface owns every typed or remote surface a person uses: the terminal REPL/TU
 | `simorgh/interface/activity.py` | Task book and activity feed built from task events |
 | `simorgh/interface/vitals.py` | Local projection of mood and metrics for the footer |
 | `simorgh/interface/voiceview.py` | Rendering of `voice ...` replies |
+| `simorgh/interface/roomnames.py` | The rooms as last seen, for Tab after `room`/`mute`/`unmute` |
 | `simorgh/interface/benchmarkview.py` | `benchmark` command parsing and rendering |
 | `simorgh/interface/benchmarkchart.py` | Unicode benchmark charts |
 | `simorgh/interface/splash_art.py` | Generated splash screens (do not edit by hand) |
@@ -256,6 +257,7 @@ for the segments. Verified against a live relay: playlist 200 with six rewritten
 
 - `/api/cam/live/` proxies go2rtc (loopback `go2rtc_port`, default 1984) behind the token: header, `?token=`, or the `sim_cam` cookie it sets scoped to that path on its first authorised answer (go2rtc's player loads its script and opens its WebSocket by relative URL, which drops the query). The token is stripped before go2rtc; a WebSocket is carried both ways; a raw route owns its connection and is not bounded by the per-request timeout; go2rtc down is a 503 naming `cam_webrtc start`.
 - `room` (2026-10-04): `room` / `room list` lists every room from `voice.status` `rooms` -- listening, muted, muted by its button, offline; `room <name>` one room (prefix allowed); `room mute|unmute <room|all>` is `voice.control`. `mute ?` / `unmute ?` (and `help`, `list`) show the same live list with the rooms each verb can act on, instead of the static usage; `mute all` / `unmute all` reach every room. A sentence starting with "room" of three or more words, or two whose first is not mute/unmute, goes to chat.
+- Tab completes room names (2026-10-05) after `mute`, `unmute`, `voice mute|unmute`, `room` (its verbs, then the rooms) and `room mute|unmute`, each with its state (listening, muted, muted by its button, offline) and `all` for mute/unmute. Names come from `roomnames.py`, a cache filled by every `voice.status` reply the interface renders and refreshed in the background (one request at a time, on the bus loop) when a Tab finds it older than 10 s; the laptop is offered before any reply.
 
 ## Contract tests
 
