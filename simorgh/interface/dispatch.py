@@ -288,6 +288,13 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
         return Outcome(render_mod.help_panel(enabled=render_mod.color_enabled(),
                                              unicode=render_mod.unicode_mode() != "off"))
 
+    if name in ("mute", "unmute", "room") and args.strip().lower() in ("?", "help", "--help", "-h", "list", "rooms"):
+        # `mute ?` shows the rooms and which are muted, not a static usage
+        # line (the creator, 2026-10-04).
+        return await _rooms(bus, "" if name == "room" else name)
+    if name == "room":
+        return await _room(bus, args)
+
     if args.strip().lower() in ("help", "?", "--help", "-h") and name:
         # `voice help` is `help voice`; every command answers it the same way.
         return Outcome(render_mod.command_panel(name, enabled=render_mod.color_enabled(),
@@ -590,6 +597,53 @@ _BENCHMARK_USAGE = "\n".join(
     f"  benchmark {f'{verb} {args}'.strip():<{_BENCHMARK_COLUMN}}{what}"
     for verb, args, what in BENCHMARK_VERBS
 )
+
+
+async def _room_list(bus) -> list | None:
+    """The voice service's rooms, or None when it does not answer."""
+    try:
+        reply = await bus.request(bus.new(topics.VOICE_STATUS_REQUEST, {}), timeout=10.0)
+    except Exception:  # noqa: BLE001 -- not answering is said, never raised
+        return None
+    if reply.payload.get("ok") is False:
+        return None
+    return list(reply.payload.get("rooms") or [])
+
+
+async def _rooms(bus, verb: str = "") -> Outcome:
+    """Every room and its mute state, live from the voice service."""
+    from . import voiceview
+
+    listed = await _room_list(bus)
+    if listed is None:
+        return Outcome("voice is not answering -- is it on? (`voice on`)")
+    return Outcome(voiceview.room_panel(listed, verb))
+
+
+async def _room(bus, args: str) -> Outcome:
+    """`room`: the rooms; `room <name>`: one; `room mute|unmute <room|all>`."""
+    from . import voiceview
+
+    verb, _, rest = args.strip().partition(" ")
+    verb = verb.lower()
+    if verb in ("", "list", "status", "rooms"):
+        return await _rooms(bus)
+    if verb in ("mute", "unmute"):
+        if not rest.strip() or rest.strip() == "?":
+            return await _rooms(bus, verb)
+        return await _request(bus, topics.VOICE_CONTROL_REQUEST, {"action": verb, "name": rest.strip()},
+                              timeout=10.0, render=voiceview.controlled)
+    listed = await _room_list(bus)
+    if listed is None:
+        return Outcome("voice is not answering -- is it on? (`voice on`)")
+    wanted = args.strip().lower()
+    matches = ([r for r in listed if str(r.get("name", "")).lower() == wanted]
+               or [r for r in listed if str(r.get("name", "")).lower().startswith(wanted)])
+    if len(matches) != 1:
+        known = ", ".join(str(r.get("name")) for r in listed) or "none"
+        return Outcome(f"no single room called {args.strip()!r} -- rooms: {known}   (room mute|unmute <room|all>)")
+    lines = voiceview.rooms(matches)
+    return Outcome("\n".join([voiceview.room_line(matches[0]).strip(), *lines[1:]]))
 
 
 async def _voice(bus: BusClient, args: str) -> Outcome:

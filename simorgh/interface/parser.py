@@ -55,8 +55,9 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("resume", "", "let it continue"),
     ("followup", "[on|off|question|time <5m>] [board]",
      "Follow Up Mode: after Sim's reply a satellite keeps listening with no wake word, per board"),
-    ("mute", "[room]", "stop the laptop's microphone (or one room's); the satellites still listen (`voice mute laptop`)"),
-    ("unmute", "[room]", "the laptop listens again (or one room)"),
+    ("mute", "[room|all|?]", "stop the laptop's microphone (or one room's, or every room's); `mute ?` lists the rooms and which are muted"),
+    ("unmute", "[room|all|?]", "the laptop listens again (or one room, or all); `unmute ?` lists the muted rooms"),
+    ("room", "[list|<name>|mute <room|all>|unmute <room|all>]", "the rooms Sim listens in: each one's microphone, mute state and settings"),
     ("pronounce", "<name> [as] <how>", "how Sim says a name aloud: `pronounce Ira as Eye-raa` (also `voice pronounce`)"),
     ("next", "", "skip the track playing on the TV (also: skip; `tv pause` / `tv play` for the rest)"),
     ("help", "[command]", "list everything, or one command's words: help voice"),
@@ -97,7 +98,7 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
-    ("Voice, screen and cameras", ("voice", "followup", "mute", "unmute", "pronounce", "tv", "next", "cameras", "ring")),
+    ("Voice, screen and cameras", ("voice", "room", "followup", "mute", "unmute", "pronounce", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "approvals", "schedule", "mcp", "pair", "devices", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
@@ -119,6 +120,10 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
                   ("clear <model|all>", "forget the recorded runs for one model, or for all of them"),
                   ("show <run>", "one run, one line per case"),
                   ("cases <run>", "one run in full: question, answer, true answer, time, tokens")),
+    "room": (("", "every room: listening, muted, muted by its button, offline"),
+             ("<name>", "one room: its microphone, speaker and Follow Up Mode"),
+             ("mute <room|all>", "stop one room's microphone, or every room's"),
+             ("unmute <room|all>", "listen again in one room, or everywhere")),
     "voice": (("status", "engines, state, the last turn's timings"), ("on", "listen and speak"),
               ("off", "silent and deaf until `voice on`"), ("mute", "stop listening; keep the rest"),
               ("unmute", "listen again"), ("barge on|off", "whether talking over Sim stops it"),
@@ -374,6 +379,11 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
         # `mute` / `unmute laptop` is the command; "mute the TV please"
         # is somebody asking, and the model should hear it.
         return len(rest.split()) > 1
+    if name == "room":
+        # `room`, `room kitchen`, `room mute all`; "room is too warm" is
+        # somebody talking.
+        words = rest.split()
+        return len(words) > 2 or (len(words) == 2 and words[0].lower() not in ("mute", "unmute"))
     return bool(rest.strip()) and name in NO_ARGUMENT_COMMANDS
 
 

@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.interface]
+by = "opus-main"
+task = "room command: per-room mute, status, mute ? lists rooms"
+since = "2026-10-05T06:35:29+00:00"
+until = "2026-10-05T14:35:29+00:00"
+
 [locks.voice]
 by = "opus-main"
 task = "laptop answers what was said to it; satellite only on a real wake word"

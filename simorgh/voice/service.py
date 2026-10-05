@@ -828,6 +828,11 @@ class Service:
                 "muted": bool(getattr(room, "muted", False)),
             }
             if link is not None:
+                # The board's own mute button (2026-10-04): pressed, the
+                # room is deaf whatever Sim's mute says.
+                entry["button_muted"] = bool(getattr(link, "muted", False))
+                entry["connected"] = bool(getattr(link, "connected", False))
+            if link is not None:
                 entry.update({
                     "in_conversation": link.in_conversation(),
                     "follow_up": self._mode_for(name),
@@ -964,20 +969,36 @@ class Service:
             await self._ctx.bus.publish(self._ctx.bus.new(topics.UI_NOTICE, {
                 "level": "info", "text": text, "source": "voice"}))
 
+    def _room_sessions(self) -> dict:
+        """Every room by its name, the laptop first."""
+        out = {"laptop": self._session} if self._session is not None else {}
+        out.update(self._rooms)
+        return out
+
     def _mute_one(self, name: str, mute: bool) -> tuple[bool, str]:
-        """Mute or unmute ONE room's session; the others keep listening."""
-        key = name.lower()
-        if key in ("laptop", self.config.device.lower()):
-            session = self._session
-        else:
-            session = next((s for device, s in self._rooms.items() if device.lower() == key), None)
-        if session is None:
-            known = ", ".join([self.config.device, *self._rooms])
-            return False, f"no room called {name!r} -- rooms: {known}"
-        session.muted = mute
+        """Mute or unmute ONE room's session (or `all` of them); the others
+        keep listening. A unique prefix names a room: `mute sim` is
+        `mute sim-room-1` when there is one such room."""
+        key = name.lower().strip()
+        rooms = self._room_sessions()
+        if key in ("all", "every", "everywhere"):
+            for session in rooms.values():
+                session.muted = mute
+            names = ", ".join(rooms) or "no rooms"
+            return True, (f"every room muted ({names}) -- `unmute all` to undo" if mute
+                          else f"every room listening again ({names})")
+        if key == self.config.device.lower():
+            key = "laptop"
+        matches = [n for n in rooms if n.lower() == key] or [n for n in rooms if n.lower().startswith(key)]
+        if len(matches) != 1:
+            known = ", ".join(rooms) or "none"
+            what = "more than one room starts with" if matches else "no room called"
+            return False, f"{what} {name!r} -- rooms: {known} (or `all`)"
+        room = matches[0]
+        rooms[room].muted = mute
         if mute:
-            return True, f"{name} muted; the other rooms still listen (`unmute {name}` to undo)"
-        return True, f"{name} listening again"
+            return True, f"{room} muted; the other rooms still listen (`unmute {room}` to undo)"
+        return True, f"{room} listening again"
 
     #: How long after its wake word a satellite is still "the room you are
     #: in" when a play request names none.
@@ -1094,7 +1115,8 @@ class Service:
             out["problems"] = list(out.get("problems") or []) + machine_notes()
         except Exception:  # noqa: BLE001 -- a health note is never a failed status
             pass
-        if self._satellites or self._rooms:
+        if self._session is not None or self._rooms:
+            # The laptop is a room too: `mute ?` lists it alone (2026-10-04).
             out["rooms"] = self._rooms_state()
         if session is not None:
             out["state"] = session.state

@@ -184,7 +184,8 @@ class TheServiceHoldsTheRooms(unittest.IsolatedAsyncioTestCase):
         await service._turn_off()  # noqa: SLF001
         self.assertFalse(_room(service, "kitchen")["running"], "`voice off` silences every room")  # noqa: SLF001
         await service.remove_room("kitchen")
-        self.assertNotIn("rooms", service._state())  # noqa: SLF001
+        # The laptop is a room too, listed alone (2026-10-04).
+        self.assertEqual([r["name"] for r in service._state()["rooms"]], ["laptop"])  # noqa: SLF001
 
 
 if __name__ == "__main__":
@@ -219,6 +220,21 @@ class MutingOneRoom(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(ok)
         self.assertIn("kitchen", detail)
 
+
+    async def test_all_mutes_every_room_and_a_prefix_names_one(self):
+        """The creator, 2026-10-04: "mute and unmute should allow me to mute
+        different rooms"."""
+        service = await TheServiceHoldsTheRooms._service(self)
+        room = await service.add_room("sim-room-1", microphone=FakeMicrophone(silence(0.03)), speaker=FakeSpeaker())
+        ok, why = await service._turn_on()  # noqa: SLF001
+        self.assertTrue(ok, why)
+        self.addAsyncCleanup(service._turn_off)  # noqa: SLF001
+        ok, detail = service._mute_one("all", True)  # noqa: SLF001
+        self.assertTrue(ok and room.muted and service._session.muted, detail)  # noqa: SLF001
+        self.assertEqual([r["muted"] for r in service._rooms_state()], [True, True])  # noqa: SLF001
+        ok, detail = service._mute_one("sim", False)  # noqa: SLF001
+        self.assertTrue(ok and not room.muted, detail)
+        self.assertTrue(service._session.muted, "only the room named")  # noqa: SLF001
 
 class OneQuestionOneAnswer(unittest.IsolatedAsyncioTestCase):
     """Live 2026-09-27: with the board beside the Mac, both the laptop and

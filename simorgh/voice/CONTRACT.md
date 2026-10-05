@@ -318,6 +318,7 @@ A reply is cut at `max_spoken_sentences` (3) and says there is more on screen --
 - One question, one answer: while any satellite's wake run is open, the laptop's session defers (`VoiceSession.defer`, set by the service) and stays quiet on that speech with the reason given; the room answers. Rooms do not defer to each other -- two boards woken at once each answer their own run.
 - In a satellite's Follow Up Mode run, a scrap (`session._fragment`: one word, or up to five with a stray single letter, «ش است», «ای ق») that is not a spoken command, does not name Sim and does not answer a question Sim just asked (`_sim_just_asked`, 30 s) stays quiet (`voice.fragment_ignored`, 2026-10-04): it was being asked back «جانم، دوباره می‌گی؟» again and again.
 - `max_spoken_sentences` defaults to 40 (2026-10-04): a wall, not a length -- the VOICE prompt keeps answers short, and "say 5 jokes for the kids" had been cut to one joke and "the rest is on screen". `narration_wanted` also knows jokes, riddles, rhymes, "say/tell/give N ..." and «جوک/لطیفه/چیستان».
+- Rooms (2026-10-04): `voice.control` mute/unmute with `name` takes a room, a unique prefix of one (`sim` for `sim-room-1`), or `all` (every room, the laptop included) -- `VoiceService._mute_one`. `voice.status` carries `rooms` whenever the laptop session exists (the laptop alone is a list of one), and each satellite entry adds `button_muted` (the board's own mute button) and `connected`.
 
 ## Contract tests
 

@@ -81,6 +81,49 @@ def rooms(listed: list) -> list[str]:
     return out
 
 
+def room_line(room: dict) -> str:
+    """One room in a word or two: what it hears and why not."""
+    name = str(room.get("name") or "?")
+    if room.get("kind") == "satellite" and not room.get("connected", True):
+        state = "offline"
+    elif room.get("button_muted"):
+        state = "muted by its button" + (" and by Sim" if room.get("muted") else "")
+    elif room.get("muted"):
+        state = "muted"
+    else:
+        state = "listening"
+    extra = []
+    if room.get("kind") == "satellite":
+        extra.append("satellite")
+        if room.get("in_conversation"):
+            extra.append("in a conversation now")
+    return f"    {name:<16} {state}" + (f"  ({', '.join(extra)})" if extra else "")
+
+
+def room_panel(listed: list, verb: str = "") -> str:
+    """The rooms and their mute state, with the words that change it --
+    what `mute ?`, `unmute ?` and `room` show (the creator, 2026-10-04:
+    "the ? in mute and unmute should show possible room options and their
+    current status")."""
+    if not listed:
+        return "no rooms: voice is off (`voice on`)"
+    out = ["rooms:"] + [room_line(r) for r in listed]
+    if verb in ("mute", "unmute"):
+        names = [str(r.get("name")) for r in listed
+                 if bool(r.get("muted")) == (verb == "unmute")]
+        if names:
+            out.append(f"  {verb} " + " | ".join(names) + (" | all" if len(names) > 1 else ""))
+        else:
+            out.append(f"  nothing to {verb}: every room is already "
+                       + ("listening" if verb == "unmute" else "muted"))
+        out.append(f"  bare `{verb}` is `{verb} laptop`")
+    else:
+        out.append("  mute <room|all> · unmute <room|all> · room <name> for one room's settings")
+    if any(r.get("button_muted") for r in listed):
+        out.append("  a room muted by its button listens again only when the button is pressed")
+    return "\n".join(out)
+
+
 def controlled(payload: dict) -> str:
     if not payload.get("ok"):
         error = payload.get("error") or {}
