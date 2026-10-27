@@ -371,6 +371,24 @@ class BudgetCapsArePartial(_Case):
         self.assertIn("wall-clock", result.metadata["reason"])
         self.assertEqual((await self.ledger.read(STREAM))[-1].type, "finished")
 
+    async def test_a_crew_members_share_caps_the_run(self):
+        """Stage 18 review: a crew member's run is carved from its crew's
+        dollars. Orchestration sets `max_usd`; the run never gets more than
+        that, nor more than `max_usd_per_run`, and nothing starts at 0."""
+        sdk = fake_sdk([], result=ResultMessage(total_cost_usd=0.12))
+        result = await self.run_tool(self.tool(sdk), {"feature": "a helper", "max_usd": 0.1})
+        self.assertEqual(sdk.options[0].max_budget_usd, 0.1)
+        self.assertEqual(result.metadata["status"], "partial")
+        self.assertIn("cost cap ($0.12 of $0.10)", result.metadata["reason"])
+        self.assertEqual(result.metadata["cost_usd"], 0.12, "the cost Orchestration charges to the crew")
+        more = fake_sdk([])
+        await self.run_tool(self.tool(more, max_runs_per_day=10), {"feature": "a helper", "max_usd": 50})
+        self.assertEqual(more.options[0].max_budget_usd, 2.0, "never above max_usd_per_run")
+        none_left = fake_sdk([])
+        refused = await self.run_tool(self.tool(none_left, max_runs_per_day=10), {"feature": "x", "max_usd": 0})
+        self.assertEqual(refused.error_kind, "refused")
+        self.assertEqual(none_left.options, [], "no client was made")
+
     async def test_an_error_result_is_failed(self):
         result = await self.run_tool(self.tool(fake_sdk([], result=ResultMessage(subtype="error_during_execution",
                                                                                  is_error=True))))
@@ -475,6 +493,31 @@ class NoMoreReachThanSimsOwnTools(_Case):
         _sdk, decision = await self._one("Bash", {"command": "git status && git log --oneline -3"})
         self.assertTrue(decision["allowed"], decision["why"])
         self.assertEqual(_git(self.repo, "rev-parse", "main"), main)
+
+    async def test_sim_holds_the_locks_claude_code_never_takes_one(self):
+        """The brief overrides CLAUDE.md's "lock before you edit": Sim is
+        the coordinator. A lock claimed, released or written by hand is
+        refused before Guardian, whatever the brief said."""
+        for command in ("python tools/modlock.py claim memory --by cc --task x",
+                        "python3 tools/modlock.py release memory --by cc",
+                        "echo '[memory]' >> docs/modules/locks.toml"):
+            with self.subTest(command=command):
+                await self.assert_refused_before_guardian("Bash", {"command": command}, "Sim holds the locks")
+        await self.assert_refused_before_guardian(
+            "Write", {"file_path": str(self.tree / "docs" / "modules" / "locks.toml"), "content": "x"},
+            "Sim holds the locks")
+        _sdk, decision = await self._one("Bash", {"command": "python tools/modtest.py memory"})
+        self.assertTrue(decision["allowed"], decision["why"])
+
+    async def test_the_brief_overrides_the_lock_rule_and_keeps_it_in_the_worktree(self):
+        sdk = fake_sdk([])
+        await self.run_tool(self.tool(sdk))
+        brief = sdk.prompts[0]
+        self.assertIn("overrides CLAUDE.md's lock rule", brief)
+        self.assertIn("tools/modlock.py claim", brief)
+        self.assertIn("docs/modules/locks.toml", brief)
+        self.assertIn("Stay inside this worktree", brief)
+        self.assertIn("Never push", brief)
 
     async def test_no_settings_file_is_loaded(self):
         """A project `.claude/settings.json` can carry hooks that run

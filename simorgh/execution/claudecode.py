@@ -42,7 +42,9 @@ Sim's other secret-shaped environment variables are blanked for the CLI.
 Budget. Off by default (`enabled = false`; the tool is not even
 registered). Each run has `max_turns`, a wall-clock cap `wall_s`, and
 `max_usd_per_run` (passed to the SDK when it takes one, and checked on the
-cost it reports); at most `max_runs_per_day` runs are started per local
+cost it reports), lowered by the call's own `max_usd` when it names less --
+Orchestration sets that to a crew member's share of its crew's dollars,
+and counts the reported `cost_usd` against the crew when the run ends; at most `max_runs_per_day` runs are started per local
 day, counted on `execution:claude_code`. A run that hits a cap reports
 `partial`. The first run of each day asks a person: Guardian's
 `daily_human_tools` (guardian/config.py), in every posture. Every run, its
@@ -52,8 +54,12 @@ the Claude quota is never spent silently (the 2026-09-11 lesson).
 The brief is `agents/claude_code.md`'s fenced `brief` block, filled with
 the feature, the acceptance test, the files in scope and the module, read
 from the live repository (the task cannot have edited it: `agents/` is
-protected). The repository's `CLAUDE.md` gives Claude Code the module-lock
-and contract rules.
+protected). The repository's CLAUDE.md gives Claude Code the contract
+rules, but not its lock rule: Sim is the coordinator and holds the
+module locks, so the brief tells Claude Code never to claim or release a
+lock, never to edit `docs/modules/locks.toml`, to stay in its worktree and
+never to push -- and `local_refusal` refuses those calls before Guardian
+(`COORDINATOR_FILES`, the `modlock` row of `CLAUDE_CODE_SHELL_REFUSALS`).
 """
 
 from __future__ import annotations
@@ -111,7 +117,16 @@ CLAUDE_CODE_SHELL_REFUSALS: dict[str, str] = {
     r"\bgit\b[^|;&]*\bworktree\b": "manages worktrees; this task already has its own",
     r"\bgit\b[^|;&]*(--git-dir|--work-tree)\b": "points git at another repository or tree",
     r"(^|[;&|]\s*)git\s+-C\s": "runs git in another directory; stay in this task's worktree",
+    # CLAUDE.md tells an agent to lock a module before editing it. Not this
+    # one: Sim is the coordinator and holds the locks; a lock Claude Code
+    # took would outlive its run and block everyone else.
+    r"\bmodlock(\.py)?\b[^|;&]*\b(claim|release)\b": "claims or releases a module lock; Sim holds the locks",
+    r"docs/modules/locks\.toml": "names the module lock file; Sim holds the locks",
 }
+
+#: Files only the coordinator (Sim, or the person running it) writes, under
+#: the worktree root. A write to one is refused before Guardian.
+COORDINATOR_FILES = frozenset({"docs/modules/locks.toml"})
 
 _BRIEF_BLOCK = re.compile(r"```brief\n(.*?)\n```", re.S)
 
@@ -240,6 +255,8 @@ def local_refusal(tool: str, tool_input: Mapping[str, Any], *, root: Path, repo_
             relative = target.relative_to(Path(root).resolve())
             if looks_like_credential_path(relative.parts):
                 return f"{raw!r} looks like a credentials path"
+            if tool in WRITE_TOOLS and relative.as_posix() in COORDINATOR_FILES:
+                return f"{raw!r} is the module lock file; Sim holds the locks, never Claude Code"
     if tool == "Bash":
         command = str(data.get("command") or "")
         reason = refusal_for(command, dict(shell_refusals or DEFAULT_SHELL_REFUSALS))
@@ -315,6 +332,10 @@ class ClaudeCodeTaskTool:
         "properties": {
             "feature": {"type": "string"}, "acceptance": {"type": "string"},
             "files": {"type": "array", "items": {"type": "string"}}, "module": {"type": "string"},
+            # A crew member's share of its crew's dollars (Orchestration
+            # sets it; stage 18): the run is capped at the lower of this and
+            # `max_usd_per_run`.
+            "max_usd": {"type": "number"},
         },
     }
 
@@ -341,6 +362,9 @@ class ClaudeCodeTaskTool:
         feature = str(args.get("feature") or "").strip()
         if not feature:
             return ToolResult.refused("give the feature to build")
+        cap = self._dollar_cap(args.get("max_usd"))
+        if cap <= 0:
+            return ToolResult.refused(f"{TOOL_NAME}: no dollars left to spend (max_usd {args.get('max_usd')!r})")
         root = getattr(ctx, "root", None)
         if root is None or not (Path(root) / ".git").is_file():
             return ToolResult.refused(f"{TOOL_NAME} runs only in this task's own worktree (worktree_open), "
@@ -379,12 +403,13 @@ class ClaudeCodeTaskTool:
                 return ToolResult.refused(f"{TOOL_NAME}: {runs_today} run(s) today already, the cap is "
                                           f"{cc.max_runs_per_day} ([execution.claude_code] max_runs_per_day)")
             await self._append(ctx, "started", {"run": run.id, "feature": feature[:500], "files": files,
-                                                "requester": requester, "max_usd": cc.max_usd_per_run,
+                                                "requester": requester, "max_usd": cap,
                                                 "max_turns": cc.max_turns, "wall_s": cc.wall_s})
         started = self._monotonic()
         status, reason = "ok", ""
         try:
-            await asyncio.wait_for(self._drive(sdk, ctx, run, brief, root, requester, channel), timeout=cc.wall_s)
+            await asyncio.wait_for(self._drive(sdk, ctx, run, brief, root, requester, channel, max_usd=cap),
+                                   timeout=cc.wall_s)
         except asyncio.TimeoutError:
             status, reason = "partial", f"stopped at the wall-clock cap ({cc.wall_s:.0f}s)"
         except asyncio.CancelledError:
@@ -402,8 +427,8 @@ class ClaudeCodeTaskTool:
                 status, reason = "failed", "Claude Code ended without a result"
             elif "max_turns" in subtype:
                 status, reason = "partial", f"stopped at the turn cap ({cc.max_turns})"
-            elif "budget" in subtype or cost > cc.max_usd_per_run:
-                status, reason = "partial", f"stopped at the cost cap (${cost:.2f} of ${cc.max_usd_per_run:.2f})"
+            elif "budget" in subtype or cost > cap:
+                status, reason = "partial", f"stopped at the cost cap (${cost:.2f} of ${cap:.2f})"
             elif getattr(result, "is_error", False) or (subtype and subtype != "success"):
                 status, reason = "failed", f"Claude Code reported {subtype or 'an error'}"
 
@@ -434,7 +459,22 @@ class ClaudeCodeTaskTool:
         return ToolResult(ok=False, error=reason, output="\n".join(lines), side_effects=effects,
                           metadata=report, error_kind="failed")
 
-    async def _drive(self, sdk, ctx, run: _Run, brief: str, root: Path, requester: str, channel: str) -> None:
+    def _dollar_cap(self, asked) -> float:
+        """This run's dollar cap: `max_usd_per_run`, or less when the call
+        names less (`max_usd`: a crew member's share of its crew's dollars,
+        which Orchestration sets). Never more than the config allows; 0 or
+        below when the call has nothing left to spend."""
+        cap = float(self._cc.max_usd_per_run)
+        if asked in (None, ""):
+            return cap
+        try:
+            asked = float(asked)
+        except (TypeError, ValueError):
+            return cap
+        return min(cap, asked)
+
+    async def _drive(self, sdk, ctx, run: _Run, brief: str, root: Path, requester: str, channel: str,
+                     *, max_usd: float | None = None) -> None:
         cc = self._cc
 
         async def pre_tool_use(input_data, tool_use_id=None, context=None):
@@ -456,7 +496,7 @@ class ClaudeCodeTaskTool:
             # would need a prompt that headless mode cannot show.
             "permission_mode": "default",
             "hooks": {"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[pre_tool_use])]},
-            "max_budget_usd": float(cc.max_usd_per_run),
+            "max_budget_usd": float(cc.max_usd_per_run if max_usd is None else max_usd),
             # No settings files at all. A project `.claude/settings.json`
             # can carry hooks (commands run outside PreToolUse, so
             # outside Guardian), MCP servers and allow rules, and the
@@ -638,6 +678,6 @@ def claude_code_tools(config) -> list:
     return [ClaudeCodeTaskTool(config)] if cc.enabled else []
 
 
-__all__ = ["BRIEF_FILE", "CLAUDE_CODE_SHELL_REFUSALS", "CLI_CREDENTIALS", "ClaudeCodeConfig", "claude_code_env", "ClaudeCodeTaskTool", "HOOK_PREFIX", "NETWORK_TOOLS", "SDK_MISSING",
+__all__ = ["BRIEF_FILE", "CLAUDE_CODE_SHELL_REFUSALS", "CLI_CREDENTIALS", "COORDINATOR_FILES", "ClaudeCodeConfig", "claude_code_env", "ClaudeCodeTaskTool", "HOOK_PREFIX", "NETWORK_TOOLS", "SDK_MISSING",
            "STREAM", "TOOL_NAME", "brief_template", "claude_code_tools", "hook_path", "load_sdk", "local_refusal", "proposal_for",
            "render_brief"]

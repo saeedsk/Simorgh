@@ -16,8 +16,12 @@ patch task's helper) reads the instructions above the brief: it hands the
 work to Claude Code with `claude_code_task` and checks what came back. And
 `execution/claudecode.py` reads ONLY the fenced `brief` block below, fills
 {feature}, {acceptance}, {files} and {module}, and gives it to Claude Code
-as its prompt. The repository's CLAUDE.md gives Claude Code the lock and
-contract rules on top of this.
+as its prompt. The repository's CLAUDE.md gives Claude Code the contract
+rules on top of this -- but NOT its lock rule: the brief overrides that.
+Sim is the coordinator and holds every module lock for the task; Claude
+Code claims nothing, releases nothing, never edits docs/modules/locks.toml,
+stays inside the worktree and never pushes (`claudecode.py` also refuses
+those calls before Guardian).
 
 `verify = false`: the judge of this work is the landing gate (rebase, the
 whole suite, the protected-path check) and the parent, not a second model
@@ -55,12 +59,19 @@ Files in scope:
 
 Rules:
 - Read CLAUDE.md and the CONTRACT.md of the module you change first.
+- This brief overrides CLAUDE.md's lock rule ("Lock before you edit"):
+  Sim is the coordinator and already holds the locks for this task. Do
+  not run tools/modlock.py claim, release or check, and do not edit
+  docs/modules/locks.toml. A lock you take would outlive you.
+- Stay inside this worktree (the current directory): never read or write
+  outside it, never cd out of it, never touch the main checkout.
 - Write the test first or alongside the change, in tests/simorgh/{module}/.
 - Prove it: run `python tools/modtest.py {module}` and make it green.
 - Update that module's CONTRACT.md in the same commit when you change a
   topic, schema, stream, config key or public symbol.
 - Commit on the current branch with a message that starts with the module
-  name, explicit paths only. Never push, never merge, never switch branch.
+  name, explicit paths only. Never push, never merge, never switch branch:
+  Sim lands the work through its own gate.
 - Never touch protected paths: simorgh/guardian/, simorgh/execution/,
   simorgh/contracts/, simorgh/kernel/, simloader.py, sim.sh, docs/SOUL.md,
   agents/, rules/, simorgh/evals/, simorgh.toml, .claude/hooks. A diff
