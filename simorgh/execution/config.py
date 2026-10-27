@@ -615,10 +615,12 @@ class Config:
         if "mcp_servers" in kwargs:
             kwargs["mcp_servers"] = tuple(
                 server if isinstance(server, McpServerConfig) else McpServerConfig(
-                    name=server["name"], command=server["command"],
+                    name=server["name"], command=server.get("command", ""),
                     args=tuple(server.get("args", ())), env=dict(server.get("env", {})),
                     read_only_tools=frozenset(server.get("read_only_tools", ())),
                     timeout_s=float(server.get("timeout_s", 15.0)),
+                    transport=str(server.get("transport", "stdio")), url=str(server.get("url", "")),
+                    headers={str(k): str(v) for k, v in dict(server.get("headers", {})).items()},
                 )
                 for server in kwargs["mcp_servers"]
             )

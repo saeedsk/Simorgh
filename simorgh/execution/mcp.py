@@ -43,7 +43,7 @@ from simorgh.contracts.protocols import ToolContext, ToolResult
 @dataclass(frozen=True)
 class McpServerConfig:
     name: str
-    command: str
+    command: str = ""
     args: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=dict)
     # Tool names (the MCP server's own names, not the `mcp_<server>_<tool>`
@@ -55,6 +55,14 @@ class McpServerConfig:
     # unrecognized tool.
     read_only_tools: frozenset[str] = frozenset()
     timeout_s: float = 15.0
+    # Stage 9 item 12 (`mcp_sdk.py`): `stdio` (this module's client, or
+    # the SDK's when installed), `http` (Streamable HTTP) or `sse`, the
+    # last two through the SDK only. `url` is the remote endpoint;
+    # `headers` maps an HTTP header name to the NAME of a secrets.toml
+    # key, never to the value itself.
+    transport: str = "stdio"
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class McpTransportError(Exception):

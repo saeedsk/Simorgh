@@ -97,6 +97,24 @@ class TestMcpBareList(_McpDispatchTestCase):
         out = await self._mcp("")
         self.assertIn("no pending", out)
 
+    async def test_a_remote_server_without_the_sdk_is_refused_by_name(self):
+        """Stage 9 item 12: an http/sse server needs the `mcp` SDK, and
+        without it the console names it rather than leaving it absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            toml_path = Path(tmp) / "simorgh.toml"
+            toml_path.write_text(
+                '[[execution.mcp_servers]]\nname = "remote"\ntransport = "http"\nurl = "https://x.test/mcp"\n'
+                '[[execution.mcp_servers]]\nname = "local"\ncommand = "npx"\n')
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path), \
+                 unittest.mock.patch("importlib.util.find_spec", lambda name: None):
+                out = await self._mcp("")
+            with unittest.mock.patch.object(dispatch_module, "_simorgh_toml_path", lambda: toml_path), \
+                 unittest.mock.patch("importlib.util.find_spec", lambda name: object()):
+                with_sdk = await self._mcp("")
+        self.assertIn("refused: MCP server remote (http) needs `pip install mcp`", out)
+        self.assertNotIn("local (", out)
+        self.assertNotIn("refused", with_sdk)
+
 
 class TestMcpApprove(_McpDispatchTestCase):
     async def test_usage_message_without_an_id(self):

@@ -6,6 +6,12 @@ requires-python = ">=3.11"
 # Runtime is stdlib-only; optional engines and providers are listed in
 # requirements.txt with the reason each one is optional.
 
+[project.optional-dependencies]
+# The official MCP SDK (simorgh/execution/mcp_sdk.py): Streamable HTTP
+# and SSE servers, and stdio through the SDK. Without it stdio servers
+# use the hand-rolled client and http/sse servers are refused by name.
+mcp = ["mcp>=1.9"]
+
 [tool.pytest.ini_options]
 # Day to day: `python tools/modtest.py <module>` (module tier) or
 # `--changed`.  The boot gate runs simloader's core selection; the full

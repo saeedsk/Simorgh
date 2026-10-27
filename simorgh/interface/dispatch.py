@@ -2787,7 +2787,30 @@ async def _mcp_command(args: str, *, bus: BusClient, ledger: LedgerClient, clock
     else:
         lines.append("no pending MCP server proposals")
     lines.append(await _mcp_active_tools_line(bus))
+    lines.extend(_mcp_refused_lines())
     return Outcome("\n".join(lines))
+
+
+def _mcp_refused_lines() -> list[str]:
+    """Configured http/sse servers this machine cannot run because the
+    `mcp` SDK is not installed (stage 9 item 12): Execution refuses them
+    by name in its health, and this says the same here, so a remote
+    server is never just absent from the active list. Read from the
+    `simorgh.toml` that `mcp approve` writes; Interface may not import
+    Execution (`tests/simorgh/test_module_boundaries.py`)."""
+    import importlib.util
+    import tomllib
+
+    try:
+        with _simorgh_toml_path().open("rb") as fh:
+            servers = tomllib.load(fh).get("execution", {}).get("mcp_servers", [])
+    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+        return []
+    remote = [s for s in servers if isinstance(s, dict) and s.get("transport") in ("http", "sse")]
+    if not remote or importlib.util.find_spec("mcp") is not None:
+        return []
+    return [f"refused: MCP server {render_mod.one_safe_line(str(s.get('name', '')), limit=60)} "
+            f"({s['transport']}) needs `pip install mcp`" for s in remote]
 
 
 __all__ = ["dispatch", "run_shell", "Outcome"]

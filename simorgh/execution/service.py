@@ -47,7 +47,8 @@ from .config import Config
 _BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
 from .external import load_external_tools
 from .selfaction import SelfActions
-from .mcp import McpClient, McpServerConfig, McpToolProxy, mcp_single_arg_key
+from .mcp import McpClient, McpServerConfig, McpToolProxy, McpTransportError, mcp_single_arg_key
+from .mcp_sdk import make_client as make_mcp_client
 from .vision import CameraVision
 from .tools import RunTestsTool, SkillTool, builtin_tools
 from .worktree import WorktreeManager, worktree_tools
@@ -579,7 +580,16 @@ class Service:
         or speaks a broken protocol is logged and skipped -- one
         misconfigured server must not stop the rest of Execution (and
         therefore the whole Kernel) from booting."""
-        client = McpClient(server)
+        # `mcp_sdk.make_client` (stage 9 item 12): the SDK's client for
+        # any transport when it is installed, this package's stdio client
+        # when it is not, and a refusal naming the server for http/sse
+        # without the SDK -- reported in `health()`, never skipped quietly.
+        try:
+            client = make_mcp_client(server, secrets=getattr(self._ctx, "secrets", None), fallback=McpClient)
+        except McpTransportError as exc:
+            self._mcp_errors.append(str(exc))
+            self._ctx.logger.warning("mcp_server_refused", server=server.name, detail=str(exc))
+            return
         try:
             await asyncio.wait_for(client.start(), timeout=server.timeout_s)
             specs = await asyncio.wait_for(client.list_tools(), timeout=server.timeout_s)
