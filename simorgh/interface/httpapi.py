@@ -1222,7 +1222,7 @@ class HttpApi:
         `tasks/resubscribe` answer as server-sent events on this
         connection, for as long as the task runs; everything else is one
         JSON body."""
-        from .a2a import MAX_BODY_BYTES, PARSE_ERROR, RPC_PATH
+        from .a2a import MAX_BODY_BYTES, PARSE_ERROR, RPC_PATH, SPAWN_RATE
 
         if split.path != RPC_PATH:
             await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
@@ -1253,6 +1253,17 @@ class HttpApi:
             await self._try_respond(writer, 200, json.dumps(payload).encode("utf-8"), "application/json")
             return
         server = self._a2a
+        # A raw route skips the route table's rate limit, so the two
+        # methods that can start a crew get the bound `/api/chat` has.
+        # Reading a task (`tasks/get`, the polling fallback) is not counted.
+        if isinstance(request, dict) and request.get("method") in ("message/send", "message/stream"):
+            limit, window = SPAWN_RATE
+            if self._rate_limited(Route(method="POST", path=f"{RPC_PATH}#message", handler=None, rate=SPAWN_RATE)):
+                refused = json.dumps({"error": {
+                    "code": "rate_limited",
+                    "detail": f"more than {limit} A2A messages in {window:.0f}s"}}).encode("utf-8")
+                await self._try_respond(writer, 429, refused, "application/json")
+                return
         if isinstance(request, dict) and request.get("method") in ("message/stream", "tasks/resubscribe"):
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n"
                          b"Connection: close\r\n\r\n")

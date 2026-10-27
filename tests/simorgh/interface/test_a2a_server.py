@@ -278,6 +278,44 @@ class TheMethods(_Base):
         self.assertEqual((await self._rpc("agent/dance", {}))["error"]["code"], -32601)
         self.assertEqual(self.bus.requests, [])
 
+    async def test_starting_crews_is_rate_limited_and_reading_one_is_not(self):
+        await self._start(script="hang")
+        self.api._rate_hits.clear()
+        from simorgh.interface import a2a as a2a_mod
+
+        limit, _window = a2a_mod.SPAWN_RATE
+        first = None
+        for _ in range(limit):
+            reply = await self._rpc("message/send", {**self._message("go"), "configuration": {"blocking": False}})
+            first = first or reply["result"]
+        refused = await self._http("POST", "/a2a", {"jsonrpc": "2.0", "id": 1, "method": "message/send",
+                                                    "params": {**self._message("one more"),
+                                                               "configuration": {"blocking": False}}})
+        self.assertEqual(refused.status, 429, refused.body)
+        self.assertEqual(len(self.bus.requests), limit, "the refused message started nothing")
+        self.assertIn("result", await self._rpc("tasks/get", {"id": first["id"]}))
+
+
+class CallerFollowUps(unittest.IsolatedAsyncioTestCase):
+    """A follow-up the caller sends comes back on `crew.message`; it is
+    the caller's, never the member's word."""
+
+    async def test_a_note_to_a_member_that_roots_its_own_crew_is_not_read_back_as_its_status(self):
+        from simorgh.interface.a2a import InboundTask
+
+        bus = _Orchestration()
+        server = A2AServer(bus, agents_dir=AGENTS)
+        await server.start()
+        self.addAsyncCleanup(server.stop)
+        task = InboundTask(handle="m1", crew_id="m1", agent="research", caller_id="d", requester="Saeed",
+                           state="working")
+        server._register(task)
+        await server._to_member(task, "also check prices in CAD")
+        self.assertEqual([m["role"] for m in task.history], ["user"], "the note is in the history once")
+        self.assertIsNone(task.status_message, "the member said nothing")
+        note = [m for m in bus.published if m.type == topics.CREW_MESSAGE][0]
+        self.assertEqual(note.payload["kind"], "note")
+
 
 class OffByDefault(unittest.IsolatedAsyncioTestCase):
     async def test_without_serve_a2a_neither_path_exists(self):

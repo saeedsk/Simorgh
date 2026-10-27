@@ -66,10 +66,9 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     T.PLAN_REGROUND: "stage 7 (re-planning)",
     T.SYSTEM_RELOAD: "reserved for the loader",
     T.UI_RENDERED: "stage 4 (session deltas)",
-    # Stage 18 item 1 declares these; orchestration (item 2) publishes and
-    # interface (item 5) consumes them, built on parallel branches. The
-    # merge of those branches removes these four lines.
-    # Interface reads them (stage 18 items 5, 10); orchestration publishes them in item 2.
+    # Stage 18 item 1 declares these. Interface reads the first two and
+    # asks the third (items 5, 10); orchestration publishes and answers
+    # them in item 2, whose merge removes these three lines.
     T.CREW_SPAWNED: "stage 18 item 2 in flight: orchestration is the producer",
     T.CREW_REPORT: "stage 18 item 2 in flight: orchestration is the producer",
     T.CREW_SPAWN: "stage 18 item 2 in flight: interface's A2A server asks, orchestration answers",

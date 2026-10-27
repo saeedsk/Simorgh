@@ -62,6 +62,9 @@ CARD_PATH = "/.well-known/agent-card.json"
 MAX_BODY_BYTES = 64 * 1024
 #: Tasks remembered for `tasks/get` after they end.
 MAX_TASKS = 200
+#: `message/send` and `message/stream` per window, across callers: each
+#: may start a crew, and a crew spends. The same bound as `/api/chat`.
+SPAWN_RATE: tuple[int, float] = (30, 60.0)
 
 # JSON-RPC and A2A error codes (A2A specification section 8).
 PARSE_ERROR = -32700
@@ -81,6 +84,9 @@ WIRE = "0.3"
 _MEMBER_OF_REPORT: dict[str, str] = {
     "ok": "done", "partial": "done", "failed": "failed", "blocked": "blocked", "cancelled": "cancelled",
 }
+#: The `crew.message` kinds a member says about its own work; the rest
+#: (`answer`, `steer`, `note`) are said to it.
+_AGENT_KINDS = frozenset({"progress", "milestone", "question", "report"})
 TERMINAL_STATES = frozenset({"completed", "failed", "canceled", "rejected"})
 #: States a stream ends on: terminal, or waiting for the caller.
 FINAL_STATES = TERMINAL_STATES | {"input-required", "auth-required"}
@@ -329,7 +335,12 @@ class A2AServer:
         task.updated = self._now()
         if kind == "message":
             what = str(payload.get("kind") or "")
-            if what not in ("progress", "milestone", "question", "note", "report"):
+            # Only what the member says about its own work (A2A role
+            # `agent`, `contracts/a2a.py`). A `note` is said TO a member:
+            # the caller's own follow-up comes back on this topic, and when
+            # the crew's root is the member itself (`from` == handle) it
+            # would read back as the member speaking.
+            if what not in _AGENT_KINDS:
                 return
             said = crew_message(payload, task_id=task.handle, context_id=task.crew_id)
             task.history.append(said)
@@ -575,6 +586,7 @@ class A2AServer:
 
 __all__ = [
     "A2AServer", "AGENTS_DIR", "CARD_PATH", "InboundTask", "MAX_BODY_BYTES", "PROTOCOL_VERSION", "RPC_PATH",
+    "SPAWN_RATE",
     "RpcError", "WIRE", "agent_card", "agent_skill", "brief_of", "crew_message", "report_artifact",
     "text_message",
 ]
