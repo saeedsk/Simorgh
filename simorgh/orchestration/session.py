@@ -1397,10 +1397,13 @@ class SessionRunner:
                     session.messages.append({"role": "tool", "tool_call_id": call["id"],
                                              "name": call.get("tool"), "content": summary})
                 dropped = len(tool_calls) - len(calls)
+                # Stage 17 item 8: this branch is native-only by construction,
+                # and the line rides in the turn, not the cacheable prefix.
+                together = scaffolds.parallel_line(self._parallel_reads)
                 session.messages.append({"role": "user", "content": (
                     (f"{dropped} further call(s) were not run: at most {MAX_NATIVE_CALLS} per reply. " if dropped else "")
                     + "If the task is now finished, reply with your final answer in plain text. "
-                      "Otherwise take the next step.")})
+                      "Otherwise take the next step." + (f" {together}" if together else ""))})
                 if self._paused():
                     return await self._pause(session)
                 continue

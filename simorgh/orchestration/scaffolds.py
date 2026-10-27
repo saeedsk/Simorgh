@@ -668,6 +668,20 @@ def scaffold_body(profile: Profile) -> str:
     return body
 
 
+#: Stage 17 item 8: a native-dialect session is told it may ask for several
+#: lookups at once. The marker dialect has its own line in Cognition's
+#: tool listing; a native session's typed transcript drops that listing
+#: after its first reply, and nothing else said it.
+PARALLEL_NATIVE_LINE = "Independent lookups may be requested together in one reply."
+
+
+def parallel_line(parallel_reads: int) -> str:
+    """The line for a native session's turn, or "" when only one call per
+    reply runs (`[orchestration] parallel_read_tools` <= 1), so the default
+    prompt is unchanged."""
+    return PARALLEL_NATIVE_LINE if int(parallel_reads or 1) > 1 else ""
+
+
 def with_turn_note(messages: list[dict], note: str) -> list[dict]:
     """`messages` with `note` at the head of the latest user turn -- the
     per-turn material (the date, soon recall) that must not sit in the
