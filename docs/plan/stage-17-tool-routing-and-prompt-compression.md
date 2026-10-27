@@ -51,6 +51,17 @@ Sim offers the model only the tools a turn plausibly needs, and we know, with nu
 
    **Acceptance**: it is kept only if tokens fall by at least 40% on long-result turns with accuracy inside the `sim` interval, and the added latency is under 300 ms p95 on this laptop. Otherwise the module stays, off, with the finding.
 
+6. **A "no tools" route, the bouncer.** *Lock `orchestration`; part of item 3.* The router gains a `conversational` class, with example utterances such as greetings, thanks, "say that again" and "what did you mean", in both languages. When it wins by a margin of `route_none_margin` (default 0.15), the turn is offered only the core group. It is **not a separate model call**: a classifier model would add a round trip to every voice turn to save one on some of them. The `tool_more` escape still works, and shadow mode counts the turns where a "conversational" route was followed by a tool use.
+
+7. **Observation masking beyond token pressure.** *Lock `orchestration`; after the item 1 gate.*
+   - Today, stage 4's compaction stubs old tool results only at 70% context pressure (`pressure.py`, "stubbed result of <tool>, N chars; … recall_result").
+   - Proposal: mask a tool result once it is `mask_after_steps` steps old (default 2), at any pressure, and add a one-line gist to the stub. The gist is a first-line or row-count summary made by code, never a model call.
+   - The trade to measure: masking rewrites an *earlier* message, so the provider's cache for the conversation part stops at that point. Item 1's split shows whether tool results or cache misses cost more. Ship it only if the tokens saved exceed the cache lost on the `toolchain/` pack, and accuracy holds (`recall_result` must remain enough to get a masked result back).
+
+8. **Parallel calls, asked for and not just allowed.** *Lock `orchestration`; independent of the gate (cheap).* The live config already runs up to `parallel_read_tools = 4` independent read-only calls from one reply. But no scaffold line tells the model it may emit several at once; the only "at once" in `scaffolds.py` is about something else. Add one line for native-dialect sessions when `parallel_read_tools > 1`: "independent lookups may be requested together in one reply". Measure on the `toolchain/` chaining and selection scenarios: steps per scenario and wall-clock.
+
+   **Flat schemas are already done:** all 109 registered tool schemas in the live registry are flat, with no nested object properties (checked 2026-10-27 from `execution:tools`). Keep it that way: add a test in `tests/simorgh/execution/` that fails on a nested argument schema.
+
 5. **Decide.** Write the findings for items 3-4: per model, the tokens saved, the cache hit rate before and after, selection accuracy, first-token latency on voice, and the miss rate. Then flip the defaults or leave them off.
 
 ## What this must never do
