@@ -341,6 +341,44 @@ class ToolMore(unittest.TestCase):
         self.assertIn("sec_posture", calls[1].payload["tools"])
 
 
+class ABrokenRouterNeverCostsATurn(unittest.TestCase):
+    """Routing decides what is offered; when it cannot decide, the turn is
+    offered everything, as with routing off -- never a crashed turn."""
+
+    @run
+    async def test_an_unreadable_groups_file_offers_everything(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        telemetry = _Telemetry()
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "groups.toml"
+            bad.write_text("[groups.x\n")
+            for mode in ("shadow", "on"):
+                with mock.patch.object(routing, "GROUPS_FILE", bad), \
+                        mock.patch.object(routing.load_groups, "__defaults__", (bad,)):
+                    async with Harness() as h:
+                        calls, _, sessions = await _turns(h, ["turn the kitchen light off"],
+                                                          telemetry=telemetry, tool_routing=mode)
+                self.assertEqual(calls[0].payload["tools"], list(offered_tools(profiles.CHAT.tools)), mode)
+                self.assertIsNone(sessions[0].route, mode)
+        self.assertIn("routing.failed", [n for n, _ in telemetry.events])
+
+    @run
+    async def test_an_embedder_that_raises_offers_everything(self):
+        def broken(text):
+            raise RuntimeError("no embedder")
+
+        telemetry = _Telemetry()
+        async with Harness() as h:
+            calls, _, sessions = await _turns(h, ["turn the kitchen light off"], telemetry=telemetry,
+                                              tool_routing="on", route_embed=broken)
+        self.assertEqual(calls[0].payload["tools"], list(offered_tools(profiles.CHAT.tools)))
+        self.assertIsNone(sessions[0].route)
+        self.assertEqual([n for n, _ in telemetry.events if n.startswith("routing.")], ["routing.failed"])
+
+
 class ShadowRecordsTheRoute(unittest.TestCase):
     @run
     async def test_each_turn_logs_offered_and_used_and_the_next_turn_sticks(self):

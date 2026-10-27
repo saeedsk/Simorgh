@@ -1803,9 +1803,23 @@ class SessionRunner:
                 and not session.depth and not session.crew_member)
 
     def _groups(self) -> tuple:
+        """`agents/groups.toml`, read once. A file that cannot be read is
+        no groups, said once as `routing.failed`: every turn is then
+        offered its whole list, as with routing off, never a crash."""
         if self._route_groups is None:
-            self._route_groups = routing_mod.load_groups()
+            try:
+                self._route_groups = routing_mod.load_groups()
+            except routing_mod.GroupsFileError as exc:
+                self._route_groups = ()
+                self._route_failed("", str(exc))
         return self._route_groups
+
+    def _route_failed(self, trace: str, why: str) -> None:
+        try:
+            self._telemetry.event("routing.failed", trace_id=trace or uuid.uuid4().hex, span_id=uuid.uuid4().hex,
+                                  ts=_epoch(self._clock) or None, attrs={"error": why[:500], "mode": self._routing})
+        except Exception:  # noqa: BLE001 -- a lost record is not worth a turn
+            pass
 
     @staticmethod
     def _conversation(session: Session) -> str:
@@ -1820,15 +1834,22 @@ class SessionRunner:
         if not self._routes(session):
             return tuple(offered), ()
         groups = self._groups()
+        if not groups:
+            return tuple(offered), ()
         if session.route is None:
             top_k, sticky, margin = self._route_params
             text = session.user_text or ""
             history = self._route_history.get(self._conversation(session), [])
-            session.route = routing_mod.route(text, history, groups, self._route_embed, top_k=top_k,
-                                              sticky_turns=sticky, none_margin=margin,
-                                              aggregate=self._route_aggregate)
-            scored = routing_mod.scores(text, groups, self._route_embed, aggregate=self._route_aggregate)
-            session.route_conversational = routing_mod.conversational(scored, groups, margin)
+            try:
+                route = routing_mod.route(text, history, groups, self._route_embed, top_k=top_k,
+                                          sticky_turns=sticky, none_margin=margin,
+                                          aggregate=self._route_aggregate)
+                scored = routing_mod.scores(text, groups, self._route_embed, aggregate=self._route_aggregate)
+                session.route_conversational = routing_mod.conversational(scored, groups, margin)
+            except Exception as exc:  # noqa: BLE001 -- an embedder that fails offers everything, as off
+                self._route_failed(session.trace or session.task_id, repr(exc))
+                return tuple(offered), ()
+            session.route = route
         if self._routing != "on":
             # Shadow: the route is recorded at the end of the turn; the
             # model is offered exactly what it would be with routing off.
