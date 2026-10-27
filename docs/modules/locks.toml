@@ -4,3 +4,9 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.evals]
+by = "claude-stage15"
+task = "stage 15 item 6: sidecar embeddings on Together's serverless model"
+since = "2026-10-27T14:16:13+00:00"
+until = "2026-10-27T18:16:13+00:00"
