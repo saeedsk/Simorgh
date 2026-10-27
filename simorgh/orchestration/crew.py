@@ -124,6 +124,12 @@ class CrewMember:
     brief_ref: str = ""
     brief_blob: bool = False      # `brief_ref` is a ledger blob, not the brief
     background: bool = False
+    #: The job in the parent's words (not the full brief), for the notice a
+    #: background crew's report becomes. In memory only.
+    job: str = ""
+    #: A remote member (`a2a:<name>`): the data classes its message carries,
+    #: which the agent's `allowed_data` is checked against (stage 18 item 9).
+    data: tuple = ()
     last_progress: str = ""
     steps: int = 0
     tokens: int = 0
@@ -171,8 +177,21 @@ class Crew:
         #: from there. None while the crew has only `delegate` helpers.
         self.started: float | None = None
         self.exhausted = ""
-        #: refs a report, message or board value has named: `read_ref` reads only these.
+        #: refs a report, message or board value has named (what a parent may
+        #: be told about). `read_ref` does NOT read by this set: a member can
+        #: write any blob hash into its report.
         self.refs: set[str] = set()
+        #: refs this crew wrote itself -- a long brief, a report's overflow
+        #: text, a member's own tool output -- the only ones `read_ref`
+        #: reads (`readable`). Durable: `crew.spawned` (a blob brief) and
+        #: `crew.report` (`owned_refs`) carry them, and `fold` rebuilds it.
+        self.owned: set[str] = set()
+        #: A crew started from outside any session (`crew.spawn`, the A2A
+        #: server): its root is the remote caller, who can still answer a
+        #: question after the spawn returned.
+        self.external = False
+        #: A background crew's notice has gone to the person who asked.
+        self.delivered = False
         #: the root's last `await_agents`, so a restarted root re-enters it.
         self.root_await: dict | None = None
         #: One per parent, so a member waiting on its own children never
@@ -201,6 +220,17 @@ class Crew:
     def is_cancelled(self, handle: str) -> bool:
         member = self.members.get(handle)
         return bool(member and member.cancel_reason)
+
+    def own(self, *refs) -> None:
+        """Mark blobs this crew wrote as its own, so `read_ref` may read them."""
+        self.owned.update(str(r) for r in refs if r)
+
+    def readable(self, ref: str) -> bool:
+        """Whether `read_ref` may read `ref`: only a blob the crew wrote
+        itself. A ref a member merely NAMED (a hash typed into its report)
+        could be any blob in the ledger -- another task's, another
+        person's -- and naming one must not be a way to read it."""
+        return bool(ref) and ref in self.owned
 
     def live(self) -> list[CrewMember]:
         return [m for m in self.members.values() if not is_terminal(m.status)]
@@ -301,7 +331,8 @@ class Crew:
     async def admit(self, *, parent: str, agent: str, brief: str, depth: int, budget: MemberBudget,
                     report_policy: str = "end", isolation: str = "fresh", writer: bool = False,
                     via: str = "spawn", background: bool = False, brief_ref: str = "",
-                    handle: str = "", requester: str = "", requester_channel: str = "") -> CrewMember:
+                    handle: str = "", requester: str = "", requester_channel: str = "",
+                    data: tuple = ()) -> CrewMember:
         """Add a member and record `crew.spawned`; CrewRefused with the reason.
         `brief_ref` is a blob ref for a long brief; "" keeps it inline.
         A `delegate` helper is outside the crew's bounds (`bounded`)."""
@@ -324,8 +355,11 @@ class Crew:
             budget=budget, report_policy=report_policy, isolation=isolation, writer=writer, via=via,
             brief=brief, brief_ref=brief_ref or brief, brief_blob=bool(brief_ref), background=background,
             started_at=self._now(), requester=requester, requester_channel=requester_channel,
+            data=tuple(str(d) for d in data or ()),
         )
         member.reported_at = member.started_at
+        if member.brief_blob:
+            self.own(member.brief_ref)
         if bounded and self.started is None:
             self.started = member.started_at
         self.members[member.handle] = member
@@ -344,6 +378,7 @@ class Crew:
             # run the member again as what it was.
             "via": member.via, "writer": member.writer, "brief_blob": member.brief_blob,
             "requester": member.requester, "requester_channel": member.requester_channel,
+            **({"data": list(member.data)} if member.data else {}),
         }
 
     async def set_status(self, handle: str, status: str, reason: str = "") -> None:
@@ -468,15 +503,22 @@ class Crew:
 
     # -- reports -------------------------------------------------------------------------
 
-    async def file_report(self, handle: str, report: Report) -> None:
+    async def file_report(self, handle: str, report: Report, *, owned=()) -> None:
+        """`owned`: the blobs this member wrote (its overflow text, its own
+        tool output), recorded with the report so a restart still knows
+        which refs are the crew's own (`readable`)."""
         member = self.members.get(handle)
         if member is not None:
             member.report = report
             member.steps = report.steps or member.steps
         self.refs.update(report.artifacts)
         self.refs.update(f.evidence_ref for f in report.findings if f.evidence_ref)
-        await self._record(topics.CREW_REPORT, {"crew_id": self.crew_id, "handle": handle,
-                                                "report": report.to_dict()})
+        owned = sorted({str(r) for r in owned if r})
+        self.own(*owned)
+        payload = {"crew_id": self.crew_id, "handle": handle, "report": report.to_dict()}
+        if owned:
+            payload["owned_refs"] = owned  # an extra field; the schema admits it
+        await self._record(topics.CREW_REPORT, payload)
         await self.set_status(handle, _status_of(report, cancelled=bool(member and member.cancel_reason)))
         self._notify()
 
@@ -541,12 +583,15 @@ class Crew:
                     background=bool(p.get("background")), started_at=crew._now(),
                     requester=str(p.get("requester") or ""),
                     requester_channel=str(p.get("requester_channel") or ""),
+                    data=tuple(str(d) for d in p.get("data") or ()),
                 )
                 if crew.bounded(crew.members[p["handle"]]) and crew.started is None:
                     # The wall-clock starts again from the restart: the
                     # process was down, and a member is not charged for that.
                     crew.started = crew._now()
                 crew.inboxes.setdefault(p["handle"], Inbox())
+                if p.get("brief_blob"):
+                    crew.own(ref)
             elif e.type == MEMBER_STATUS_CHANGED:
                 handle = str(p.get("handle") or "")
                 if handle in crew.members:
@@ -564,6 +609,7 @@ class Crew:
                 handle = str(p.get("handle") or "")
                 report = Report.from_dict(p.get("report") or {})
                 crew.refs.update(report.artifacts)
+                crew.own(*(p.get("owned_refs") or ()))
                 if handle in crew.members:
                     member = crew.members[handle]
                     member.report = report
@@ -690,6 +736,34 @@ def render_report(member: CrewMember) -> str:
     return "\n".join(lines)
 
 
+#: The most a background notice says (typed) and speaks (voice).
+NOTICE_MAX = 2000
+SPOKEN_MAX = 400
+
+
+def render_background(members: list[CrewMember], *, spoken: bool = False) -> str:
+    """What a chat or voice turn's background work came back with, for the
+    person who asked (stage 18 item 3): one notice with every member's
+    conclusion -- never a transcript. `spoken`: one short line for Voice to
+    say, the summaries only."""
+    if spoken:
+        parts = [(m.report.summary if m.report else "") or f"{m.agent} {m.status}" for m in members]
+        line = " ".join(f"What you asked me to look into: {'; '.join(p.rstrip('.') for p in parts)}.".split())
+        return line if len(line) <= SPOKEN_MAX else line[:SPOKEN_MAX - 1] + "…"
+    lines = [f"Back from the background work you asked for ({len(members)} "
+             f"helper{'s' if len(members) != 1 else ''}):"]
+    for m in members:
+        r = m.report
+        what = " ".join((m.job or m.agent).split())[:120]
+        if r is None:
+            lines.append(f"- {what}: {m.status}, no report")
+            continue
+        lines.append(f"- {what} -- {r.status}: {r.summary}")
+        lines += [f"    · {f.claim}" for f in r.findings[:5]]
+    text = "\n".join(lines)
+    return text if len(text) <= NOTICE_MAX else text[:NOTICE_MAX - 1] + "…"
+
+
 def status_table(members: list[CrewMember]) -> str:
     if not members:
         return "no crew members"
@@ -703,5 +777,6 @@ def status_table(members: list[CrewMember]) -> str:
 
 __all__ = [
     "BRIEF_INLINE_MAX", "CREW_BUDGET", "Crew", "CrewMember", "CrewRefused", "Inbox", "build_report",
-    "parse_report_text", "render_inbox", "render_report", "status_table",
+    "NOTICE_MAX", "SPOKEN_MAX", "parse_report_text", "render_background", "render_inbox", "render_report",
+    "status_table",
 ]

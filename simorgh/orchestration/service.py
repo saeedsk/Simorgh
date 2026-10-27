@@ -37,12 +37,21 @@ class Service:
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
         topics.TASK_CANCEL,
         topics.TOOL_PROBED,
+        # Crews from outside a session (stage 18): the A2A server's
+        # `crew.spawn`, its caller's answers and notes, and a cancel from
+        # the console or the A2A server. Orchestration's own crew.* events
+        # come back on the same subscriptions and are told apart by source.
+        topics.CREW_SPAWN, topics.CREW_MESSAGE, topics.CREW_CANCEL,
     )
     produces: tuple[str, ...] = (
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_PAUSED, topics.TASK_COMPLETED,
         topics.TASK_FAILED, topics.TASK_BLOCKED, topics.TURN_COMPLETED,
         topics.ACTION_PROPOSED, topics.VERIFY_REQUESTED, topics.SYSTEM_METRICS,
         topics.MEMORY_STORE,
+        topics.CREW_SPAWNED, topics.CREW_MESSAGE, topics.CREW_REPORT, topics.CREW_CANCEL,
+        # A background crew's report, to the person who asked (stage 18
+        # item 3): the console's notice, or Initiative's reminder path.
+        topics.UI_NOTICE, topics.PERCEPT_TIME_SCHEDULED,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -54,6 +63,7 @@ class Service:
         self._situation_sub = None
         self._tool_sub = None
         self._capability_sub = None
+        self._crew_subs: list = []
         self._next_worker = 0
         self._metrics_task: asyncio.Task | None = None
         # Chat sessions in flight, each run off the bus handler so the
@@ -114,6 +124,7 @@ class Service:
                             skills_catalog_max_chars=self.config.skills_catalog_max_chars,
                             skills_roots=tuple(self.config.skills_roots),
                             skills_channels=tuple(self.config.skills_channels),
+                            chat_crews=self.config.chat_crews,
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)
@@ -130,6 +141,11 @@ class Service:
         # said so in the prompt, once, instead of costing a task three
         # steps to discover by failing (execution/capabilities.py).
         self._capability_sub = await ctx.bus.subscribe(topics.TOOL_PROBED, self._on_capability_probed)
+        self._crew_subs = [
+            await ctx.bus.subscribe(topics.CREW_SPAWN, self._on_crew_spawn),
+            await ctx.bus.subscribe(topics.CREW_MESSAGE, self._on_crew_message),
+            await ctx.bus.subscribe(topics.CREW_CANCEL, self._on_crew_cancel),
+        ]
         await self._replay_registrations(ctx)
         await self._replay_capabilities(ctx)
         if self.config.metrics_interval_s > 0:
@@ -264,6 +280,9 @@ class Service:
             await self._capability_sub.unsubscribe()
             self._capability_sub = None
         forget_registered()
+        for sub in self._crew_subs:
+            await sub.unsubscribe()
+        self._crew_subs = []
         if self._percept_sub is not None:
             await self._percept_sub.unsubscribe()
             self._percept_sub = None
@@ -318,6 +337,59 @@ class Service:
         )
         self._chat_tasks.add(task)
         task.add_done_callback(self._chat_tasks.discard)
+
+    async def _on_crew_spawn(self, message: Message) -> None:
+        """`crew.spawn` (stage 18 item 10's A2A server asks): one member,
+        the agent named, acting as `requester` on `requester_channel`.
+        Refused, with an error reply, when the request names no channel --
+        a crew acts for somebody through something, and Guardian weighs
+        every call as that -- or when the runner will not take it."""
+        from simorgh.contracts.registry import error_reply_payload
+
+        from .crew import CrewRefused
+
+        p = dict(message.payload or {})
+        bus = self._ctx.bus
+
+        async def refuse(code: str, detail: str) -> None:
+            await bus.reply(message, type=topics.CREW_SPAWN_REPLY, payload=error_reply_payload(code, detail))
+
+        if not str(p.get("requester_channel") or "").strip():
+            await refuse("refused", "requester_channel is empty: a crew must act for somebody, through some channel")
+            return
+        if not self._workers:
+            await refuse("unavailable", "no orchestration worker is running")
+            return
+        worker = self._workers[self._next_worker % len(self._workers)]
+        self._next_worker += 1
+        try:
+            crew_id, handle = await worker.spawn_crew(
+                agent=str(p.get("agent") or ""), brief=str(p.get("brief") or ""),
+                requester=str(p.get("requester") or ""), requester_channel=str(p.get("requester_channel") or ""),
+                report=str(p.get("report") or "end"), background=p.get("background", True) is not False)
+        except CrewRefused as exc:
+            await refuse("refused", str(exc))
+            return
+        await bus.reply(message, type=topics.CREW_SPAWN_REPLY, payload={"crew_id": crew_id, "handle": handle})
+
+    def _ours(self, message: Message) -> bool:
+        """A crew.* event this subsystem published itself (a member's own
+        message, a cancel it recorded): already handled where it was made."""
+        return message.source == getattr(self._ctx.bus, "source", None)
+
+    async def _on_crew_message(self, message: Message) -> None:
+        if self._ours(message):
+            return
+        for worker in self._workers:
+            if await worker.crew_message(dict(message.payload or {})):
+                return
+
+    async def _on_crew_cancel(self, message: Message) -> None:
+        if self._ours(message):
+            return
+        for worker in self._workers:
+            if await worker.crew_cancel(dict(message.payload or {})):
+                return
 
     async def _on_situation(self, message: Message) -> None:
         payload = message.payload

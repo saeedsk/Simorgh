@@ -120,7 +120,39 @@ CREW_TOOLS = frozenset(CREW_PARENT_TOOLS + CREW_MEMBER_TOOLS)
 #: The scaffolds whose sessions may start a crew (the plan's "Who may
 #: spawn"; chat and voice are stage 18 item 3).
 CREW_SCAFFOLDS = ("patch", "research", "plan")
+#: Chat and voice crews (stage 18 item 3), only with `[orchestration]
+#: chat_crews` on. A chat turn may start read-only helpers and nothing
+#: else; a spoken turn only in the background (it answers at once and the
+#: report comes later), so it is offered no tool that waits.
+CHAT_CREW_AGENTS = ("research", "browser")
+CHAT_CREW_TOOLS = ("spawn", "await_agents", "check_agents", "send_agent", "cancel_agent", "read_ref")
+VOICE_CREW_TOOLS = ("spawn", "check_agents", "cancel_agent")
+#: A remote agent as a crew member (stage 18 item 9): `spawn{agent: "a2a:<name>"}`.
+A2A_PREFIX = "a2a:"
+#: Execution's `a2a:calls` stream, where `a2a_call` writes each status
+#: update of a remote task. Duplicated rather than imported: a subsystem
+#: may not import another (tests/simorgh/test_module_boundaries.py).
+_A2A_CALLS_STREAM = "a2a:calls"
+#: A background result joins the conversation it was asked in only when
+#: that conversation's last turn is this recent: the person is still in it.
+BACKGROUND_WINDOW_S = 30 * 60.0
+#: After a cancel, how long a remote member waits for its in-flight call to
+#: name the remote task it must send `tasks/cancel` to.
+A2A_CANCEL_GRACE_S = 10.0
+#: Where a background result is a `ui.notice` (the console and the phone
+#: print it); any other channel with a person behind it goes through
+#: Initiative, which weighs the hour and the room (`_deliver_background`).
+_NOTICE_CHANNELS = ("", "cli", "api", "http")
 SESSION_LOCAL = SESSION_LOCAL | CREW_TOOLS
+
+
+def _data_classes(value) -> tuple[str, ...]:
+    """The data classes a remote member's message carries (`a2a_call`'s
+    `data`): a list or a comma-separated string; nothing said is `public`."""
+    items = value.split(",") if isinstance(value, str) else list(value or ()) if isinstance(
+        value, (list, tuple, set, frozenset)) else []
+    out = tuple(dict.fromkeys(str(i).strip().lower() for i in items if str(i).strip()))
+    return out or ("public",)
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here
@@ -134,10 +166,14 @@ from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .claims import unsupported_claims
+from simorgh.contracts import session as session_contract
 from simorgh.contracts.messages.crew import MemberBudget, is_terminal
 from simorgh.contracts.streamnames import crew_stream
 
-from .crew import CREW_BUDGET, BRIEF_INLINE_MAX, Crew, CrewRefused, build_report, render_inbox, render_report, status_table
+from .crew import (
+    CREW_BUDGET, BRIEF_INLINE_MAX, Crew, CrewRefused, build_report, render_background, render_inbox, render_report,
+    status_table,
+)
 from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_action_payload, tool_schemas
 
 # What a Guardian refusal looks like on a step, in one place. The step's
@@ -745,8 +781,12 @@ class SessionRunner:
         bridge_on_slow_turns: bool = False, bridge_timeout_s: float = 2.0,
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
         crew_max_members: int = 8, crew_max_writers: int = 1, crew_max_usd: float = 0.5,
-        crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0,
+        crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0, chat_crews: bool = False,
     ) -> None:
+        #: `[orchestration] chat_crews` (stage 18 item 3): a chat or voice
+        #: turn is offered `spawn` (read-only agents; voice only in the
+        #: background). Off by default.
+        self._chat_crews = bool(chat_crews)
         # Counts each Stop-hook rule that fires (`stophook.py`); a no-op
         # stand-in when the runner is built without one (tests, harnesses).
         from simorgh.contracts.protocols import NULL_TELEMETRY
@@ -919,15 +959,28 @@ class SessionRunner:
             outcome = await self._run(session, user_text=user_text)
         finally:
             self._open.pop(session.task_id, None)
+            crew = self._crew_of(session)
+            if crew is not None and crew.root == session.task_id:
+                # A background crew whose members all finished while the
+                # turn that started them was still answering is delivered
+                # now (stage 18 item 3); otherwise the last report does it.
+                try:
+                    await self._deliver_background(crew)
+                except Exception:  # noqa: BLE001 -- a notice must never cost the turn
+                    pass
             self._forget_crew(session.crew_id)
             await self._persist_transcript(session)
         if outcome.kind == "failed" and outcome.reason == CANCELLED_REASON:
             # A cancelled parent takes its members with it: each stops at its
             # next step, and one asleep in `ask_parent` or `await_agents`
             # wakes now. (Not on a process stop -- that raises past here,
-            # and a restart resumes the crew.)
+            # and a restart resumes the crew.) A background member is not
+            # the turn's: a spoken turn is cancelled whenever the person
+            # says the next thing, and the work they asked for goes on;
+            # `cancel_agent` or `crew cancel` stops it.
             crew = self._crew_of(session)
-            for member in [m for m in crew.children(session.task_id) if not is_terminal(m.status)] if crew else ():
+            for member in [m for m in crew.children(session.task_id)
+                           if not is_terminal(m.status) and not m.background] if crew else ():
                 await crew.cancel(member.handle, "its parent was cancelled")
         if outcome.kind == "completed":
             # `_transcript_echo` catches a fabrication written in our own
@@ -1258,7 +1311,8 @@ class SessionRunner:
             # way, so an uncommitted change is still discarded.
             if session.crew_id:
                 await self._crew_tick(session)
-            if (self._is_cancelled(session.task_id) or (session.parent_id and self._is_cancelled(session.parent_id))
+            if (self._is_cancelled(session.task_id)
+                    or (session.parent_id and self._is_cancelled(session.parent_id) and not self._detached(session))
                     or self._crew_cancelled(session)):
                 return Outcome("failed", reason=CANCELLED_REASON)
 
@@ -1723,6 +1777,11 @@ class SessionRunner:
         if offered and self._delegation and session.depth < self._max_depth and session.profile.scaffold in CREW_SCAFFOLDS:
             # Agent crews (stage 18): a parent starts members and talks to them.
             offered = tuple(offered) + tuple(t for t in CREW_PARENT_TOOLS if t not in offered)
+        if offered and self._chat_crews and not session.depth and session.profile.scaffold == "chat":
+            # Chat and voice crews (stage 18 item 3): read-only helpers,
+            # and a spoken turn only in the background.
+            crew_tools = VOICE_CREW_TOOLS if session.channel == "voice" else CHAT_CREW_TOOLS
+            offered = tuple(offered) + tuple(t for t in crew_tools if t not in offered)
         if offered and session.crew_member:
             offered = tuple(offered) + tuple(t for t in CREW_MEMBER_TOOLS if t not in offered)
         # What the crew said since the last think: after the prefix, never in it.
@@ -2124,6 +2183,10 @@ class SessionRunner:
     def _brief(self, session: Session, job: str, *, crew: bool) -> str:
         goal = (session.progress.split("\n", 1)[0] if session.progress
                 else " ".join(session.user_text.split())[:500]) or "(not stated; the job below is the whole brief)"
+        return self._brief_text(goal, job, crew=crew)
+
+    @staticmethod
+    def _brief_text(goal: str, job: str, *, crew: bool) -> str:
         who = "a member of a crew working on a larger task" if crew else "a helper on a larger task"
         return (
             f"You are {who}. Its goal: {goal}\n\n"
@@ -2194,6 +2257,8 @@ class SessionRunner:
             async with crew.slot(member):
                 if crew.is_cancelled(member.handle):
                     outcome = Outcome("failed", reason=CANCELLED_REASON)
+                elif member.agent.startswith(A2A_PREFIX):
+                    outcome = await self._run_remote(crew, member, child, brief)
                 else:
                     outcome = await self.run(child, user_text=brief)
         except asyncio.CancelledError:
@@ -2211,14 +2276,26 @@ class SessionRunner:
             if member.cancel_reason:
                 text = f"cancelled: {member.cancel_reason}" + (f"\n\n{said}" if said else "")
 
+        # What this member wrote itself is the crew's own and `read_ref` may
+        # read it; a ref it merely names is not (`Crew.readable`).
+        owned = [ref for ref, _tool in (getattr(child, "set_aside", None) or []) if ref]
+        owned += list(child.owned_refs)
+
         async def put(data: bytes) -> str:
-            return await self._ledger.put_blob(data, content_type="text/plain")
+            ref = await self._ledger.put_blob(data, content_type="text/plain")
+            owned.append(ref)
+            return ref
 
         report = await build_report(
             text, status=status, steps=child.budget.steps_used, tokens=child.spent_tokens,
             cost_usd=child.spent_usd, wall_s=time.monotonic() - started,
             questions_unanswered=member.questions_unanswered, put_blob=put if self._ledger is not None else None)
-        await crew.file_report(member.handle, report)
+        await crew.file_report(member.handle, report, owned=owned)
+        if member.background:
+            try:
+                await self._deliver_background(crew)
+            except Exception:  # noqa: BLE001 -- the report is filed; a lost notice must not lose it
+                pass
         self._forget_crew(crew.crew_id)
         return outcome
 
@@ -2340,12 +2417,21 @@ class SessionRunner:
             return False
         if crew.is_cancelled(session.task_id):
             return True
-        up = crew.parent_of(session.task_id)
-        while up:
-            if self._is_cancelled(up):
+        node = crew.members.get(session.task_id)
+        # Up to the first background member: a chat or voice turn that
+        # started work in the background and was then cancelled (the person
+        # said the next thing) does not take that work with it.
+        while node is not None and not node.background:
+            if self._is_cancelled(node.parent):
                 return True
-            up = crew.parent_of(up)
+            node = crew.members.get(node.parent)
         return False
+
+    def _detached(self, session: Session) -> bool:
+        """A background crew member: its parent turn's cancel is not its own."""
+        crew = self._crew_of(session)
+        member = crew.members.get(session.task_id) if crew is not None else None
+        return bool(member is not None and member.background)
 
     async def _crew_inbox(self, session: Session) -> None:
         """What arrived for this session since its last think, as one
@@ -2437,13 +2523,31 @@ class SessionRunner:
         brief_text = " ".join(str(args.get("brief") or args.get("job") or args.get("goal") or "").split())
         if not brief_text:
             return False, "spawn: refused -- say what the member should do (`brief`)"
-        if session.profile.scaffold not in CREW_SCAFFOLDS:
-            return False, f"spawn: refused -- a {session.profile.scaffold} session does not start crews"
-        if args.get("background"):
-            return False, ("spawn: refused -- background crews are not built yet (stage 18 item 3); "
-                           "spawn without `background` and await the report")
+        chat = session.profile.scaffold == "chat"
+        background = args.get("background") in (True, "true", "yes", 1, "1")
         wanted = str(args.get("agent") or "research").strip().lower()
-        if wanted not in _agents.AGENTS:
+        if chat:
+            # Stage 18 item 3: a chat turn starts read-only helpers, and a
+            # spoken one only in the background.
+            if not self._chat_crews or session.depth:
+                return False, "spawn: refused -- a chat turn starts crews only with [orchestration] chat_crews on"
+            if wanted not in CHAT_CREW_AGENTS:
+                return False, (f"spawn: refused -- a chat turn may start only read-only agents "
+                               f"({', '.join(CHAT_CREW_AGENTS)}), not {wanted!r}")
+            if session.channel == "voice" and not background:
+                return False, ("spawn: refused -- a spoken turn starts work only in the background: "
+                               "spawn with background true, tell the person you are on it, and the report "
+                               "reaches them when it is ready")
+        elif session.profile.scaffold not in CREW_SCAFFOLDS:
+            return False, f"spawn: refused -- a {session.profile.scaffold} session does not start crews"
+        elif background:
+            return False, ("spawn: refused -- `background` is for chat and voice turns, whose person is told "
+                           "when the report comes; spawn without it and await the report")
+        remote = wanted.startswith(A2A_PREFIX)
+        if remote and not re.fullmatch(r"[a-z][a-z0-9_]*", wanted[len(A2A_PREFIX):]):
+            return False, (f"spawn: refused -- {wanted!r} is not a remote agent's name: `a2a:<name>`, "
+                           "the name a person configured under [crew.a2a_agents.<name>]")
+        if not remote and wanted not in _agents.AGENTS:
             return False, f"spawn: refused -- no agent called {wanted!r}; the agents are {', '.join(sorted(_agents.AGENTS))}"
         if session.depth >= self._max_depth:
             return False, f"spawn: refused -- members may not go deeper than {self._max_depth}"
@@ -2468,22 +2572,37 @@ class SessionRunner:
         crew = await self._crew_for(session)
         carved = crew.carve(session.task_id, MemberBudget(
             steps=steps, tokens=number("tokens", int), usd=number("usd", float), wall_s=number("wall_s", float)))
-        agent = _agents.AGENTS[wanted]
-        brief = self._brief(session, brief_text, crew=True)
+        if remote:
+            # A remote agent (stage 18 item 9): its work is one Guardian-
+            # gated `a2a_call`, and only the job itself leaves the house --
+            # never the parent's goal, its conversation or Sim's own rules.
+            agent, brief, isolation = self._remote_profile(wanted), brief_text, "fresh"
+        else:
+            agent = _agents.AGENTS[wanted]
+            brief = self._brief(session, brief_text, crew=True)
         try:
             member = await crew.admit(
                 parent=session.task_id, agent=agent.name, brief=brief, depth=session.depth + 1, budget=carved,
                 report_policy=policy, isolation=isolation, writer=self._writes(agent),
-                brief_ref=await self._brief_ref(brief),
-                requester=session.speaker, requester_channel=session.channel)
+                brief_ref=await self._brief_ref(brief), background=background,
+                requester=session.speaker, requester_channel=session.channel,
+                data=_data_classes(args.get("data")) if remote else ())
         except CrewRefused as exc:
             return False, f"spawn: refused -- {exc}"
+        member.job = brief_text
         child = self._member_session(session, member, agent, job=brief_text)
         self._start_member(crew, member, child, brief, session)
+        return True, self._spawned_line(crew, member, policy)
+
+    @staticmethod
+    def _spawned_line(crew: Crew, member, policy: str) -> str:
         queued = len([m for m in crew.live() if m.status == "running"]) >= crew.max_concurrent
-        return True, (f"spawned {member.handle} ({agent.name}, report: {policy})"
-                      + (" -- queued behind the members already running" if queued else " -- running now")
-                      + ". Keep working; await_agents collects its report, check_agents shows where it is.")
+        head = (f"spawned {member.handle} ({member.agent}, report: {policy})"
+                + (" -- queued behind the members already running" if queued else " -- running now"))
+        if member.background:
+            return head + (". It works in the background: answer the person now (say you are on it), "
+                           "and do not wait for it -- its report reaches them as a notice when it is ready.")
+        return head + ". Keep working; await_agents collects its report, check_agents shows where it is."
 
     async def _await_agents(self, session: Session, args: dict) -> tuple[bool, str]:
         """`await_agents{handles, mode: all|any|first_ok, timeout_s}`. Suspends
@@ -2630,8 +2749,11 @@ class SessionRunner:
     async def _read_ref(self, session: Session, args: dict) -> tuple[bool, str]:
         crew = self._crew_of(session)
         ref = str(args.get("ref") or "").strip()
-        if crew is None or ref not in crew.refs:
-            return False, "read_ref: only a ref a report, message or board entry of your crew named"
+        if crew is None or not crew.readable(ref):
+            # Only a blob the crew wrote itself (a long brief, a report's
+            # overflow text, a member's own tool output). A ref a member
+            # merely typed into its report could be any blob in the ledger.
+            return False, "read_ref: only a ref your crew wrote itself (a report's text, a member's tool output)"
         try:
             data = (await self._ledger.get_blob(ref)).decode("utf-8", "replace")
         except Exception as exc:  # noqa: BLE001
@@ -2673,6 +2795,23 @@ class SessionRunner:
             timeout_s = max(0.0, float(args.get("timeout_s") or 120.0))
         except (TypeError, ValueError):
             timeout_s = 120.0
+        answer, waited = await self._ask_and_wait(crew, member, question, timeout_s, default)
+        if answer is not None:
+            return True, f"your parent answered: {answer.get('body')}"
+        member.questions_unanswered.append(question)
+        if waited is None:
+            return True, (f"nobody is there to answer: you work in the background for a turn that has "
+                          f"ended. Go ahead with the default: {default or '(none given)'}, and say in your "
+                          "report that you did")
+        return True, (f"no answer in {waited:.0f} s; go ahead with the default: {default or '(none given)'}, "
+                      "and say in your report that you did")
+
+    async def _ask_and_wait(self, crew: Crew, member, question: str, timeout_s: float,
+                            default: str = "") -> tuple[dict | None, float | None]:
+        """Send `question` to the member's parent and wait for its answer:
+        `(answer message or None, seconds waited)`. The seconds are None
+        when nobody could answer -- a background member whose turn has
+        ended -- and the question is recorded but not waited on."""
         if crew.max_wall_s:
             # Never past the crew's wall-clock: a member asleep here would
             # otherwise outlive the bound, since nothing else is stepping
@@ -2680,6 +2819,12 @@ class SessionRunner:
             timeout_s = min(timeout_s, crew.remaining().wall_s + 1.0)
         sent = await crew.send(member.handle, member.parent, "question",
                                question + (f" (default if no answer: {default})" if default else ""))
+        if (member.background and member.parent not in self._open and member.parent in (crew.root, "")
+                and not crew.external):
+            # A chat or voice turn that started background work has
+            # answered and gone; its person hears the report, and a
+            # question to nobody would only hold the member up.
+            return None, None
         inbox = crew.inboxes[member.handle]
         answer: dict = {}
 
@@ -2694,11 +2839,7 @@ class SessionRunner:
         await crew.set_status(member.handle, "waiting", reason=f"ask_parent #{sent['seq']}")
         await crew.wait_until(answered, timeout_s)
         await crew.set_status(member.handle, "running")
-        if answer:
-            return True, f"your parent answered: {answer.get('body')}"
-        member.questions_unanswered.append(question)
-        return True, (f"no answer in {timeout_s:.0f} s; go ahead with the default: {default or '(none given)'}, "
-                      "and say in your report that you did")
+        return (dict(answer) if answer else None), timeout_s
 
     async def _board_put(self, session: Session, args: dict) -> tuple[bool, str]:
         crew = self._crew_of(session)
@@ -2720,6 +2861,318 @@ class SessionRunner:
         if not crew.board:
             return True, "the board is empty"
         return True, "\n".join(f"{k} (from {v['handle']}): {str(v['value'])[:200]}" for k, v in sorted(crew.board.items()))
+
+    # -- remote members (stage 18 item 9) -------------------------------------------------
+
+    @staticmethod
+    def _remote_profile(agent_name: str):
+        """The profile a remote member's session carries: `research`'s
+        limits, one tool. Its scaffold makes it wait for a person's answer
+        to Guardian like any task, and never makes it a writer."""
+        from dataclasses import replace as _replace
+
+        from . import profiles as _profiles
+
+        return _replace(_profiles.RESEARCH, name=agent_name, tools=("a2a_call",), verify=False)
+
+    async def _run_remote(self, crew: Crew, member, child: Session, text: str) -> Outcome:
+        """A remote agent's work as a crew member (stage 18 item 9): one
+        `a2a_call`, proposed to Guardian as the person who asked like every
+        member's call, and what the A2A task lifecycle needs around it:
+
+        - each status update Execution writes to `a2a:calls` for this
+          member becomes a `crew.message{kind: progress}` (a ledger tail:
+          delivered as it is written, never polled);
+        - `input-required` becomes an `ask_parent`; the answer goes back as
+          a second call naming the remote task, and no answer cancels it;
+        - a cancel of this member sends `tasks/cancel` (a call with
+          `cancel: true`), also through Guardian;
+        - a task still working when the call's own wait ran out is asked
+          after again by its id.
+
+        Every call is one of the member's steps, so its step budget bounds
+        the conversation. A Guardian denial ends it `blocked` with
+        Guardian's reason, and nothing more is sent."""
+        name = member.agent[len(A2A_PREFIX):]
+        remote = {"task_id": ""}
+        tail = None
+
+        async def on_call_event(event) -> None:
+            p = dict(event.payload or {})
+            if str(p.get("task") or "") != member.handle:
+                return
+            if p.get("task_id"):
+                remote["task_id"] = str(p["task_id"])
+            if event.type != "progress":
+                return
+            said = str(p.get("text") or "").strip()
+            line = " ".join(f"{name} is {p.get('state') or 'working'}{': ' + said if said else ''}".split())[:200]
+            await crew.send(member.handle, member.parent, "progress", line,
+                            deliver=crew.policy_allows(member.handle, "progress"))
+
+        if self._ledger is not None and hasattr(self._ledger, "tail"):
+            try:
+                tail = await self._ledger.tail(_A2A_CALLS_STREAM, on_call_event)
+            except Exception:  # noqa: BLE001 -- no progress lines is not a failed member
+                tail = None
+        data = list(member.data or ("public",))
+        args: dict = {"agent": name, "message": text, "data": data}
+        try:
+            while True:
+                if self._crew_cancelled(child):
+                    await self._remote_cancel(child, name, remote["task_id"])
+                    return Outcome("failed", reason=CANCELLED_REASON)
+                if child.budget.steps_left <= 0:
+                    await self._remote_cancel(child, name, remote["task_id"])
+                    return Outcome("blocked", reason=(f"{BUDGET_REASON}: {child.budget.steps_used} calls to {name} "
+                                                      "and it has not finished"))
+                step_no = child.next_step_no()
+                child.budget.steps_used += 1
+                captured: dict = {}
+                call = {"id": f"a2a-{step_no}", "tool": "a2a_call", "args": dict(args)}
+                in_flight = asyncio.ensure_future(self._propose_and_await(child, call, step_no, capture=captured))
+                stop = asyncio.ensure_future(crew.wait_until(lambda: self._crew_cancelled(child), 1e9))
+                try:
+                    await asyncio.wait({in_flight, stop}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    stop.cancel()
+                if not in_flight.done():
+                    # Cancelled while the remote agent works. Its task id is
+                    # usually known from a status update by now; if not, the
+                    # call has a short grace to name it.
+                    if not remote["task_id"]:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(in_flight), timeout=A2A_CANCEL_GRACE_S)
+                        except Exception:  # noqa: BLE001 -- a timeout or a failed call: cancel what is known
+                            pass
+                        if captured:
+                            remote["task_id"] = str((await self._remote_meta(captured)).get("task_id") or "")
+                    in_flight.cancel()
+                    await self._remote_cancel(child, name, remote["task_id"])
+                    return Outcome("failed", reason=CANCELLED_REASON)
+                ok, summary, _detail = in_flight.result()
+                meta = await self._remote_meta(captured)
+                remote["task_id"] = str(meta.get("task_id") or "") or remote["task_id"]
+                state = str(meta.get("state") or "")
+                denied = captured.get("type") == topics.ACTION_DENIED
+                step = Step(step_no, "act", " ".join(f"a2a_call {name}: {state or ('ok' if ok else 'failed')}: "
+                                                      f"{summary}".split())[:300],
+                            tool="a2a_call", ok=bool(ok), denied=denied)
+                child.record(step)
+                await self._record_step(child, step)
+                if denied or not captured:
+                    # Guardian said no, or nothing answered the proposal:
+                    # nothing more goes out of the house.
+                    return Outcome("blocked" if denied else "failed", reason=summary)
+                if ok and state == "input-required":
+                    question = str(meta.get("question") or summary).strip()
+                    answer, _waited = await self._ask_and_wait(crew, member, f"{name} asks: {question}", 120.0)
+                    if answer is None or crew.is_cancelled(member.handle):
+                        if not crew.is_cancelled(member.handle):
+                            member.questions_unanswered.append(question)
+                        await self._remote_cancel(child, name, remote["task_id"])
+                        if crew.is_cancelled(member.handle):
+                            return Outcome("failed", reason=CANCELLED_REASON)
+                        return Outcome("blocked", reason=f"{name} needed an answer nobody gave: {question}")
+                    args = {"agent": name, "task_id": remote["task_id"], "message": str(answer.get("body") or ""),
+                            "data": data}
+                    continue
+                if ok:
+                    answer_text = str(captured.get("stdout_preview") or summary or "").strip()
+                    return Outcome("completed", result_summary=answer_text or f"{name} finished with no text")
+                kind = str(captured.get("error_kind") or "")
+                if kind == "transient" and remote["task_id"] and state not in ("completed", "canceled", "failed",
+                                                                                "rejected"):
+                    args = {"agent": name, "task_id": remote["task_id"]}
+                    continue
+                # `unconfigured` is the SDK missing ("needs `pip install
+                # a2a-sdk`") or a scheme Sim cannot meet: blocked, by name.
+                return Outcome("blocked" if kind in ("unconfigured", "refused") else "failed", reason=summary)
+        finally:
+            if tail is not None:
+                try:
+                    await tail.unsubscribe()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    async def _remote_meta(self, captured: dict) -> dict:
+        """What `a2a_call` reported about the remote task (`state`,
+        `task_id`, `question`), from the result's metadata blob."""
+        ref = str(captured.get("metadata_ref") or "")
+        if not ref or self._ledger is None:
+            return {}
+        try:
+            data = json.loads((await self._ledger.get_blob(ref)).decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001 -- no metadata reads as no state, never a crash
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    async def _remote_cancel(self, child: Session, name: str, task_id: str) -> None:
+        """`tasks/cancel` for the remote task, through Guardian like the
+        call that started it. Nothing to cancel without its id."""
+        if not task_id:
+            return
+        step_no = child.next_step_no()
+        ok, summary, _ = await self._propose_and_await(
+            child, {"id": f"a2a-cancel-{step_no}", "tool": "a2a_call",
+                    "args": {"agent": name, "task_id": task_id, "cancel": True}}, step_no)
+        step = Step(step_no, "act", " ".join(f"a2a_call {name}: cancel {task_id}: {summary}".split())[:300],
+                    tool="a2a_call", ok=bool(ok))
+        child.record(step)
+        await self._record_step(child, step)
+
+    # -- background crews (stage 18 item 3) ------------------------------------------------
+
+    async def _deliver_background(self, crew: Crew) -> None:
+        """A chat or voice turn's background work is done: one notice, to
+        the person who asked, with every member's report in it.
+
+        Only once the turn that started it has ended (it may still be
+        answering) and every background member has reported. Orchestration
+        does not deliver anything itself: it publishes on the paths that
+        already reach a person --
+        - a typed turn (`cli`, `api`, no channel): `ui.notice`, which the
+          console and the phone already print;
+        - a spoken one, or any channel with a person behind it
+          (`voice`, `telegram`): `percept.time.scheduled{person}`, the
+          reminder Initiative already weighs -- quiet hours, who is in
+          which room, speaker or phone -- and proposes to Guardian as
+          `speak` or `notify` to that person and nobody else;
+        - an A2A caller: nothing here; the A2A server folds `crew.report`.
+        And when the conversation it was asked in is still going (its last
+        turn under `BACKGROUND_WINDOW_S` ago), the result joins it, so "what
+        did you find?" is answered from what came back."""
+        if crew.delivered or crew.external or crew.root in self._open:
+            return
+        members = [m for m in crew.children(crew.root) if m.background]
+        if not members or any(m.report is None or not is_terminal(m.status) for m in members):
+            return
+        crew.delivered = True
+        person, channel = members[0].requester, members[0].requester_channel
+        if channel == "a2a":
+            return
+        text = render_background(members)
+        if channel in _NOTICE_CHANNELS:
+            await self._bus.publish(Message.new(
+                topics.UI_NOTICE, source=self._bus.source, trace_id=crew.crew_id, clock=self._clock,
+                payload={"level": "info", "text": text, "source": "crew"}))
+        else:
+            await self._bus.publish(Message.new(
+                topics.PERCEPT_TIME_SCHEDULED, source=self._bus.source, trace_id=crew.crew_id, clock=self._clock,
+                payload={"schedule_id": f"crew:{crew.crew_id}", "label": render_background(members, spoken=True),
+                         "person": person}))
+        await self._join_conversation(channel, person, text)
+
+    async def _join_conversation(self, channel: str, person: str, text: str) -> None:
+        from .transcript import append_exchange, conversation_id
+
+        if self._ledger is None or not hasattr(self._ledger, "head"):
+            return
+        conversation = conversation_id(channel, person)
+        stream = session_contract.stream_name(conversation)
+        try:
+            head = int(await self._ledger.head(stream) or 0)
+            last = await self._ledger.read(stream, from_seq=max(0, head - 1)) if head else []
+            now = _epoch(self._clock) or time.time()
+            if not last or now - float(last[-1].ts or 0.0) > BACKGROUND_WINDOW_S:
+                return
+            await append_exchange(self._ledger, conversation, user_text="", answer=text, who=person or "User", ts=now)
+        except Exception:  # noqa: BLE001 -- the notice went; a conversation line is extra
+            pass
+
+    # -- crews started, steered and cancelled from outside a session (`crew.spawn`) -------
+
+    async def spawn_external(self, *, agent: str, brief: str, requester: str, requester_channel: str,
+                             report: str = "end", background: bool = True) -> tuple[str, str]:
+        """`crew.spawn`: a crew with no session at its root, one member
+        acting as `requester` on `requester_channel` -- what Guardian sees
+        on every one of its proposals. Asked by the A2A server (stage 18
+        item 10) for a paired caller. Returns `(crew_id, handle)`; raises
+        `CrewRefused` with what to tell the asker. Read-only agents only:
+        a request from outside the house never starts a writer."""
+        from simorgh.contracts.messages.crew import parse_report_policy
+
+        from . import profiles as _agents
+
+        if not str(requester_channel or "").strip():
+            raise CrewRefused("requester_channel is required: a crew acts for somebody, through some channel, "
+                              "and Guardian weighs every call as theirs")
+        wanted = str(agent or "").strip().lower()
+        if wanted.startswith(A2A_PREFIX) or wanted not in _agents.AGENTS:
+            raise CrewRefused(f"no agent called {wanted!r} here")
+        profile = _agents.AGENTS[wanted]
+        if self._writes(profile):
+            raise CrewRefused(f"{wanted} changes the repository; a crew started from outside is read-only")
+        job = " ".join(str(brief or "").split())
+        if not job:
+            raise CrewRefused("the brief is empty")
+        policy = str(report or "end").strip()
+        try:
+            parse_report_policy(policy)
+        except ValueError as exc:
+            raise CrewRefused(str(exc)) from exc
+        crew_id = f"crew-{uuid.uuid4().hex[:12]}"
+        crew = self._new_crew(crew_id)
+        crew.external = True
+        self._crews[crew_id] = crew
+        text = self._brief_text("(a request from outside the house; the job below is the whole brief)", job,
+                                crew=True)
+        try:
+            member = await crew.admit(
+                parent=crew_id, agent=profile.name, brief=text, depth=1,
+                budget=crew.carve(crew_id, MemberBudget(steps=self._delegate_max_steps)), report_policy=policy,
+                background=bool(background), brief_ref=await self._brief_ref(text),
+                requester=str(requester or ""), requester_channel=str(requester_channel))
+        except CrewRefused:
+            self._crews.pop(crew_id, None)
+            raise
+        member.job = job
+        child = self._member_session(None, member, profile)
+        self._start_member(crew, member, child, text, None)
+        return crew_id, member.handle
+
+    async def crew_message_external(self, payload: dict) -> bool:
+        """A `crew.message` from outside (the A2A server's caller answering
+        a question, or adding a note): delivered to the member as if its
+        parent sent it, and numbered in the crew. Only from the member's
+        own parent, and only an answer, note or steer. True when this
+        runner holds the crew."""
+        crew = self._crews.get(str(payload.get("crew_id") or ""))
+        to = str(payload.get("to") or "")
+        if crew is None:
+            return False
+        member = crew.members.get(to)
+        sender = str(payload.get("from") or "")
+        if member is None or is_terminal(member.status) or sender != member.parent:
+            return True
+        kind = str(payload.get("kind") or "note")
+        if kind not in ("answer", "note", "steer"):
+            return True
+        body = " ".join(str(payload.get("body") or "").split())
+        if not body:
+            return True
+        try:
+            reply_to = int(payload.get("reply_to") or 0)
+        except (TypeError, ValueError):
+            reply_to = 0
+        if kind == "answer" and not reply_to:
+            reply_to = crew.questions.get(to, 0)
+        await crew.send(sender, to, kind, body[:1200], reply_to=reply_to)
+        return True
+
+    async def crew_cancel_external(self, payload: dict) -> bool:
+        """A `crew.cancel` from outside (the console's `crew cancel`, the A2A
+        server's `tasks/cancel`): cancel that member, or every member when it
+        names the crew's root. True when this runner holds the crew."""
+        crew = self._crews.get(str(payload.get("crew_id") or ""))
+        if crew is None:
+            return False
+        handle = str(payload.get("handle") or "")
+        if handle != crew.root and handle not in crew.members:
+            return True
+        cascade = payload.get("cascade", True) not in (False, "false", "no", 0)
+        await crew.cancel(handle, str(payload.get("reason") or "cancelled"), cascade=cascade or handle == crew.root)
+        return True
 
     async def _checkpoint(self, session: Session, call: dict, summary: str) -> None:
         """Record an irreversible action that succeeded (stage 7 item 7).
@@ -3055,7 +3508,11 @@ class SessionRunner:
             " for a file, READ_FILE: path:START-END returns just those lines]"
         )
 
-    async def _propose_and_await(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
+    async def _propose_and_await(self, session: Session, call: dict, step_no: int, *,
+                                 capture: dict | None = None) -> tuple[bool, str, str]:
+        """`capture`, when given, gets the answering event's payload and
+        `type` (`action.result` or `action.denied`): a remote crew member
+        reads its `metadata_ref` for the remote task's state."""
         if call.get("error"):
             # A native call whose arguments were not a JSON object (stage 2):
             # nothing to propose; the model is told and can send it again.
@@ -3143,6 +3600,17 @@ class SessionRunner:
             through_timeout=_HUMAN_ANSWER_WAIT_S + _ACTION_TIMEOUTS.get(tool_name, self._action_timeout_s),
         )
         self._note_tool_ms(str(tool_name or ""), (time.monotonic() - started_at) * 1000.0)
+        if result is not None:
+            if capture is not None:
+                capture.update(dict(result.payload or {}), type=result.type)
+            if session.crew_id:
+                # What this crew member's own call wrote is the crew's own
+                # (`Crew.readable`): its output and metadata blobs.
+                refs = [str(result.payload.get(k) or "") for k in ("output_ref", "metadata_ref")]
+                session.owned_refs.extend(r for r in refs if r)
+                crew = self._crew_of(session)
+                if crew is not None:
+                    crew.own(*refs)
         if result is None:
             if cancel_check is not None and cancel_check():
                 text = f"{tool_name}: cancelled while waiting for a response"

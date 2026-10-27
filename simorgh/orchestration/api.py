@@ -285,6 +285,10 @@ class Session:
     #: tools: `report_progress`, `ask_parent`, `send_agent`, `read_ref`,
     #: `board_put`, `board_get`.
     crew_member: bool = False
+    #: Blobs this session's own tool calls wrote (Execution's `output_ref`
+    #: and `metadata_ref`), kept while it is in a crew: the crew's own refs,
+    #: which `read_ref` may read (stage 18, `Crew.readable`).
+    owned_refs: list = field(default_factory=list)
 
     @property
     def trace(self) -> str:

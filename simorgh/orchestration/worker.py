@@ -151,7 +151,7 @@ class Worker:
         skills_channels: tuple[str, ...] = ("", "cli", "http"),
         attempt_limits: tuple[int, float, float] = (0, 0.0, 0.0), telemetry=None,
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
-        crew_limits: tuple[int, int, float, float, int] = (8, 1, 0.5, 900.0, 0),
+        crew_limits: tuple[int, int, float, float, int] = (8, 1, 0.5, 900.0, 0), chat_crews: bool = False,
     ) -> None:
         self._review_benchmark = review_benchmark
         self._attempt_limits = attempt_limits
@@ -200,7 +200,8 @@ class Worker:
             # `[orchestration] crew_max_members, crew_max_writers, crew_max_usd,
             # crew_max_wall_s, crew_max_tokens` (stage 18).
             crew_max_members=crew_limits[0], crew_max_writers=crew_limits[1], crew_max_usd=crew_limits[2],
-            crew_max_wall_s=crew_limits[3], crew_max_tokens=crew_limits[4], **runner_kwargs,
+            crew_max_wall_s=crew_limits[3], crew_max_tokens=crew_limits[4], chat_crews=chat_crews,
+            **runner_kwargs,
         )
         self._subs: list = []
         # Task ids somebody has asked to stop -> whether that cancel was
@@ -412,6 +413,17 @@ class Worker:
     def note_environment(self, fact: str, value: bool, *, people: dict | None = None) -> int:
         """Pass a change in the house to whatever this worker is running."""
         return self._runner.note_environment(fact, value, people=people)
+
+    # Crews from outside a session (stage 18, `crew.spawn` and the A2A
+    # server's follow-ups): the runner holds the crews, so it answers.
+    async def spawn_crew(self, **kwargs) -> tuple[str, str]:
+        return await self._runner.spawn_external(**kwargs)
+
+    async def crew_message(self, payload: dict) -> bool:
+        return await self._runner.crew_message_external(payload)
+
+    async def crew_cancel(self, payload: dict) -> bool:
+        return await self._runner.crew_cancel_external(payload)
 
     def prefetch_recall(self, session_id: str, text: str, *, channel: str = "", trace_id: str = "") -> None:
         """Start this turn's recall before its session exists (stage 5 item
