@@ -17,6 +17,7 @@ from simorgh.contracts.scratch import SCRATCH_PREFIX
 from .external import ExternalToolSpec
 from .shell import DEFAULT_SHELL_REFUSALS
 from .mcp import McpServerConfig
+from .a2a import A2aAgentConfig, a2a_agents_from_mapping
 
 
 def _looks_like_the_repo(candidate: Path) -> bool:
@@ -593,6 +594,10 @@ class Config:
     # each an optional import, wrapped behind the Tool protocol so
     # Guardian still gates every call.
     external_tools: tuple[ExternalToolSpec, ...] = ()
+    # -- remote A2A agents (a2a.py's module docstring, stage 18 item 9):
+    # `{name: {url, auth_secret, allowed_data}}`, set only by a person.
+    # Empty means `a2a_call` is not registered at all.
+    a2a_agents: tuple[A2aAgentConfig, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
@@ -622,5 +627,7 @@ class Config:
                 )
                 for server in kwargs["mcp_servers"]
             )
+        if "a2a_agents" in kwargs:
+            kwargs["a2a_agents"] = a2a_agents_from_mapping(kwargs["a2a_agents"])
         kwargs = {k: v for k, v in kwargs.items() if k in cls.__dataclass_fields__}
         return cls(**kwargs)

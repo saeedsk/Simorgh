@@ -33,6 +33,7 @@ Since 2026-09-20 `run_tests` runs the suite through `procs.run_child`: its own p
 | `simorgh/execution/capabilities.py` | boot probes (node, puppeteer, docker, bandit, homeharvest, connectors) and the `capabilities` stream |
 | `simorgh/execution/domainstatus.py` | per-domain configured/working connectors for the probes |
 | `simorgh/execution/mcp.py` | stdio MCP client and `McpToolProxy` for human-configured servers |
+| `simorgh/execution/a2a.py` | A2A client (stage 18 item 9): `a2a_call` (irreversible; registered only when `a2a_agents` is non-empty) and `propose_a2a_agent` (reversible; records on `a2a:proposals`). Agent Card fetch and security check, `message/stream` with progress, `message/send` + bounded `tasks/get` polling, `tasks/cancel`, `input-required` returned as an ok result with the question. Speaks through the optional `a2a-sdk` (`SdkTransport`); without it the call is `unconfigured` "needs `pip install a2a-sdk`" and nothing is sent |
 | `simorgh/execution/external.py` | adapters for LangChain / pydantic_ai / Composio / callables behind the Tool protocol |
 | `simorgh/execution/packages.py` | `find_package`, `install_package` (age floor, daily cap, denylist) |
 | `simorgh/execution/websearch.py` | `web_search` with spacing and a call budget |
@@ -88,7 +89,7 @@ The generated rows for `action.denied`, `action.result`, `cognition.think`, `per
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/execution/service.py | at boot, the `skills` gauge |
 | `percept.web.fetched` | `messages/percept.py::PerceptWebFetched` | simorgh/execution/service.py | after a successful `web_fetch` (no consumer; allow-listed one-sided) |
 | `learn.skill.acquired` | `messages/learn.py::LearnSkillAcquired` | simorgh/execution/service.py | after a successful `apply_skill` of a `.py` subject |
-| `ui.notice` | `messages/ui.py::UiNotice` | service.py, vision.py, home/cameras.py, home/ring.py | a proposed MCP server; a camera description; watcher notices |
+| `ui.notice` | `messages/ui.py::UiNotice` | service.py, vision.py, home/cameras.py, home/ring.py | a proposed MCP server or A2A agent; a camera description; watcher notices |
 | `voice.speak.request` | `messages/voice.py::VoiceSpeakRequest` | simorgh/execution/vision.py | a camera description, when `camera_vision_speak` |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/execution/vision.py | request with images and `require_real_provider=True` |
 | `memory.retrieve` | `messages/memory.py::MemoryRetrieve` | simorgh/execution/service.py | request for a skill's procedural description on load |
@@ -108,6 +109,8 @@ The Service's `produces` tuple lists exactly these 26 topics (since 2026-09-19; 
 | `execution:tools` | simorgh/execution/service.py (`registered`) | simorgh/interface/dispatch.py, simorgh/orchestration/service.py | 30d |
 | `capabilities` | simorgh/execution/capabilities.py (`probed`) | - | forever (no entry) |
 | `mcp:proposals` | simorgh/execution/tools.py (`propose_mcp_server`) | simorgh/interface/dispatch.py | forever (no entry) |
+| `a2a:proposals` | simorgh/execution/a2a.py (`propose_a2a_agent`, `proposed`) | nobody yet (interface's `a2a` / `a2a approve` is not built) | forever (no entry) |
+| `a2a:calls` | simorgh/execution/a2a.py (`a2a_call`: `sent` {agent, url, data, chars, sha256 -- never the text}, `progress` {agent, task_id, state, text}, then the final state; every event carries `action_id` and `task`) | nobody yet (orchestration's `a2a:<name>` member is meant to turn `progress` into `crew.message{kind: progress}`) | forever (no entry) |
 
 Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; oversized proposal args are read back with `get_blob`. Large row sets go to `results/<action_id>.json`, not the Ledger: the metadata blob (`service.py::metadata_for_blob`) carries `rows` as a pointer string. A tool that declares `evidence_fields` also gets `rows_kept` in the blob -- its rows projected onto those fields, scalars only, strings cut at `EVIDENCE_MAX_CHARS` (200), at most `EVIDENCE_MAX_ROWS` (50) rows and `EVIDENCE_MAX_BYTES` (8 KB) serialised -- and `rows_total`, the full count (stage 6 item 3, 2026-09-22). That is how the World Model folds what Sim READ about the house; the W21-07 bound still holds because the kept copy is bounded whatever the tool returns. A tool that declares nothing is exactly as before. Deleted rows: every `name:{x}` string the generator matched in a tool (`file_write:`, `git_discard:`, `cam_*:`, `ring_*:`, `cast_*:`, `tv_*:`, `media:`, `music:`, `home:{service}:{entity_id}`, `worktree_land:{sha}`, `run_shell:`, `skill:`) is a `ToolResult.side_effects` label or a tool name, not a stream; `vault:...` are secret refs; `python:`, `node:`, `alpine:`, `fe80:`, `javascript:`, `urn:...`, `d:href` and the rest are string literals; `task:{task_id}` appears only in comments.
 
@@ -266,6 +269,7 @@ Blobs: large outputs, tool metadata and `web_fetch` content via `put_blob`; over
 | `real_estate_window_s` | `3600.0` | yes |
 | `mcp_servers` | `()` | yes |
 | `external_tools` | `()` | yes |
+| `a2a_agents` | `()` | yes (`a2a.py`). `{name: {url, auth_secret, allowed_data, timeout_s=30, poll_interval_s=2, max_wait_s=120}}`; read as `[execution.a2a_agents.<name>]` today. The plan's home is `[crew.a2a_agents.<name>]`, which the Kernel does not yet copy in, and an `auth_secret` must also be listed in `[execution] secrets` until the Kernel adds it to Execution's scope |
 
 ## Public Python surface
 
@@ -369,3 +373,4 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - The `people` tool gains `set_tool` (2026-09-29, stage 6 item 5): `tool` and `answer` (allow | ask | deny, "" to clear) -- one tool for one person above or below their role, through the same tier-3 path as a link.
 - `shell.APP_CLI_DIRS` (2026-09-29): run_shell's PATH gains the command-line tools that live inside a macOS app, when present -- today `/Applications/Tailscale.app/Contents/MacOS` (`tailscale` resolves on the case-insensitive disk). Sim had said Tailscale was not installed.
 - `web_fetch` redirects (2026-09-29, security): the default opener is `build_opener(_CheckedRedirects(self._validate_url))` -- every redirect hop passes the same SSRF check as the first URL, and an `Authorization` header is dropped when a redirect changes host. Confirmed live before the fix: a public redirector pointed at `http://127.0.0.1:8765/api/status` returned the running Sim's status. An injected `opener` (tests) is used as given.
+- A2A client (stage 18 item 9, Execution half, 2026-10-27): `a2a.py`. `a2a_call{agent, message?, data?, task_id?, context_id?, cancel?}` is refused before any request for an unknown agent or a `data` class outside the agent's `allowed_data` (default `public` both sides; `*` allows any); posts to the CONFIGURED url, never the card's; meets only HTTP bearer and header API keys from `auth_secret`, and refuses any other scheme (oauth2, openIdConnect, mutualTLS, basic, query/cookie keys) or a non-JSON-RPC card by name. Results: `completed` -> ok with the artifacts' or reply's text; `input-required` -> ok, `metadata.question` and `task_id`; `failed`/`rejected`/`canceled` -> `failed`; `auth-required` -> `unconfigured`; still running at `max_wait_s` -> `transient` naming the task id. `side_effects` `a2a:<agent>:send` / `a2a:<agent>:cancel`. `A2aCallTool(progress=)` takes `async (ctx, {agent, task_id, state, text})`; the default appends `progress` to `a2a:calls`. Tests: `tests/simorgh/execution/test_a2a.py` (in-process asyncio HTTP A2A server; a Guardian denial makes no request).
