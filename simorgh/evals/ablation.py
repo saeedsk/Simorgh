@@ -56,7 +56,7 @@ PRESETS: dict[str, dict[str, tuple[str, ...]]] = {
 
 #: Which scenario prefix each `--suite` name runs. A raw id prefix (any text
 #: with a "/") is accepted too, for a one-category look (`toolchain/recovery/`).
-SUITE_PREFIXES: dict[str, str] = {"toolchain": "toolchain/"}
+SUITE_PREFIXES: dict[str, str] = {"toolchain": "toolchain/", "crew": "toolchain/crew/"}
 
 #: The model name that means "no model": the floor provider costs
 #: nothing and needs no `--paid`.
@@ -119,12 +119,17 @@ class RunResult:
     #: out, or its ledger could not be read). `run_matrix` then charges
     #: the run its whole share of the cap.
     spend_known: bool = True
+    #: How a safety scenario's gate held (`house.script.gate_held`):
+    #: "asked", "denied" or "declined" (the model proposed nothing); ""
+    #: for a run with no gate in it.
+    gate: str = ""
 
     def row(self, suite: str) -> dict:
         return {"ts": round(time.time(), 3), "suite": suite, "model": self.run.model.label,
                 "preset": self.run.preset, "scenario": self.run.scenario.id, "repeat": self.run.repeat,
                 "status": self.status, "why": self.why[:300], "steps": self.steps,
-                "cost_usd": round(self.cost_usd, 6), "seconds": round(self.seconds, 2)}
+                "cost_usd": round(self.cost_usd, 6), "seconds": round(self.seconds, 2),
+                **({"gate": self.gate} if self.gate else {})}
 
 
 @dataclass
@@ -327,7 +332,8 @@ def judge(run: Run, outcomes: list[Outcome], *, child_cap_usd: float | None = No
             status, why = SKIPPED, f"{run.model.label} never answered ({summary['model_errors']} error replies)"
     return RunResult(run=run, status=status, why=why, steps=steps, cost_usd=cost,
                      seconds=sum(o.seconds for o in outcomes),
-                     spend_known=bool(summary) and summary.get("known", True) is not False)
+                     spend_known=bool(summary) and summary.get("known", True) is not False,
+                     gate=str(one.case.detail.get("gate") or "") if status == PASSED else "")
 
 
 def _skip(run: Run, why: str) -> RunResult:
@@ -436,6 +442,17 @@ def table(results: list[RunResult]) -> str:
     if inert:
         lines.append("")
         lines.append(f"* {', '.join(inert)} {INERT_NOTE}")
+    gated = [c for c in rows if any(r.gate for r in c.results)]
+    if gated:
+        # A safety pass is "asked", "denied" or "declined" (no hazardous
+        # call proposed at all). Only the first two exercised Guardian; a
+        # row that passes on declines alone has not tested the gate.
+        lines.append("")
+        lines.append("safety gate per passed run, asked / denied / declined "
+                     "(only the first two exercised Guardian):")
+        for c in gated:
+            n = {g: sum(1 for r in c.results if r.gate == g) for g in ("asked", "denied", "declined")}
+            lines.append(f"  {c.model:<{width}}  {c.preset:<14} {n['asked']} / {n['denied']} / {n['declined']}")
     skipped = [r for r in results if r.status == SKIPPED]
     if skipped:
         reasons: dict[str, int] = {}

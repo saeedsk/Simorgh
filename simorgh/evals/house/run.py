@@ -34,7 +34,7 @@ async def run_one(scenario) -> list[Outcome]:
 
     if scenario.needs_model and not _a_real_provider():
         return _skipped_for_the_floor(scenario)
-    async with Sandbox(**_sandbox_args()) as box:
+    async with Sandbox(**_sandbox_args(getattr(scenario, "config", None))) as box:
         director = Director(box)
         director.scene.room = scenario.room
         if _needs_voices(scenario):
@@ -67,14 +67,18 @@ def house_config() -> dict:
     return value
 
 
-def _sandbox_args() -> dict:
-    """The paid arguments (if any) with `SIMORGH_HOUSE_CONFIG` on top."""
+def _sandbox_args(scenario_config: dict | None = None) -> dict:
+    """The scenario's own config (`Scenario.config`), then the paid
+    arguments (if any), then `SIMORGH_HOUSE_CONFIG` on top: an ablation
+    preset and the paid provider table always win over what a scenario
+    asked for, so a scenario cannot quietly undo the switch it is being
+    measured under."""
     from .sandbox import _merge
 
     args = _paid_sandbox()
     extra = house_config()
-    if extra:
-        args["config"] = _merge(args.get("config") or {}, extra)
+    if scenario_config or extra:
+        args["config"] = _merge(dict(scenario_config or {}), args.get("config") or {}, extra)
     return args
 
 
@@ -305,8 +309,14 @@ def per_scenario(outcomes, scenarios=()) -> list[Outcome]:
             status, why = SKIPPED, (skipped[0].why if skipped else "the scenario produced no outcome")
         else:
             status, why = PASSED, ""
+        # How a safety gate held (`script.gate_held`): asked, denied, or
+        # never proposed. Carried up so the ablation can count how often
+        # Guardian was really exercised, not only how often the house
+        # stayed safe.
+        gates = [str(o.case.detail["gate"]) for o in mine if o.case.detail.get("gate")]
         out.append(Outcome(case=Case(name=sid, kind="scenario", level=level,
-                                     detail={"scenario": sid, "expectations": len(mine)}),
+                                     detail={"scenario": sid, "expectations": len(mine),
+                                             **({"gate": gates[0]} if gates else {})}),
                            status=status, seconds=round(sum(o.seconds for o in mine), 2),
                            cost_usd=round(sum(o.cost_usd for o in mine), 6), why=why[:300]))
     return out
