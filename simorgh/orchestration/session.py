@@ -143,6 +143,13 @@ _A2A_CALLS_STREAM = "a2a:calls"
 #: A background result joins the conversation it was asked in only when
 #: that conversation's last turn is this recent: the person is still in it.
 BACKGROUND_WINDOW_S = 30 * 60.0
+#: A background report a stop left undelivered is delivered at the next
+#: start only when it was filed this recently. Older is news nobody is
+#: waiting for -- and every crew delivered before the delivery record
+#: existed (2026-10-27) has no record, so without a bound the first start
+#: after the upgrade would say every past result again. Also lets a start
+#: skip a crew stream by its last event without reading all of it.
+PENDING_WINDOW_S = 24 * 3600.0
 #: After a cancel, how long a remote member waits for its in-flight call to
 #: name the remote task it must send `tasks/cancel` to.
 A2A_CANCEL_GRACE_S = 10.0
@@ -3273,7 +3280,9 @@ class SessionRunner:
         through the path a live delivery takes, and the record written
         first makes a second start find nothing. A member that never
         reported is not resumed (a chat turn's crew does not resume) and
-        has nothing to deliver. Returns how many members were delivered."""
+        has nothing to deliver. Only a report filed within
+        `PENDING_WINDOW_S` is delivered. Returns how many members were
+        delivered."""
         from simorgh.contracts.streamnames import CREW_PREFIX
 
         if self._ledger is None or not hasattr(self._ledger, "streams"):
@@ -3282,11 +3291,20 @@ class SessionRunner:
             streams = await self._ledger.streams(CREW_PREFIX)
         except Exception:  # noqa: BLE001 -- no crews to read is nothing to deliver
             return 0
+        since = (_epoch(self._clock) or time.time()) - PENDING_WINDOW_S
         count = 0
         for stream in streams:
             crew_id = stream[len(CREW_PREFIX):]
             if not crew_id or crew_id in self._crews or crew_id in self._open:
                 continue
+            try:
+                # A crew whose last event is older than the window has no
+                # report recent enough: skipped without reading it all.
+                last = await self._ledger.read(stream, from_seq=await self._ledger.head(stream), limit=1)
+                if last and float(last[-1].ts or 0.0) < since:
+                    continue
+            except Exception:  # noqa: BLE001 -- the full read below decides
+                pass
             try:
                 events = await self._ledger.read(stream)
             except Exception:  # noqa: BLE001 -- one unreadable crew must not cost the others
@@ -3296,9 +3314,12 @@ class SessionRunner:
             crew = self._new_crew(crew_id, events)
             if crew.external:
                 continue
+            filed = {str((e.payload or {}).get("handle") or ""): float(e.ts or 0.0)
+                     for e in events if e.type == topics.CREW_REPORT}
             groups: dict[tuple[str, str], list] = {}
             for m in crew.children(crew.root):
-                if m.background and m.handle not in crew.delivered and m.report is not None:
+                if (m.background and m.handle not in crew.delivered and m.report is not None
+                        and filed.get(m.handle, 0.0) >= since):
                     groups.setdefault((m.requester, m.requester_channel), []).append(m)
             for (person, channel), members in groups.items():
                 try:

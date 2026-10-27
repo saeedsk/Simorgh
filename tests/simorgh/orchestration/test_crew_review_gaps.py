@@ -364,6 +364,36 @@ class AStopDoesNotLoseTheNotice(unittest.TestCase):
         self.assertEqual([(r["from"], r["to"]) for r in records], [("voice-1-h1", "voice:Soodeh")])
 
     @run
+    async def test_an_old_undelivered_report_is_not_said_after_a_restart(self):
+        """A crew delivered before the delivery record existed has none: the
+        first start after the upgrade must not say every past result again."""
+        from simorgh.orchestration.session import PENDING_WINDOW_S
+
+        async with Harness() as h:
+            seen, start = _collect(h, topics.UI_NOTICE, topics.PERCEPT_TIME_SCHEDULED)
+            await start()
+            cognition = CrewCognition(h.client("cognition"), {
+                "voice-1": [{"tool_calls": [_call(1, "spawn", brief="price of A", background=True)]},
+                            {"text": "I'll find out."}],
+                "voice-1-h1": _member_answer("A")}, delay={"*": 0.05})
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start(); await gx.start()
+            first = _runner(h, chat_crews=True)
+
+            async def stopped(crew):
+                return None
+
+            first._deliver_background = stopped  # noqa: SLF001
+            await first.run(_chat("voice-1", channel="voice", speaker="Soodeh"), user_text="x")
+            await asyncio.wait_for(first._crews["voice-1"].members["voice-1-h1"].task, timeout=10)  # noqa: SLF001
+            h.clock.advance(PENDING_WINDOW_S + 60)
+            delivered = await _runner(h, chat_crews=True).deliver_pending_background()
+            await asyncio.sleep(0.1)
+            await cognition.stop(); await gx.stop()
+        self.assertEqual(delivered, 0)
+        self.assertEqual(seen, [])
+
+    @run
     async def test_a_live_delivery_is_recorded_so_a_restart_does_not_repeat_it(self):
         async with Harness() as h:
             seen, start = _collect(h, topics.UI_NOTICE)
