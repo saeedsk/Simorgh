@@ -118,6 +118,40 @@ class NothingIsRescued(unittest.TestCase):
             self.assertEqual(rescue_tool_calls(text, ["read_file", "web_search"]), (), text)
 
 
+class ReviewNarrowings(unittest.TestCase):
+    """Stage 16 item 1 review: cases the first build accepted or took too
+    long over."""
+
+    def test_an_object_with_other_keys_and_no_args_is_not_a_bare_call(self):
+        # Its other keys were the arguments; rescuing `fetch({})` loses them.
+        self.assertEqual(rescue_tool_calls('{"name": "fetch", "city": "Paris"}', ["fetch"]), ())
+        self.assertEqual(_sig(rescue_tool_calls('{"type": "function", "name": "fetch"}', ["fetch"])),
+                         [("fetch", {})])
+
+    def test_an_unclosed_think_block_is_still_thinking(self):
+        self.assertEqual(rescue_tool_calls('<think>maybe {"tool": "fetch", "args": {}}', ["fetch"]), ())
+        self.assertEqual(rescue_tool_calls('[THINK]maybe fetch[ARGS]{"p": 1}', ["fetch"]), ())
+
+    def test_a_lone_close_tag_ends_template_opened_thinking(self):
+        text = 'plan: {"tool": "fetch", "args": {"p": "a"}}</think>The answer is 4.'
+        self.assertEqual(rescue_tool_calls(text, ["fetch"]), ())
+        text = 'plan</think>{"tool": "fetch", "args": {"p": "b"}}'
+        self.assertEqual(_sig(rescue_tool_calls(text, ["fetch"])), [("fetch", {"p": "b"})])
+
+    def test_a_degenerate_repeating_reply_is_cheap(self):
+        import time
+        for text in ("{ " * 20000, '{"' * 20000, 'fetch[ARGS]{"a": 1, ' * 3000,
+                     "[TOOL_CALLS]fetch{" * 3000, "<function=fetch>" * 5000,
+                     "</function>" + "<function=fetch>" * 5000):
+            started = time.monotonic()
+            self.assertEqual(rescue_tool_calls(text, ["fetch"]), ())
+            self.assertLess(time.monotonic() - started, 1.0, text[:20])
+
+    def test_a_call_after_a_few_stray_braces_is_still_found(self):
+        text = "use { and { to open blocks. " + '{"tool": "fetch", "args": {"p": 1}}'
+        self.assertEqual(_sig(rescue_tool_calls(text, ["fetch"])), [("fetch", {"p": 1})])
+
+
 MARKERS = ("read_file", "web_search", "run_shell")
 SPEC = {"kind": "markers", "markers": MARKERS}
 

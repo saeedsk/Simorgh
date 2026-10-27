@@ -25,7 +25,9 @@ nothing (forge's precedence, so one reply is never counted twice):
 
 Think blocks (`<think>...</think>`, `[THINK]...[/THINK]`) are removed
 first: the call may sit after them, and a call rehearsed inside them is
-not one the model made.
+not one the model made. So is a block whose close never came (a reply cut
+off mid-thought: from the open tag to the end) and one whose open tag the
+chat template wrote (everything up to a lone close tag).
 
 Two rules forge leaves to its caller are enforced here: a call is accepted
 only for a tool offered to this session, and only when its arguments are
@@ -35,7 +37,13 @@ a tool without one of these shapes is never a call.
 Differences from forge, all narrowing or robustness: the brace scan
 respects JSON strings (forge's strategy 1 and 2 did not), so a `}` inside
 an argument cannot end the object early; a tool name matches the offered
-one case-insensitively and is returned as offered. Stdlib only.
+one case-insensitively and is returned as offered; an object with no
+`args`/`arguments` is a call with no arguments only when it holds nothing
+else (`{"name": "fetch", "city": "Paris"}` is not `fetch({})`); an
+unclosed think block is thinking too; and the work is bounded -- a
+degenerate reply that repeats an opening `{` or `<function=` thousands of
+times (small models loop) gives up after a few unclosed scans instead of
+rescanning to the end from every one. Stdlib only.
 """
 
 from __future__ import annotations
@@ -44,6 +52,15 @@ import json
 import re
 
 THINK_TAG_RE = re.compile(r"\[THINK\](.*?)\[/THINK\]|<think>(.*?)</think>", re.DOTALL)
+_THINK_CLOSE_RE = re.compile(r"\[/THINK\]|</think>")
+_THINK_OPEN_RE = re.compile(r"\[THINK\]|<think>")
+
+# Scans from an opening brace that never closes, per strategy, before the
+# strategy stops looking: each one reads to the end of the reply, so without
+# a cap a reply of N unclosed braces costs N times its length.
+_MAX_UNCLOSED = 16
+# Keys a JSON call may carry besides its name when it has no `args`.
+_CALL_KEYS = frozenset({"tool", "name", "type", "id"})
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?")
 _REHEARSAL_RE = re.compile(r"(\w+)\[ARGS\]\s*(?=\{)")
@@ -56,8 +73,17 @@ _MISTRAL_BRACKET_RE = re.compile(r"\[TOOL_CALLS\](\w+)\s*(?=\{)")
 
 
 def strip_think(text: str) -> str:
-    """`text` without its think blocks, stripped."""
-    return THINK_TAG_RE.sub("", text).strip()
+    """`text` without its think blocks, stripped. A lone close tag ends
+    thinking the template opened (everything before it goes); an open tag
+    that never closes is thinking to the end."""
+    text = THINK_TAG_RE.sub("", text)
+    closes = list(_THINK_CLOSE_RE.finditer(text))
+    if closes:
+        text = text[closes[-1].end():]
+    opened = _THINK_OPEN_RE.search(text)
+    if opened:
+        text = text[:opened.start()]
+    return text.strip()
 
 
 def _object_end(text: str, start: int) -> int | None:
@@ -114,6 +140,7 @@ def _json_calls(text: str, offered: dict[str, str]) -> list[dict]:
     """Strategy 1: JSON objects naming an offered tool (fences removed)."""
     cleaned = _FENCE_RE.sub("", text).replace("```", "")
     found: list[dict] = []
+    unclosed = 0
     i = 0
     while i < len(cleaned):
         if cleaned[i] != "{":
@@ -121,13 +148,21 @@ def _json_calls(text: str, offered: dict[str, str]) -> list[dict]:
             continue
         data, end = _json_object(cleaned, i)
         if end is None:
+            unclosed += 1
+            if unclosed >= _MAX_UNCLOSED:
+                break
             i += 1
             continue
         if data is not None:
             name = data.get("tool") or data.get("name")
             tool = offered.get(name.lower()) if isinstance(name, str) else None
-            raw = data["args"] if "args" in data else data.get("arguments", {})
-            args = _as_object(raw if raw is not None else {})
+            if "args" in data or "arguments" in data:
+                raw = data["args"] if "args" in data else data["arguments"]
+                args = _as_object(raw if raw is not None else {})
+            else:
+                # No arguments named: a no-argument call only when nothing
+                # else is in the object, or its other keys would be lost.
+                args = {} if set(data) <= _CALL_KEYS else None
             if tool and args is not None:
                 found.append(_call(tool, args))
                 i = end
@@ -141,11 +176,16 @@ def _json_calls(text: str, offered: dict[str, str]) -> list[dict]:
 def _bracketed_calls(pattern: re.Pattern, text: str, offered: dict[str, str]) -> list[dict]:
     """Strategies 2 and 4: `name` from `pattern`, then one JSON object."""
     found: list[dict] = []
+    unclosed = 0
     for match in pattern.finditer(text):
         tool = offered.get(match.group(1).lower())
         if not tool:
             continue
-        args, _end = _json_object(text, match.end())
+        args, end = _json_object(text, match.end())
+        if end is None:
+            unclosed += 1
+            if unclosed >= _MAX_UNCLOSED:
+                break
         if args is not None:
             found.append(_call(tool, args))
     return found
@@ -155,7 +195,12 @@ def _qwen_calls(text: str, offered: dict[str, str]) -> list[dict]:
     """Strategy 3: Qwen Coder XML. One leading and one trailing newline
     are stripped from each value, as Qwen's reference parser does."""
     found: list[dict] = []
-    for fn in _QWEN_FUNCTION_RE.finditer(text):
+    # Only up to the last close tag: an open tag after it can never match,
+    # and searching from each one to the end is quadratic.
+    last = text.rfind("</function>")
+    if last < 0:
+        return found
+    for fn in _QWEN_FUNCTION_RE.finditer(text, 0, last + len("</function>")):
         tool = offered.get(fn.group(1).strip().lower())
         if not tool:
             continue
