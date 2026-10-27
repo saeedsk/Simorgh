@@ -23,7 +23,7 @@ from .assembler import PromptAssembler
 from .budget import RollingWindowBudget
 from .compaction import Compactor
 from .config import Config
-from .parser import OutputParser
+from .parser import OutputParser, accept_native_calls
 from .providers.base import FloorProvider
 from .providers.claude_code import ClaudeCodeProvider
 from .providers.gemini import GeminiProvider
@@ -371,7 +371,9 @@ class Service:
             self._config, ctx.ledger, bus=ctx.bus, source=ctx.source, clock=ctx.clock,
             summarize=self._summarize_for_compaction,
         )
-        self._parser = OutputParser()
+        # `[cognition] ablate = ["rescue"]` (stage 14): accept well-formed
+        # calls only, marker and native alike (`parser.py`, "strict parsing").
+        self._parser = OutputParser(strict="rescue" in self._config.ablate)
 
         self._sub_think = await ctx.bus.subscribe(topics.COGNITION_THINK, self._on_think)
         self._sub_compact = await ctx.bus.subscribe(topics.COGNITION_COMPACT_REQUEST, self._on_compact_request)
@@ -595,12 +597,21 @@ class Service:
 
         self._note_reply(floor=floor)
         parsed = self._parser.parse(response.text, _expected_spec(payload))
-        if response.tool_calls and payload.get("expected") == "tool_calls":
+        native_calls = response.tool_calls
+        if native_calls and payload.get("expected") == "tool_calls" and self._parser.strict:
+            # Strict (`ablate = ["rescue"]`): a malformed typed call is not
+            # handed back for the model to fix. When none is well-formed the
+            # reply is its text, parsed as a plain answer.
+            native_calls = accept_native_calls(
+                native_calls, tuple(payload.get("tools") or ()), self._tool_specs)
+            if not native_calls:
+                parsed = self._parser.parse(response.text, {"kind": "final"})
+        if native_calls and payload.get("expected") == "tool_calls":
             # A native provider answered with typed calls (stage 2 item 9):
             # those are the calls, whatever marker-looking text came with them.
             parsed = dataclasses.replace(parsed, kind="tool_calls", tool_calls=tuple(
                 {"tool": c["tool"], "args": c.get("args") or {}, "id": c.get("id", ""),
-                 **({"error": c["error"]} if c.get("error") else {})} for c in response.tool_calls))
+                 **({"error": c["error"]} if c.get("error") else {})} for c in native_calls))
         await self._append_call_record(purpose, response, floor, compacted)
         # Not for a call that carried pictures: only one provider can see,
         # so a camera event always "changes" the provider and then changes

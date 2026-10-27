@@ -37,6 +37,10 @@ DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
 }
 
 
+#: The `[cognition] ablate` switches this module owns (stage 14).
+ABLATE_SWITCHES: frozenset[str] = frozenset({"rescue"})
+
+
 @dataclass(frozen=True)
 class ProviderConfig:
     max_calls: int = 500
@@ -153,6 +157,11 @@ class Config:
     collapse_trigger_fraction: float = 0.45
     availability_poll_seconds: float = 30.0
     assembly_request_timeout: float = 2.0  # persona.voice / self.summary -- omitted on timeout, not fatal
+    # Guardrails switched off for a sandboxed ablation run (stage 14): only
+    # "rescue" today, which makes the parser accept well-formed tool calls
+    # only (`OutputParser(strict=True)`). Never set by `sim.sh`; empty is
+    # Sim as it ships.
+    ablate: tuple[str, ...] = ()
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -190,7 +199,16 @@ class Config:
         ):
             if key in raw:
                 kwargs[key] = raw[key]
+        if "ablate" in raw:
+            value = raw["ablate"]
+            if isinstance(value, (list, tuple)):
+                known = [isinstance(v, str) and v in ABLATE_SWITCHES for v in value]
+                kwargs["ablate"] = tuple(v for v, ok in zip(value, known) if ok)
+                problems += [f"ablate: unknown switch {v!r} (known: {', '.join(sorted(ABLATE_SWITCHES))})"
+                             for v, ok in zip(value, known) if not ok]
+            else:
+                problems.append(f"ablate is {type(value).__name__}, not a list -- ignored")
         return cls(**kwargs, problems=tuple(problems))
 
 
-__all__ = ["Config", "ProviderConfig", "DEFAULT_PURPOSE_BUDGETS"]
+__all__ = ["ABLATE_SWITCHES", "Config", "ProviderConfig", "DEFAULT_PURPOSE_BUDGETS"]

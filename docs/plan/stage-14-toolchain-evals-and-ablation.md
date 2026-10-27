@@ -1,6 +1,6 @@
 # Stage 14 -- Tool-chain evals and guardrail ablation
 
-Status: **in progress** (2026-10-27: plan written; items 1-4 being built; item 5 needs the creator's spend cap) · Depends on: stage 4 (`simorgh/evals/`), stage 11 (the household simulator) · Modules touched: evals (owner), orchestration, cognition; `docs/`
+Status: **in progress** (2026-10-27: items 1-4 done -- 1 expectations + fault injection, 2 the 22-scenario `toolchain` pack, 3 the `ablate` switches in orchestration and cognition, 4 `python -m simorgh.evals ablate`; item 5 needs the creator's spend cap) · Depends on: stage 4 (`simorgh/evals/`), stage 11 (the household simulator) · Modules touched: evals (owner), orchestration, cognition; `docs/`
 
 ## Outcome
 
@@ -94,6 +94,6 @@ None of these switches may weaken Guardian. Guardian is not ablatable: every pro
 
 ## Definition of done
 
-- [ ] Items 1-4 built with tests; `modtest` is green for evals, orchestration and cognition; each CONTRACT.md is updated.
-- [ ] `ablate --dry-run` prints the full matrix and a cost estimate.
+- [x] Items 1-4 built with tests; `modtest` is green for evals, orchestration and cognition; each CONTRACT.md is updated.
+- [x] `ablate --dry-run` prints the full matrix and a cost estimate.
 - [ ] Item 5 run, and the findings written.

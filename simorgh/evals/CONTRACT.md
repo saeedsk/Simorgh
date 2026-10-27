@@ -36,7 +36,8 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/suites.py` | the suite registry, and each suite's adapter |
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
-| `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
+| `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario \| house \| arcs \| ablate` |
+| `simorgh/evals/ablation.py` | the stage-14 guardrail ablation runner: presets, the matrix, the cap, the table |
 | `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `timing.py`, `voicecache.py`, `run.py`, `scenarios/` |
 
 ## Suites
@@ -48,6 +49,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `tooluse` | BFCL cases from `simorgh/benchmark` | real | dollars |
 | `research` | GAIA cases from `simorgh/benchmark` | real | dollars |
 | `code` | the SWE-bench Verified slice | real | dollars, Docker |
+| `toolchain` | the `toolchain/` house scenarios (stage 14), one case per scenario, level = category | real | dollars; every case skipped without `--paid` |
 
 A paid suite refuses to start without `--paid`. `household` is the one
 the bless runs: no model, no network, no money, and it measures the
@@ -111,12 +113,44 @@ First scores, 2026-09-20: **tooluse (BFCL parallel) 5/5**, **research (GAIA leve
 
 Which voices those are is a **measurement**, kept in `tools/house_voices.py`. The first hand-picked set had `af_heart` and `af_bella` at 0.77 against each other -- two personas the embedder could not tell apart, which would have read as Sim misidentifying people in every scenario. The measured set (`af_river`, `bm_lewis`, `bf_isabella`, `am_puck`, `af_nicole`) has a worst pair of 0.24, and each persona identifies itself at 0.89-0.95 with a profile coherence of 0.86-0.92.
 
+**Tool chains** (`scenarios/toolchain.py`, stage 14 items 1-2). 22 scenarios with ids `toolchain/<category>/<name>` in forge's eight categories -- plumbing, selection, fidelity (argument fidelity), chaining, conditional, recovery, relevance, safety -- each typed at the console by the owner (`Beat(says=..., ask_directly=True)`, no `who`, so `play` routes it to `Director.type`), each `needs_model=True` with `needs_model_because` as its skip reason. Every device and service they name is in `contracts/home/fakes.py::DEFAULT_HOUSE`/`DEFAULT_SERVICES` and every tool in `agents/chat.md`; a test holds both. Their expectations read the house or the bus, never the wording:
+
+- `called_with(tool, **args)`: some `action.proposed` for `tool` carries these arguments as a subset (`matches`: dicts as subsets, also when sent as a JSON string; numbers equal whatever their type; text equal ignoring case and surrounding space; a callable such as `containing("18:45")` is asked).
+- `called_in_order(*tools)`: a subsequence of the proposed tools since the beat; an item may be a tuple of alternatives (`called_in_order(READS, "home_call")`). `called_any(*tools)`: at least one of them.
+- `steps_at_most(n)`: distinct `task.step` numbers of the beat's session (the heads-up before a model call carries the number of the step it starts, so this counts steps, not messages); a session with no steps falls back to its `cognition.think` count. The beat's session is the `task.started` ids since the mark, narrowed to the percept's `session_id` when they meet.
+- `recovered()`: an `action.result` with `ok: false` for one of the session's proposals, and then `task.completed` for that session without `floor`. Nothing failing fails it (the fault never fired), as does `task.failed`, a floor ending, or no ending.
+- `the_house_did(service, target, **data)` now also matches the service data the house received (`the_house_did("climate.set_temperature", "climate.hallway", temperature=21.5)`); without data its name is unchanged. `the_house_left(entity)`: nothing reached that one device.
+- `answered()` also accepts a completed `cli` turn with text in it, since nothing reads a typed reply aloud; a voice turn still has to be spoken.
+
+**Fault injection.** `Beat(fails={"service": "light.turn_on", "times": 1, "error": "...", "target": "", "kind": "transient"})` arms `Sandbox.fail(...)` (also `Director.fail`) for that beat and disarms it after (`times=0`). The sandbox's wrapper around `FakeHomeAssistant.call` raises `HomeUnavailable(error, error_kind=kind)` -- what the real client raises -- for the next `times` matching calls, so the tool reports an ordinary failure and nothing is written to `Record.house`. `contracts/home/fakes.py` is unchanged. The sandbox now wires the `media_` tools to the same fake house as the `home_` ones (`_MediaTool` shares the client seam), so `media_control` can be the right tool in a scenario.
+
+**Answering Guardian.** `Beat(answers="no")` runs `Director.answer_prompts(answer, since=mark)` for the beat: every `ui.prompt` after the mark is answered through `Interface._resolve_prompt`, the path a typed reply and `POST /api/prompts` take. A typed beat needs it, because `type()` is waiting for the turn the question is holding up; unanswered, the turn sits on Guardian's 30-minute prompt and the scenario times out. The three safety scenarios answer `no`.
+
+**On the floor** `run_pack` skips a `needs_model` scenario in the parent, without booting a child, with the scenario's `needs_model_because`; `python -m simorgh.evals house --only toolchain/` lists all 22 as skipped in about a second. `house.run.per_scenario(outcomes, scenarios)` folds per-expectation outcomes into one per scenario -- PASSED only if every expectation passed, FAILED if any failed (why = the first failure and its beat), SKIPPED if any could not be judged or nothing came back -- which is stage 14's unit of success and what the `toolchain` suite reports. The suite sets `SIMORGH_HOUSE_PAID` for its scenario children only when `--paid` set `SIMORGH_EVALS_PAID`.
+
+## The ablation runner (`ablation.py`, stage 14 item 4)
+
+`python -m simorgh.evals ablate --suite toolchain --presets sim,bare --models together:<model>,gemini:<model> --repeats 5 --paid --cap-usd 20` runs the same scenarios once per (model, preset, scenario, repeat), each in its own child (`house/run.py::_in_a_child`, which now takes `env=`). `--suite` is `toolchain` or any scenario id prefix containing `/` (`toolchain/recovery/`).
+
+- **Presets** are `ablation.PRESETS`, the plan's Definitions table as data: `sim`, `no_scaffold`, `no_verify`, `no_revisions`, `no_recovery`, `no_rescue`, `bare`. A test parses the table out of `docs/plan/stage-14-toolchain-evals-and-ablation.md` and compares, and another checks every switch is one `orchestration.config.ABLATABLE` / `cognition.config.ABLATE_SWITCHES` knows. No preset sets anything outside `[orchestration]` and `[cognition]`: Guardian is not a switch.
+- **The child's config** arrives as `SIMORGH_HOUSE_CONFIG` (`house.run.HOUSE_CONFIG_ENV`): a JSON object `house.run.house_config()` reads and `_sandbox_args()` merges over the paid sandbox arguments; `Sandbox` then merges it over `DEFAULT_CONFIG`. `sandbox._merge` is recursive since this item (identical to the old one-level merge for every earlier caller, none of which nests two deep). Malformed JSON raises in the child, which the parent reports as a skip, never as a run of the default config. `ablation.preset_config(preset, model, spend_cap_usd=)` sets `[orchestration] ablate`, `[cognition] ablate`, `provider_order = [provider]`, and -- for a real provider -- `providers.<provider>` starting from the shipped table (prices, caps) with `model` replaced, because cognition replaces a provider's whole table when one is given.
+- **Money.** A model other than `floor:floor` needs `--paid` **and** `--cap-usd`; without either the command exits 2 before anything starts. `SIMORGH_HOUSE_PAID` is set in a child's environment only for a paid run of a real model, and `SIMORGH_COGNITION_PROVIDER_ORDER` is removed from a real model's child (cognition lets it override `provider_order`; the test session sets it to `floor`). The cap is total across the matrix: checked before each run, and the child's share -- what is left, at most `ablation.PER_RUN_CAP_USD` ($1.00) -- becomes `[cognition.providers.<provider>] max_spend_usd`, the budget cognition really enforces (there is no section-wide `[cognition] max_spend_usd`, so none is written). A child that reports no spend (it died, timed out, or its ledger could not be read; `RunResult.spend_known = False`) is charged its whole share, so the total holds when the dollars are unknown. Once reached, the remaining runs are recorded `skipped: spend cap reached`. Runs are ordered repeat-major, so a capped matrix still has the same repeats behind every (model, preset).
+- **Skips.** A `needs_model` scenario on the floor or without `--paid` is skipped in the parent without a child. A child that raised, a house that did not boot, a real model that never answered (no `cognition:calls` row from it and at least one think error, or any answer from the floor), or a failed run that reached its share of the cap (a `budget_exceeded` think error, or floor answers once its spend reached the share) is skipped, not failed. Success per run is `per_scenario`'s.
+- **Steps and dollars.** `house.run.run_one` attaches `run_summary(record, **await ledger_facts(box))` to every outcome as `detail["run"]`: `steps` (distinct `task.step` numbers, else `cognition.think` count), `cost_usd` (the sandbox ledger's `cognition:budget:<provider>` spend, billed failures included), `model_answers` / `floor_answers` (`cognition:calls` rows by their `floor` flag), `model_errors` / `budget_errors` (the `task.step` a session publishes for a think that came back an error, `cognition error: <code> -- ...`), and `known` (False when the ledger could not be read). Not from `cognition.think.reply`: a reply is routed only to the asker's inbox (`bus/router.py`), so the observer never sees one -- the first version read $0 and "nobody answered" for every run, and the cap never moved. The cost goes on the first outcome only (`with_run_summary`), so a sum over outcomes counts it once.
+- **Output.** One row per (model, preset): passed/counted, rate, a **Wilson** 95% interval (`ablation.wilson`; the bootstrap collapses to zero width on 5/5), skipped count, mean steps, dollars; then the skip reasons and failures. One JSONL row per run is appended to `.simorgh_evals/ablation.jsonl` at the repo root (gitignored; `--log PATH` elsewhere): `{ts, suite, model, preset, scenario, repeat, status, why, steps, cost_usd, seconds}`. `--json` prints the rows instead of the table. Exit 0 once the matrix ran: a failed chain is the measurement.
+- **`--dry-run`** prints the matrix, each preset's switches, and an estimate per model from the shipped prices (`EST_STEPS_PER_RUN` x `EST_INPUT_TOKENS_PER_STEP` / `EST_OUTPUT_TOKENS_PER_STEP`); it needs no key and no `--paid` and starts nothing. It also names the presets that cannot change the chosen scenarios (`ablation.inert_presets`): every `toolchain/` scenario is a chat turn, and the chat profile already runs with `verify = false` and `max_revisions = 0`, so on that pack `no_verify` and `no_revisions` can only equal `sim`.
+- **Never in the live Sim.** `tests/simorgh/evals/test_ablation.py` asserts that a shipped `config.toml` / `simorgh.toml` at the repo root (none exists today) sets neither `[orchestration] ablate` nor `[cognition] ablate`, that `sim.sh` and `simloader.py` mention neither, and that only `simorgh/evals/` reads `SIMORGH_HOUSE_CONFIG`.
+
 ## Public Python surface
 
 - `simorgh.evals.run(suite, *, repeats=1, isolate=None) -> Report`
 - `simorgh.evals.table(report) -> str`, `record(report, data_dir=...) -> Path`, `last(data_dir, suite="") -> dict | None`
 - `simorgh.evals.api`: `Case`, `Outcome`, `Report`, `bootstrap_ci`, `outcomes_from`, `PASSED`/`FAILED`/`SKIPPED`
-- `simorgh.evals.suites`: `SUITES`, `PAID`, `find`
+- `simorgh.evals.suites`: `SUITES`, `PAID`, `find`, `toolchain`
+- `simorgh.evals.house.script`: the expectations above, plus `called_with`, `called_in_order`, `called_any`, `steps_at_most`, `recovered`, `the_house_left`, `containing`, `matches`; `Beat.fails`, `Beat.answers`, `Scenario.needs_model_because`
+- `simorgh.evals.house.sandbox.Sandbox.fail`, `simorgh.evals.house.director.Director.fail` / `answer_prompts`
+- `simorgh.evals.house.run.per_scenario`, `HOUSE_CONFIG_ENV`, `house_config`, `ledger_facts`, `run_summary`, `with_run_summary`; `simorgh.evals.house.scenarios.by_prefix`, `scenarios.toolchain` (`SCENARIOS`, `CATEGORIES`, `READS`, `category`)
+- `simorgh.evals.ablation`: `PRESETS`, `SUITE_PREFIXES`, `PER_RUN_CAP_USD`, `Model`, `Run`, `RunResult`, `Cell`, `parse_models`, `parse_presets`, `scenarios_for`, `preset_config`, `child_env`, `matrix`, `run_matrix`, `judge`, `wilson`, `cells`, `table`, `dry_run`, `estimate_usd`, `inert_presets`, `DEFAULT_LOG`
 - `simorgh.evals.scenario`: `run`, `SCRIPT`, `main` -- `tools/recall_scenario.py` is a shim onto it
 - Read by `simloader.py::run_evals` (the bless gate) and `tools/recall_scenario.py`. Nothing else imports it.
 
@@ -127,10 +161,14 @@ python -m simorgh.evals run household --repeats 3        # the acceptance case
 python -m simorgh.evals run household --json --record ~/.simorgh/loader
 python -m simorgh.evals run trials --paid                # real money
 python -m simorgh.evals list
+python -m simorgh.evals house --only toolchain/ --json   # the tool-chain pack; all skipped on the floor
+python -m simorgh.evals run toolchain --paid              # one case per scenario, real money
 python -m simorgh.evals scenario --verbose               # per-probe context
+python -m simorgh.evals ablate --suite toolchain --models floor:floor --dry-run   # the matrix and its cost
+python -m simorgh.evals ablate --suite toolchain --models together:<m> --paid --cap-usd 20
 ```
 
-Exit code 0 only when every counted case passed.
+Exit code 0 only when every counted case passed (`ablate`: 0 once the matrix ran, 2 on a refusal).
 
 ## Record
 
@@ -168,6 +206,9 @@ interesting question about an eval is what it did last week.
 
 - `tests/simorgh/evals/test_evals.py` -- the arithmetic and the wiring: skipped cases out of the denominator, a suite that could not start, per-level reporting, a stable interval, the JSON round trip, the record, the table, a dead repeat.
 - `tests/simorgh/evals/test_scenario.py` -- the household scenario against the real booted system: 3 of 3 probes (integration mark).
+- `tests/simorgh/evals/house/test_tool_chain_expectations.py` -- each stage-14 expectation passing and failing against a hand-built record.
+- `tests/simorgh/evals/test_ablation.py` -- the presets equal the plan's table, the child's config and its deep merge, paid/cap refusals, the cap stopping the matrix, skips vs failures, the JSONL rows, Wilson, `--dry-run` with no key, a floor run all skipped with exit 0, and the never-in-the-live-Sim checks.
+- `tests/simorgh/evals/house/test_the_toolchain_pack.py` -- the pack's shape, every device/service/tool it names exists, the floor run skips all without booting, `per_scenario`, the suite, `play` arming a fault and an answer, and (integration) a fault firing once in a real sandbox, the media tools reaching the house, and a "no" keeping the door locked.
 
 ## Known issues
 

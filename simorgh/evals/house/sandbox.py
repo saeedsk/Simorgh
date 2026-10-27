@@ -105,6 +105,9 @@ class Sandbox:
         self.clock = SkippingClock()
         #: The house the home tools reach, once booted: `FakeHomeAssistant`.
         self.house = None
+        #: Armed faults (stage 14 item 1), consulted on every service
+        #: call the house is asked for. See `fail()`.
+        self._faults: list[dict] = []
 
     # -- lifecycle ----------------------------------------------------------------
     async def start(self) -> "Sandbox":
@@ -215,14 +218,48 @@ class Sandbox:
             # `**rest` on purpose: `home_call` passes `settle_s` too,
             # and a wrapper that pins today's signature turns a new
             # argument into a TypeError from inside the fake house.
+            self._maybe_fail(service, entity_ids)
             result = await original(service, entity_ids=entity_ids, data=data, **rest)
             self.record.house_did(service, entity_ids, data or {})
             return result
 
         self.house.call = _watched
+        # `media_` too: `media_control` and `media_now` share the home
+        # tools' client seam (`_MediaTool` is a `_HomeTool`), and left
+        # unwired "set the Echo to 15" could only fail in a sandbox --
+        # the right tool scored as a wrong one.
         for tool in execution._registry.values():  # noqa: SLF001 -- the domain tools' own seam
-            if getattr(tool, "name", "").startswith("home_"):
+            if getattr(tool, "name", "").startswith(("home_", "media_")) and hasattr(tool, "_given"):
                 tool._given = self.house  # noqa: SLF001
+
+    def fail(self, service: str, *, times: int = 1, error: str = "", target: str = "",
+             kind: str = "transient") -> None:
+        """Make the house refuse `service` the next `times` calls.
+
+        Raised as `HomeUnavailable`, which is what the real client raises
+        when Home Assistant times out or refuses, so the tool reports it
+        exactly as it would live and the model sees an ordinary failure.
+        `target` narrows it to calls that include that entity id.
+        `times=0` disarms every fault on `service`. Wraps the fake rather
+        than changing it: `contracts/home/fakes.py` is not this
+        package's to edit.
+        """
+        self._faults = [f for f in self._faults if f["service"] != service]
+        if times > 0:
+            self._faults.append({"service": service, "left": int(times), "target": target,
+                                 "kind": kind,
+                                 "error": error or f"Home Assistant did not answer the {service} call in time"})
+
+    def _maybe_fail(self, service: str, entity_ids) -> None:
+        from simorgh.contracts.home.client import HomeUnavailable
+
+        for fault in self._faults:
+            if fault["service"] != service or fault["left"] <= 0:
+                continue
+            if fault["target"] and fault["target"] not in tuple(entity_ids or ()):
+                continue
+            fault["left"] -= 1
+            raise HomeUnavailable(fault["error"], error_kind=fault["kind"])
 
     def _bus_backend(self):
         return self.kernel._bus_backend  # noqa: SLF001 -- the observer seam; see `_watch`
@@ -307,12 +344,19 @@ def _voice_fakes(into: dict, *, recogniser=None):
 
 
 def _merge(*layers: dict) -> dict:
-    """Later layers win, one level into each section."""
+    """Later layers win, merged table by table at every depth.
+
+    Recursive since stage 14: an ablation run sets
+    `cognition.providers.<name>.model` and must not clobber the rest of
+    `[cognition]` that an earlier layer set. For the layers that existed
+    before (no table nested two deep on both sides) it is the old
+    one-level merge exactly.
+    """
     out: dict = {}
     for layer in layers:
         for key, value in (layer or {}).items():
             if isinstance(value, dict) and isinstance(out.get(key), dict):
-                out[key] = {**out[key], **value}
+                out[key] = _merge(out[key], value)
             else:
                 out[key] = value
     return out

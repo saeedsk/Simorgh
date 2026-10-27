@@ -23,6 +23,7 @@ the evals report shape, unchanged.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -81,6 +82,20 @@ class Beat:
     proposes: dict = field(default_factory=dict)
     device: dict = field(default_factory=dict)   # something in the house did this
     restart: bool = False           # kill Sim and boot it again before this beat
+    #: A fault in the fake house for this beat (stage 14 item 1):
+    #: `{"service": "light.turn_on", "times": 1, "error": "...",
+    #: "target": "", "kind": "transient"}`. The named service call
+    #: raises the way an unreachable Home Assistant does, `times` times,
+    #: and then works. How a recovery scenario gets a failure a real
+    #: model has to notice and get past, without touching the contracts
+    #: fake (`Sandbox.fail`).
+    fails: dict = field(default_factory=dict)
+    #: What the person answers if Guardian stops to ask during this
+    #: beat ("no", "yes"). Empty leaves the question unanswered, which
+    #: is right for a proposal beat and wrong for a typed one: the turn
+    #: then waits on Guardian's half-hour prompt and the scenario times
+    #: out instead of reporting what the gate did.
+    answers: str = ""
     expect: tuple = ()              # expectations judged after this beat
 
     def describe(self) -> str:
@@ -114,6 +129,10 @@ class Scenario:
     #: out of a conversation cannot be judged by the floor provider,
     #: which answers everything, and says so rather than failing.
     needs_model: bool = False
+    #: The skip reason a floor run reports for this scenario. Empty
+    #: keeps the listening one above; a tool-choosing scenario says
+    #: what it is really waiting for.
+    needs_model_because: str = ""
 
     def cases(self) -> int:
         return sum(len(b.expect) for b in self.beats) + len(self.expect)
@@ -124,10 +143,21 @@ class Scenario:
 #   expect=[answered(), did_not_call("home_call"), first_audio_under(2.5)]
 
 def answered() -> Expectation:
-    """Sim said something back."""
+    """Sim said something back.
+
+    Spoken, or -- for a turn typed at the console, which nothing reads
+    aloud -- a completed `cli` turn with words in it. The typed half
+    only counts typed turns: a voice turn that finished without being
+    spoken did not answer anybody in the room.
+    """
     def _check(record: Record, since: float) -> str:
         if record.said_since(since):
             return ""
+        for turn in record.of("turn.completed", since=since):
+            payload = turn.payload
+            if (payload.get("channel") == "cli" and str(payload.get("text") or "").strip()
+                    and not payload.get("cancelled")):
+                return ""
         return "Sim said nothing"
     return Expectation("answered", _check, stage="3")
 
@@ -191,6 +221,185 @@ def did_not_run(tool: str) -> Expectation:
                 return f"{tool} was invoked"
         return ""
     return Expectation(f"{tool} never ran", _check, stage="0")
+
+
+# ---------------------------------------------------------- tool chains (stage 14 item 1)
+# What forge's eval guide measures, read off the bus: which tool, with
+# which arguments, in which order, in how many steps, and whether a
+# failure was got past. None of them reads the reply's wording.
+
+class containing:
+    """A matcher for `called_with`/`the_house_did`: the value, as text,
+    contains this (case-insensitive). For a time or a phrase a model may
+    reasonably dress up -- "18:45", "today at 18:45" -- where equality
+    would be judging the wording."""
+
+    def __init__(self, text: str) -> None:
+        self.text = str(text)
+
+    def __call__(self, value) -> bool:
+        return self.text.lower() in str(value).lower()
+
+    def __repr__(self) -> str:
+        return f"containing({self.text!r})"
+
+
+def matches(want, got) -> bool:
+    """Whether `got` carries `want`: a subset for dicts, equal for
+    numbers whatever their type ("21", 21, 21.0), equal ignoring case
+    and surrounding space for text, and a callable is asked. A dict that
+    arrived as a JSON string is read as the dict -- `home_call` accepts
+    its `data` either way, so the model may send either."""
+    if callable(want):
+        try:
+            return bool(want(got))
+        except Exception:  # noqa: BLE001 -- a matcher that cannot read the value did not match it
+            return False
+    if isinstance(want, dict):
+        if isinstance(got, str):
+            import json
+
+            try:
+                got = json.loads(got)
+            except ValueError:
+                return False
+        if not isinstance(got, dict):
+            return False
+        return all(key in got and matches(value, got[key]) for key, value in want.items())
+    if isinstance(want, bool) or isinstance(got, bool):
+        return str(want).lower() == str(got).strip().lower()
+    if isinstance(want, (int, float)):
+        try:
+            number = float(got)
+        except (TypeError, ValueError):
+            return False
+        return abs(number - float(want)) <= 1e-6 * max(1.0, abs(float(want)))
+    if isinstance(want, str):
+        return str(got).strip().lower() == want.strip().lower()
+    if isinstance(want, (list, tuple)):
+        return (isinstance(got, (list, tuple)) and len(got) == len(want)
+                and all(matches(w, g) for w, g in zip(want, got)))
+    return want == got
+
+
+def called_with(tool: str, **args) -> Expectation:
+    """Sim proposed `tool` with at least these arguments (`matches`).
+
+    A proposal, not a result: whether the call then worked is the
+    house's business (`the_house_did`). This is argument fidelity --
+    did the exact entity id, number or time asked for reach the call.
+    """
+    def _check(record: Record, since: float) -> str:
+        proposals = [m.payload.get("args") or {} for m in record.of("action.proposed", since=since)
+                     if m.payload.get("tool") == tool]
+        if any(matches(args, proposed) for proposed in proposals):
+            return ""
+        if not proposals:
+            return f"{tool} was never proposed"
+        return f"{tool} was proposed with {[str(p)[:90] for p in proposals[:3]]}, not {args}"
+    return Expectation(f"called {tool} with {args}", _check, stage="14")
+
+
+def _proposed_tools(record: Record, since: float) -> list[str]:
+    return [str(m.payload.get("tool") or "") for m in record.of("action.proposed", since=since)]
+
+
+def called_any(*tools: str) -> Expectation:
+    """Sim proposed at least one of these. For reading the house, where
+    `home_state`, `home_find` and `home_describe` are all honest ways to
+    find something out and naming one would be judging style."""
+    def _check(record: Record, since: float) -> str:
+        proposed = _proposed_tools(record, since)
+        if any(tool in proposed for tool in tools):
+            return ""
+        return f"none of {list(tools)} was proposed (proposed: {proposed or 'nothing'})"
+    return Expectation(f"called one of {', '.join(tools)}", _check, stage="14")
+
+
+def called_in_order(*tools) -> Expectation:
+    """These tools were proposed in this order, others allowed between.
+
+    Each item is a tool name or a tuple of names any one of which will
+    do: `called_in_order(("home_state", "home_find"), "home_call")` is
+    "read the house, then act on it", which is what chaining means.
+    """
+    wanted = [tuple(t) if isinstance(t, (tuple, list)) else (t,) for t in tools]
+
+    def _check(record: Record, since: float) -> str:
+        proposed = _proposed_tools(record, since)
+        index = 0
+        for tool in proposed:
+            if index < len(wanted) and tool in wanted[index]:
+                index += 1
+        if index == len(wanted):
+            return ""
+        missing = "/".join(wanted[index])
+        return f"no {missing} after the first {index} in order (proposed: {proposed or 'nothing'})"
+    label = " then ".join("/".join(w) for w in wanted)
+    return Expectation(f"called {label}", _check, stage="14")
+
+
+def _sessions(record: Record, since: float) -> set[str]:
+    """The sessions this beat started. The task ids `task.started`
+    names since the mark, narrowed to the ones the beat's own percept
+    named when it named any (a typed turn's session id IS its task id),
+    so a background task that happened to start meanwhile is not
+    counted against the turn."""
+    started = {str(m.payload.get("task_id") or "") for m in record.of("task.started", since=since)}
+    started.discard("")
+    asked = {str(m.payload.get("session_id") or "") for m in record.of("percept.text.received", since=since)}
+    return (started & asked) or started
+
+
+def steps_at_most(n: int) -> Expectation:
+    """The beat's session took no more than `n` steps.
+
+    A step is one numbered `task.step` of the session -- a model call
+    and what it led to. The heads-up a session publishes before it asks
+    the model carries the number of the step it is about to take, so
+    counting distinct numbers counts steps, not messages. A session that
+    never stepped falls back to its `cognition.think` count.
+    """
+    def _check(record: Record, since: float) -> str:
+        sessions = _sessions(record, since)
+        if not sessions:
+            return "no session started during the beat"
+        numbers = {(m.payload.get("task_id"), m.payload.get("step_no"))
+                   for m in record.of("task.step", since=since)
+                   if m.payload.get("task_id") in sessions}
+        took = len(numbers) or sum(1 for m in record.of("cognition.think", since=since)
+                                   if m.payload.get("stream_to") in sessions)
+        return "" if took <= n else f"took {took} steps, more than {n}"
+    return Expectation(f"in {n} steps or fewer", _check, stage="14")
+
+
+def recovered() -> Expectation:
+    """A tool failed during the beat and the session still completed.
+
+    Both halves are required. Nothing failing is a failure of the
+    scenario's premise (the injected fault never fired, usually because
+    the model never made the call), not a recovery; and a session that
+    ended `failed` or on the floor gave up. Whether the house then did
+    the right thing is a separate expectation, beside this one.
+    """
+    def _check(record: Record, since: float) -> str:
+        sessions = _sessions(record, since)
+        mine = {str(m.payload.get("action_id") or "") for m in record.of("action.proposed", since=since)
+                if not sessions or m.payload.get("task_id") in sessions}
+        failed = [m for m in record.of("action.result", since=since)
+                  if m.payload.get("ok") is False and m.payload.get("action_id") in mine]
+        if not failed:
+            return "no tool failed during the beat, so nothing was recovered from"
+        for message in record.of("task.failed", since=since):
+            if message.payload.get("task_id") in sessions:
+                return f"the session failed: {str(message.payload.get('reason') or '')[:100]}"
+        for message in record.of("task.completed", since=since):
+            if message.payload.get("task_id") in sessions:
+                if message.payload.get("floor"):
+                    return "the session ended on the floor provider"
+                return ""
+        return "the session never completed"
+    return Expectation("recovered from a failed tool", _check, stage="14")
 
 
 def the_prefix_did_not_change() -> Expectation:
@@ -258,7 +467,7 @@ def nothing_wrote_a_trace() -> Expectation:
     return Expectation("nothing wrote a trace", _check, stage="1")
 
 
-def the_house_did(service: str, target: str = "") -> Expectation:
+def the_house_did(service: str, target: str = "", **data) -> Expectation:
     """A service really reached a device, and the device really moved.
 
     The positive half of `the_house_did_nothing`, and the reason the
@@ -266,16 +475,38 @@ def the_house_did(service: str, target: str = "") -> Expectation:
     kitchen light should end with the kitchen light on, and until
     2026-09-20 nothing in this harness could tell the difference
     between that and a tool that quietly refused.
+
+    `data` is matched as a subset of the service data the house got
+    (`matches`): `the_house_did("climate.set_temperature",
+    "climate.hallway", temperature=21.5)`. Read at the far end, so it
+    holds whichever tool carried the value there.
     """
     def _check(record: Record, since: float) -> str:
         did = [a for a in record.house if a.at >= since and a.service == service]
         if target:
             did = [a for a in did if target in a.targets]
+        if data:
+            near = did
+            did = [a for a in did if matches(data, a.args)]
+            if near and not did:
+                return f"{service} reached the house with {[a.args for a in near][:3]}, not {data}"
         if did:
             return ""
         happened = ", ".join(sorted({a.service for a in record.house if a.at >= since})) or "nothing"
         return f"the house did {happened}, not {service}" + (f" on {target}" if target else "")
-    return Expectation(f"the house did {service}", _check, stage="9")
+    name = f"the house did {service}" + (f" on {target}" if target and data else "")
+    return Expectation(name + (f" with {data}" if data else ""), _check, stage="9")
+
+
+def the_house_left(entity_id: str) -> Expectation:
+    """Nothing reached this one device. The narrow form of
+    `the_house_did_nothing`, for a beat that rightly changed something
+    else -- "turn on whichever light is off" must not touch the one
+    that is on."""
+    def _check(record: Record, since: float) -> str:
+        did = [a for a in record.house if a.at >= since and entity_id in a.targets]
+        return "" if not did else f"the house did {', '.join(a.service for a in did)} on {entity_id}"
+    return Expectation(f"the house left {entity_id} alone", _check, stage="14")
 
 
 def the_house_did_nothing() -> Expectation:
@@ -492,7 +723,11 @@ async def play(scenario: Scenario, director) -> list[Outcome]:
     for beat in scenario.beats:
         if beat.after:
             await director.advance(beat.after)
+        if beat.fails:
+            director.fail(**beat.fails)
         mark = director.now()
+        answering = (asyncio.ensure_future(director.answer_prompts(beat.answers, since=mark))
+                     if beat.answers else None)
         try:
             if beat.restart:
                 await director.restart()
@@ -520,6 +755,14 @@ async def play(scenario: Scenario, director) -> list[Outcome]:
                                               level=scenario.stage),
                                     status=FAILED, why=f"the beat itself failed: {exc!r}"))
             continue
+        finally:
+            if answering is not None:
+                answering.cancel()
+            if beat.fails:
+                # A fault belongs to its beat. Left armed, a recovery
+                # beat that never made the call would fail the NEXT
+                # beat's call instead, and blame it.
+                director.fail(service=str(beat.fails.get("service") or ""), times=0)
         for expectation in beat.expect:
             outcomes.append(expectation.judge(director.record, mark, beat=beat.describe()))
     for expectation in scenario.expect:
@@ -558,8 +801,9 @@ def _with_room(config: dict | None, room: str) -> dict:
 
 
 __all__ = ["Beat", "Check", "Expectation", "Scenario", "answered", "asked_a_person", "called",
-           "nobody_was_asked", "printed", "printed_nothing_like",
+           "called_any", "called_in_order", "called_with", "containing", "matches",
+           "nobody_was_asked", "printed", "printed_nothing_like", "recovered", "steps_at_most",
            "did_not_call", "did_not_run", "first_audio_under", "identified_as", "play", "play_all", "quiet",
            "nothing_wrote_a_trace", "remembered", "said_something_like", "the_house_did", "the_house_did_nothing",
-           "the_prefix_did_not_change", "tui_is_sane",
+           "the_house_left", "the_prefix_did_not_change", "tui_is_sane",
            "was_denied"]
