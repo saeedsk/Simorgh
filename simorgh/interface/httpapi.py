@@ -1273,9 +1273,9 @@ class HttpApi:
                 writer.write(b"data: " + json.dumps(response, default=str).encode("utf-8") + b"\n\n")
                 await writer.drain()
 
-            await server.stream(request, caller, _emit)
+            await server.stream(request, caller, _emit, version=headers.get("a2a-version", ""))
             return
-        response = await server.call(request, caller)
+        response = await server.call(request, caller, version=headers.get("a2a-version", ""))
         await self._try_respond(writer, 200, json.dumps(response, default=str).encode("utf-8"), "application/json")
 
     def _authorized(self, headers: dict[str, str], query: dict | None = None) -> bool:

@@ -26,6 +26,13 @@ Four rules, each a decision rather than a default:
   expose` (default `["research"]`) with their skills from `agents/*.md`;
   a request for any other agent is refused by name.
 
+The version is negotiated, not assumed (A2A v1.0 "Versioning"): the card
+says 0.3 twice, as v0.3's top-level `protocolVersion` and as v1.0's
+`supportedInterfaces[]`, so a client of either version reads it; a
+request names its version in the `A2A-Version` header (none means 0.3),
+and one this server does not speak is a `VersionNotSupportedError`
+(-32009) naming the ones it does, before anything runs.
+
 The mapping is `contracts/a2a.py`'s (item 8), in A2A v0.3.0's spelling
 -- the version the card declares and the `a2a-sdk` 0.3 line speaks:
 crew status is the task state (`waiting` is `input-required`, `blocked`
@@ -53,6 +60,10 @@ from .crewview import message_text
 
 #: The A2A protocol version this server speaks.
 PROTOCOL_VERSION = "0.3.0"
+#: The versions a request may name in its `A2A-Version` header, as
+#: major.minor. A request that names none is 0.3 (the spec's default).
+SERVER_VERSIONS = ("0.3",)
+VERSION_HEADER = "A2A-Version"
 #: Where the agent bodies are (`agents/*.md`); read for the card's skills.
 AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
 #: The JSON-RPC endpoint, next to the card on the same listener.
@@ -77,6 +88,7 @@ TASK_NOT_CANCELABLE = -32002
 PUSH_NOT_SUPPORTED = -32003
 UNSUPPORTED_OPERATION = -32004
 CONTENT_TYPE_NOT_SUPPORTED = -32005
+VERSION_NOT_SUPPORTED = -32009
 
 #: The wire version this server speaks (`contracts/a2a.py` spells both).
 WIRE = "0.3"
@@ -157,7 +169,25 @@ def agent_card(*, url: str, expose: tuple[str, ...], agents_dir: Path = AGENTS_D
                                        "description": "a paired device's token (`pair` on Sim's console)"}},
         "security": [{"bearer": []}],
         "skills": skills,
+        # v1.0's spelling of the same interface, for a v1.0 client to find
+        # the version it must speak here (v0.3's card schema allows it).
+        "supportedInterfaces": [{"url": url, "protocolBinding": "JSONRPC",
+                                 "protocolVersion": SERVER_VERSIONS[0]}],
     }
+
+
+def check_version(header: str) -> str:
+    """The `A2A-Version` a request named -> the version it is served in,
+    or `VersionNotSupportedError` naming the ones this server speaks."""
+    asked = str(header or "").strip()
+    if not asked:
+        return SERVER_VERSIONS[0]
+    parts = asked.split(".")
+    major_minor = ".".join(parts[:2])
+    if major_minor in SERVER_VERSIONS:
+        return major_minor
+    raise RpcError(VERSION_NOT_SUPPORTED, f"A2A version {asked!r} is not spoken here; this agent speaks "
+                                          f"{', '.join(SERVER_VERSIONS)}", {"supported": list(SERVER_VERSIONS)})
 
 
 # ------------------------------------------------------------------ mapping
@@ -515,11 +545,13 @@ class A2AServer:
         task.push(self._status_event(task))
         return task.to_a2a()
 
-    async def call(self, request: dict, caller) -> dict:
-        """One non-streaming JSON-RPC request -> its response object."""
+    async def call(self, request: dict, caller, *, version: str = "") -> dict:
+        """One non-streaming JSON-RPC request -> its response object.
+        `version` is the request's `A2A-Version` header."""
         rid = request.get("id") if isinstance(request, dict) else None
         try:
             method, params = self._check(request)
+            check_version(version)
             if method == "message/send":
                 result = await self._send(params, caller)
             elif method == "tasks/get":
@@ -543,7 +575,8 @@ class A2AServer:
         params = request.get("params")
         return request["method"], params if isinstance(params, dict) else {}
 
-    async def stream(self, request: dict, caller, emit: Callable[[dict], "asyncio.Future"]) -> None:
+    async def stream(self, request: dict, caller, emit: Callable[[dict], "asyncio.Future"], *,
+                     version: str = "") -> None:
         """`message/stream` and `tasks/resubscribe`: every event as one
         JSON-RPC response, until the task ends or waits for the caller.
         `emit` writes one response; an error before the first event is
@@ -553,6 +586,7 @@ class A2AServer:
         task: InboundTask | None = None
         try:
             method, params = self._check(request)
+            check_version(version)
             if method == "message/stream":
                 task = await self._begin(params, caller, listener=queue)
             elif method == "tasks/resubscribe":
@@ -586,7 +620,7 @@ class A2AServer:
 
 __all__ = [
     "A2AServer", "AGENTS_DIR", "CARD_PATH", "InboundTask", "MAX_BODY_BYTES", "PROTOCOL_VERSION", "RPC_PATH",
-    "SPAWN_RATE",
-    "RpcError", "WIRE", "agent_card", "agent_skill", "brief_of", "crew_message", "report_artifact",
-    "text_message",
+    "SERVER_VERSIONS", "SPAWN_RATE", "VERSION_HEADER", "VERSION_NOT_SUPPORTED",
+    "RpcError", "WIRE", "agent_card", "agent_skill", "brief_of", "check_version", "crew_message",
+    "report_artifact", "text_message",
 ]
