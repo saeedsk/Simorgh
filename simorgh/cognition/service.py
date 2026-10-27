@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import re
 import os
 
@@ -29,6 +30,7 @@ from .providers.claude_code import ClaudeCodeProvider
 from .providers.gemini import GeminiProvider
 from .providers.together import DEFAULT_MODEL as together_default_model, TogetherProvider
 from .router import Router
+from .tokens import ESTIMATOR, estimate_tokens, pinned, split_messages
 
 VERSION = "0.1.0"
 
@@ -218,6 +220,32 @@ def _typed_transcript(protected_text: str, messages: list[dict], compacted) -> l
         elif m.get("content"):
             out.append({"role": "system" if role == "system" else role, "content": m["content"]})
     return out
+
+
+def _token_split(prefix_tokens: int, tool_instructions: str | None, specs: list[dict] | None,
+                 messages: list[dict], compacted, *, native: bool, typed: bool) -> dict[str, int]:
+    """Where this think's input tokens went, by block (stage 17 item 1),
+    estimated with `estimate_tokens`. `tools` is what the answering
+    provider was actually sent: the marker block unless it was handed the
+    typed transcript, plus the schemas when it is native. After
+    compaction the messages compaction may shorten are scaled to what was
+    left of them; pinned ones (memory, the protected question) are not."""
+    tools = 0
+    if tool_instructions and not (native and typed):
+        tools += estimate_tokens(tool_instructions)
+    if native and specs:
+        tools += estimate_tokens(json.dumps(specs, separators=(",", ":"), default=str))
+    ratio = 1.0
+    if compacted.layers_applied:
+        # Compaction never shortens a pinned message (system blocks, the
+        # protected question), so only the rest shrinks: scale that by what
+        # was left of it, measured the way the compactor measures.
+        held = sum(estimate_tokens(str(m.get("content") or "")) for m in messages if pinned(m))
+        elastic_before = compacted.tokens_before - held
+        if elastic_before > 0:
+            ratio = max(0, compacted.tokens_after - held) / elastic_before
+    caller = split_messages(messages, elastic_ratio=ratio)
+    return {"prefix": int(prefix_tokens), "tools": tools, **caller}
 
 
 def _within_deadline(max_seconds: float, message: Message, now: float) -> float:
@@ -582,6 +610,12 @@ class Service:
                 span.set("tokens_in", response.input_tokens)
                 span.set("tokens_out", response.output_tokens)
                 span.set("tokens_cached", response.cached_input_tokens)
+                span.set("split", _token_split(
+                    protected_tokens, tool_instructions, self._offered_specs(payload), messages, compacted,
+                    native=self._router.is_native(response.provider), typed=bool(native_messages)))
+                span.set("estimator", ESTIMATOR)
+                if payload.get("channel"):
+                    span.set("channel", str(payload["channel"]))
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)
             return

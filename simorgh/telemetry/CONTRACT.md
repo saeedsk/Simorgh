@@ -1,6 +1,6 @@
 # telemetry -- contract
 
-One-line status: layer 0 · ~500 lines · 2 test files · lock: `telemetry` in docs/modules/locks.toml
+One-line status: layer 0 · ~700 lines · 3 test files · lock: `telemetry` in docs/modules/locks.toml
 
 ## Purpose
 
@@ -15,6 +15,8 @@ As of this item nothing writes to it but tests: routing bus tracing and metrics 
 | `simorgh/telemetry/__init__.py` | re-exports `Config`, `FILENAME`, `RecordingSpan`, `TelemetryService`, `TelemetryStore` |
 | `simorgh/telemetry/config.py` | `[telemetry]` dataclass and `from_mapping` (negative values refused) |
 | `simorgh/telemetry/store.py` | `TelemetryStore`: schema, batched insert, trace and series reads, retention and downsampling; synchronous, one connection behind a lock |
+| `simorgh/telemetry/tokens.py` | stage 17 item 1: sums `cognition.provider_call` spans into the input split per block and the cache hit rate, per provider and per lane (`chat`, `voice`, `task`) |
+| `simorgh/telemetry/__main__.py` | `python -m simorgh.telemetry tokens [--since 7d] [--file PATH \| --data-dir DIR] [--json]` |
 | `simorgh/telemetry/service.py` | `TelemetryService`: implements `contracts.protocols.Telemetry`; the buffer, the writer task, `flush`, `query`, `series`, `maintain`, `on_sleep_tick`, `stop` |
 
 ## Consumes
@@ -74,6 +76,9 @@ No environment variables. The file path is fixed: `<[runtime] data_dir>/telemetr
   - Attributes: `counters` (`spans`, `samples`, `flushes`, `dropped`, `write_errors`, `maintain_runs`), `last_retention`, `path`, `store`, `config`.
 - `TelemetryStore(path)`: synchronous `open`, `close`, `write(spans, samples)`, `spans(trace_id)`, `samples(series, since=, until=)`, `counts()`, `retain(now=, span_max_age_s=, sample_max_age_s=, downsample_after_s=, bucket_s=)`. Call it from a worker thread.
 - `Config`, `FILENAME = "telemetry.sqlite"`.
+- `store.read_spans(path, name, *, since=None) -> list[dict]`: every span called `name` started at or after `since`, read-only; keys `trace_id, span_id, name, start, end, status, attrs`; empty when the file or its `spans` table is absent; any other sqlite error raises (the command prints it and exits 1) rather than reading as an empty period.
+- `tokens` (stage 17 item 1): `report(path, *, since_s, now=None) -> dict` (`by_provider`, `by_lane`, `all`; a row has `calls`, `split_calls`, `tokens_in`, `tokens_cached`, `tokens_out`, `cache_hit`, and per block `blocks`, `uncached`, `share`, `uncached_share`), `summarize(spans)`, `span_blocks(attrs)`, `lane_of(attrs)`, `parse_since(text)`, `format_report(result)`, `BLOCKS` (a copy of `cognition/tokens.py::BLOCKS`; telemetry may not import cognition). A span's `split` (chars/4 estimates) is scaled to its `tokens_in` (left as estimated when a provider reports no `tokens_in`); `tokens_cached` is taken off the blocks in the order sent (prefix, tools, memory, question, window, results), which is approximate where a provider places native schemas elsewhere. Lane: `voice` when the span's `channel` is `voice`, `chat` for other `purpose: chat`, `task` otherwise. The printout ends with the stage 17 gate line: the tools block's share of uncached input on chat and voice.
+- `python -m simorgh.telemetry tokens`: the file is `--file`, else `<--data-dir>/telemetry.sqlite`, else `$SIMORGH_RUNTIME_DATA_DIR` or `~/.simorgh` (telemetry cannot import the Kernel's config loader, so a `data_dir` set only in simorgh.toml needs `--data-dir`). Reads token counts only; exit 1 when the file is absent.
 - Module-level state: `service._CURRENT`, a `ContextVar` holding the innermost open span per task.
 
 ## Invariants
@@ -92,6 +97,7 @@ No environment variables. The file path is fixed: `<[runtime] data_dir>/telemetr
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract telemetry`.
 
 - `tests/simorgh/telemetry/test_store.py` -- WAL file, table columns and indexes; 10k spans then one trace by index; start/end/status/attrs; nested and child-task parent ids; exception marks `error` and re-raises; cancellation; batching by timer and by size; stop flushes everything; bounded buffer; retention by age; one sample per minute per series; sleep-tick rate limit; the after-start pass; every config key read.
+- `tests/simorgh/telemetry/test_tokens_report.py` -- the per-span scaling and cache attribution, per provider and per lane, the period filter, the printed gate line, `--json`, a missing file.
 - `tests/simorgh/telemetry/test_kernel_wiring.py` -- a booted Kernel puts one store on every Context, the sleep tick runs retention, shutdown flushes, `enabled = false` hands out the no-op.
 - `tests/simorgh/contracts/test_telemetry_protocol.py` -- the protocol's no-op and the `Context.telemetry` default.
 

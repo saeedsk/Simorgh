@@ -229,3 +229,34 @@ def last_sample(path: str | Path, series: str) -> dict | None:
     finally:
         conn.close()
     return None if row is None else {"ts": row[0], "value": json.loads(row[1])}
+
+
+def read_spans(path: str | Path, name: str, *, since: float | None = None) -> list[dict]:
+    """Every span called `name` that started at or after `since`, read-only
+    (`python -m simorgh.telemetry tokens`); empty when the file or its
+    table does not exist. Any other sqlite error (a corrupt or locked
+    file) raises: "no calls" would be a false answer to it."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    sql, args = 'SELECT trace_id, span_id, start, "end", status, attrs_json FROM spans WHERE name=?', [name]
+    if since is not None:
+        sql, args = sql + " AND start>=?", args + [since]
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5.0)
+    try:
+        rows = conn.execute(sql + " ORDER BY start, rowid", args).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return []
+    finally:
+        conn.close()
+    out = []
+    for trace, span, start, end, status, attrs in rows:
+        try:
+            decoded = json.loads(attrs) if attrs else {}
+        except ValueError:
+            decoded = {}
+        out.append({"trace_id": trace, "span_id": span, "name": name, "start": start, "end": end,
+                    "status": status, "attrs": decoded if isinstance(decoded, dict) else {}})
+    return out
