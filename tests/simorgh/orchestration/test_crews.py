@@ -31,10 +31,12 @@ class CrewCognition:
     `together=n`: a session's first think waits until n sessions have
     thought, so n sessions that run at once all have a think in flight at
     the same instant whatever the machine's load, and sessions that run in
-    turn never meet (`apart` is set once the generous ceiling passes)."""
+    turn never meet (`apart` is set once the generous ceiling passes).
+    Sessions named in `alone` (a root whose think spawns the others) neither
+    wait nor count."""
 
     def __init__(self, bus, scripts: dict, *, delay=None, cost=None, together: int = 0,
-                 together_ceiling_s: float = 15.0) -> None:
+                 together_ceiling_s: float = 15.0, alone: tuple = ()) -> None:
         self._bus = bus
         self._scripts = scripts
         self._delay = delay or {}
@@ -44,6 +46,7 @@ class CrewCognition:
         self._sub = None
         self._together = together
         self._ceiling = together_ceiling_s
+        self._alone = set(alone)
         self._met = asyncio.Event()
         self.apart = False
 
@@ -65,8 +68,8 @@ class CrewCognition:
         mine = self.calls.setdefault(task_id, [])
         mine.append(message)
         start = time.monotonic()
-        if self._together and len(mine) == 1:
-            if len(self.calls) >= self._together:
+        if self._together and len(mine) == 1 and task_id not in self._alone:
+            if len(set(self.calls) - self._alone) >= self._together:
                 self._met.set()
             try:
                 await asyncio.wait_for(self._met.wait(), self._ceiling)
@@ -116,10 +119,11 @@ CHILD = [{"tool_calls": [{"tool": "read_file", "args": {"path": "notes.md"}}]},
 
 
 class CrewsRunTogether(unittest.TestCase):
-    async def _wall(self, parent_script, *, delay=0.15):
+    async def _wall(self, parent_script, *, delay=0.15, together=0):
         async with Harness() as h:
             cognition = CrewCognition(h.client("cognition"), {
-                "t-root": parent_script, "*": CHILD}, delay={"*": delay, "t-root": 0.0})
+                "t-root": parent_script, "*": CHILD}, delay={"*": delay, "t-root": 0.0},
+                together=together, alone=("t-root",))
             gx = FakeGuardianExecution(h.client("guardian"))
             await cognition.start(); await gx.start()
             runner = _runner(h)
@@ -138,9 +142,19 @@ class CrewsRunTogether(unittest.TestCase):
                    {"text": "All three cost 500."}]
         serial = [{"tool_calls": [_call(i, "delegate", job=f"price of dishwasher {x}") for i, x in enumerate("ABC")]},
                   {"text": "All three cost 500."}]
-        crew_wall, cognition, root, _ = await self._wall(spawned)
-        serial_wall, _, _, _ = await self._wall(serial)
-        self.assertLess(crew_wall, 0.6 * serial_wall, (crew_wall, serial_wall))
+        # The three members meet at their first think (`together=3`): "by
+        # far" as an order of events, since a wall-clock ratio went red on a
+        # loaded machine. Delegated in turn, no two members' thinks overlap.
+        _, cognition, root, _ = await self._wall(spawned, together=3)
+        _, serial_cognition, _, _ = await self._wall(serial)
+        self.assertFalse(cognition.apart, "the three members never had a think in flight together")
+        firsts = [min(s for t, s, _ in cognition.spans if t == h) for h in ("t-root-h1", "t-root-h2", "t-root-h3")]
+        first_end = min(e for t, _, e in cognition.spans if t != "t-root")
+        self.assertLess(max(firsts), first_end, "a member waited for another to finish before it started")
+        spans = sorted((s, e) for t, s, e in serial_cognition.spans if t != "t-root")
+        self.assertEqual(len(spans), 6)
+        self.assertTrue(all(a_end <= b_start for (_, a_end), (b_start, _) in zip(spans, spans[1:])),
+                        "delegated members ran at once")
         last = _text(cognition.calls["t-root"][-1])
         for h in ("t-root-h1", "t-root-h2", "t-root-h3"):
             self.assertIn(f"{h} (research) ok", last)
@@ -160,7 +174,8 @@ class CrewsRunTogether(unittest.TestCase):
                                            _call(3, "spawn", brief="look at c")]},
                            {"tool_calls": [_call(4, "await_agents", timeout_s=20)]},
                            {"text": "done"}],
-                "*": patch_child}, delay={"*": 0.1, "t-root": 0.0})
+                "*": patch_child}, delay={"*": 0.1, "t-root": 0.0},
+                together=2, alone=("t-root",))   # the reader meets the first writer
             gx = FakeGuardianExecution(h.client("guardian"))
             await cognition.start(); await gx.start()
             root = _root()
@@ -174,6 +189,7 @@ class CrewsRunTogether(unittest.TestCase):
 
         a, b, reader = span("t-root-h1"), span("t-root-h2"), span("t-root-h3")
         self.assertTrue(a[1] <= b[0] or b[1] <= a[0], f"two writers at once: {a} {b}")
+        self.assertFalse(cognition.apart, "the reader did not run beside a writer")
         self.assertLess(reader[0], max(a[0], b[0]), "the reader waited for a writer")
 
 
