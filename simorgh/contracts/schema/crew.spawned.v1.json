@@ -1,0 +1,94 @@
+{
+  "$id": "https://simorgh.local/schema/crew.spawned.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A crew member started. Producer: orchestration. Also the first event on crew:<id> for that member.",
+  "properties": {
+    "agent": {
+      "type": "string"
+    },
+    "background": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "brief_ref": {
+      "type": "string"
+    },
+    "budget": {
+      "additionalProperties": true,
+      "properties": {
+        "steps": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "wall_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "crew_id": {
+      "type": "string"
+    },
+    "depth": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "handle": {
+      "type": "string"
+    },
+    "isolation": {
+      "anyOf": [
+        {
+          "enum": [
+            "fresh",
+            "fork"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent": {
+      "type": "string"
+    },
+    "report_policy": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "crew_id",
+    "handle",
+    "parent",
+    "agent",
+    "brief_ref",
+    "report_policy",
+    "budget"
+  ],
+  "title": "crew.spawned",
+  "type": "object"
+}

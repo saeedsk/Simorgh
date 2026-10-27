@@ -20,6 +20,7 @@ to answer" without every reply type re-declaring it.
 from __future__ import annotations
 
 import dataclasses
+import keyword
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,12 +71,21 @@ def _class_name(type_name: str) -> str:
     return "".join(part.capitalize() for part in type_name.replace("_", ".").split("."))
 
 
+def attr_name(field_name: str) -> str:
+    """The dataclass attribute for a wire field: the name itself, or the
+    name with a trailing `_` when it is a Python keyword (`crew.message`
+    has a `from` field on the wire, which `make_dataclass` refuses)."""
+    return field_name + "_" if keyword.iskeyword(field_name) else field_name
+
+
 def _make_dataclass(type_name: str, fields: tuple[Field, ...], doc: str) -> type:
     required = [f for f in fields if f.required]
     optional = [f for f in fields if not f.required]
-    spec: list = [(f.name, f.node.py) for f in required]
-    spec += [(f.name, f.node.py | None, dataclasses.field(default=None)) for f in optional]
-    optional_names = frozenset(f.name for f in optional)
+    spec: list = [(attr_name(f.name), f.node.py) for f in required]
+    spec += [(attr_name(f.name), f.node.py | None, dataclasses.field(default=None)) for f in optional]
+    optional_names = frozenset(attr_name(f.name) for f in optional)
+    wire_of = {attr_name(f.name): f.name for f in fields}
+    attr_of = {f.name: attr_name(f.name) for f in fields}
 
     def to_payload(self) -> dict:
         out = {}
@@ -83,12 +93,11 @@ def _make_dataclass(type_name: str, fields: tuple[Field, ...], doc: str) -> type
             value = getattr(self, f.name)
             if value is None and f.name in optional_names:
                 continue
-            out[f.name] = value
+            out[wire_of.get(f.name, f.name)] = value
         return out
 
     def from_payload(cls, payload: dict):
-        known = {f.name for f in dataclasses.fields(cls)}
-        kwargs = {k: v for k, v in payload.items() if k in known}
+        kwargs = {attr_of[k]: v for k, v in payload.items() if k in attr_of}
         try:
             return cls(**kwargs)
         except TypeError as exc:

@@ -66,6 +66,13 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     T.PLAN_REGROUND: "stage 7 (re-planning)",
     T.SYSTEM_RELOAD: "reserved for the loader",
     T.UI_RENDERED: "stage 4 (session deltas)",
+    # Stage 18 item 1 declares these; orchestration (item 2) publishes and
+    # interface (item 5) consumes them, built on parallel branches. The
+    # merge of those branches removes these four lines.
+    T.CREW_SPAWNED: "stage 18 item 2/5 in flight",
+    T.CREW_MESSAGE: "stage 18 item 2/5 in flight",
+    T.CREW_REPORT: "stage 18 item 2/5 in flight",
+    T.CREW_CANCEL: "stage 18 item 2/5 in flight",
 }
 
 _REF = re.compile(r"\btopics\.([A-Z_][A-Z0-9_]*)\b")

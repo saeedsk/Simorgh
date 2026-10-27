@@ -1,0 +1,60 @@
+{
+  "$id": "https://simorgh.local/schema/crew.message.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "One typed message between members; an A2A Message. A question always reaches the parent.",
+  "properties": {
+    "body": {
+      "type": "string"
+    },
+    "crew_id": {
+      "type": "string"
+    },
+    "from": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "progress",
+        "milestone",
+        "question",
+        "answer",
+        "steer",
+        "note",
+        "report"
+      ],
+      "type": "string"
+    },
+    "refs": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "reply_to": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "seq": {
+      "type": "integer"
+    },
+    "to": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "crew_id",
+    "from",
+    "to",
+    "kind",
+    "body",
+    "seq"
+  ],
+  "title": "crew.message",
+  "type": "object"
+}

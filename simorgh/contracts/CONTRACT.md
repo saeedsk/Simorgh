@@ -12,6 +12,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 
 | File | For |
 |---|---|
+| `simorgh/contracts/a2a.py` | the crew's shapes as A2A's, both ways and pure (stage 18 item 8): `to_a2a_task(member, report)`, `from_a2a_task(task)`, `to_a2a_message(crew_message)`, `from_a2a_message(message)`, `task_state`, `member_status`; wire versions `1.0` (default) and `0.3`, pinned by the vendored schemas in `tests/simorgh/contracts/fixtures/a2a/` |
 | `simorgh/contracts/__init__.py` | imports `messages` to fill the registry; re-exports envelope and catalogue names |
 | `simorgh/contracts/channels.py` | the names of every channel a person reaches Sim by (cli, voice, api, chat, command, telegram, whatsapp) and their display names; `CONSOLE_CHANNELS` = `("", "cli")` and `is_console(channel)`, the owner's keyboard |
 | `simorgh/contracts/checkout.py` | the manifest telling `run_tests` where a containerised checkout's tests run (reads and writes files, runs git) |
@@ -30,6 +31,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/action.py` | `action.*` (5 types) |
 | `simorgh/contracts/messages/benchmark.py` | `benchmark.*` (12) |
 | `simorgh/contracts/messages/cognition.py` | `cognition.*` (7) |
+| `simorgh/contracts/messages/crew.py` | `crew.*` (4), and the pure shapes `Member`, `MemberBudget`, `Report`, `Finding` with `validate_report`/`validate_member`, `parse_report_policy`, the vocabularies `MEMBER_STATUS`, `REPORT_STATUS`, `MESSAGE_KIND`, and the stream-only event types `crew.member.status`, `crew.board` (stage 18 item 1) |
 | `simorgh/contracts/messages/curiosity.py` | `curiosity.*` (12) |
 | `simorgh/contracts/messages/guardian.py` | `guardian.*` (5) |
 | `simorgh/contracts/messages/intent.py` | `intent.goal.stated` |
@@ -59,7 +61,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/security.py` | HMAC approval tokens, `ReplayGuard`, subsystem identity tokens |
 | `simorgh/contracts/settings.py` | settings home, `config_path()`, `persist()` to `simorgh.toml`, secret hand-off files, `conversation_key`, and `VOICE_SAFE_KEYS`: the one table deciding which `[voice]` keys `voice set` will accept at all. Read by `voice/settings.py` (parse, apply, the settings screen) and `interface/tui.py:181` (completion). A `[voice]` config field absent from it is READ but unsettable and unshown -- 60 of 109 were on 2026-09-23, and `stt_partial_every_ms` was one the creator went looking for in `voice` help. A key here that `voice/service.py` must reopen or rebuild for must also be in its `_ENGINE_KEYS`/`_SESSION_KEYS`, and the reverse, or the branch is unreachable |
 | `simorgh/contracts/skills.py` | parses `SKILL.md` folders, reviews skill contents, the skills catalogue text |
-| `simorgh/contracts/streamnames.py` | the stream-name grammar `[a-z0-9_.:-]{1,128}` |
+| `simorgh/contracts/streamnames.py` | the stream-name grammar `[a-z0-9_.:-]{1,128}`, the writer table `WRITERS`, and `crew_stream(crew_id)` -> `crew:<id>` |
 | `simorgh/contracts/tidy.py` | fixing typos and mishearings in a line before it is answered |
 | `simorgh/contracts/timewindow.py` | `"22:00-07:00"` quiet-hours parsing |
 | `simorgh/contracts/tone.py` | the `[tone]` tag at the head of a spoken reply: split, strip, names |
@@ -74,7 +76,7 @@ Nothing. `contracts` is a library; it has no `Service` and no bus client.
 
 ## Produces
 
-Nothing on the bus. It defines all 172 message types (`len(topics.CATALOG) == len(all_specs()) == 172`, checked 2026-09-19) and one schema file per type under `schema/`.
+Nothing on the bus. It defines all 209 message types (`len(topics.CATALOG) == len(all_specs()) == 209`, checked 2026-10-27) and one schema file per type under `schema/`.
 
 ## Ledger streams
 
@@ -132,6 +134,8 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/contracts/test_security.py` -- approval tokens verify, forgeries and expired or altered tokens fail, replays are refused.
 - `tests/simorgh/contracts/test_toolargs.py` -- the shared marker-to-arguments tables the model path and the CLI both use.
 - `tests/simorgh/contracts/test_people.py` -- `Person.permissions` and `interests` are explicit fields; a fresh install grants nothing; `may_check_in` refuses `None`, guest, unknown and child whatever the record says, and an adult without the grant; `may_share_interest` admits a child with a parent's grant and refuses a guest.
+- `tests/simorgh/contracts/test_crew_contracts.py` -- the four `crew.*` topics (domain, validation, the `from` field), `Report` and `Member` round trips and caps, the report-policy grammar, `crew_stream` and its single writer.
+- `tests/simorgh/contracts/test_a2a.py` -- every member status, report status and message kind round-trips through `a2a.py` in both wire versions and validates against the vendored A2A schema; foreign Tasks and Messages written to the spec read as documented; the fixtures match their pinned sha256.
 - `tests/simorgh/contracts/test_telemetry_protocol.py` -- `NullTelemetry` conforms to `Telemetry`, records nothing, lets a span's exception through; a hand-built `Context` carries `NULL_TELEMETRY`.
 
 ## Known issues (2026-09-18 evaluation)
@@ -212,3 +216,10 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - `settings` `tts_farsi` gains "elevenlabs" (2026-10-04): the cloud Farsi voice over Mana. Consumer: voice (`tts/__init__.py::_farsi_synthesiser`).
 - `settings` `tts` gains "elevenlabs" (2026-10-04). Consumer: voice (`tts/__init__.py::open_synthesiser`).
 - `settings.VOICE_SAFE_KEYS` gains `tts_elevenlabs_voice`, `tts_elevenlabs_voice_english`, `tts_elevenlabs_model` (eleven_v4 | eleven_v4_turbo | eleven_v3 | eleven_v3_conversational), `tts_elevenlabs_language` (2026-10-04). Consumer: voice; interface's `voice set` completion lists them.
+
+- Agent crews (stage 18 items 1 and 8, 2026-10-27). New domain `crew` and four topics in `messages/crew.py`:
+  - `crew.spawned{crew_id, handle, parent, agent, brief_ref, report_policy, budget{steps?, tokens?, usd?, wall_s?}, depth?, isolation?: fresh|fork, background?}`;
+  - `crew.message{crew_id, from, to, kind: progress|milestone|question|answer|steer|note|report, body, seq, refs?, reply_to?}` -- `from` on the wire, `from_` on the dataclass (`registry.attr_name`: a field whose name is a Python keyword gets a trailing `_` in Python only);
+  - `crew.report{crew_id, handle, report}`, where `report` is `{status: ok|partial|failed|blocked|cancelled, summary, findings?[{claim, evidence_ref?}], artifacts?[ref], steps?, tokens?, cost_usd?, wall_s?, questions_unanswered?}`; `validate_report` adds the caps the schema cannot say (summary <= 1,200 characters, findings <= 20);
+  - `crew.cancel{crew_id, handle, reason, cascade?}` (absent = cascade).
+  Member status is `starting | running | waiting | done | failed | blocked | cancelled`. The stream `crew:<crew_id>` (`streamnames.crew_stream`, writer: orchestration) also holds `crew.member.status{handle, status, reason?}` and `crew.board{handle, key, value}`, which are ledger event types, not bus topics. The report-policy grammar (`end | progress | every_steps:N | every_s:T | milestones | silent`) is `parse_report_policy`. `a2a.py` maps all of it to A2A v1.0.1 (default) or v0.3.0 and back; Sim-only fields ride in `metadata.simorgh`, so a round trip is exact. Producer: orchestration (stage 18 item 2, in flight). Consumers: orchestration (its own fold), interface (the tree view, item 5, in flight); execution (item 9) and interface (item 10) will use `a2a.py`. Until those land, the four topics are in `ALLOWED_ONE_SIDED` with reason "stage 18 item 2/5 in flight"; the merge removes them.
