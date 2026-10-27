@@ -46,3 +46,9 @@ by = "claude-wave-a"
 task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
 since = "2026-10-27T14:37:23+00:00"
 until = "2026-10-27T22:37:23+00:00"
+
+[locks.planning]
+by = "claude-wave-a"
+task = "wave A merge: prerequisite retry delay"
+since = "2026-10-27T15:09:55+00:00"
+until = "2026-10-27T21:09:55+00:00"
