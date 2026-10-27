@@ -344,12 +344,19 @@ def _voice_fakes(into: dict, *, recogniser=None):
 
 
 def _merge(*layers: dict) -> dict:
-    """Later layers win, one level into each section."""
+    """Later layers win, merged table by table at every depth.
+
+    Recursive since stage 14: an ablation run sets
+    `cognition.providers.<name>.model` and must not clobber the rest of
+    `[cognition]` that an earlier layer set. For the layers that existed
+    before (no table nested two deep on both sides) it is the old
+    one-level merge exactly.
+    """
     out: dict = {}
     for layer in layers:
         for key, value in (layer or {}).items():
             if isinstance(value, dict) and isinstance(out.get(key), dict):
-                out[key] = {**out[key], **value}
+                out[key] = _merge(out[key], value)
             else:
                 out[key] = value
     return out

@@ -34,12 +34,82 @@ async def run_one(scenario) -> list[Outcome]:
 
     if scenario.needs_model and not _a_real_provider():
         return _skipped_for_the_floor(scenario)
-    async with Sandbox(**_paid_sandbox()) as box:
+    async with Sandbox(**_sandbox_args()) as box:
         director = Director(box)
         director.scene.room = scenario.room
         if _needs_voices(scenario):
             await _enrol_into(box, director)
-        return await play(scenario, director)
+        return with_run_summary(await play(scenario, director), director.record)
+
+
+#: The environment variable an ablation run (`simorgh/evals/ablation.py`)
+#: hands each scenario child its preset and model through: a JSON object
+#: merged, table by table, over the sandbox's own config. Read here and
+#: nowhere else -- the live Sim never sees it.
+HOUSE_CONFIG_ENV = "SIMORGH_HOUSE_CONFIG"
+
+
+def house_config() -> dict:
+    """`SIMORGH_HOUSE_CONFIG` as a dict; `{}` when unset.
+
+    Malformed JSON raises rather than falling back: a child that quietly
+    ran the default config would score `sim` under the name of `bare`.
+    """
+    import os
+
+    raw = os.environ.get(HOUSE_CONFIG_ENV, "").strip()
+    if not raw:
+        return {}
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError(f"{HOUSE_CONFIG_ENV} must be a JSON object, not {type(value).__name__}")
+    return value
+
+
+def _sandbox_args() -> dict:
+    """The paid arguments (if any) with `SIMORGH_HOUSE_CONFIG` on top."""
+    from .sandbox import _merge
+
+    args = _paid_sandbox()
+    extra = house_config()
+    if extra:
+        args["config"] = _merge(args.get("config") or {}, extra)
+    return args
+
+
+def run_summary(record) -> dict:
+    """What one scenario run cost, read off the bus.
+
+    `steps`: distinct numbered `task.step`s across the run, else the
+    `cognition.think` count (the counting `steps_at_most` uses, over the
+    whole evening rather than one beat). `cost_usd`: the sum of the
+    `cognition.think.reply` costs. `model_answers`, `floor_answers` and
+    `model_errors` let an ablation run tell "the model failed the chain"
+    from "no model answered at all", which is a skip.
+    """
+    steps = {(m.payload.get("task_id"), m.payload.get("step_no")) for m in record.of("task.step")}
+    replies = record.of("cognition.think.reply")
+    return {
+        "steps": len(steps) or len(record.of("cognition.think")),
+        "cost_usd": round(sum(float(m.payload.get("cost_usd") or 0.0) for m in replies), 6),
+        "model_answers": sum(1 for m in replies if not m.payload.get("error") and not m.payload.get("floor")),
+        "floor_answers": sum(1 for m in replies if m.payload.get("floor")),
+        "model_errors": sum(1 for m in replies if m.payload.get("error")),
+    }
+
+
+def with_run_summary(outcomes: list[Outcome], record) -> list[Outcome]:
+    """Every outcome carries the run's summary as `detail["run"]`; the
+    first also carries its cost, so a sum over outcomes counts it once."""
+    from dataclasses import replace
+
+    summary = run_summary(record)
+    out = []
+    for index, outcome in enumerate(outcomes):
+        detail = {**outcome.case.detail, "run": summary}
+        out.append(replace(outcome, case=replace(outcome.case, detail=detail),
+                           cost_usd=summary["cost_usd"] if index == 0 else outcome.cost_usd))
+    return out
 
 
 def _skipped_for_the_floor(scenario) -> list[Outcome]:
@@ -198,11 +268,13 @@ def per_scenario(outcomes, scenarios=()) -> list[Outcome]:
     return out
 
 
-async def _in_a_child(scenario) -> list[Outcome]:
+async def _in_a_child(scenario, *, env: dict | None = None) -> list[Outcome]:
+    """`env`, when given, is the child's whole environment: an ablation
+    run passes a copy of this one plus `SIMORGH_HOUSE_CONFIG`."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "simorgh.evals", "house", "--one", scenario.id, "--json",
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        cwd=str(Path(__file__).resolve().parents[3]))
+        cwd=str(Path(__file__).resolve().parents[3]), env=env)
     try:
         raw, err = await asyncio.wait_for(proc.communicate(), timeout=SCENARIO_TIMEOUT_S)
     except asyncio.TimeoutError:
@@ -242,4 +314,5 @@ def as_json(outcomes) -> str:
                         "why": o.why, "detail": o.case.detail} for o in outcomes])
 
 
-__all__ = ["SCENARIO_TIMEOUT_S", "as_json", "per_scenario", "run_one", "run_pack"]
+__all__ = ["HOUSE_CONFIG_ENV", "SCENARIO_TIMEOUT_S", "as_json", "house_config", "per_scenario",
+           "run_one", "run_pack", "run_summary", "with_run_summary"]

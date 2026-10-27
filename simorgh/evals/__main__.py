@@ -4,6 +4,7 @@
     python -m simorgh.evals run household --json
     python -m simorgh.evals list
     python -m simorgh.evals scenario --verbose     # the household script, per probe
+    python -m simorgh.evals ablate --suite toolchain --models floor:floor --dry-run
 
 A suite that costs money needs `--paid`. That is not paternalism: the
 loader runs `run household` on every bless, and a suite that quietly
@@ -60,8 +61,21 @@ def main(argv: list[str]) -> int:
     scen = sub.add_parser("scenario", help="the household script, probe by probe")
     scen.add_argument("--json", action="store_true")
     scen.add_argument("--verbose", action="store_true")
+    abl = sub.add_parser("ablate", help="the guardrail ablation matrix (stage 14)")
+    abl.add_argument("--suite", default="toolchain", help="toolchain, or a scenario id prefix such as toolchain/recovery/")
+    abl.add_argument("--presets", default="", help="comma-separated (default: all of them)")
+    abl.add_argument("--models", required=True, metavar="PROVIDER:MODEL,...",
+                     help="e.g. together:<model>,gemini:<model>; floor:floor runs free")
+    abl.add_argument("--repeats", type=int, default=1)
+    abl.add_argument("--paid", action="store_true", help="allow a real model (costs money)")
+    abl.add_argument("--cap-usd", type=float, default=0.0, help="total dollar cap across the matrix (required with --paid)")
+    abl.add_argument("--dry-run", action="store_true", help="print the matrix and an estimated cost; spend nothing")
+    abl.add_argument("--log", default="", metavar="PATH", help="where to append one JSONL row per run")
+    abl.add_argument("--json", action="store_true")
     args, rest = ap.parse_known_args(argv)
 
+    if args.command == "ablate":
+        return _ablate(args)
     if args.command == "list":
         for name in sorted(SUITES):
             print(f"{name:<12} {'costs money' if name in PAID else 'free'}")
@@ -198,6 +212,50 @@ def main(argv: list[str]) -> int:
         record(report, data_dir=args.record)
     print(json.dumps(report.as_dict(), indent=1) if args.json else table(report))
     return 0 if report.total and report.passed == report.total else 1
+
+
+def _ablate(args) -> int:
+    """`ablate`: refuse what would spend without leave, else run (or
+    describe) the matrix. Exit 0 once the matrix ran: a failed chain is
+    the measurement, not an error."""
+    from pathlib import Path
+
+    from . import ablation
+
+    try:
+        models = ablation.parse_models(args.models)
+        presets = ablation.parse_presets(args.presets)
+        scenarios = ablation.scenarios_for(args.suite)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    repeats = max(1, args.repeats)
+    runs = ablation.matrix(models, presets, scenarios, repeats)
+    if args.dry_run:
+        print(ablation.dry_run(runs, models=models, presets=presets, scenarios=scenarios,
+                               repeats=repeats, paid=args.paid))
+        return 0
+    spending = [m.label for m in models if not m.is_floor]
+    if spending and not args.paid:
+        print(f"{', '.join(spending)} cost money; pass --paid (and --cap-usd) to run them", file=sys.stderr)
+        return 2
+    if spending and args.cap_usd <= 0:
+        print("a paid ablation needs a total cap: pass --cap-usd", file=sys.stderr)
+        return 2
+    log = Path(args.log) if args.log else ablation.DEFAULT_LOG
+
+    def _progress(result) -> None:
+        print(f"[ablate] {result.run.model.label} {result.run.preset} {result.run.scenario.id} "
+              f"#{result.run.repeat}: {result.status}", file=sys.stderr)
+
+    results = asyncio.run(ablation.run_matrix(runs, suite=args.suite, paid=args.paid, cap_usd=args.cap_usd,
+                                              log=log, progress=_progress))
+    if args.json:
+        print(json.dumps([r.row(args.suite) for r in results], indent=1))
+    else:
+        print(ablation.table(results))
+        print(f"\nrows appended to {log}")
+    return 0
 
 
 def _house_table(outcomes) -> str:
