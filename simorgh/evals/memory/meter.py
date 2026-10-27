@@ -16,7 +16,11 @@ never nothing, and counted in `unmetered`. A cap that is not a finite
 positive number stops the first call.
 
 Embedding tokens are charged at the chat input price: dearer than any
-embedding model, so the count can only over-state the bill.
+embedding model, so the count can only over-state the bill. An embedding
+call whose response has no usage (Gemini's OpenAI-compatible endpoint
+sends none) is charged its input's length (chars / 4, no output), not the
+chat-call estimate: on 2026-10-27 the estimate charged 598 Cognee
+embeddings about $0.34 they never cost and stopped the run at episode 112.
 """
 
 from __future__ import annotations
@@ -62,7 +66,7 @@ class Meter:
             raise CapReached(f"spent ${self.usd:.4f} (+{self.inflight} calls in flight) of a "
                              f"${self.cap_usd:.2f} cap after {self.calls} calls")
 
-    def charge(self, response) -> None:
+    def charge(self, response, request: dict | None = None) -> None:
         self.calls += 1
         usage = _get(response, "usage")
         tokens_in = int(_get(usage, "prompt_tokens") or _get(usage, "input_tokens") or 0)
@@ -70,7 +74,11 @@ class Meter:
         if not (tokens_in or tokens_out):
             # Nothing said is not nothing spent: a cap fed zeros never stops.
             self.unmetered += 1
-            tokens_in, tokens_out = self.reserve_in, self.reserve_out
+            embedded = _embedding_input_tokens(request)
+            if embedded:
+                tokens_in, tokens_out = embedded, 0
+            else:
+                tokens_in, tokens_out = self.reserve_in, self.reserve_out
         self.tokens_in += tokens_in
         self.tokens_out += tokens_out
 
@@ -86,6 +94,17 @@ def _get(obj, name: str):
     return getattr(obj, name, None)
 
 
+def _embedding_input_tokens(request: dict | None) -> int:
+    """An embedding request's input as tokens (chars / 4, at least 1 per
+    text), or 0 when `request` is not an embedding call (it has messages,
+    or no `input`)."""
+    if not request or "messages" in request or "input" not in request:
+        return 0
+    texts = request["input"]
+    texts = [texts] if isinstance(texts, str) else list(texts or ())
+    return sum(max(1, (len(str(t)) + 3) // 4) for t in texts)
+
+
 def metered(fn, meter: Meter):
     """`fn` (sync or async) with the cap checked before and usage charged after."""
     if inspect.iscoroutinefunction(fn):
@@ -97,7 +116,7 @@ def metered(fn, meter: Meter):
                 response = await fn(*args, **kwargs)
             finally:
                 meter.inflight -= 1
-            meter.charge(response)
+            meter.charge(response, kwargs)
             return response
         return _async
 
@@ -116,11 +135,11 @@ def metered(fn, meter: Meter):
                     result = await response
                 finally:
                     meter.inflight -= 1
-                meter.charge(result)
+                meter.charge(result, kwargs)
                 return result
             return _later()
         meter.inflight -= 1
-        meter.charge(response)
+        meter.charge(response, kwargs)
         return response
     return _sync
 

@@ -471,3 +471,22 @@ class ALibraryFailure(unittest.TestCase):
         self.assertTrue(result.report.outcomes)
         self.assertTrue(all(o.status == SKIPPED for o in result.report.outcomes))
         self.assertIn("s3fs", result.report.outcomes[0].why)
+
+
+class AnEmbeddingWithoutUsage(unittest.TestCase):
+    def test_is_charged_its_input_not_a_chat_call(self):
+        from simorgh.evals.memory.meter import Meter, metered
+
+        meter = Meter(cap_usd=1.0, price_in=1.0, price_out=1.0, reserve_in=2_500, reserve_out=400)
+
+        async def embed(**kwargs):
+            return SimpleNamespace(data=[SimpleNamespace(embedding=[0.0])])
+
+        asyncio.run(metered(embed, meter)(model="e", input=["Mara: the bins go out on Tuesday"]))
+        self.assertEqual((meter.tokens_in, meter.tokens_out, meter.unmetered), (8, 0, 1))
+
+        async def chat(**kwargs):
+            return SimpleNamespace(choices=[])
+
+        asyncio.run(metered(chat, meter)(model="m", messages=[{"role": "user", "content": "x"}]))
+        self.assertEqual((meter.tokens_in, meter.tokens_out), (8 + 2_500, 400))
