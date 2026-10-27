@@ -583,7 +583,7 @@ class TestTheSdkTransport(_Case):
         self.assertEqual(result.output, "via the sdk")
         self.assertTrue(cancelled.ok, cancelled.error)
         self.assertEqual(self.methods(), ["card", "message/stream", "tasks/get", "tasks/cancel"])
-        self.assertEqual(fake["seen"]["headers"], {"Authorization": "Bearer tok"})
+        self.assertEqual(fake["seen"]["headers"], {"Authorization": "Bearer tok", "A2A-Version": "0.3"})
         self.assertEqual(fake["seen"]["client_url"], self.server.url, "the configured URL, never the card's")
         self.assertEqual(fake["seen"]["base_url"], self.server.url.rsplit("/a2a", 1)[0])
 
@@ -678,6 +678,56 @@ class TestGuardianGatesTheCall(_ExecutionServiceTestCase):
         self.assertEqual(result.output, "answer")
         self.assertEqual([m for m, _h, _p in self.server.requests], ["card", "message/send"])
 
+
+
+class TestInteropFindings(_Case):
+    """What Sim calling Sim found (stage 18 item 11,
+    `tests/simorgh/interface/test_a2a_interop.py`), pinned here too."""
+
+    def test_the_version_is_read_from_either_card_spelling(self):
+        v1_only = {"supportedInterfaces": [{"url": "u", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
+                                           {"url": "u", "protocolBinding": "GRPC", "protocolVersion": "0.3"}]}
+        self.assertEqual(a2a.card_versions({"protocolVersion": "0.3.0"}), ("0.3",))
+        self.assertEqual(a2a.card_versions({}), ("0.3",), "a card that names none is 0.3")
+        self.assertEqual(a2a.card_versions(v1_only), ("1.0",), "only a JSON-RPC interface counts")
+        both = {"protocolVersion": "0.3.0", "supportedInterfaces": [
+            {"url": "u", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
+            {"url": "u", "protocolBinding": "JSONRPC", "protocolVersion": "0.3"}]}
+        self.assertEqual(a2a.negotiate_version(both), "0.3")
+        with self.assertRaises(a2a.A2aError) as caught:
+            a2a.negotiate_version(v1_only)
+        self.assertEqual(caught.exception.error_kind, "refused")
+
+    async def test_every_request_names_the_agreed_version(self):
+        await self.tool().run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
+        rpc = [headers for method, headers, _p in self.server.requests if method != "card"]
+        self.assertTrue(rpc)
+        self.assertTrue(all(h.get("a2a-version") == "0.3" for h in rpc), rpc)
+
+    async def test_a_card_behind_a_bearer_is_asked_for_again_with_the_secret_and_only_then(self):
+        asked: list[dict] = []
+
+        class _Gated(RawTransport):
+            async def card(self, headers=None):
+                asked.append(dict(headers or {}))
+                if not headers:
+                    raise a2a.CardUnauthorized()
+                return await super().card()
+
+        agent = A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN", poll_interval_s=1.0)
+        tool = A2aCallTool((agent,), secrets={"DESK_TOKEN": "tok"}, transport_factory=_Gated)
+        result = await tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(asked, [{}, {"Authorization": "Bearer tok"}])
+
+        asked.clear()
+        no_secret = A2aCallTool((A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN"),),
+                                secrets={}, transport_factory=_Gated)
+        result = await no_secret.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
+        self.assertEqual(result.error_kind, "unconfigured")
+        self.assertIn("DESK_TOKEN", result.error)
+        self.assertEqual(asked, [{}], "no secret: asked once, without one")
+        self.assertEqual(self.methods(), ["card", "message/send"], "the refused call sent nothing")
 
 
 class TestReviewFindings(_Case):

@@ -29,9 +29,15 @@ plain dicts (a Task, a Message, a status or artifact update), so a test
 can drive the tool with a transport of its own against a fake server.
 
 One call:
-- fetch the Agent Card (cached per agent for `CARD_TTL_S`) and refuse, by
-  scheme name, a security requirement Sim cannot meet (anything but HTTP
-  bearer or a header API key);
+- fetch the Agent Card (cached per agent for `CARD_TTL_S`); a card behind
+  a bearer (another Sim's is: only a paired device may read it) is asked
+  for again once with the configured secret;
+- agree the A2A version: the card's JSON-RPC interfaces name what it
+  speaks, this client speaks `CLIENT_VERSIONS` and says which in the
+  `A2A-Version` header of every request; a card offering none of them
+  is refused by name, before anything is sent;
+- refuse, by scheme name, a security requirement Sim cannot meet
+  (anything but HTTP bearer or a header API key);
 - `message/stream` when the card says it streams, each status update
   handed to the progress callback (the default writes it to `a2a:calls`);
 - otherwise, or when a stream breaks after the task exists, `message/send`
@@ -62,6 +68,15 @@ A2A_CALLS_STREAM = "a2a:calls"
 SDK_MISSING = "needs `pip install a2a-sdk`"
 CARD_PATH = "/.well-known/agent-card.json"
 CARD_TTL_S = 300.0
+#: The A2A versions this client speaks, newest first: the v0.3 wire the
+#: `a2a-sdk` 0.3 line speaks and `_Progress` folds (`kind` discriminators,
+#: `input-required`). v1.0's shapes (`TASK_STATE_*`, `statusUpdate`
+#: wrappers, `SendMessage`) are not spoken yet.
+CLIENT_VERSIONS = ("0.3",)
+#: The request header that names the version (A2A v1.0 "Versioning"). A
+#: server that sees none assumes 0.3, so a 0.3 server that ignores it
+#: still understands the request.
+VERSION_HEADER = "A2A-Version"
 
 TERMINAL_STATES = frozenset({"completed", "canceled", "failed", "rejected"})
 INTERRUPTED_STATES = frozenset({"input-required", "auth-required"})
@@ -121,6 +136,15 @@ class A2aError(Exception):
         self.error_kind = error_kind
 
 
+class CardUnauthorized(A2aError):
+    """The Agent Card answered 401 or 403: it is behind the agent's own
+    credential. A transport raises it from `card()`; the tool asks once
+    more with the configured secret."""
+
+    def __init__(self, message: str = "the agent card needs a credential") -> None:
+        super().__init__(message, error_kind="unconfigured")
+
+
 # -- the Agent Card ---------------------------------------------------------
 
 def auth_headers(card: Mapping[str, Any], *, secret_name: str, secret: str) -> dict[str, str]:
@@ -175,6 +199,47 @@ def check_card(card: Mapping[str, Any]) -> None:
     others = {str((row or {}).get("transport", "")).upper() for row in card.get("additionalInterfaces") or ()}
     if "JSONRPC" not in others:
         raise A2aError(f"the agent offers transport {preferred!r} only; Sim speaks JSON-RPC", error_kind="refused")
+
+
+def _major_minor(version: Any) -> str:
+    """`0.3.0` -> `0.3`; A2A versions negotiate on major.minor."""
+    parts = str(version or "").strip().split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 and all(p.isdigit() for p in parts[:2]) else ""
+
+
+def card_versions(card: Mapping[str, Any]) -> tuple[str, ...]:
+    """The A2A versions a card offers over JSON-RPC, as major.minor.
+
+    A v1.0 card lists `supportedInterfaces[]{protocolBinding,
+    protocolVersion}`; a v0.3 card has one top-level `protocolVersion`
+    for its `url`. A card that names no version at all is 0.3, the
+    version the spec assumes when none is said."""
+    offered: list[str] = []
+    for row in card.get("supportedInterfaces") or ():
+        if not isinstance(row, Mapping):
+            continue
+        binding = str(row.get("protocolBinding") or row.get("transport") or "").upper()
+        version = _major_minor(row.get("protocolVersion"))
+        if binding == "JSONRPC" and version:
+            offered.append(version)
+    top = _major_minor(card.get("protocolVersion"))
+    if top:
+        offered.append(top)
+    if not offered and not card.get("supportedInterfaces"):
+        offered.append("0.3")
+    return tuple(dict.fromkeys(offered))
+
+
+def negotiate_version(card: Mapping[str, Any]) -> str:
+    """The newest version both sides speak, or a refusal naming both
+    lists: a request in a version the agent does not speak would be
+    misread, and the household's data would already have left."""
+    offered = card_versions(card)
+    for version in CLIENT_VERSIONS:
+        if version in offered:
+            return version
+    raise A2aError(f"the agent speaks A2A {', '.join(offered) or 'no version over JSON-RPC'}; Sim's client "
+                   f"speaks {', '.join(CLIENT_VERSIONS)}", error_kind="refused")
 
 
 def card_url(url: str) -> str:
@@ -304,11 +369,21 @@ class SdkTransport:
         self._http = None
         self._client = None
 
-    async def card(self) -> dict:
+    async def card(self, headers: Mapping[str, str] | None = None) -> dict:
         parsed = urlparse(self._agent.url)
         async with self._httpx.AsyncClient(timeout=self._agent.timeout_s) as http:
             resolver = self._resolver_cls(httpx_client=http, base_url=f"{parsed.scheme}://{parsed.netloc}")
-            return dict(_dump(await resolver.get_agent_card()))
+            try:
+                if headers:
+                    card = await resolver.get_agent_card(http_kwargs={"headers": dict(headers)})
+                else:
+                    card = await resolver.get_agent_card()
+            except Exception as exc:
+                # The SDK's `A2AClientHTTPError` carries the status.
+                if getattr(exc, "status_code", None) in (401, 403):
+                    raise CardUnauthorized(f"the agent card answered {exc.status_code}") from exc
+                raise
+            return dict(_dump(card))
 
     async def connect(self, headers: Mapping[str, str]) -> None:
         self._http = self._httpx.AsyncClient(timeout=self._agent.timeout_s, headers=dict(headers))
@@ -451,26 +526,37 @@ class A2aCallTool:
             with contextlib.suppress(Exception):
                 await transport.close()
 
-    async def _card(self, agent: A2aAgentConfig, transport) -> dict:
+    async def _card(self, agent: A2aAgentConfig, transport, secret: str) -> dict:
         cached = self._cards.get(agent.name)
         now = self._monotonic()
         if cached is not None and now - cached[0] < CARD_TTL_S:
             return cached[1]
-        card = await transport.card()
+        try:
+            card = await transport.card()
+        except CardUnauthorized:
+            # Asked again once, with the configured credential, of the
+            # origin a person configured: a card behind a bearer (another
+            # Sim's is) is still that agent's card.
+            if not secret:
+                raise A2aError(f"the agent's card needs a credential and no secret is set: put "
+                               f"{agent.auth_secret or '<a key name>'} in secrets.toml and name it as this "
+                               "agent's auth_secret", error_kind="unconfigured") from None
+            card = await transport.card(headers={"Authorization": f"Bearer {secret}"})
         if not isinstance(card, Mapping):
             raise A2aError("the agent card is not an object")
         self._cards[agent.name] = (now, dict(card))
         return dict(card)
 
     async def _call(self, agent, transport, ctx, *, message_text, task_id, context_id, cancel, data) -> ToolResult:
-        card = await self._card(agent, transport)
-        check_card(card)
         secret = ""
         if agent.auth_secret and self._secrets is not None:
             with contextlib.suppress(Exception):
                 secret = str(self._secrets.get(agent.auth_secret) or "")
+        card = await self._card(agent, transport, secret)
+        check_card(card)
+        version = negotiate_version(card)
         headers = auth_headers(card, secret_name=agent.auth_secret, secret=secret)
-        await transport.connect(headers)
+        await transport.connect({**headers, VERSION_HEADER: version})
         progress = _Progress()
         progress.task_id, progress.context_id = task_id, context_id
 
@@ -679,7 +765,8 @@ def a2a_tools(config, *, secrets=None) -> list:
 
 
 __all__ = [
-    "A2A_CALLS_STREAM", "A2A_PROPOSALS_STREAM", "A2aAgentConfig", "A2aCallTool", "A2aError",
-    "ProposeA2aAgentTool", "SDK_MISSING", "SdkTransport", "a2a_agents_from_mapping", "a2a_tools",
-    "auth_headers", "card_url", "check_card",
+    "A2A_CALLS_STREAM", "A2A_PROPOSALS_STREAM", "A2aAgentConfig", "A2aCallTool", "A2aError", "CLIENT_VERSIONS",
+    "CardUnauthorized", "ProposeA2aAgentTool", "SDK_MISSING", "SdkTransport", "VERSION_HEADER",
+    "a2a_agents_from_mapping", "a2a_tools", "auth_headers", "card_url", "card_versions", "check_card",
+    "negotiate_version",
 ]
