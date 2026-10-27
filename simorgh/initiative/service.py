@@ -44,6 +44,7 @@ from .api import (
     RESEARCH_PER_DAY,
     NOT_NOW_HOLD_S,
     PERSONAL,
+    PRIVATE,
     Notice,
     Situation,
     acceptable_line,
@@ -464,7 +465,12 @@ class Service:
             held = self._hold(notice)
             if held:
                 why = "kept for the digest"
-            elif notice.kind not in PERSONAL and not for_owner(notice, self._owner):
+            elif notice.kind in PRIVATE and not for_owner(notice, self._owner):
+                # A companion word for somebody else: the phone is the
+                # owner's, and the speaker is only for them alone.
+                why = (f"only a word to {notice.person} alone in their room reaches {notice.person}, and none "
+                       "could be said now (the phone is the owner's)")
+            elif not for_owner(notice, self._owner):
                 # Said, so a lost result is not a mystery: the phone is the
                 # owner's, and the room's speaker was not worth it or not there.
                 why = (f"only the speaker in {notice.person}'s room reaches {notice.person}, and it could not "

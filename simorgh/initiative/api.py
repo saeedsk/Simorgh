@@ -69,10 +69,10 @@ CHANNEL_COST: dict[str, float] = {"phone": 0.1, "screen": 0.2, "speaker": 0.45}
 #: Channels that reach only the owner: both are `notify`, which has no
 #: recipient and goes to the person who runs Sim (`Delivery.tool`). A
 #: notice for anybody else may use only the speaker in the room they are
-#: in (`for_owner`). Not yet applied to the companion classes, whose
-#: night-time "her phone" stage 10 pinned (and `companion_shadow` sends
-#: to the owner on purpose): that is the same owner's phone, an open
-#: question for the creator (initiative CONTRACT.md).
+#: in (`for_owner`). The companion classes too: stage 10's night-time
+#: "her phone" was the owner's phone, so Soodeh's check-in reached
+#: Saeed (wave A review, 2026-10-27). `companion_shadow` still sends to
+#: the owner on purpose, after this decision.
 OWNER_ONLY: frozenset[str] = frozenset({"phone", "screen"})
 
 #: Under this, nothing is delivered: it waits for the digest instead
@@ -314,7 +314,7 @@ def decide(notice: Notice, situation: Situation, *, owner: str = "Saeed", now: f
     private_to = notice.person if notice.kind in PRIVATE else ""
     best: Delivery | None = None
     for channel in CHANNELS:
-        if channel in OWNER_ONLY and notice.kind not in PERSONAL and not for_owner(notice, owner):
+        if channel in OWNER_ONLY and not for_owner(notice, owner):
             continue        # the owner's phone is not delivery to somebody else
         if channel == "speaker" and notice.person and notice.person not in situation.people:
             continue        # saying it in a room they are not in is not delivery
