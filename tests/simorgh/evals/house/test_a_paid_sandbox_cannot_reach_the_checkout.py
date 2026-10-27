@@ -27,7 +27,7 @@ class APaidSandbox(unittest.TestCase):
 
         async def go():
             async with Sandbox(secrets={"SOME_PROVIDER_KEY": "x"}) as box:
-                root = Path(box.service("execution")._config.repo_root  # noqa: SLF001)
+                root = Path(box.service("execution")._config.repo_root)  # noqa: SLF001
                 self.assertNotEqual(root.resolve(), live.resolve())
                 self.assertTrue(str(root).startswith(str(box.data_dir)))
                 self.assertEqual(os.environ.get("SIMORGH_EXECUTION_REPO_ROOT"), str(root))
@@ -43,7 +43,7 @@ class APaidSandbox(unittest.TestCase):
     def test_a_free_sandbox_is_unchanged(self):
         async def go():
             async with Sandbox() as box:
-                return Path(box.service("execution")._config.repo_root  # noqa: SLF001)
+                return Path(box.service("execution")._config.repo_root)  # noqa: SLF001
 
         self.assertEqual(asyncio.run(go()).resolve(), find_repo_root().resolve())
 
