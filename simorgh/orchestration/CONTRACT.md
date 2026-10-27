@@ -14,6 +14,7 @@ Orchestration owns the agent loop: it claims a task (or takes a conversational p
 | `simorgh/orchestration/api.py` | Package-internal types: `Profile`, `Session`, `Step`, `Budget`, `Outcome` |
 | `simorgh/orchestration/claims.py` | `unsupported_claims`: a final answer's claims checked against the step log |
 | `simorgh/orchestration/config.py` | `[orchestration]` dataclass |
+| `simorgh/orchestration/crew.py` | Stage 18 item 2, agent crews, with no bus: `Crew` (members and tree, budget carving, per-parent concurrency and crew-wide writer semaphores, the cancel cascade, the report-policy engine, the blackboard, `wait_until`, and `Crew.fold` of `crew:<id>`), `Inbox`, `build_report` / `parse_report_text` (a member's answer into a typed `Report`) |
 | `simorgh/orchestration/context.py` | `Assembler`: conversation window, memory block and transcript for one think |
 | `simorgh/orchestration/profiles.py` | Loads the agent definitions (`agents/<name>.md`: TOML frontmatter `tools` (globs allowed), `read_only`, `max_steps`, `max_revisions`, `scaffold`, `max_output_tokens`, `verify`, `extends`, and since stage 16 the optional `required_steps`, `terminal_tools`, `prerequisites` (checked at load); the scaffold as body; `<!-- -->` notes never reach the prompt) into CHAT, VOICE_CHAT, PATCH, RESEARCH, PLAN, SKILL; an unknown key is refused |
 | `simorgh/orchestration/guardrails.py` | Stage 16, ported from forge (MIT): `validate` (unknown tool, bad arguments) before a proposal, `ErrorBudget` (retries, hard tool errors), `Steps` (required steps, terminal tools, prerequisites, escalating nudges), `Guards` (one session's set). Pure: no bus |
@@ -72,6 +73,12 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `research.finding.recorded` | `messages/research.py::ResearchFindingRecorded` | session.py `_record_finding` | a completed RESEARCH task's answer, with `follow_up{subject, description}` when it ends with a `FOLLOW_UP: <path> :: <what>` line. Planning turns that into a patch task SCOPED to that file. It had a topic, a schema, a consumer and no publisher until 2026-09-23 (`tools/scan_half_wired.py`), so no research task had ever produced a follow-up |
 | `learn.self_patch.applied` | `messages/learn.py::LearnSelfPatchApplied` | session.py:809 | `_land` succeeded AND commits actually landed: a `worktree_land` that reports "nothing to land" is ok (there was nothing to refuse) but publishes nothing and records the step as `nothing landed`, not ok -- announcing a self-patch there told five subsystems Sim had changed its own code, with main's own sha as the patch, for all 30 cases of a SWE-bench run that produced none (2026-09-22) |
 | `system.metrics` | `messages/system.py::SystemMetrics` | service.py:312 | Every `metrics_interval_s` (worker busy gauges) |
+| `crew.spawned` | `messages/crew.py::CrewSpawned` | session.py `_crew_record` (from `Crew.admit`) | A member started by `spawn` or `delegate`. Extra fields (the schema admits them): `via` (`spawn`/`delegate`), `writer`, `brief_blob` (`brief_ref` is a blob) -- what a restart needs to run it again as what it was |
+| `crew.message` | `messages/crew.py::CrewMessage` | session.py `_crew_record` (from `Crew.send`) | Every member message: `report_progress` (progress/milestone, recorded whatever the policy, delivered per policy), automatic `every_steps`/`every_s` lines, `ask_parent` questions, `send_agent` steer/note/answer |
+| `crew.report` | `messages/crew.py::CrewReport` | session.py `_run_member` | A member's final typed `Report` |
+| `crew.cancel` | `messages/crew.py::CrewCancel` | session.py `_crew_record` (from `Crew.cancel`) | `cancel_agent`, `first_ok` cancelling the rest, and the crew budget running out (reason `crew budget`) |
+
+Nothing here subscribes to `crew.*` yet: the four are on `ALLOWED_ONE_SIDED` until Interface (stage 18 item 5) consumes them, and a console `crew cancel` will need orchestration to subscribe to `crew.cancel`.
 
 ## Ledger streams
 
@@ -80,6 +87,9 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `task:<task_id>` | worker.py:491, session.py:1949 (append); resume.py:112 (read) | planning, verification, growth, interface, benchmark | forever (no prefix in DEFAULT_RETENTION) |
 | `execution:tools` | service.py:21 (read at start to replay registrations) | written by execution | 30d |
 | `capabilities` | service.py:22 (read at start to replay probes) | written by execution | forever |
+| `crew:<crew_id>` | session.py `_crew_record` (append), `_crew_resume` (read, folded by `Crew.fold`) | interface (stage 18 item 5) | forever (no prefix in DEFAULT_RETENTION) |
+
+`crew:<id>` holds the four `crew.*` topics plus two stream-only types: `crew.member.status{handle, status, reason?}` (a member's status, and the root's own `waiting`/`running` around `await_agents`, whose `reason` is `{"await": {handles, mode, timeout_s}}` so a restarted root re-enters it) and `crew.board{handle, key, value}`.
 
 Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905`), plan artifacts (`worker.py:444`) and oversized result text (`worker.py:569`). `person:<name>` and `someone:` in this package are memory tags and room-text markers, not streams.
 
@@ -106,7 +116,12 @@ Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905
 | `skills_channels` | `('', 'cli', 'http')` | yes |
 | `heartbeat_s` | `30` | yes |
 | `max_depth` | `3` | yes (delegation depth) |
-| `max_children_concurrent` | `4` | NO (declared, never read) |
+| `max_children_concurrent` | `4` | yes: each parent's cap on members running at once (`spawn` queues the rest in `starting`; `delegate` still refuses past it) |
+| `crew_max_members` | `8` | yes (stage 18): members in one crew; past it `spawn`/`delegate` are refused |
+| `crew_max_writers` | `1` | yes (stage 18): writers (patch, skill: `WORKTREE_KINDS`) running at once in one crew |
+| `crew_max_usd` | `0.5` | yes (stage 18): the crew's dollars; 0 is no bound |
+| `crew_max_wall_s` | `900.0` | yes (stage 18): the crew's wall-clock from its first spawn in this process; 0 is no bound |
+| `crew_max_tokens` | `0` | yes (stage 18): the crew's tokens; 0 is no bound |
 | `think_timeout_s` | `200.0` | yes |
 | `needs_human_timeout_s` | `600.0` | NO (declared, never read) |
 | `worktrees` | `True` | yes |
@@ -139,6 +154,7 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
   - `scaffolds._UNAVAILABLE` (`scaffolds.py:35`): tools currently probed down.
   - `tools._SCHEMAS` (stage 16): each tool's `input_schema` from `tool.registered` (live and replayed), read by `guardrails.validate`; emptied by `forget_registered`.
 - `api.Profile` gained `required_steps`, `terminal_tools`, `prerequisites`; `api.Step` gained `nudge`, `tier`; `api.Session` gained `guards`, `step_state` (stage 16).
+- `api.Session` gained `crew_id` and `crew_member` (stage 18); `session.CREW_PARENT_TOOLS`, `CREW_MEMBER_TOOLS`, `CREW_TOOLS`, `CREW_SCAFFOLDS`; `crew.py` (package-internal). Types taken from `simorgh.contracts`: `messages.crew` (`MemberBudget`, `Report`, `Finding`, `parse_report_policy`, `is_terminal`, the vocabularies) and `streamnames.crew_stream`.
 
 - `home_blink` (2026-09-27) is in `_TOOL_POLICY` (reversible), the marker help, `session` tool time budgets (45 s) and `scaffolds` tool lines, and in `agents/chat.md` / `agents/voice_chat.md`: the one way to blink a light, never a shell loop.
 
@@ -183,6 +199,19 @@ A claim or a promise is backed only by a tool that SUCCEEDED -- not by one that 
 - A task whose `subject` lies inside a materialised checkout (`contracts/checkout.py`'s manifest) gets NO worktree of this repository (`_uses_worktree`, 2026-09-22). A SWE-bench case works in `workspace/swebench/<case>/`, which a worktree does not contain: live, the task opened one, never wrote the file, `cd` into the checkout answered "No such file or directory", and the case scored "no patch" while the model reported a fix it had never applied.
 - Adopted rules (stage 8 item 5, 2026-09-22): `profiles.load` appends `rules/<agent>.md` (people's `<!-- -->` notes stripped) after the agent's own body under "Lessons adopted for this kind of work". `rules/` is Guardian-protected, so only a person places a file there; before this nothing read the folder and an adopted policy changed nothing.
 - The typed `Task` (stage 7 item 1, 2026-09-22): `task`/`delegate` take `{agent, brief, isolation, budget}`; `budget` is a step count or `{steps: n}` (clamped to 3..`delegate_max_steps`); `isolation` is `fresh` (default: the brief only) or `fork` (a copy of the parent's user/assistant/tool messages, then the job; the parent's context is never touched). Anything else is refused by name.
+- Agent crews (stage 18 item 2, 2026-10-27; docs/plan/stage-18-agent-crews.md). With `delegation` on, a patch, research or plan session below `max_depth` is offered `spawn`, `await_agents`, `check_agents`, `send_agent`, `cancel_agent`, `read_ref`, `board_put`, `board_get`; a member started by `spawn` is also offered `report_progress` and `ask_parent` (`CREW_PARENT_TOOLS`, `CREW_MEMBER_TOOLS`, all in `SESSION_LOCAL`: they coordinate and are never proposed; every tool a member uses in the world still is). Chat and voice are offered none (stage 18 item 3), and `spawn{background: true}` is refused by name until then.
+  - `spawn` returns the handle (`<parent>-h<n>`, the stage 7 helper ids) at once; the member runs as an asyncio task in this process on its own `task:<handle>` stream. It is batchable, so several spawns in one reply start together.
+  - A member's budget is carved at spawn: no more than it asked, its parent's own remainder, or the crew's (`Crew.carve`), and it becomes the child's `Budget` (steps, tokens, usd, wall). Each think a member pays is charged to the crew; spent out (or past `crew_max_wall_s`), every live member is cancelled with reason `crew budget` and reports `partial`.
+  - Cancellation is cooperative: a member stops at its next step boundary (`_crew_cancelled` beside `_is_cancelled`), one waiting in `await_agents`/`ask_parent` wakes at once. `cancel_agent` cascades to descendants by default.
+  - `await_agents{handles, mode: all|any|first_ok, timeout_s}` gives back the step its think took, waits event-driven (`Crew.wait_until`, no polling) until the mode holds, the timeout passes, or a member's question arrives, and returns each report (`render_report`: status, summary, findings, artifact refs) plus the messages that arrived. `first_ok` cancels the rest once one reports `ok`.
+  - The inbox: messages to a session are queued (`Inbox`, one `asyncio.Queue` per member and one for the root) and rendered as one `[crew inbox]` block at the head of the latest user turn before the next think -- after the cacheable prefix; `task_rules` and every system block are byte-identical before and after a message (`test_crews.py`).
+  - Report policy (`Crew.policy_allows`): `end` and `silent` deliver no progress, `progress` all of it, `milestones` milestones only, `every_steps:N` / `every_s:T` an automatic line between steps (`_crew_tick`) plus milestones. A question always reaches the parent; held progress is still on the stream and in `check_agents`.
+  - `ask_parent{question, timeout_s, default}` waits for an `answer` (`send_agent{kind: "answer"}` sets `reply_to` to the open question); on timeout the member goes on with the default and the question is in its report's `questions_unanswered`.
+  - The `Report` (`build_report`): a JSON object with `summary`, or the brief's "answer, then `- ` bullets" shape, parses into summary and findings (`[ref: x]` in a bullet is its `evidence_ref`); anything else is summarised by its first 1,200 characters. A summary that had to be cut has the whole text as a blob ref in `artifacts`. `read_ref` reads only refs a report, message or board entry of the crew named.
+  - Requester: a member's `speaker` and `channel` are its parent's, so Guardian sees the same person on every proposal.
+  - Writers (patch, skill) take the crew's writer slot, one at a time by default; a writer may not start another writer (it would wait on its own ancestor's slot). Readers run in parallel, `max_children_concurrent` per parent.
+  - Durability: a root that runs again (`run` with `delegation` on, a crew scaffold, depth 0) folds `crew:<id>`, restarts every member that had not finished through `resume.restore_session`, and when the root was in `await_agents` re-enters it before its first think, with the reports filed meanwhile. A crew is dropped from memory once its root has ended and nothing in it is running.
+  - `delegate`/`task` is `spawn` + `await_agents{mode: all}` on that one handle (`via: delegate`): the same refusals, step budget (no dollar carving), brief, child tools and `Helper <id> (<kind>, N steps): ...` line as before.
 - Helpers are agents (stage 7 item 1, 2026-09-19): `delegate` (also called `task`) takes `{"agent": "<name>"}` and runs the child as that agent from `agents/*.md`; an unknown name is refused by name rather than silently swapped. `[orchestration] max_children_concurrent` is now read: a task may have that many helpers running at once, and the next is refused with the cap in the message. Depth still bounds a chain of helpers.
 - A checkpoint after every action that changes something (stage 7 item 7, 2026-09-19): a successful non-read-only tool appends `session.checkpoint{tool, args_sha256, summary, tier}` to `session:<id>`, and a resumed session reads them (`resume.done_actions`) and answers that exact call with what it returned instead of doing it again. The drill it exists for: SIGKILL between a successful `git_commit` and its step record, where the resumed session used to commit twice. Not the Guardian tier: `git_commit` is "reversible" there, and the question here is whether doing it twice would be visible.
 - The house reaches an open task (stage 6 item 7, 2026-09-19): `world.home.situation_changed` is appended to every open task session as a user turn (`SessionRunner.note_environment`), so the agent may act on it at its next step under the same gate. A chat turn is one exchange long and is left alone.
@@ -218,6 +247,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/orchestration/test_never_leave_a_broken_tree.py` -- uncommitted edits are discarded or kept, never abandoned.
 - `tests/simorgh/orchestration/test_cancel.py` -- `task.cancel` stops a session at a step boundary.
 - `tests/simorgh/orchestration/test_scaffolds.py` -- `Profile.scaffold` reaches Cognition's `task_rules`.
+- `tests/simorgh/orchestration/test_crews.py` -- stage 18 item 2: three members faster than serial, writer serialisation, the crew budget, the cancel cascade, `ask_parent` answered and timed out, a steer reaching the next think with the prefix unmoved, report policies, a restart mid-crew, and `delegate` as before.
 - `tests/simorgh/orchestration/test_guardrails.py` -- stage 16: each nudge kind, the budgets, steps and prerequisites, a denial never nudged, chat text never nudged, step state across a resume, and `ablate = ["nudge", "steps"]` as before.
 
 ## Known issues (2026-09-18 evaluation)
