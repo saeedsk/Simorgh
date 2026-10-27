@@ -1389,7 +1389,7 @@ class SessionRunner:
             # waiting, not just after.
             await self._publish(session, topics.TASK_STEP, {
                 "task_id": session.task_id, "step_no": step_no, "phase": "gather",
-                "summary": f"asking the model (purpose={'chat' if session.profile.name == 'chat' else 'draft'})",
+                "summary": f"asking the model (purpose={'chat' if session.profile.scaffold == 'chat' else 'draft'})",
             })
             think_reply = await self._think(session, pending_user_text, last_step=is_last)
             pending_user_text = ""
@@ -1402,7 +1402,7 @@ class SessionRunner:
                 if await self._reground(session, forced=True):
                     think_reply = await self._think(session, "", last_step=is_last)
             if think_reply is None:  # provider unavailable / timeout -- honest floor
-                if session.profile.name == "chat":
+                if session.profile.scaffold == "chat":
                     # A chat turn ends as `completed` rather than `blocked`:
                     # nothing should retry a sentence somebody said out loud.
                     # But it must still SAY why. It used to return here with
@@ -1999,7 +1999,10 @@ class SessionRunner:
         # Per-turn material goes to the latest user turn, so the system
         # prefix stays byte-identical from turn to turn (stage 4 item 4).
         messages = scaffolds.with_turn_note(messages, scaffolds.when_line(_epoch(self._clock)))
-        is_chat = session.profile.name == "chat"
+        # A chat turn by its scaffold, not its name: a future agent on the
+        # chat scaffold under another name is a chat turn too (wave A
+        # review, 2026-10-27). Today chat and voice_chat both are.
+        is_chat = session.profile.scaffold == "chat"
         req = Message.new(
             topics.COGNITION_THINK, source=self._bus.source,
             payload={
