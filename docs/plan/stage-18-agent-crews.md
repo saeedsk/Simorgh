@@ -1,6 +1,6 @@
 # Stage 18 -- Agent crews: autonomous sub-agents that run together and talk to each other
 
-Status: **in progress** (2026-10-27: plan written; build starts once stage 16's orchestration branch is merged) · Depends on: stage 7 (the `Task` built-in, waits, projects), stage 16 (guardrails in the loop), stage 14 (evals runner) · Modules touched: contracts, orchestration (owner), interface, evals; `agents/`; `docs/`
+Status: **in progress** (2026-10-27: items 1-5, 8, 9, 10 and 12 merged and reviewed, `--tier core` green; open: item 6 (crew scenarios in evals), item 7 (measure, paid), item 11 (interop proof). Known gaps from review: crew tools have no native schemas and are dispatched without checking they were offered; Claude Code spend is not carved from the crew budget; the Claude Code brief must override CLAUDE.md's lock rule; a remote member's `data` class defaults to `public`; Initiative's notice can reach the owner for someone else's background result; background notices are lost on restart; an A2A `contextId` always starts a fresh crew (`spawn_external`)) · Depends on: stage 7 (the `Task` built-in, waits, projects), stage 16 (guardrails in the loop), stage 14 (evals runner) · Modules touched: contracts, orchestration (owner), interface, evals; `agents/`; `docs/`
 
 ## Outcome
 
