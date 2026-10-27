@@ -1,6 +1,6 @@
 # telemetry -- contract
 
-One-line status: layer 0 · ~700 lines · 3 test files · lock: `telemetry` in docs/modules/locks.toml
+One-line status: layer 0 · ~900 lines · 4 test files · lock: `telemetry` in docs/modules/locks.toml
 
 ## Purpose
 
@@ -16,7 +16,8 @@ As of this item nothing writes to it but tests: routing bus tracing and metrics 
 | `simorgh/telemetry/config.py` | `[telemetry]` dataclass and `from_mapping` (negative values refused) |
 | `simorgh/telemetry/store.py` | `TelemetryStore`: schema, batched insert, trace and series reads, retention and downsampling; synchronous, one connection behind a lock |
 | `simorgh/telemetry/tokens.py` | stage 17 item 1: sums `cognition.provider_call` spans into the input split per block and the cache hit rate, per provider and per lane (`chat`, `voice`, `task`) |
-| `simorgh/telemetry/__main__.py` | `python -m simorgh.telemetry tokens [--since 7d] [--file PATH \| --data-dir DIR] [--json]` |
+| `simorgh/telemetry/routing.py` | stage 17 item 3: sums the `routing.shadow` (or `routing.on`) spans orchestration writes per routed chat turn into turns, the miss rate, the conversational-route-then-tool rate and per-group offered/used counts |
+| `simorgh/telemetry/__main__.py` | `python -m simorgh.telemetry tokens [--since 7d] [--file PATH \| --data-dir DIR] [--json]`; `python -m simorgh.telemetry routing [--since 7d] [--mode shadow\|on] [same file options] [--json]` |
 | `simorgh/telemetry/service.py` | `TelemetryService`: implements `contracts.protocols.Telemetry`; the buffer, the writer task, `flush`, `query`, `series`, `maintain`, `on_sleep_tick`, `stop` |
 
 ## Consumes
@@ -78,7 +79,8 @@ No environment variables. The file path is fixed: `<[runtime] data_dir>/telemetr
 - `Config`, `FILENAME = "telemetry.sqlite"`.
 - `store.read_spans(path, name, *, since=None) -> list[dict]`: every span called `name` started at or after `since`, read-only; keys `trace_id, span_id, name, start, end, status, attrs`; empty when the file or its `spans` table is absent; any other sqlite error raises (the command prints it and exits 1) rather than reading as an empty period.
 - `tokens` (stage 17 item 1): `report(path, *, since_s, now=None) -> dict` (`by_provider`, `by_lane`, `all`; a row has `calls`, `split_calls`, `tokens_in`, `tokens_cached`, `tokens_out`, `cache_hit`, and per block `blocks`, `uncached`, `share`, `uncached_share`), `summarize(spans)`, `span_blocks(attrs)`, `lane_of(attrs)`, `parse_since(text)`, `format_report(result)`, `BLOCKS` (a copy of `cognition/tokens.py::BLOCKS`; telemetry may not import cognition). A span's `split` (chars/4 estimates) is scaled to its `tokens_in` (left as estimated when a provider reports no `tokens_in`); `tokens_cached` is taken off the blocks in the order sent (prefix, tools, memory, question, window, results), which is approximate where a provider places native schemas elsewhere. Lane: `voice` when the span's `channel` is `voice`, `chat` for other `purpose: chat`, `task` otherwise. The printout ends with the stage 17 gate line: the tools block's share of uncached input on chat and voice.
-- `python -m simorgh.telemetry tokens`: the file is `--file`, else `<--data-dir>/telemetry.sqlite`, else `$SIMORGH_RUNTIME_DATA_DIR` or `~/.simorgh` (telemetry cannot import the Kernel's config loader, so a `data_dir` set only in simorgh.toml needs `--data-dir`). Reads token counts only; exit 1 when the file is absent.
+- `routing` (stage 17 item 3): `report(path, *, since_s, mode="shadow", now=None) -> dict`, `summarize(spans)`, `format_report(result)`, `SPANS` (`{"shadow": "routing.shadow", "on": "routing.on"}`), `MISS_GATE = 0.03`. Reads the attributes `orchestration/session.py::_route_done` writes (`offered` groups, `used` tools, `used_groups`, `missed`, `conversational`, `channel`; a string contract, telemetry may not import orchestration). A summary has `turns`, `tool_turns`, `missed_turns`, `miss_rate` (turns with any `missed` tool over all turns), `conversational`, `conversational_then_tool` and `conversational_then_tool_rate` (of the conversational turns), `groups` (`{group: {"offered", "used"}}`, in turns), `missed_tools` (`{tool: turns}`) and `by_channel` (`{channel or "typed": {"turns", "missed_turns"}}`). The printout ends with the plan's gate line (miss rate under 3%).
+- `python -m simorgh.telemetry tokens` and `routing`: the file is `--file`, else `<--data-dir>/telemetry.sqlite`, else `$SIMORGH_RUNTIME_DATA_DIR` or `~/.simorgh` (telemetry cannot import the Kernel's config loader, so a `data_dir` set only in simorgh.toml needs `--data-dir`). Reads token counts (or group and tool names) only; exit 1 when the file is absent.
 - Module-level state: `service._CURRENT`, a `ContextVar` holding the innermost open span per task.
 
 ## Invariants
@@ -98,6 +100,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 
 - `tests/simorgh/telemetry/test_store.py` -- WAL file, table columns and indexes; 10k spans then one trace by index; start/end/status/attrs; nested and child-task parent ids; exception marks `error` and re-raises; cancellation; batching by timer and by size; stop flushes everything; bounded buffer; retention by age; one sample per minute per series; sleep-tick rate limit; the after-start pass; every config key read.
 - `tests/simorgh/telemetry/test_tokens_report.py` -- the per-span scaling and cache attribution, per provider and per lane, the period filter, the printed gate line, `--json`, a missing file.
+- `tests/simorgh/telemetry/test_routing_report.py` -- hand-built `routing.shadow` spans: turns, the miss rate, the conversational-route-then-tool rate, per-group offered/used, missed tools, per channel, the period and mode filters, the printout and gate line, `--json`, an empty period, a missing file.
 - `tests/simorgh/telemetry/test_kernel_wiring.py` -- a booted Kernel puts one store on every Context, the sleep tick runs retention, shutdown flushes, `enabled = false` hands out the no-op.
 - `tests/simorgh/contracts/test_telemetry_protocol.py` -- the protocol's no-op and the `Context.telemetry` default.
 
