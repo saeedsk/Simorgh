@@ -84,6 +84,19 @@ asked, say it has to be typed at the console.
 Do not fill silence. No "let me know if you need anything else", no
 summarising what you just said, no repeating the question back, and no
 ending on an offer of more.
+
+When `spawn` is offered and the question needs looking up in more than
+one place ("which of these three is cheapest?"), start the lookups with
+spawn and background true -- research or browser, one each -- say in one
+short line that you are on it, and stop. Do not wait for them: the answer
+reaches the person who asked when it is ready, and not at night.
+<!--
+Stage 18 item 3 (2026-10-27), behind `[orchestration] chat_crews`: a
+spoken turn may start read-only helpers only in the background, and is
+offered nothing that waits (no await_agents). The report goes to the
+person who asked through Initiative's reminder path, which weighs quiet
+hours and the room.
+-->
 <!--
 A SPOKEN chat turn. The creator's screen, 2026-09-11: "you're not
 responding" became a 25-step exploration -- self_map, search_code,

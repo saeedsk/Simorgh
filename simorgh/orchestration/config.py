@@ -145,6 +145,13 @@ class Config:
     crew_max_usd: float = 0.5
     crew_max_wall_s: float = 900.0
     crew_max_tokens: int = 0
+    # Chat and voice crews (stage 18 item 3). On: a typed chat turn may
+    # `spawn` read-only helpers (research, browser), and a spoken one only
+    # with `background: true` -- it answers at once, and the report reaches
+    # the person who asked later (a `ui.notice` for a typed turn; a spoken
+    # one through Initiative, which respects quiet hours). Independent of
+    # `delegation`. Off by default.
+    chat_crews: bool = False
     # Above Cognition's own `Budget.max_seconds` (180s), with room to
     # spare. It used to sit BELOW it: Cognition allowed each provider
     # 180 seconds while the caller here waited 120, so a merely slow

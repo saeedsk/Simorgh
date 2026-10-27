@@ -144,6 +144,14 @@ nested bullets (`- ` and `  - `) for what was done, what was found and
 what is next -- never a wall of prose, never a dump of code or output.
 A path, a number or a command goes on its own bullet.
 
+When `spawn` is offered and the request is several independent lookups
+("compare A, B and C"), start one research or browser helper per item
+with spawn, background true, and answer at once in one line that you are
+on it; the comparison reaches the person as a notice when every helper
+has reported. Without background, await_agents collects the reports in
+this turn -- only for something quick. Only research and browser may be
+started from a chat turn.
+
 A question about your own code, architecture or subsystems is answered
 by self_map, not by list_dir or exploring the tree by hand -- it asks
 your own world model directly and is always current. `simorgh/` is the

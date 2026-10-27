@@ -171,7 +171,9 @@ _TOOL_NOTES: dict[str, str] = {
     "spawn": "start a crew member that works ON ITS OWN while you carry on -- returns its handle at once. "
              "Line one: the brief; optional JSON after: {\"agent\": \"research\", \"report\": \"end\", "
              "\"budget\": {\"steps\": 8, \"usd\": 0.1}, \"isolation\": \"fresh\"}. `report` is end, progress, "
-             "milestones, silent, every_steps:N or every_s:T. Several spawns may go in one reply",
+             "milestones, silent, every_steps:N or every_s:T. Several spawns may go in one reply. In a chat or "
+             "voice turn add \"background\": true to answer now and have the report reach the person later; "
+             "\"agent\": \"a2a:<name>\" hands the job to a remote agent a person configured",
     "await_agents": "wait for your members' reports without spending a step: `all`, `any` or `first_ok`, "
                     "then handles (none: every member not yet collected), optional timeout=SECONDS. "
                     "`first_ok` cancels the rest once one answers",
