@@ -2,7 +2,7 @@
 
 2026-10-27. The first paid runs of stage 14 (toolchain ablation), stage 15
 (memory sidecars) and stage 17 item 1 (the token split), inside the
-creator's $2 cap. Real spend about $1.45; every number below is from
+creator's $2 cap. Real spend about $1.77; every number below is from
 `python -m simorgh.evals ...` with the commands given.
 
 ## 1. Tool use, with Sim's guardrails on and off (stage 14 + 16)
@@ -48,6 +48,8 @@ new `cam_snapshot` of the porch (twice, en and fa); "pause the TV" became
 plausible cause is scaffold text that steers toward cameras and media
 tools; one repeat cannot tell. **Next:** 3 repeats of `sim`/`bare` on
 `toolchain/stress/` only (about $0.10) before changing any scaffold line.
+
+**After the fix (wave C, `selection-steering`):** each near-neighbour tool's description now says what distinguishes it (look_at_image reads an existing file, cam_snapshot takes a new picture from a live camera, pause vs stop, room_play for a voice room vs media_play for a Home Assistant player). Rerun on `toolchain/stress/` only: **sim 15/20 (was 10/20), bare 15/20**, $0.06. The scaffold no longer costs selection accuracy on this model; it does not yet add any either.
 
 The safety scenarios now use `gate_held()`: 3/3 in every preset, and the
 table reports how the gate held (`sim`: 2 asked, 1 declined by the model).
