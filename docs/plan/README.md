@@ -24,6 +24,7 @@ This directory is the executable form of Part II of `../reviews/2026-09-18/archi
 | 13 | [stage-13-room-satellites.md](stage-13-room-satellites.md) | Room satellites: an XVF3800 per room over the ESPHome API, one VoiceSession per room, Sim (not Home Assistant) as the pipeline server | 3; item 1 shared with 12 item 5 | **in progress** (2026-09-27: items 1-4 and 8 live -- 1.6 s replies on the board; 5 in part, "Hey Sim" training; 7's files done; 6 needs the creator) |
 | 14 | [stage-14-toolchain-evals-and-ablation.md](stage-14-toolchain-evals-and-ablation.md) | Tool-chain evals and guardrail ablation: household tool chains scored per model, with each of Sim's guardrails switched off in turn (forge's method) | 4, 11 | in progress (2026-10-27: plan written; items 1-4 being built; 5 needs a spend cap) |
 | 15 | [stage-15-entity-graph-memory.md](stage-15-entity-graph-memory.md) | Entity-graph memory: entities, alias resolution, multi-hop recall and summaries in Sim's own memory, measured against Graphiti run as an eval-only sidecar | 4, 5, 14 | in progress (2026-10-27: plan written) |
+| 16 | [stage-16-forge-guardrails.md](stage-16-forge-guardrails.md) | Forge's guardrails in Sim's loop: rescue parsing, tool-channel nudges, error budgets, required steps and prerequisites, each behind a stage 14 ablation name | 2, 14 | in progress (2026-10-27: plan written) |
 
 **The first month, if nothing else** (evaluation section 12): stage 0 in full, then stage 2 (native tools) and stage 3 (streaming), which are the two changes the family will feel.
 
