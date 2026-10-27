@@ -165,6 +165,10 @@ class Session:
     #: so a refusal can name the cheap way back to one instead of
     #: telling the model to read the whole file again.
     set_aside: list = field(default_factory=list)
+    #: `pressure.digest` of every tool result appended that failed, so
+    #: masking by age (stage 17 item 7) never hides an error the model
+    #: has not yet answered.
+    failed_results: set = field(default_factory=set)
     # Once per session: a reply that said the TV was playing something
     # when no tool had run was sent back (live 2026-09-13).
     claim_corrected: bool = False

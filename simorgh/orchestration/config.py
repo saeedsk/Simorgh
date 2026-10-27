@@ -243,6 +243,12 @@ class Config:
     # and entity summaries, one line each, summaries first. 0 hides them.
     memory_fact_lines: int = 8
     memory_graph_lines: int = 8
+    # Observation masking by age (stage 17 item 7, `pressure.py`): a tool
+    # result this many steps old becomes its stub and a one-line gist made
+    # by code, at any pressure; `recall_result` brings it back in full.
+    # 0 is off -- the prompt is byte-identical -- until the item's
+    # measurement says the tokens saved beat the cache lost (plan: 2).
+    mask_after_steps: int = 0
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -269,7 +275,7 @@ class Config:
                 mode = "off"
             kwargs["tool_routing"] = mode
         for key, low in (("route_top_k", 1), ("route_sticky_turns", 0), ("memory_fact_lines", 0),
-                         ("memory_graph_lines", 0)):
+                         ("memory_graph_lines", 0), ("mask_after_steps", 0)):
             if key in kwargs:
                 try:
                     kwargs[key] = max(low, int(kwargs[key]))
