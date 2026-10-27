@@ -39,6 +39,21 @@ class TheTool(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tool_more", {t.name for t in builtin_tools(Config())})
 
 
+class ItsDescription(unittest.TestCase):
+    def test_it_names_every_group_the_model_may_ask_for(self):
+        """The description is the only list of groups the model sees
+        before it asks; a group added to `agents/groups.toml` and not named
+        here is one the model never knows to ask for."""
+        import tomllib
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[3] / "agents" / "groups.toml"
+        groups = tomllib.loads(path.read_text(encoding="utf-8"))["groups"]
+        askable = {n for n, g in groups.items() if g.get("tools") and not g.get("core")}
+        named = set(ToolMoreTool.description.split("(", 1)[1].split(")", 1)[0].replace(" ", "").split(","))
+        self.assertEqual(named, askable)
+
+
 class ItIsRegistered(_ExecutionServiceTestCase):
     async def test_the_service_registers_it(self):
         await self._start()

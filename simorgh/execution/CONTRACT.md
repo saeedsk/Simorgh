@@ -311,7 +311,7 @@ Each `[[execution.mcp_servers]]` entry: `name`, `command` (stdio only), `args`, 
 
 The files below pin the interface above. Keep them green: `python tools/modtest.py --tier contract execution`.
 
-- `tests/simorgh/execution/test_tool_more.py` -- `tool_more` is read-only, names its group, refuses an empty one, has a flat schema needing `group`, is a meta tool and not a builtin, and the service registers it.
+- `tests/simorgh/execution/test_tool_more.py` -- `tool_more` is read-only, names its group, refuses an empty one, has a flat schema needing `group`, is a meta tool and not a builtin, its description names every non-core group in `agents/groups.toml`, and the service registers it.
 - `tests/simorgh/execution/test_own_calls_go_through_guardian.py` -- boot watches, charts autoplay and the camera watcher's list/snapshot are proposed with `proposed_by="execution"` and run through `_on_approved`; a denial runs nothing and leaves the feature off; an AST scan finds no tool run or `ToolContext` outside `_on_approved`.
 - `tests/simorgh/execution/test_verifier.py` -- the six token outcomes: ok, missing args, hash mismatch, expired, bad signature, replay.
 - `tests/simorgh/integration/test_guardian_execution_action_path.py` -- real Guardian + Execution through the Kernel: an approved tool runs, a forged approval is refused before any tool runs, pause and protected paths deny.
