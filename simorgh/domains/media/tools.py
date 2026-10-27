@@ -138,7 +138,7 @@ class MediaControlTool(_MediaTool):
     # nothing said that pause keeps the place while stop ends playback.
     description = (
         "Control a Home Assistant media player -- a TV or a speaker in the house: pause (holds the place, "
-        "so resume carries on from it), resume, skip, stop (ends playback), off or on (switches the player "
+        "so resume carries on from it), resume, next, previous, stop (ends playback), off or on (switches the player "
         "itself off or on), mute, or set the volume. Volume is 0-100. "
         "Refuses to go loud unattended, and refuses to go loud at all during quiet hours. "
         "Not a room satellite (room_play) or the Mac's Music app (music_control)."

@@ -53,6 +53,7 @@ class PlayersAgainstTheRoom(unittest.TestCase):
         self.assertIn("pause (keeps the place)", line)
         self.assertIn("stop (ends playback)", line)
         self.assertIn("off or on", line)
+        self.assertNotIn("skip", line)  # not an op media_control accepts
 
     def test_media_play_finds_nothing_and_cannot_reach_a_satellite(self):
         line = note("media_play")

@@ -38,8 +38,11 @@ class MediaControl(unittest.TestCase):
 
     def test_every_op_it_describes_is_one_it_accepts(self):
         ops = set(MediaControlTool.args_schema["properties"]["op"]["enum"])
-        for op in ("pause", "resume", "stop", "off", "on", "mute", "volume"):
+        for op in ("pause", "resume", "next", "previous", "stop", "off", "on", "mute", "volume"):
             self.assertIn(op, ops)
+        # "skip" read like an op and is not one: a call with op=skip is
+        # refused as unknown.
+        self.assertNotIn("skip", MediaControlTool.description.lower())
 
 
 class MediaPlay(unittest.TestCase):

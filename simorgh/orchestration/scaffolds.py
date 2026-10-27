@@ -98,7 +98,7 @@ _TOOL_NOTES: dict[str, str] = {
     # the full scaffold lost to the bare one on exactly these pairs);
     # test_tool_notes_tell_neighbours_apart.py holds the facts.
     "media_control": "a Home Assistant player (a TV, a speaker in the house): pause (keeps the place), resume, "
-                     "skip, stop (ends playback), off or on (the player itself), or set the volume",
+                     "next, previous, stop (ends playback), off or on (the player itself), or set the volume",
     "media_play": "play a URL or stream URL on a Home Assistant player (a TV, a speaker in the house) -- it finds "
                   "no station by genre, and a room satellite is not one of its players",
     "music_now": "what the Mac's Music app is playing: track, artist, album, state, volume",
