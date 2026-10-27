@@ -47,7 +47,13 @@ def _is_result(message: dict) -> bool:
     return role == "tool" or (role == "user" and str(message.get("content") or "").startswith(_RESULT_HEADS))
 
 
-def split_messages(messages: list[dict]) -> dict[str, int]:
+def pinned(message: dict) -> bool:
+    """A message compaction never shortens (`compaction.py::_is_protected`):
+    `system` messages and the `protected` turn."""
+    return bool(message.get("protected")) or message.get("role") == "system"
+
+
+def split_messages(messages: list[dict], *, elastic_ratio: float = 1.0) -> dict[str, int]:
     """The caller's messages of one think, estimated per block:
 
     - `memory`: every `role: "system"` message the caller sends (the
@@ -57,6 +63,9 @@ def split_messages(messages: list[dict]) -> dict[str, int]:
     - `question`: the turn marked `protected`, else the first user turn
       that is not a result;
     - `window`: everything else (earlier turns, the model's own replies).
+
+    `elastic_ratio` scales every message compaction may shorten (all but
+    the `pinned` ones), so a compacted think is split as it was sent.
     """
     out = {"memory": 0, "question": 0, "window": 0, "results": 0}
     question_at = next((i for i, m in enumerate(messages) if m.get("protected")), None)
@@ -65,6 +74,8 @@ def split_messages(messages: list[dict]) -> dict[str, int]:
                             if m.get("role", "user") == "user" and not _is_result(m)), None)
     for i, m in enumerate(messages):
         tokens = estimate_tokens(_content(m))
+        if elastic_ratio != 1.0 and not pinned(m):
+            tokens = round(tokens * elastic_ratio)
         if i == question_at:
             out["question"] += tokens
         elif m.get("role") == "system":
@@ -76,4 +87,4 @@ def split_messages(messages: list[dict]) -> dict[str, int]:
     return out
 
 
-__all__ = ["BLOCKS", "ESTIMATOR", "estimate_tokens", "split_messages"]
+__all__ = ["BLOCKS", "ESTIMATOR", "estimate_tokens", "pinned", "split_messages"]

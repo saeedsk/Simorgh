@@ -30,7 +30,7 @@ from .providers.claude_code import ClaudeCodeProvider
 from .providers.gemini import GeminiProvider
 from .providers.together import DEFAULT_MODEL as together_default_model, TogetherProvider
 from .router import Router
-from .tokens import ESTIMATOR, estimate_tokens, split_messages
+from .tokens import ESTIMATOR, estimate_tokens, pinned, split_messages
 
 VERSION = "0.1.0"
 
@@ -228,16 +228,23 @@ def _token_split(prefix_tokens: int, tool_instructions: str | None, specs: list[
     estimated with `estimate_tokens`. `tools` is what the answering
     provider was actually sent: the marker block unless it was handed the
     typed transcript, plus the schemas when it is native. After
-    compaction the caller's blocks are scaled to what was left of them."""
+    compaction the messages compaction may shorten are scaled to what was
+    left of them; pinned ones (memory, the protected question) are not."""
     tools = 0
     if tool_instructions and not (native and typed):
         tools += estimate_tokens(tool_instructions)
     if native and specs:
         tools += estimate_tokens(json.dumps(specs, separators=(",", ":"), default=str))
-    caller = split_messages(messages)
-    if compacted.layers_applied and compacted.tokens_before > 0:
-        ratio = compacted.tokens_after / compacted.tokens_before
-        caller = {k: round(v * ratio) for k, v in caller.items()}
+    ratio = 1.0
+    if compacted.layers_applied:
+        # Compaction never shortens a pinned message (system blocks, the
+        # protected question), so only the rest shrinks: scale that by what
+        # was left of it, measured the way the compactor measures.
+        held = sum(estimate_tokens(str(m.get("content") or "")) for m in messages if pinned(m))
+        elastic_before = compacted.tokens_before - held
+        if elastic_before > 0:
+            ratio = max(0, compacted.tokens_after - held) / elastic_before
+    caller = split_messages(messages, elastic_ratio=ratio)
     return {"prefix": int(prefix_tokens), "tools": tools, **caller}
 
 

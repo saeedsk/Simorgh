@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from simorgh.cognition.api import Capabilities
 from simorgh.cognition.config import Config as CognitionConfig, ProviderConfig
+from simorgh.cognition.service import _token_split
 from simorgh.cognition.tokens import BLOCKS, ESTIMATOR, estimate_tokens, split_messages
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -84,6 +85,28 @@ class TheSplitOfMessages(unittest.TestCase):
                                 {"role": "user", "content": "do it"}, {"role": "user", "content": "more"}])
         self.assertEqual(split["question"], estimate_tokens("do it"))
         self.assertEqual(split["window"], estimate_tokens("more"))
+
+
+class _Compacted:
+    def __init__(self, before, after):
+        self.layers_applied, self.tokens_before, self.tokens_after = (2,), before, after
+
+
+class AfterCompaction(unittest.TestCase):
+    def test_only_what_compaction_can_shorten_is_scaled(self):
+        # Memory (system) and the protected question are never compacted;
+        # only the window and results shrank, 400 -> 100 of them.
+        messages = [{"role": "system", "content": "m" * 400},                   # memory, 100
+                    {"role": "user", "content": "q" * 40, "protected": True},   # question, 10
+                    {"role": "assistant", "content": "w" * 400},                # window, 100
+                    {"role": "user", "content": "Result of x:\n" + "r" * 1188}]  # results, 300
+        split = _token_split(0, None, None, messages, _Compacted(before=510, after=210),
+                             native=False, typed=False)
+        self.assertEqual(split["memory"], 100)
+        self.assertEqual(split["question"], 10)
+        self.assertEqual(split["window"], 25)
+        self.assertEqual(split["results"], 75)
+        self.assertEqual(split["memory"] + split["question"] + split["window"] + split["results"], 210)
 
 
 class TheProviderCallSpanCarriesTheSplit(CognitionServiceTestCase):
