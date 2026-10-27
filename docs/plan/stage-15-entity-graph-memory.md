@@ -9,7 +9,7 @@ Sim's semantic memory knows **entities**, not just strings. "Soo", "Soodeh" and 
 The same questions are also answered by **Graphiti** (github.com/getzep/graphiti) as a sidecar. It is fed the same episodes, and runs only inside the eval harness, never in the live Sim. One table then says whether the native version is good enough, or whether Graphiti is worth its dependencies, its graph database and its 5-10 model calls per episode:
 
 ```
-python -m simorgh.evals memory --systems native,native_graph,graphiti --paid --cap-usd 2
+python -m simorgh.evals memory --systems native,native_graph,graphiti,cognee --paid --cap-usd 2
 ```
 
 ## Why
@@ -91,7 +91,15 @@ python -m simorgh.evals memory --systems native,native_graph,graphiti --paid --c
    - a dry run with no key lists the matrix and an estimated cost;
    - with the package absent, the run reports `graphiti` skipped with the reason, not failed.
 
-6. **The comparison.** *No lock; paid, within the creator's cap.* Run all three systems on the suite and write `docs/findings/<date>-entity-graph-vs-graphiti.md`:
+5b. **Cognee as a second sidecar.** *Lock `evals`; parallel to item 5.* `simorgh/evals/memory/cognee_side.py`, built with the same rules as item 5:
+   - an import guarded by `ImportError`, and every case reported skipped by name when the package is absent;
+   - a hard `--cap-usd`, telemetry forced off (cognee reads `TELEMETRY_DISABLED`);
+   - its **local-first** storage only: SQLite for relational data, LanceDB for vectors, and its embedded graph store (check which one the installed version defaults to, and say so in the report), all in a temporary directory, with no server;
+   - the LLM through an OpenAI-compatible endpoint at the same Together model.
+
+   It runs the same corpus through `cognee.add` then `cognee.cognify`, and answers each question with `cognee.search` in its graph-completion mode, scored by the same "does the context contain the right fact" check. Cognee has no per-person scope that maps to `person_scope`, so it uses one dataset per person for the privacy category, and the report says so. It records the same ingestion cost and time numbers. `pip install cognee` goes in an `[eval-cognee]` extra, never the core. Systems name: `cognee`.
+
+6. **The comparison.** *No lock; paid, within the creator's cap.* Run all four systems on the suite and write `docs/findings/<date>-entity-graph-vs-graphiti.md`:
    - accuracy per category with intervals;
    - ingestion cost and time per episode;
    - recall latency p50/p95;
