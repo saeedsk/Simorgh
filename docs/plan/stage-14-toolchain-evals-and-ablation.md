@@ -36,7 +36,9 @@ prints one row per (model, preset), with the success rate, its 95% bootstrap int
 | `no_revisions` | `["revisions"]` | `[]` |
 | `no_recovery` | `["recovery"]` | `[]` |
 | `no_rescue` | `[]` | `["rescue"]` |
-| `bare` | `["scaffold", "verify", "revisions", "recovery"]` | `["rescue"]` |
+| `no_nudge` | `["nudge"]` | `[]` |
+| `no_steps` | `["steps"]` | `[]` |
+| `bare` | `["scaffold", "verify", "revisions", "recovery", "nudge", "steps"]` | `["rescue"]` |
 
 **Switch meanings.** Each switch is read by the module that owns the behaviour, from its own config section. Unknown names are reported through `problems` and do not fail the boot.
 
@@ -44,6 +46,8 @@ prints one row per (model, preset), with the success rate, its 95% bootstrap int
 - `orchestration.ablate` `"verify"`: every profile behaves as `verify = false`. The `review_benchmark` knob in `profiles.for_claimed` is the precedent.
 - `orchestration.ablate` `"revisions"`: every profile behaves as `max_revisions = 0`.
 - `orchestration.ablate` `"recovery"`: a tool result that is an error, a Guardian denial of an unknown tool, or a malformed call ends the session as `failed` on the spot. Today the error goes back to the model for another step. This is forge's `no_recovery`.
+- `orchestration.ablate` `"nudge"` (stage 16): no tool-call validation and no retry nudge; the tool-error budget and the refused-twice rule are off. A malformed or invented call goes to Guardian and the tool as it came.
+- `orchestration.ablate` `"steps"` (stage 16): an agent's `required_steps`, `terminal_tools` and `prerequisites` are not enforced. No chat profile declares any, so on a pack of chat turns `no_steps` is inert, as `no_verify` and `no_revisions` are (`ablation.inert_presets`; `--dry-run` and the table mark them).
 - `cognition.ablate` `"rescue"`: the parser accepts only a well-formed call. That means a marker line at the start of a line with exactly the tool's name, or a native typed call with arguments that are valid JSON for the schema. The leniencies in `cognition/parser.py`, such as first-line arguments, code-fence extraction and the case-insensitive marker match, are switched off. Whatever is not accepted becomes a plain text answer, exactly as an unparseable reply is treated today. This is forge's `no_rescue`.
 
 None of these switches may weaken Guardian. Guardian is not ablatable: every proposal is still gated. The ablation measures the loop, not the safety layer.

@@ -47,7 +47,11 @@ PRESETS: dict[str, dict[str, tuple[str, ...]]] = {
     "no_revisions": {"orchestration": ("revisions",), "cognition": ()},
     "no_recovery": {"orchestration": ("recovery",), "cognition": ()},
     "no_rescue": {"orchestration": (), "cognition": ("rescue",)},
-    "bare": {"orchestration": ("scaffold", "verify", "revisions", "recovery"), "cognition": ("rescue",)},
+    # Stage 16 item 3: forge's own guardrails, ported by stage 16 items 1-2.
+    "no_nudge": {"orchestration": ("nudge",), "cognition": ()},
+    "no_steps": {"orchestration": ("steps",), "cognition": ()},
+    "bare": {"orchestration": ("scaffold", "verify", "revisions", "recovery", "nudge", "steps"),
+             "cognition": ("rescue",)},
 }
 
 #: Which scenario prefix each `--suite` name runs. A raw id prefix (any text
@@ -414,15 +418,24 @@ def cells(results: list[RunResult]) -> list[Cell]:
 
 def table(results: list[RunResult]) -> str:
     rows = cells(results)
+    # A preset that cannot change these scenarios is marked `*`, so its
+    # row reads as a second `sim`, not as a guardrail that did nothing.
+    presets = list(dict.fromkeys(c.preset for c in rows))
+    scenarios = list({r.run.scenario.id: r.run.scenario for r in results}.values())
+    inert = inert_presets(presets, scenarios)
     width = max([len("model"), *(len(c.model) for c in rows)])
-    lines = [f"{'model':<{width}}  {'preset':<12} {'pass':>7} {'rate':>6}  {'95% CI':<13} "
+    lines = [f"{'model':<{width}}  {'preset':<14} {'pass':>7} {'rate':>6}  {'95% CI':<13} "
              f"{'skip':>4} {'steps':>6} {'$':>8}"]
     for c in rows:
         rate = f"{c.rate:.0%}" if c.rate is not None else "-"
         ci = f"[{c.interval[0]:.2f}, {c.interval[1]:.2f}]" if c.interval else "-"
         steps = f"{c.mean_steps:.1f}" if c.mean_steps is not None else "-"
-        lines.append(f"{c.model:<{width}}  {c.preset:<12} {f'{c.passed}/{len(c.counted)}':>7} {rate:>6}  "
+        name = c.preset + ("*" if c.preset in inert else "")
+        lines.append(f"{c.model:<{width}}  {name:<14} {f'{c.passed}/{len(c.counted)}':>7} {rate:>6}  "
                      f"{ci:<13} {c.skipped:>4} {steps:>6} {c.cost_usd:>8.4f}")
+    if inert:
+        lines.append("")
+        lines.append(f"* {', '.join(inert)} {INERT_NOTE}")
     skipped = [r for r in results if r.status == SKIPPED]
     if skipped:
         reasons: dict[str, int] = {}
@@ -444,15 +457,13 @@ def dry_run(runs: list[Run], *, models: list[Model], presets: list[str], scenari
     """The matrix and a cost estimate, spending nothing."""
     lines = [f"ablation matrix: {len(models)} model(s) x {len(presets)} preset(s) x "
              f"{len(scenarios)} scenario(s) x {repeats} repeat(s) = {len(runs)} runs", ""]
+    inert = inert_presets(presets, scenarios)
     for name in presets:
         switches = PRESETS[name]
         lines.append(f"  {name:<13} orchestration={list(switches['orchestration'])} "
-                     f"cognition={list(switches['cognition'])}")
-    inert = inert_presets(presets, scenarios)
+                     f"cognition={list(switches['cognition'])}" + ("  (inert here)" if name in inert else ""))
     if inert:
-        lines.append(f"  note: {', '.join(inert)} change nothing for these scenarios -- every one is a chat "
-                     "turn, and the chat profile already runs with verify = false and max_revisions = 0; "
-                     "those rows can only equal sim")
+        lines.append(f"  note: {', '.join(inert)} {INERT_NOTE}")
     lines.append("")
     total, unknown = 0.0, []
     for model in models:
@@ -475,28 +486,44 @@ def dry_run(runs: list[Run], *, models: list[Model], presets: list[str], scenari
     return "\n".join(lines)
 
 
+#: What `--dry-run` and `table` say after naming the inert presets.
+INERT_NOTE = ("change nothing for these scenarios -- every one is a chat turn, and the chat profiles "
+              "already run with that guardrail off (verify = false, max_revisions = 0, no required_steps, "
+              "terminal_tools or prerequisites); those rows can only equal sim")
+
+
 def inert_presets(presets: list[str], scenarios: list) -> list[str]:
     """The presets that cannot change anything for `scenarios`: those
-    whose only switches are `verify`/`revisions` when every scenario is a
-    chat turn (typed or spoken, never a task) and the chat profile
-    already has Verification off and no revisions. Paying for those rows
-    buys a second `sim` row, so `--dry-run` says so before anything is
-    spent."""
+    whose only switches are ones the chat profiles already have off,
+    when every scenario is a chat turn (typed or spoken, never a task).
+    `verify` is off when no chat profile verifies, `revisions` when none
+    has a revision, `steps` when none declares `required_steps`,
+    `terminal_tools` or `prerequisites` (all that stage 16's step
+    enforcement reads, `guardrails.steps_for`). `scaffold`, `recovery`,
+    `nudge` and `rescue` act on every chat turn and are never inert.
+    Paying for an inert row buys a second `sim` row, so `--dry-run` and
+    `table` say so; the preset stays, because on a pack with a task in
+    it the same switch is not inert."""
     from simorgh.orchestration import profiles
 
-    chat = profiles.for_percept("cli")
-    if chat.verify or chat.max_revisions:
-        return []
     beats = [b for s in scenarios for b in (getattr(s, "beats", None) or ())]
     if not beats or not all(getattr(s, "beats", None) for s in scenarios) \
             or any(not getattr(b, "says", "") or getattr(b, "proposes", None) for b in beats):
         return []
-    owned = {"verify", "revisions"}
+    chats = (profiles.for_percept("cli"), profiles.for_percept("voice"))
+    off = set()
+    if not any(c.verify for c in chats):
+        off.add("verify")
+    if not any(c.max_revisions for c in chats):
+        off.add("revisions")
+    if not any(getattr(c, "required_steps", ()) or getattr(c, "terminal_tools", ())
+               or getattr(c, "prerequisites", {}) for c in chats):
+        off.add("steps")
     return [p for p in presets
-            if PRESETS[p]["orchestration"] and set(PRESETS[p]["orchestration"]) <= owned
+            if PRESETS[p]["orchestration"] and set(PRESETS[p]["orchestration"]) <= off
             and not PRESETS[p]["cognition"]]
 
 
-__all__ = ["Cell", "DEFAULT_LOG", "FLOOR", "PER_RUN_CAP_USD", "inert_presets", "Model", "PRESETS", "Run", "RunResult", "SUITE_PREFIXES",
+__all__ = ["Cell", "DEFAULT_LOG", "FLOOR", "INERT_NOTE", "PER_RUN_CAP_USD", "inert_presets", "Model", "PRESETS", "Run", "RunResult", "SUITE_PREFIXES",
            "cells", "child_env", "dry_run", "estimate_usd", "judge", "matrix", "parse_models",
            "parse_presets", "preset_config", "run_matrix", "scenarios_for", "table", "wilson"]

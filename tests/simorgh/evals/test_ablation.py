@@ -75,8 +75,19 @@ class ThePresets(unittest.TestCase):
             if m:
                 rows[m.group(1)] = {"orchestration": tuple(json.loads(m.group(2))),
                                     "cognition": tuple(json.loads(m.group(3)))}
-        self.assertEqual(len(rows), 7)
+        self.assertEqual(len(rows), 9)
         self.assertEqual(rows, PRESETS)
+
+    def test_bare_is_every_single_switch_at_once(self):
+        """Stage 16 item 3: `no_nudge` and `no_steps` exist, and `bare`
+        is the union of every one-switch preset, so a guardrail added
+        later and left out of `bare` fails here."""
+        self.assertEqual(PRESETS["no_nudge"], {"orchestration": ("nudge",), "cognition": ()})
+        self.assertEqual(PRESETS["no_steps"], {"orchestration": ("steps",), "cognition": ()})
+        singles = [v for k, v in PRESETS.items() if k not in ("sim", "bare")]
+        for section in ("orchestration", "cognition"):
+            union = {s for v in singles for s in v[section]}
+            self.assertEqual(set(PRESETS["bare"][section]), union, section)
 
     def test_every_switch_is_one_its_module_knows(self):
         from simorgh.cognition.config import ABLATE_SWITCHES
@@ -331,12 +342,47 @@ class TheReport(unittest.TestCase):
         from simorgh.evals.house.scenarios import by_prefix
 
         pack = by_prefix("toolchain/")
-        self.assertEqual(ablation.inert_presets(list(PRESETS), pack), ["no_verify", "no_revisions"])
+        self.assertEqual(ablation.inert_presets(list(PRESETS), pack), ["no_verify", "no_revisions", "no_steps"])
         self.assertEqual(ablation.inert_presets(list(PRESETS), [_Scenario("x/y/z")]), [])
         runs = ablation.matrix([Model("together", "m")], list(PRESETS), pack, 1)
         dry = ablation.dry_run(runs, models=[Model("together", "m")], presets=list(PRESETS),
                                scenarios=pack, repeats=1, paid=True)
-        self.assertIn("no_verify, no_revisions change nothing", dry)
+        self.assertIn("no_verify, no_revisions, no_steps change nothing", dry)
+        marked = [line.split()[0] for line in dry.splitlines() if line.endswith("(inert here)")]
+        self.assertEqual(marked, ["no_verify", "no_revisions", "no_steps"])
+
+    def test_no_steps_is_live_once_a_chat_profile_declares_a_step(self):
+        """`no_steps` is inert only because no chat profile has a step
+        key; give one a prerequisite and it is a real row again. `bare`
+        and `no_nudge` act on every chat turn and are never inert."""
+        from dataclasses import replace
+
+        from simorgh.evals.house.scenarios import by_prefix
+        from simorgh.orchestration import profiles
+
+        pack = by_prefix("toolchain/")
+        stepped = replace(profiles.CHAT, prerequisites={"home_call": ["home_state"]})
+        with mock.patch.object(profiles, "for_percept",
+                               lambda ch: profiles.VOICE_CHAT if ch == "voice" else stepped):
+            self.assertEqual(ablation.inert_presets(["no_steps", "no_verify"], pack), ["no_verify"])
+        self.assertEqual(ablation.inert_presets(["sim", "no_nudge", "bare"], pack), [])
+
+    def test_the_table_marks_inert_rows(self):
+        """The report, not only the dry run: a row that can only equal
+        `sim` carries `*` and a note, so nobody reads it as a guardrail
+        that did nothing."""
+        from simorgh.evals.house.scenarios import by_prefix
+
+        pack = by_prefix("toolchain/")[:1]
+        runs = ablation.matrix([Model("together", "m")], ["sim", "no_nudge", "no_steps"], pack, 1)
+        results = [ablation.RunResult(r, PASSED) for r in runs]
+        text = ablation.table(results)
+        self.assertIn("no_steps* ", text)
+        self.assertNotIn("no_nudge*", text)
+        self.assertIn("* no_steps change nothing", text)
+        plain = ablation.table([ablation.RunResult(ablation.Run(Model("t", "m"), "no_steps", _Scenario("x/y/z"), 1),
+                                                   PASSED)])
+        self.assertNotIn("*", plain)
 
     def test_the_rule_on_skips_in_the_row(self):
         results = [ablation.RunResult(ablation.Run(Model("t", "m"), "sim", _Scenario("x/y/z"), 1), s)
@@ -361,7 +407,7 @@ class TheCommand(unittest.TestCase):
             code, out, _ = self._main("ablate", "--suite", "toolchain", "--models", "together:m,floor:floor",
                                       "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn("7 preset(s)", out)
+        self.assertIn("9 preset(s)", out)
         for name in PRESETS:
             self.assertIn(name, out)
 
