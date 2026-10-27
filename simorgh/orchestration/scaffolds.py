@@ -167,6 +167,24 @@ _TOOL_NOTES: dict[str, str] = {
                 "Line one: the job; optional JSON line after it: {\"steps\": 8, \"agent\": \"verify\", "
                 "\"isolation\": \"fork\"} -- `fork` gives the helper a copy of what you have seen so far, "
                 "`fresh` (the default) only the job",
+    # Agent crews (stage 18 item 2): members run together while you work.
+    "spawn": "start a crew member that works ON ITS OWN while you carry on -- returns its handle at once. "
+             "Line one: the brief; optional JSON after: {\"agent\": \"research\", \"report\": \"end\", "
+             "\"budget\": {\"steps\": 8, \"usd\": 0.1}, \"isolation\": \"fresh\"}. `report` is end, progress, "
+             "milestones, silent, every_steps:N or every_s:T. Several spawns may go in one reply",
+    "await_agents": "wait for your members' reports without spending a step: `all`, `any` or `first_ok`, "
+                    "then handles (none: every member not yet collected), optional timeout=SECONDS. "
+                    "`first_ok` cancels the rest once one answers",
+    "check_agents": "a table of your members: status, last progress, steps, cost",
+    "send_agent": "a message to a member: `<handle> [steer|note|answer]` then the text. Steer your own "
+                  "members, answer their questions, note to a sibling or your parent",
+    "cancel_agent": "stop a member and everything under it: `<handle> <reason>`",
+    "read_ref": "read the full text behind a ref a report or message named -- only when the summary is not enough",
+    "report_progress": "tell your parent how it is going in one line; `milestone: <text>` marks a milestone",
+    "ask_parent": "ask your parent for a decision only it can make and wait for the answer: the question, "
+                  "then optional JSON {\"timeout_s\": 60, \"default\": \"...\"}; on timeout you go on with the default",
+    "board_put": "write to the crew's shared board: `<key> <value>` (last write wins, 2,000 characters)",
+    "board_get": "read the crew's shared board: one key, or nothing for all of it",
     "start_task": "hand a BUILD off to a background task with its own step budget, which "
                    "resumes where it left off instead of starting over -- for an app, a game, a "
                    "long document, anything too big for one reply. authorised=true only when the "
@@ -650,6 +668,20 @@ def scaffold_body(profile: Profile) -> str:
         # Computed, so it stays in code: the keyless public sources.
         body = body + "\n\n" + keyless_sources_block()
     return body
+
+
+#: Stage 17 item 8: a native-dialect session is told it may ask for several
+#: lookups at once. The marker dialect has its own line in Cognition's
+#: tool listing; a native session's typed transcript drops that listing
+#: after its first reply, and nothing else said it.
+PARALLEL_NATIVE_LINE = "Independent lookups may be requested together in one reply."
+
+
+def parallel_line(parallel_reads: int) -> str:
+    """The line for a native session's turn, or "" when only one call per
+    reply runs (`[orchestration] parallel_read_tools` <= 1), so the default
+    prompt is unchanged."""
+    return PARALLEL_NATIVE_LINE if int(parallel_reads or 1) > 1 else ""
 
 
 def with_turn_note(messages: list[dict], note: str) -> list[dict]:

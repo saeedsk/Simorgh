@@ -9,7 +9,9 @@ Optional, each behind its own `[orchestration]` switch: re-grounding
 every `reground_every_steps` (`progress.py`), clean revisions, helper
 tasks through the `delegate` tool (`delegation`, bounded by
 `max_depth`), and strong-tier escalation (`escalate_from_attempt`).
-Not built: Plan Mode artifact assembly and steer injection.
+Under `delegation`, agent crews too (stage 18, `crew.py`): `spawn` starts
+members that run together, and a parent steers them through their inbox.
+Not built: Plan Mode artifact assembly.
 """
 
 from __future__ import annotations
@@ -106,6 +108,19 @@ WAIT = "wait"
 #: file may list `memory_search`; `delegate`, `use_skill` and
 #: `recall_result` are added when the session has something to use them on.
 SESSION_LOCAL = frozenset({MEMORY_SEARCH, WAIT, "delegate", "task", "use_skill", pressure_mod.RECALL_TOOL})
+
+#: Agent crews (stage 18, `crew.py`): tools a session answers itself, like
+#: `delegate`. They coordinate members and never touch the world, so they
+#: are not proposed to Guardian; everything a member does in the world is.
+#: A parent is offered the first set, a member started by `spawn` the second.
+CREW_PARENT_TOOLS = ("spawn", "await_agents", "check_agents", "send_agent", "cancel_agent", "read_ref",
+                     "board_put", "board_get")
+CREW_MEMBER_TOOLS = ("report_progress", "ask_parent", "send_agent", "read_ref", "board_put", "board_get")
+CREW_TOOLS = frozenset(CREW_PARENT_TOOLS + CREW_MEMBER_TOOLS)
+#: The scaffolds whose sessions may start a crew (the plan's "Who may
+#: spawn"; chat and voice are stage 18 item 3).
+CREW_SCAFFOLDS = ("patch", "research", "plan")
+SESSION_LOCAL = SESSION_LOCAL | CREW_TOOLS
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here
@@ -119,6 +134,10 @@ from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .claims import unsupported_claims
+from simorgh.contracts.messages.crew import MemberBudget, is_terminal
+from simorgh.contracts.streamnames import crew_stream
+
+from .crew import CREW_BUDGET, BRIEF_INLINE_MAX, Crew, CrewRefused, build_report, render_inbox, render_report, status_table
 from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_action_payload, tool_schemas
 
 # What a Guardian refusal looks like on a step, in one place. The step's
@@ -725,6 +744,8 @@ class SessionRunner:
         skills_channels: tuple[str, ...] = ("", "cli", "http"), telemetry=None,
         bridge_on_slow_turns: bool = False, bridge_timeout_s: float = 2.0,
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
+        crew_max_members: int = 8, crew_max_writers: int = 1, crew_max_usd: float = 0.5,
+        crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0,
     ) -> None:
         # Counts each Stop-hook rule that fires (`stophook.py`); a no-op
         # stand-in when the runner is built without one (tests, harnesses).
@@ -746,9 +767,15 @@ class SessionRunner:
         #: happens in the house can reach the agent working in it
         #: (stage 6 item 7).
         self._open: dict[str, Session] = {}
-        #: Helper sessions running for a parent task (stage 7 item 1), so
-        #: `max_children_concurrent` is a real cap and not a number in a doc.
-        self._children: dict[str, list] = {}
+        #: Agent crews (stage 18 item 2, `crew.py`), by crew id: the tree
+        #: under one root session. Built at the first spawn, or folded
+        #: from `crew:<id>` when a root that had one runs again.
+        self._crews: dict[str, Crew] = {}
+        self._crew_limits = {
+            "max_members": max(1, int(crew_max_members)), "max_concurrent": max(1, int(max_children)),
+            "max_writers": max(1, int(crew_max_writers)), "max_usd": max(0.0, float(crew_max_usd)),
+            "max_wall_s": max(0.0, float(crew_max_wall_s)), "max_tokens": max(0, int(crew_max_tokens)),
+        }
         # Agent Skills: the catalog rides in `task_rules` and `use_skill` returns
         # one skill's instructions. Off by default -- every THINK pays for the
         # catalog (docs/plans/agent-skills-design.md section 5.2).
@@ -865,6 +892,9 @@ class SessionRunner:
             session.base_ref = _git_head()
         self._open[session.task_id] = session
         self._unrecovered.pop(session.task_id, None)
+        if self._delegation:
+            # A root that had a crew before a restart takes it up again.
+            await self._crew_resume(session)
         if self._ablate:
             from . import profiles as _profiles
 
@@ -889,7 +919,16 @@ class SessionRunner:
             outcome = await self._run(session, user_text=user_text)
         finally:
             self._open.pop(session.task_id, None)
+            self._forget_crew(session.crew_id)
             await self._persist_transcript(session)
+        if outcome.kind == "failed" and outcome.reason == CANCELLED_REASON:
+            # A cancelled parent takes its members with it: each stops at its
+            # next step, and one asleep in `ask_parent` or `await_agents`
+            # wakes now. (Not on a process stop -- that raises past here,
+            # and a restart resumes the crew.)
+            crew = self._crew_of(session)
+            for member in [m for m in crew.children(session.task_id) if not is_terminal(m.status)] if crew else ():
+                await crew.cancel(member.handle, "its parent was cancelled")
         if outcome.kind == "completed":
             # `_transcript_echo` catches a fabrication written in our own
             # bracket syntax. Plain prose walked straight past it: "I've
@@ -1186,6 +1225,18 @@ class SessionRunner:
 
         pending_user_text = user_text
         started = time.monotonic()
+        crew = self._crew_of(session)
+        if crew is not None and crew.root == session.task_id and crew.root_await:
+            # The root was in `await_agents` when the process stopped: it
+            # re-enters it, with every report filed meanwhile already there.
+            spec, crew.root_await = crew.root_await, None
+            known = [h for h in spec.get("handles") or () if h in crew.members]
+            if known:
+                result, _woke = await self._await_members(session, crew, {**spec, "handles": known})
+                session.messages.append({"role": "user", "content": (
+                    f"Results of await_agents (taken up again after a restart):\n{result}\n\n"
+                    "If the task is now finished, reply with your final answer in plain text. "
+                    "Otherwise take the next step.")})
         while True:
             ended = self._unrecovered_outcome(session)
             if ended is not None:
@@ -1205,7 +1256,10 @@ class SessionRunner:
             # one: a cancel must not tear down a provider call or leave a
             # half-applied edit behind. The cleanup in `run` runs either
             # way, so an uncommitted change is still discarded.
-            if self._is_cancelled(session.task_id) or (session.parent_id and self._is_cancelled(session.parent_id)):
+            if session.crew_id:
+                await self._crew_tick(session)
+            if (self._is_cancelled(session.task_id) or (session.parent_id and self._is_cancelled(session.parent_id))
+                    or self._crew_cancelled(session)):
                 return Outcome("failed", reason=CANCELLED_REASON)
 
             if (session.profile.scaffold != "chat" and session.messages and not session.budget.is_last_step
@@ -1351,10 +1405,13 @@ class SessionRunner:
                     session.messages.append({"role": "tool", "tool_call_id": call["id"],
                                              "name": call.get("tool"), "content": summary})
                 dropped = len(tool_calls) - len(calls)
+                # Stage 17 item 8: this branch is native-only by construction,
+                # and the line rides in the turn, not the cacheable prefix.
+                together = scaffolds.parallel_line(self._parallel_reads)
                 session.messages.append({"role": "user", "content": (
                     (f"{dropped} further call(s) were not run: at most {MAX_NATIVE_CALLS} per reply. " if dropped else "")
                     + "If the task is now finished, reply with your final answer in plain text. "
-                      "Otherwise take the next step.")})
+                      "Otherwise take the next step." + (f" {together}" if together else ""))})
                 if self._paused():
                     return await self._pause(session)
                 continue
@@ -1369,6 +1426,8 @@ class SessionRunner:
                 else:
                     if call.get("tool") in ("delegate", "task"):
                         ok, summary, detail = await self._delegate(session, call)
+                    elif call.get("tool") in CREW_TOOLS:
+                        ok, summary, detail = await self._crew_tool(session, call)
                     elif call.get("tool") == "use_skill":
                         ok, summary, detail = await self._use_skill(session, call)
                     elif call.get("tool") == pressure_mod.RECALL_TOOL:
@@ -1661,6 +1720,13 @@ class SessionRunner:
         if (offered and self._delegation and session.depth < self._max_depth
                 and session.profile.scaffold in ("patch", "research") and "delegate" not in offered):
             offered = tuple(offered) + ("delegate",)
+        if offered and self._delegation and session.depth < self._max_depth and session.profile.scaffold in CREW_SCAFFOLDS:
+            # Agent crews (stage 18): a parent starts members and talks to them.
+            offered = tuple(offered) + tuple(t for t in CREW_PARENT_TOOLS if t not in offered)
+        if offered and session.crew_member:
+            offered = tuple(offered) + tuple(t for t in CREW_MEMBER_TOOLS if t not in offered)
+        # What the crew said since the last think: after the prefix, never in it.
+        await self._crew_inbox(session)
         catalog = self._catalog(session) if offered and not no_tools else ""
         if offered and session.profile.scaffold in ("patch", "research", "plan") and WAIT not in offered:
             # Long work may have to wait for the world (stage 7 item 5).
@@ -1755,6 +1821,11 @@ class SessionRunner:
         # `task.step` and, downstream, on a benchmark run.
         session.spent_usd += float(reply.payload.get("cost_usd") or 0.0)
         session.spent_tokens += int(reply.payload.get("tokens") or 0)
+        crew = self._crew_of(session)
+        if crew is not None and session.task_id in crew.members:
+            # The crew's budget (stage 18): spent out, every member is cancelled.
+            await crew.charge(session.task_id, usd=float(reply.payload.get("cost_usd") or 0.0),
+                              tokens=int(reply.payload.get("tokens") or 0))
         # Which model actually answered. Cognition has always said so in
         # the reply and nothing carried it any further, so a benchmark
         # run could not check its own headline: the creator's GAIA run
@@ -1862,7 +1933,7 @@ class SessionRunner:
 
     def _parallel_offer(self, offered) -> dict:
         """Which offered tools may run together, when that is switched on."""
-        reads = [tool for tool in offered if tool not in ("delegate", "task") and is_read_only(tool)]
+        reads = [tool for tool in offered if tool == "spawn" or (tool not in ("delegate", "task") and is_read_only(tool))]
         if self._parallel_reads < 2 or len(reads) < 2:
             return {}
         return {"parallel_tools": reads, "max_parallel_tools": self._parallel_reads}
@@ -1884,7 +1955,9 @@ class SessionRunner:
     @staticmethod
     def _batchable(call: dict) -> bool:
         tool = str(call.get("tool") or "")
-        return tool not in ("delegate", "task") and is_read_only(tool)
+        # `spawn` returns at once (stage 18), so several in one reply start
+        # together; `delegate` still waits for its helper and runs alone.
+        return tool == "spawn" or (tool not in ("delegate", "task") and is_read_only(tool))
 
     def _dropped_rule(self) -> str:
         if self._parallel_reads > 1:
@@ -1925,6 +1998,8 @@ class SessionRunner:
     async def _run_one(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
         if call.get("tool") in ("delegate", "task"):
             return await self._delegate(session, call)
+        if call.get("tool") in CREW_TOOLS:
+            return await self._crew_tool(session, call)
         if call.get("tool") == "use_skill":
             return await self._use_skill(session, call)
         if call.get("tool") == pressure_mod.RECALL_TOOL:
@@ -1940,7 +2015,7 @@ class SessionRunner:
         Guardian on its own and recorded as its own step; the model gets
         one numbered block with every result."""
         results = await asyncio.gather(*(
-            self._propose_and_await(session, call, step_no + i) for i, call in enumerate(batch)
+            self._run_one(session, call, step_no + i) for i, call in enumerate(batch)
         ))
         blocks = []
         for i, (call, (ok, summary, detail)) in enumerate(zip(batch, results)):
@@ -1955,11 +2030,12 @@ class SessionRunner:
         """Run a helper: a read-only research session with a fresh context and
         its own small budget, in this process (so a single Worker cannot
         deadlock waiting on its own child). Only its report comes back; its
-        steps live on its own `task:<id>` stream. (Design section 5.)"""
-        from dataclasses import replace as _replace
+        steps live on its own `task:<id>` stream. (Design section 5.)
 
+        Since stage 18 a helper is a crew member: this is `spawn` plus
+        `await_agents{mode: "all"}` on that one handle, with the old
+        refusals, step budget, brief and report line kept word for word."""
         from . import profiles as _profiles
-        from .api import Budget as _Budget
 
         args = call.get("args") or {}
         if isinstance(args, dict) and set(args) == {"argument"}:
@@ -1985,7 +2061,8 @@ class SessionRunner:
             text = (f"delegate: refused -- no agent called {wanted!r}; "
                     f"the agents are {', '.join(sorted(_agents.AGENTS))}")
             return False, text, text
-        running = len([t for t in self._children.get(session.task_id, ()) if not t.done()])
+        crew = await self._crew_for(session)
+        running = len([m for m in crew.children(session.task_id) if not is_terminal(m.status)])
         if running >= self._max_children:
             text = (f"delegate: refused -- {running} helper(s) already running for this task; "
                     f"{self._max_children} at once is the cap")
@@ -1996,23 +2073,60 @@ class SessionRunner:
         # The typed shape (stage 7 item 1): `Task{agent, brief, isolation,
         # budget}`. `budget` is a step count or `{"steps": n}`; `steps`
         # stays for the marker form.
-        budget = args.get("budget")
-        raw_steps = budget.get("steps") if isinstance(budget, dict) else budget
-        try:
-            steps = int(raw_steps or args.get("steps") or 0)
-        except (TypeError, ValueError):
-            steps = 0
+        steps = self._asked_steps(args)
         isolation = str(args.get("isolation") or "fresh").strip().lower()
         if isolation not in ("fresh", "fork"):
             text = f"delegate: refused -- isolation is `fresh` or `fork`, not {isolation!r}"
             return False, text, text
         steps = max(3, min(self._delegate_max_steps, steps or self._delegate_max_steps))
-        n = sum(1 for s in session.steps if s.tool in ("delegate", "task")) + 1
-        child_id = f"{session.task_id}-h{n}"
+        agent = _agents.AGENTS[wanted] if wanted else _profiles.RESEARCH
+        brief = self._brief(session, job, crew=False)
+        try:
+            member = await crew.admit(
+                parent=session.task_id, agent=agent.name, brief=brief, depth=session.depth + 1,
+                budget=MemberBudget(steps=steps), isolation=isolation, writer=self._writes(agent),
+                via="delegate", brief_ref=await self._brief_ref(brief),
+                requester=session.speaker, requester_channel=session.channel)
+        except CrewRefused as exc:
+            text = f"delegate: refused -- {exc}"
+            return False, text, text
+        child = self._member_session(session, member, agent, job=job,
+                                     kind=agent.scaffold if wanted else "research")
+        self._start_member(crew, member, child, brief, session)
+        outcome = await member.task
+        member.collected = True
+        body = (outcome.result_summary or outcome.reason or "(no report)").strip()
+        if len(body) > 1500:
+            body = body[:1499] + "…"
+        ok = outcome.kind == "completed" and bool((outcome.result_summary or "").strip())
+        text = f"Helper {member.handle} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
+        return ok, text, text[:self._DETAIL_CHARS]
+
+    # -- agent crews (stage 18 item 2, `crew.py`) -----------------------------------------
+
+    @staticmethod
+    def _writes(agent) -> bool:
+        """A writer, for the crew's `max_writers`: an agent whose product is a
+        change to the repository (`WORKTREE_KINDS`: patch, skill). `research`
+        is not `read_only` in its file -- it may run a shell -- but it is
+        one of the plan's readers, which run in parallel."""
+        return agent.scaffold in WORKTREE_KINDS
+
+    @staticmethod
+    def _asked_steps(args: dict) -> int:
+        budget = args.get("budget")
+        raw_steps = budget.get("steps") if isinstance(budget, dict) else budget
+        try:
+            return int(raw_steps or args.get("steps") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _brief(self, session: Session, job: str, *, crew: bool) -> str:
         goal = (session.progress.split("\n", 1)[0] if session.progress
                 else " ".join(session.user_text.split())[:500]) or "(not stated; the job below is the whole brief)"
-        brief = (
-            f"You are a helper on a larger task. Its goal: {goal}\n\n"
+        who = "a member of a crew working on a larger task" if crew else "a helper on a larger task"
+        return (
+            f"You are {who}. Its goal: {goal}\n\n"
             f"Your one job: {job}\n\n"
             # No `WORD:` lines: a capitalised word and a colon reads as a tool
             # marker, and a report of "ANSWER: 2009" was bounced as an invented
@@ -2021,37 +2135,591 @@ class SessionRunner:
             "first the answer in one or two sentences, then the facts behind it as '- ' bullets with "
             "exact paths, names and numbers, including any tests you ran and whether they passed."
         )
-        agent = _agents.AGENTS[wanted] if wanted else _profiles.RESEARCH
+
+    async def _brief_ref(self, brief: str) -> str:
+        """A blob ref for a brief too long to sit on `crew.spawned`; "" keeps it inline."""
+        if len(brief) <= BRIEF_INLINE_MAX or self._ledger is None:
+            return ""
+        return await self._ledger.put_blob(brief.encode("utf-8"), content_type="text/plain")
+
+    def _member_session(self, parent: Session | None, member, agent, *, job: str = "", kind: str = "") -> Session:
+        """The child session for a crew member: its agent, its carved budget,
+        its own `task:<handle>` stream, and the parent's requester -- never
+        more authority than the person who asked."""
+        from dataclasses import replace as _replace
+
+        from .api import Budget as _Budget
+
+        steps = member.budget.steps or self._delegate_max_steps
         child = Session(
-            task_id=child_id, kind=agent.scaffold if wanted else "research", mode="execute",
+            task_id=member.handle, kind=kind or agent.scaffold, mode="execute",
             profile=_replace(agent, verify=False, max_steps=steps),
-            budget=_Budget(max_steps=steps), worker_id=session.worker_id, user_text=brief,
-            depth=session.depth + 1, parent_id=session.task_id,
+            budget=_Budget(max_steps=steps, max_tokens=member.budget.tokens, max_usd=member.budget.usd,
+                           max_wall_s=member.budget.wall_s),
+            worker_id=parent.worker_id if parent else self._worker_id, user_text=member.brief,
+            depth=member.depth, parent_id=member.parent, crew_id=self._crew_id_of(member),
+            crew_member=member.via == "spawn",
         )
-        if isolation == "fork":
+        # The requester, as Guardian sees it on every proposal: the parent's,
+        # or -- for a member resumed after a restart, with no parent session
+        # in hand -- the one `crew.spawned` recorded. Never the owner's
+        # console by default.
+        child.speaker = parent.speaker if parent is not None else member.requester
+        child.channel = parent.channel if parent is not None else member.requester_channel
+        if parent is not None and member.isolation == "fork":
             # A fork starts from what the parent has already seen -- its
             # conversation so far, copied, so nothing the child does
             # reaches the parent's context -- and ends with the one job.
             # `fresh` (the default) sees only the brief: the cheap,
             # focused helper this began as.
-            child.messages = [dict(m) for m in session.messages if m.get("role") in ("user", "assistant", "tool")]
+            child.messages = [dict(m) for m in parent.messages if m.get("role") in ("user", "assistant", "tool")]
             child.messages.append({"role": "user", "content": f"Now, as the helper: {job}"})
-        running_task = asyncio.ensure_future(self.run(child, user_text=brief))
-        self._children.setdefault(session.task_id, []).append(running_task)
+        return child
+
+    def _crew_id_of(self, member) -> str:
+        for crew_id, crew in self._crews.items():
+            if crew.members.get(member.handle) is member:
+                return crew_id
+        return ""
+
+    def _start_member(self, crew: Crew, member, child: Session, brief: str, parent: Session | None) -> None:
+        member.task = asyncio.ensure_future(self._run_member(crew, member, child, brief, parent))
+
+    async def _run_member(self, crew: Crew, member, child: Session, brief: str, parent: Session | None) -> Outcome:
+        """Run one member to its report. A crash of the process (the task
+        cancelled under it) files nothing: the member is still `running`
+        on `crew:<id>`, and a restart resumes it."""
+        started = time.monotonic()
         try:
-            outcome = await running_task
-        finally:
-            siblings = self._children.get(session.task_id) or []
-            if running_task in siblings:
-                siblings.remove(running_task)
-        session.spent_usd += child.spent_usd
-        session.spent_tokens += child.spent_tokens
-        body = (outcome.result_summary or outcome.reason or "(no report)").strip()
-        if len(body) > 1500:
-            body = body[:1499] + "\u2026"
-        ok = outcome.kind == "completed" and bool((outcome.result_summary or "").strip())
-        text = f"Helper {child_id} ({outcome.kind}, {child.budget.steps_used} steps): {body}"
+            async with crew.slot(member):
+                if crew.is_cancelled(member.handle):
+                    outcome = Outcome("failed", reason=CANCELLED_REASON)
+                else:
+                    outcome = await self.run(child, user_text=brief)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- a member that dies still reports
+            outcome = Outcome("failed", reason=f"the member stopped: {type(exc).__name__}: {exc}")
+        if parent is not None:
+            parent.spent_usd += child.spent_usd
+            parent.spent_tokens += child.spent_tokens
+        status = self._report_status(outcome, member)
+        text = (outcome.result_summary or "").strip()
+        if status != "ok":
+            said = text or member.last_progress
+            text = f"{outcome.reason or outcome.kind}" + (f"\n\n{said}" if said else "")
+            if member.cancel_reason:
+                text = f"cancelled: {member.cancel_reason}" + (f"\n\n{said}" if said else "")
+
+        async def put(data: bytes) -> str:
+            return await self._ledger.put_blob(data, content_type="text/plain")
+
+        report = await build_report(
+            text, status=status, steps=child.budget.steps_used, tokens=child.spent_tokens,
+            cost_usd=child.spent_usd, wall_s=time.monotonic() - started,
+            questions_unanswered=member.questions_unanswered, put_blob=put if self._ledger is not None else None)
+        await crew.file_report(member.handle, report)
+        self._forget_crew(crew.crew_id)
+        return outcome
+
+    @staticmethod
+    def _report_status(outcome: Outcome, member) -> str:
+        if member.cancel_reason:
+            # The crew ran out: what it found so far is still worth having.
+            return "partial" if member.cancel_reason == CREW_BUDGET else "cancelled"
+        if outcome.kind == "completed":
+            return "ok" if (outcome.result_summary or "").strip() else "failed"
+        reason = outcome.reason or ""
+        if outcome.kind == "blocked":
+            return "partial" if reason.startswith((BUDGET_REASON, CONTINUATION_REASON)) else "blocked"
+        if outcome.kind == "paused":
+            return "blocked"
+        return "cancelled" if reason == CANCELLED_REASON else "failed"
+
+    def _new_crew(self, crew_id: str, events=None) -> Crew:
+        async def append(type_: str, payload: dict) -> None:
+            await self._crew_record(crew_id, type_, payload)
+
+        if events:
+            return Crew.fold(crew_id, events, append=append, **self._crew_limits)
+        return Crew(crew_id, append=append, **self._crew_limits)
+
+    async def _crew_record(self, crew_id: str, type_: str, payload: dict) -> None:
+        """One event on `crew:<crew_id>`, and on the bus when it is a topic."""
+        stream = crew_stream(crew_id)
+        if type_ not in (topics.CREW_SPAWNED, topics.CREW_MESSAGE, topics.CREW_REPORT, topics.CREW_CANCEL):
+            # `crew.member.status` and `crew.board` live only on the stream,
+            # as `session.turn.appended` lives only on `session:<id>`.
+            if self._ledger is not None:
+                await self._ledger.append(stream, Event(
+                    stream=stream, type=type_, ts=_epoch(self._clock) or time.time(), trace_id=crew_id,
+                    causation_id=None, payload=dict(payload), idempotency_key=uuid.uuid4().hex))
+            return
+        msg = Message.new(type_, source=self._bus.source, payload=payload, partition_key=stream,
+                          trace_id=crew_id, clock=self._clock)
+        if self._ledger is not None:
+            await self._ledger.append(stream, Event.from_message(msg, stream))
+        await self._bus.publish(msg)
+
+    async def _crew_for(self, session: Session) -> Crew:
+        """This session's crew, made at its first spawn (the root's id)."""
+        crew_id = session.crew_id or session.task_id
+        crew = self._crews.get(crew_id)
+        if crew is None:
+            crew = self._new_crew(crew_id)
+            self._crews[crew_id] = crew
+        session.crew_id = crew_id
+        return crew
+
+    def _forget_crew(self, crew_id: str) -> None:
+        """Drop a crew from memory once its root has ended and no member is
+        left running; `crew:<id>` keeps it, and a root that runs again folds it."""
+        crew = self._crews.get(crew_id) if crew_id else None
+        if crew is not None and crew.root not in self._open and not crew.live():
+            self._crews.pop(crew_id, None)
+
+    def _crew_of(self, session: Session) -> Crew | None:
+        return self._crews.get(session.crew_id) if session.crew_id else None
+
+    async def _crew_resume(self, session: Session) -> None:
+        """A root that had a crew runs again (a restart): fold `crew:<id>`,
+        start every member that had not finished (each through the task
+        resume, so it continues rather than starts over), and leave the
+        root's own unfinished `await_agents` for `_run` to re-enter."""
+        if (session.crew_id or session.depth or session.task_id in self._crews or self._ledger is None
+                or session.profile.scaffold not in CREW_SCAFFOLDS):
+            return
+        try:
+            events = await self._ledger.read(crew_stream(session.task_id))
+        except Exception:  # noqa: BLE001 -- an unreadable stream is no crew, not a failed task
+            return
+        if not events:
+            return
+        from . import profiles as _profiles
+        from .resume import restore_session
+
+        crew = self._new_crew(session.task_id, events)
+        self._crews[session.task_id] = crew
+        session.crew_id = session.task_id
+        for member in list(crew.live()):
+            if member.brief_blob:
+                try:
+                    member.brief = (await self._ledger.get_blob(member.brief_ref)).decode("utf-8", "replace")
+                except Exception:  # noqa: BLE001
+                    member.brief = member.brief_ref
+            agent = _profiles.AGENTS.get(member.agent, _profiles.RESEARCH)
+            child = self._member_session(None, member, agent)
+            try:
+                await restore_session(child, self._ledger)
+            except Exception:  # noqa: BLE001 -- a member with no stream yet starts fresh
+                pass
+            self._start_member(crew, member, child, member.brief, None)
+
+    async def _crew_tick(self, session: Session) -> None:
+        """Between a member's steps: the crew's wall-clock, and the
+        periodic report its parent asked for (`every_steps:N`, `every_s:T`)."""
+        crew = self._crew_of(session)
+        if crew is None:
+            return
+        await crew.enforce()
+        member = crew.members.get(session.task_id)
+        steps = session.budget.steps_used
+        if member is None or not steps or not crew.progress_due(member.handle, steps):
+            return
+        last = session.steps[-1].summary if session.steps else ""
+        line = " ".join(f"step {steps} of {session.budget.max_steps}: {last}".split())[:200]
+        await crew.send(member.handle, member.parent, "progress", line,
+                        deliver=crew.policy_allows(member.handle, "progress", automatic=True))
+
+    def _crew_cancelled(self, session: Session) -> bool:
+        """Cancelled in the crew, or under an ancestor somebody cancelled as
+        a task (`task.cancel` names the root; the cascade reaches every
+        member, not only the root's own children)."""
+        crew = self._crew_of(session)
+        if crew is None:
+            return False
+        if crew.is_cancelled(session.task_id):
+            return True
+        up = crew.parent_of(session.task_id)
+        while up:
+            if self._is_cancelled(up):
+                return True
+            up = crew.parent_of(up)
+        return False
+
+    async def _crew_inbox(self, session: Session) -> None:
+        """What arrived for this session since its last think, as one
+        `inbox` turn after the cacheable prefix: at the head of the latest
+        user turn, or a user turn of its own."""
+        crew = self._crew_of(session)
+        inbox = crew.inboxes.get(session.task_id) if crew else None
+        text = render_inbox(inbox.drain()) if inbox is not None else ""
+        if not text:
+            return
+        last = session.messages[-1] if session.messages else None
+        if last is not None and last.get("role") == "user" and isinstance(last.get("content"), str):
+            last["content"] = f"{text}\n\n{last['content']}"
+        else:
+            session.messages.append({"role": "user", "content": text})
+
+    @staticmethod
+    def _crew_args(tool: str, args) -> dict:
+        """A crew tool's arguments: a native call's object as it is, or a
+        marker's one raw string -- a JSON object, or the tool's line shape
+        (`SPAWN: <brief>` then optional JSON; `SEND_AGENT: <handle> [kind]`
+        then the text; `AWAIT_AGENTS: [all|any|first_ok] [handles...]`)."""
+        args = dict(args or {}) if isinstance(args, dict) else {}
+        if set(args) != {"argument"}:
+            return args
+        raw = str(args["argument"] or "").strip()
+        if raw.startswith("{"):
+            try:
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    return data
+            except ValueError:
+                pass
+        head, _, rest = raw.partition("\n")
+        head, rest = head.strip(), rest.strip()
+        words = head.split()
+        if tool in ("spawn", "ask_parent"):
+            from .tools import _json_rest
+
+            key = "brief" if tool == "spawn" else "question"
+            return {key: head, **_json_rest(rest, "spec")}
+        if tool in ("await_agents", "check_agents"):
+            out: dict = {"handles": [w for w in words if w not in ("all", "any", "first_ok") and "=" not in w]}
+            for w in words:
+                if w in ("all", "any", "first_ok"):
+                    out["mode"] = w
+                elif w.startswith("timeout") and "=" in w:
+                    out["timeout_s"] = w.split("=", 1)[1]
+            return out
+        if tool == "send_agent":
+            kind = words[1] if len(words) > 1 and words[1] in ("steer", "note", "answer") else ""
+            inline = " ".join(words[2 if kind else 1:])
+            return {"to": words[0] if words else "", "kind": kind,
+                    "text": "\n".join(x for x in (inline, rest) if x)}
+        if tool == "cancel_agent":
+            return {"handle": words[0] if words else "", "reason": " ".join(words[1:]) or rest}
+        if tool == "read_ref":
+            return {"ref": head}
+        if tool == "report_progress":
+            milestone = head.lower().startswith("milestone")
+            text = head.split(":", 1)[1].strip() if milestone and ":" in head else head
+            return {"text": "\n".join(x for x in (text, rest) if x), "milestone": milestone}
+        if tool == "board_put":
+            key, _, value = head.partition(" ")
+            return {"key": key, "value": "\n".join(x for x in (value.strip(), rest) if x)}
+        if tool == "board_get":
+            return {"key": head}
+        return {"argument": raw}
+
+    async def _crew_tool(self, session: Session, call: dict) -> tuple[bool, str, str]:
+        tool = str(call.get("tool") or "")
+        args = self._crew_args(tool, call.get("args"))
+        handler = {
+            "spawn": self._spawn, "await_agents": self._await_agents, "check_agents": self._check_agents,
+            "send_agent": self._send_agent, "cancel_agent": self._cancel_agent, "read_ref": self._read_ref,
+            "report_progress": self._report_progress, "ask_parent": self._ask_parent,
+            "board_put": self._board_put, "board_get": self._board_get,
+        }[tool]
+        ok, text = await handler(session, args)
         return ok, text, text[:self._DETAIL_CHARS]
+
+    async def _spawn(self, session: Session, args: dict) -> tuple[bool, str]:
+        """`spawn{agent, brief, isolation, budget, report, background}`:
+        start a member and return its handle at once."""
+        from simorgh.contracts.messages.crew import parse_report_policy
+
+        from . import profiles as _agents
+
+        brief_text = " ".join(str(args.get("brief") or args.get("job") or args.get("goal") or "").split())
+        if not brief_text:
+            return False, "spawn: refused -- say what the member should do (`brief`)"
+        if session.profile.scaffold not in CREW_SCAFFOLDS:
+            return False, f"spawn: refused -- a {session.profile.scaffold} session does not start crews"
+        if args.get("background"):
+            return False, ("spawn: refused -- background crews are not built yet (stage 18 item 3); "
+                           "spawn without `background` and await the report")
+        wanted = str(args.get("agent") or "research").strip().lower()
+        if wanted not in _agents.AGENTS:
+            return False, f"spawn: refused -- no agent called {wanted!r}; the agents are {', '.join(sorted(_agents.AGENTS))}"
+        if session.depth >= self._max_depth:
+            return False, f"spawn: refused -- members may not go deeper than {self._max_depth}"
+        isolation = str(args.get("isolation") or "fresh").strip().lower()
+        if isolation not in ("fresh", "fork"):
+            return False, f"spawn: refused -- isolation is `fresh` or `fork`, not {isolation!r}"
+        policy = str(args.get("report") or "end").strip()
+        try:
+            parse_report_policy(policy)
+        except ValueError as exc:
+            return False, f"spawn: refused -- {exc}"
+        steps = self._asked_steps(args)
+        steps = max(3, min(self._delegate_max_steps, steps or self._delegate_max_steps))
+        budget = args.get("budget") if isinstance(args.get("budget"), dict) else {}
+
+        def number(key, cast):
+            try:
+                return max(cast(0), cast(budget.get(key) or 0))
+            except (TypeError, ValueError):
+                return cast(0)
+
+        crew = await self._crew_for(session)
+        carved = crew.carve(session.task_id, MemberBudget(
+            steps=steps, tokens=number("tokens", int), usd=number("usd", float), wall_s=number("wall_s", float)))
+        agent = _agents.AGENTS[wanted]
+        brief = self._brief(session, brief_text, crew=True)
+        try:
+            member = await crew.admit(
+                parent=session.task_id, agent=agent.name, brief=brief, depth=session.depth + 1, budget=carved,
+                report_policy=policy, isolation=isolation, writer=self._writes(agent),
+                brief_ref=await self._brief_ref(brief),
+                requester=session.speaker, requester_channel=session.channel)
+        except CrewRefused as exc:
+            return False, f"spawn: refused -- {exc}"
+        child = self._member_session(session, member, agent, job=brief_text)
+        self._start_member(crew, member, child, brief, session)
+        queued = len([m for m in crew.live() if m.status == "running"]) >= crew.max_concurrent
+        return True, (f"spawned {member.handle} ({agent.name}, report: {policy})"
+                      + (" -- queued behind the members already running" if queued else " -- running now")
+                      + ". Keep working; await_agents collects its report, check_agents shows where it is.")
+
+    async def _await_agents(self, session: Session, args: dict) -> tuple[bool, str]:
+        """`await_agents{handles, mode: all|any|first_ok, timeout_s}`. Suspends
+        without spending a step until the condition holds, the timeout
+        passes, or a member asks a question; returns the reports and any
+        messages that arrived."""
+        crew = self._crew_of(session)
+        mine = crew.children(session.task_id) if crew else []
+        if not mine:
+            return False, "await_agents: you have no crew members -- spawn one first"
+        raw = args.get("handles") or []
+        handles = [h for h in (raw.split() if isinstance(raw, str) else list(raw)) if h]
+        handles = handles or [m.handle for m in mine if not m.collected]
+        handles = handles or [m.handle for m in mine]
+        unknown = [h for h in handles if h not in {m.handle for m in mine}]
+        if unknown:
+            return False, f"await_agents: {', '.join(unknown)} is not one of your members ({', '.join(m.handle for m in mine)})"
+        mode = str(args.get("mode") or "all").strip().lower()
+        if mode not in ("all", "any", "first_ok"):
+            return False, f"await_agents: mode is all, any or first_ok, not {mode!r}"
+        try:
+            timeout_s = float(args.get("timeout_s") or 180.0)
+        except (TypeError, ValueError):
+            timeout_s = 180.0
+        pending = any(not is_terminal(crew.members[h].status) for h in handles)
+        text, woke = await self._await_members(session, crew, {"handles": handles, "mode": mode,
+                                                               "timeout_s": timeout_s})
+        if pending and woke:
+            # Waiting is not working: the step this call took is given back
+            # -- but only when a member it waited on finished or asked
+            # something. An await on members already done, or one that ran
+            # out its timeout, costs its step, or a model that awaits again
+            # and again would think for ever without spending any.
+            session.budget.steps_used = max(0, session.budget.steps_used - 1)
+        return True, text
+
+    async def _await_members(self, session: Session, crew: Crew, spec: dict) -> tuple[str, bool]:
+        """The await itself: the text the parent reads, and whether it woke
+        for a reason (the condition held, or a member asked a question)
+        rather than at its timeout."""
+        handles, mode = list(spec["handles"]), spec["mode"]
+        timeout_s = max(0.0, float(spec.get("timeout_s") or 0.0))
+        left = crew.remaining().wall_s
+        if crew.max_wall_s:
+            timeout_s = min(timeout_s, left + 1.0)
+        me = session.task_id
+        inbox = crew.inboxes.get(me)
+
+        def done() -> list:
+            return [crew.members[h] for h in handles if is_terminal(crew.members[h].status)]
+
+        def holds() -> bool:
+            finished = done()
+            if mode == "all":
+                return len(finished) == len(handles)
+            if mode == "any":
+                return bool(finished)
+            return any(m.report and m.report.status == "ok" for m in finished) or len(finished) == len(handles)
+
+        def wake() -> bool:
+            return holds() or bool(inbox and inbox.questions) or crew.is_cancelled(me)
+
+        await crew.set_status(me, "waiting", reason=json.dumps({"await": {**spec, "handles": handles}}))
+        # Not in a `finally`: a process that stops here leaves `waiting` on
+        # the stream, which is how the restarted root knows to re-enter.
+        held = await crew.wait_until(wake, timeout_s)
+        await crew.set_status(me, "running")
+        asked = bool(inbox and inbox.questions)
+        held = held and holds()
+        lines = []
+        if mode == "first_ok" and held:
+            winner = next((m for m in done() if m.report and m.report.status == "ok"), None)
+            if winner is not None:
+                rest = [h for h in handles if not is_terminal(crew.members[h].status)]
+                for h in rest:
+                    await crew.cancel(h, f"first_ok: {winner.handle} answered")
+                if rest:
+                    lines.append(f"{winner.handle} answered first; cancelled {', '.join(rest)}.")
+        if not held:
+            why = "a member asked a question" if inbox and inbox.questions else f"{timeout_s:.0f} s passed"
+            lines.append(f"await_agents ({mode}) returned before it held: {why}.")
+        if crew.exhausted:
+            lines.append(f"The crew budget ran out ({crew.exhausted}): every member was cancelled.")
+        for h in handles:
+            member = crew.members[h]
+            if member.report is not None:
+                member.collected = True
+            lines.append(render_report(member))
+        messages = render_inbox(inbox.drain()) if inbox is not None else ""
+        if messages:
+            lines.append(messages)
+        return "\n".join(lines), held or asked
+
+    async def _check_agents(self, session: Session, args: dict) -> tuple[bool, str]:
+        crew = self._crew_of(session)
+        mine = crew.descendants(session.task_id) if crew else []
+        raw = args.get("handles") or []
+        wanted = [h for h in (raw.split() if isinstance(raw, str) else list(raw)) if h]
+        if wanted:
+            mine = [m for m in mine if m.handle in wanted]
+        return True, status_table(mine)
+
+    async def _send_agent(self, session: Session, args: dict) -> tuple[bool, str]:
+        """`send_agent{to, text, kind}`: down to your own members (steer,
+        note, answer), across to a sibling or up to your parent (note)."""
+        crew = self._crew_of(session)
+        to = str(args.get("to") or "").strip()
+        text = " ".join(str(args.get("text") or args.get("body") or "").split())
+        if crew is None or not to:
+            return False, "send_agent: say who to send to (`to`: a member's handle)"
+        if not text:
+            return False, "send_agent: nothing to send (`text`)"
+        me = session.task_id
+        kids = {m.handle for m in crew.children(me)}
+        my_parent = crew.parent_of(me)
+        siblings = {m.handle for m in crew.children(my_parent)} - {me} if my_parent else set()
+        kind = str(args.get("kind") or ("steer" if to in kids else "note")).strip().lower()
+        if to in kids:
+            allowed = ("steer", "note", "answer")
+        elif to in siblings or (my_parent and to == my_parent):
+            allowed = ("note",)
+        else:
+            return False, f"send_agent: {to} is not your member, your sibling or your parent"
+        if kind not in allowed:
+            return False, f"send_agent: to {to} you may send {', '.join(allowed)}, not {kind!r}"
+        if is_terminal(crew.members[to].status) if to in crew.members else False:
+            return False, f"send_agent: {to} has already finished ({crew.members[to].status})"
+        reply_to = crew.questions.get(to, 0) if kind == "answer" else 0
+        if len(text) > 1200:
+            text = text[:1199] + "…"
+        payload = await crew.send(me, to, kind, text, reply_to=reply_to)
+        return True, f"sent to {to} ({kind} #{payload['seq']})"
+
+    async def _cancel_agent(self, session: Session, args: dict) -> tuple[bool, str]:
+        crew = self._crew_of(session)
+        handle = str(args.get("handle") or "").strip()
+        if crew is None or handle not in {m.handle for m in crew.descendants(session.task_id)}:
+            return False, f"cancel_agent: {handle or '(none)'} is not one of your members"
+        cascade = args.get("cascade", True) not in (False, "false", "no", 0)
+        hit = await crew.cancel(handle, str(args.get("reason") or "cancelled by its parent"), cascade=cascade)
+        return True, (f"cancelled {', '.join(hit)}; each stops at its next step and files a report"
+                      if hit else f"{handle} had already finished")
+
+    async def _read_ref(self, session: Session, args: dict) -> tuple[bool, str]:
+        crew = self._crew_of(session)
+        ref = str(args.get("ref") or "").strip()
+        if crew is None or ref not in crew.refs:
+            return False, "read_ref: only a ref a report, message or board entry of your crew named"
+        try:
+            data = (await self._ledger.get_blob(ref)).decode("utf-8", "replace")
+        except Exception as exc:  # noqa: BLE001
+            return False, f"read_ref: {ref} could not be read ({type(exc).__name__})"
+        return True, data if len(data) <= 8000 else data[:7999] + "…"
+
+    def _member_of(self, session: Session):
+        crew = self._crew_of(session)
+        member = crew.members.get(session.task_id) if crew else None
+        return crew, member
+
+    async def _report_progress(self, session: Session, args: dict) -> tuple[bool, str]:
+        crew, member = self._member_of(session)
+        if member is None:
+            return False, "report_progress: only a crew member reports progress"
+        text = " ".join(str(args.get("text") or "").split())[:400]
+        if not text:
+            return False, "report_progress: say what has happened (`text`)"
+        milestone = args.get("milestone") in (True, "true", "yes", 1)
+        if args.get("percent") not in (None, ""):
+            text = f"{text} ({args.get('percent')}%)"
+        kind = "milestone" if milestone else "progress"
+        deliver = crew.policy_allows(member.handle, kind, milestone=milestone)
+        await crew.send(member.handle, member.parent, kind, text, deliver=deliver)
+        return True, ("reported to your parent" if deliver else
+                      "recorded; your parent's report policy holds it until it asks")
+
+    async def _ask_parent(self, session: Session, args: dict) -> tuple[bool, str]:
+        """`ask_parent{question, timeout_s, default}`: wait for an answer;
+        on timeout go ahead with `default`, and the report says so."""
+        crew, member = self._member_of(session)
+        if member is None:
+            return False, "ask_parent: only a crew member has a parent to ask"
+        question = " ".join(str(args.get("question") or "").split())[:600]
+        if not question:
+            return False, "ask_parent: what is the question?"
+        default = " ".join(str(args.get("default") or "").split())
+        try:
+            timeout_s = max(0.0, float(args.get("timeout_s") or 120.0))
+        except (TypeError, ValueError):
+            timeout_s = 120.0
+        if crew.max_wall_s:
+            # Never past the crew's wall-clock: a member asleep here would
+            # otherwise outlive the bound, since nothing else is stepping
+            # to notice that it ran out.
+            timeout_s = min(timeout_s, crew.remaining().wall_s + 1.0)
+        sent = await crew.send(member.handle, member.parent, "question",
+                               question + (f" (default if no answer: {default})" if default else ""))
+        inbox = crew.inboxes[member.handle]
+        answer: dict = {}
+
+        def answered() -> bool:
+            if crew.is_cancelled(member.handle):
+                return True
+            found = inbox.take_answer(sent["seq"])
+            if found is not None:
+                answer.update(found)
+            return bool(answer)
+
+        await crew.set_status(member.handle, "waiting", reason=f"ask_parent #{sent['seq']}")
+        await crew.wait_until(answered, timeout_s)
+        await crew.set_status(member.handle, "running")
+        if answer:
+            return True, f"your parent answered: {answer.get('body')}"
+        member.questions_unanswered.append(question)
+        return True, (f"no answer in {timeout_s:.0f} s; go ahead with the default: {default or '(none given)'}, "
+                      "and say in your report that you did")
+
+    async def _board_put(self, session: Session, args: dict) -> tuple[bool, str]:
+        crew = self._crew_of(session)
+        key = " ".join(str(args.get("key") or "").split())[:80]
+        if crew is None or not key:
+            return False, "board_put: needs a crew and a `key`"
+        value = await crew.board_put(session.task_id, key, str(args.get("value") or ""))
+        return True, f"board[{key}] = {len(value)} characters"
+
+    async def _board_get(self, session: Session, args: dict) -> tuple[bool, str]:
+        crew = self._crew_of(session)
+        if crew is None:
+            return False, "board_get: you are in no crew"
+        key = " ".join(str(args.get("key") or "").split())
+        if key:
+            entry = crew.board.get(key)
+            return (True, f"{key} (from {entry['handle']}): {entry['value']}") if entry else (
+                False, f"board_get: nothing under {key!r}; keys: {', '.join(sorted(crew.board)) or 'none'}")
+        if not crew.board:
+            return True, "the board is empty"
+        return True, "\n".join(f"{k} (from {v['handle']}): {str(v['value'])[:200]}" for k, v in sorted(crew.board.items()))
 
     async def _checkpoint(self, session: Session, call: dict, summary: str) -> None:
         """Record an irreversible action that succeeded (stage 7 item 7).

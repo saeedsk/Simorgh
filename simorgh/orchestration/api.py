@@ -278,6 +278,13 @@ class Session:
     #: restored by `resume.py` after a crash so the steps already done
     #: stay done.
     step_state: dict = field(default_factory=dict)
+    #: The crew this session belongs to (stage 18, `crew.py`): the root's
+    #: task id; "" until the session spawns, or when it is in no crew.
+    crew_id: str = ""
+    #: Started by `spawn` (not `delegate`), so it is offered the member
+    #: tools: `report_progress`, `ask_parent`, `send_agent`, `read_ref`,
+    #: `board_put`, `board_get`.
+    crew_member: bool = False
 
     @property
     def trace(self) -> str:

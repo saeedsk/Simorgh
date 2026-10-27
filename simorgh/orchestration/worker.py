@@ -151,6 +151,7 @@ class Worker:
         skills_channels: tuple[str, ...] = ("", "cli", "http"),
         attempt_limits: tuple[int, float, float] = (0, 0.0, 0.0), telemetry=None,
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
+        crew_limits: tuple[int, int, float, float, int] = (8, 1, 0.5, 900.0, 0),
     ) -> None:
         self._review_benchmark = review_benchmark
         self._attempt_limits = attempt_limits
@@ -195,7 +196,11 @@ class Worker:
             parallel_read_tools=parallel_read_tools, skills_enabled=skills_enabled,
             escalate_below_posterior=escalate_below_posterior, escalate_min_samples=escalate_min_samples,
             skills_catalog_max_chars=skills_catalog_max_chars, skills_roots=skills_roots,
-            skills_channels=skills_channels, telemetry=telemetry, ablate=ablate, guard_limits=guard_limits, **runner_kwargs,
+            skills_channels=skills_channels, telemetry=telemetry, ablate=ablate, guard_limits=guard_limits,
+            # `[orchestration] crew_max_members, crew_max_writers, crew_max_usd,
+            # crew_max_wall_s, crew_max_tokens` (stage 18).
+            crew_max_members=crew_limits[0], crew_max_writers=crew_limits[1], crew_max_usd=crew_limits[2],
+            crew_max_wall_s=crew_limits[3], crew_max_tokens=crew_limits[4], **runner_kwargs,
         )
         self._subs: list = []
         # Task ids somebody has asked to stop -> whether that cancel was

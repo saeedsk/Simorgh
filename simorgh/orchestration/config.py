@@ -132,6 +132,19 @@ class Config:
     # since 2026-09-19; it was declared and unread for a year, which is
     # this codebase's commonest bug.
     max_children_concurrent: int = 4
+    # Agent crews (stage 18 item 2, `crew.py`; docs/plan/stage-18-agent-crews.md).
+    # `max_children_concurrent` above is now each parent's cap on members
+    # running at once (more wait in `starting`). Per crew: at most this many
+    # members in all, this many writers (patch, skill) at once, and one
+    # budget every member's is carved from -- dollars, wall-clock seconds
+    # and tokens (0: no bound of that kind). Spent out, every member is
+    # cancelled with reason `crew budget` and reports `partial`. A `delegate`
+    # helper is outside these bounds and keeps its old ones (`Crew.bounded`).
+    crew_max_members: int = 8
+    crew_max_writers: int = 1
+    crew_max_usd: float = 0.5
+    crew_max_wall_s: float = 900.0
+    crew_max_tokens: int = 0
     # Above Cognition's own `Budget.max_seconds` (180s), with room to
     # spare. It used to sit BELOW it: Cognition allowed each provider
     # 180 seconds while the caller here waited 120, so a merely slow
