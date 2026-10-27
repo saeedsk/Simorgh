@@ -319,6 +319,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/execution/test_pathsafety.py` -- the path boundary never raises and refuses every escape.
 - `tests/simorgh/execution/test_readable_root_files.py` -- `[execution] readable_root_files` decides which root files the read tools open.
 - `tests/simorgh/execution/test_produces_manifest.py` -- `Service.produces` equals the set of topics the package publishes or requests.
+- `tests/simorgh/execution/test_tool_schemas_are_flat.py` -- stage 17's flat schemas: no registered tool (`builtin_tools` + `domain_tools`, the worktree tools, `a2a_call`, `claude_code_task`) has an argument that is an object declaring `properties`, at any depth (array items and `anyOf`/`oneOf`/`allOf` alternatives included); a free-form `{"type": "object"}` map is allowed. `KNOWN_NESTED` holds the one exception (`energy_tariff.rates[]`) and may only shrink.
 - `tests/simorgh/execution/test_shell.py` -- `run_shell` refuses credential reads.
 - `tests/simorgh/execution/test_tool_unavailable_is_announced.py` -- `tool.unavailable` / `tool.probed` payloads and ordering.
 - `tests/simorgh/execution/test_result_handback.py` -- `action.result` carries `metadata_ref` and stderr; rows go to `results/` capped.

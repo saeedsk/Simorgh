@@ -48,20 +48,28 @@ def _every_tool() -> list:
 
 def _nested(schema: dict, path: str = "") -> list[str]:
     """The paths under `schema` whose node is an object declaring
-    `properties` (an array's items are `name[]`)."""
+    `properties` (an array's items are `name[]`, an alternative
+    `name<anyOf>`), at any depth: an array of arrays of objects, or an
+    `anyOf` inside an array's items, is as nested as an object argument."""
     found: list[str] = []
     for name, node in (schema.get("properties") or {}).items():
-        if not isinstance(node, dict):
-            continue
-        here = f"{path}{name}"
-        if node.get("properties"):
-            found.append(here)
-        if isinstance(node.get("items"), dict) and node["items"].get("properties"):
-            found.append(f"{here}[]")
-        for key in ("anyOf", "oneOf", "allOf"):
-            for option in node.get(key) or ():
-                if isinstance(option, dict) and option.get("properties"):
-                    found.append(f"{here}<{key}>")
+        found += _nested_node(node, f"{path}{name}")
+    return found
+
+
+def _nested_node(node, here: str) -> list[str]:
+    if not isinstance(node, dict):
+        return []
+    found: list[str] = []
+    if node.get("properties"):
+        found.append(here)
+        # Reported once at its top; what is inside it is the same fault.
+        return found
+    if isinstance(node.get("items"), dict):
+        found += _nested_node(node["items"], f"{here}[]")
+    for key in ("anyOf", "oneOf", "allOf"):
+        for option in node.get(key) or ():
+            found += _nested_node(option, f"{here}<{key}>")
     return found
 
 
@@ -99,6 +107,18 @@ class EveryToolSchemaIsFlat(unittest.TestCase):
             "rows": {"type": "array", "items": {"type": "object", "properties": {"y": {"type": "integer"}}}},
         }}
         self.assertEqual(sorted(_nested(schema)), ["inner", "rows[]"])
+
+    def test_the_check_looks_below_the_first_level(self):
+        # An array of arrays of objects, and an object among an array's
+        # alternatives, are nested too; a one-level walk missed both.
+        obj = {"type": "object", "properties": {"x": {"type": "string"}}}
+        schema = {"type": "object", "properties": {
+            "grid": {"type": "array", "items": {"type": "array", "items": obj}},
+            "either": {"type": "array", "items": {"anyOf": [{"type": "string"}, obj]}},
+            "maybe": {"anyOf": [{"type": "null"}, obj]},
+            "strings": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        }}
+        self.assertEqual(sorted(_nested(schema)), ["either[]<anyOf>", "grid[][]", "maybe<anyOf>"])
 
 
 if __name__ == "__main__":
