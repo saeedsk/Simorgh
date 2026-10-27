@@ -490,3 +490,151 @@ class AnEmbeddingWithoutUsage(unittest.TestCase):
 
         asyncio.run(metered(chat, meter)(model="m", messages=[{"role": "user", "content": "x"}]))
         self.assertEqual((meter.tokens_in, meter.tokens_out), (8 + 2_500, 400))
+
+
+def _fake_mem0_modules(store: dict, *, seams: bool = True) -> dict[str, types.ModuleType]:
+    """Just enough of mem0 to drive the sidecar: a Memory that, like the
+    real one, owns a sync OpenAI client in its LLM and in its embedder."""
+
+    def chat_create(**kw):
+        store["chats"] = store.get("chats", 0) + 1
+        return _usage(1_000, 100)
+
+    def embed_create(**kw):
+        # Gemini's endpoint sends no usage: charged its input's length.
+        store["embeds"] = store.get("embeds", 0) + 1
+        return SimpleNamespace(data=[SimpleNamespace(embedding=[0.0])])
+
+    def openai_client():
+        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=chat_create)),
+                               embeddings=SimpleNamespace(create=embed_create))
+
+    class Memory:
+        def __init__(self, config):
+            self.config = config
+            self.llm = SimpleNamespace(client=openai_client() if seams else None)
+            self.embedding_model = SimpleNamespace(client=openai_client())
+            self.vector_store = SimpleNamespace(client=SimpleNamespace(close=lambda: store.update(closed=True)))
+            self.graph = None
+
+        @classmethod
+        def from_config(cls, config):
+            store["config"] = config
+            store["telemetry_at_open"] = os.environ.get("MEM0_TELEMETRY")
+            store["openrouter_at_open"] = os.environ.get("OPENROUTER_API_KEY")
+            return cls(config)
+
+        def add(self, messages, *, user_id):
+            # As Mem0 does: through the clients it built, looked up at call time.
+            self.llm.client.chat.completions.create(model="m", messages=messages)
+            self.embedding_model.client.embeddings.create(model="e", input=[messages[0]["content"]])
+            store.setdefault("added", []).append((user_id, messages[0]["content"]))
+
+        def search(self, query, *, user_id, limit=100):
+            self.embedding_model.client.embeddings.create(model="e", input=[query])
+            store.setdefault("searches", []).append((query, user_id))
+            if user_id == "household":
+                return {"results": [{"memory": "Nellie swimming lessons are on Tuesdays", "score": 0.4},
+                                    {"memory": "wifi password is copper-meadow-17", "score": 0.9}]}
+            return {"results": []}
+
+    mem0 = types.ModuleType("mem0")
+    mem0.Memory = Memory
+    return {"mem0": mem0}
+
+
+class Mem0Sidecar(unittest.TestCase):
+    def setUp(self):
+        env = mock.patch.dict(os.environ, {})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("MEM0_DIR", None)
+        os.environ.pop("OPENROUTER_API_KEY", None)
+
+    def _side(self, *, cap=5.0):
+        from simorgh.evals.memory.mem0_side import Mem0Side
+
+        return Mem0Side(paid=True, cap_usd=cap, settings=_SETTINGS)
+
+    def test_absent_package_is_skipped_by_name_and_never_touches_home(self):
+        with mock.patch.dict(sys.modules, {"mem0": None}):
+            result = asyncio.run(run_system(self._side(), episodes()[:3]))
+        self.assertIn("mem0", result.skipped)
+        self.assertIn("pip install mem0ai", result.skipped)
+        self.assertTrue(result.report.outcomes)
+        self.assertTrue(all(o.status == SKIPPED for o in result.report.outcomes))
+        self.assertEqual(os.environ["MEM0_TELEMETRY"], "False")
+        self.assertNotEqual(os.environ["MEM0_DIR"], os.path.expanduser("~/.mem0"))
+
+    def test_it_ingests_and_searches_by_user_and_counts_chat_and_embeddings(self):
+        store: dict = {}
+        with mock.patch.dict(sys.modules, _fake_mem0_modules(store)):
+            result = asyncio.run(run_system(self._side(), episodes()))
+        self.assertEqual(store["telemetry_at_open"], "False")
+        config = store["config"]
+        self.assertEqual(config["vector_store"]["provider"], "qdrant")
+        self.assertFalse(os.path.exists(config["vector_store"]["config"]["path"]), "the temporary directory is gone")
+        self.assertEqual(config["llm"]["config"]["openai_base_url"], _SETTINGS.base_url)
+        self.assertEqual(config["embedder"]["config"]["api_key"], "embed-key")
+        self.assertEqual(config["embedder"]["config"]["embedding_dims"], 768)
+        self.assertNotIn("graph_store", config)
+        self.assertEqual(len(store["added"]), 150)
+        self.assertEqual({u for u, _ in store["added"]},
+                         {"household", "person_mara", "person_devin", "person_nell", "person_otto", "person_priya"})
+        self.assertIn(("What's the wifi password?", "household"), store["searches"])
+        self.assertIn(("What's the wifi password?", "person_priya"), store["searches"])
+        outcome = {o.case.name: o for o in result.report.outcomes}
+        self.assertEqual(outcome["now.wifi"].status, "passed")
+        self.assertEqual(outcome["never.otto_swim"].status, "passed")
+        # Both clients metered: a chat and an embedding per episode, and an
+        # embedding (without usage, charged its input) per search.
+        self.assertEqual(result.ingestion["calls"], 300)
+        self.assertEqual(store["embeds"], 150 + 2 * len(QUESTIONS))
+        self.assertEqual(result.ingestion["unmetered_calls"], store["embeds"])
+        self.assertGreater(result.ingestion["usd"], 150 * 1_100 / 1_000_000)
+        self.assertIn("user_id", result.notes["privacy"])
+        self.assertGreater(result.injected["p50"], 0)
+        self.assertTrue(store["closed"])
+
+    def test_the_cap_stops_ingestion_and_skips_every_question(self):
+        store: dict = {}
+        with mock.patch.dict(sys.modules, _fake_mem0_modules(store)):
+            result = asyncio.run(run_system(self._side(cap=0.005), episodes()))
+        self.assertLess(len(store["added"]), 10)
+        self.assertIn("cap reached", result.ingestion["stopped"])
+        self.assertTrue(all(o.status == SKIPPED and "cap reached" in o.why for o in result.report.outcomes))
+        self.assertNotIn("searches", store)
+
+    def test_a_memory_without_a_client_to_meter_is_refused(self):
+        store: dict = {}
+        with mock.patch.dict(sys.modules, _fake_mem0_modules(store, seams=False)):
+            result = asyncio.run(run_system(self._side(), episodes()[:3]))
+        self.assertIn("unmetered", result.skipped)
+        self.assertNotIn("added", store)
+
+    def test_an_openrouter_key_is_set_aside_for_the_run(self):
+        store: dict = {}
+        os.environ["OPENROUTER_API_KEY"] = "or-key"
+        with mock.patch.dict(sys.modules, _fake_mem0_modules(store)):
+            asyncio.run(run_system(self._side(), episodes()[:3]))
+        self.assertIsNone(store["openrouter_at_open"])
+        self.assertEqual(os.environ["OPENROUTER_API_KEY"], "or-key")
+
+    def test_the_dry_run_estimates_it(self):
+        with mock.patch.dict(sys.modules, {"mem0": None}):
+            plan = dry_run(["native", "mem0"], cap_usd=2.0)
+        row = {r["system"]: r for r in plan["systems"]}["mem0"]
+        self.assertGreater(row["estimate"]["usd"], 0)
+        self.assertIn("pip install mem0ai", row["runnable"])
+
+
+class InjectedTokens(unittest.TestCase):
+    def test_every_system_reports_the_tokens_its_block_would_inject(self):
+        from simorgh.evals.memory.suite import block_tokens
+
+        self.assertEqual(block_tokens([]), 0)
+        self.assertEqual(block_tokens(["abcd", "efg"]), 2)
+        result = asyncio.run(run_system(Native(), episodes()))
+        self.assertGreater(result.injected["mean"], 0)
+        self.assertLessEqual(result.injected["p50"], result.injected["p95"])
+        self.assertIn("injected", result.as_dict())

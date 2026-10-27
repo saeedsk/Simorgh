@@ -1,7 +1,7 @@
-"""The memory eval suite (stage 15 items 4, 5 and 5b).
+"""The memory eval suite (stage 15 items 4, 5, 5b and 5c).
 
-Native Memory, native Memory with the entity layer, and two sidecars --
-Graphiti and Cognee -- fed the same synthetic household month and asked
+Native Memory, native Memory with the entity layer, and three sidecars --
+Graphiti, Cognee and Mem0 -- fed the same synthetic household month and asked
 the same questions; see `suite.py`. Nothing in `simorgh/` imports this
 package except `evals/suites.py` and `evals/__main__.py`.
 """
