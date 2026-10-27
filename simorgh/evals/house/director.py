@@ -312,6 +312,34 @@ class Director:
         assert area or True  # `area` is the scene's (item 3); accepted now so scenarios need no rewrite
         return mark
 
+    def fail(self, service: str, *, times: int = 1, error: str = "", target: str = "",
+             kind: str = "transient") -> None:
+        """The house will refuse `service` the next `times` calls
+        (`Sandbox.fail`). What `Beat(fails=...)` arms."""
+        self.sandbox.fail(service, times=times, error=error, target=target, kind=kind)
+
+    async def answer_prompts(self, answer: str, *, since: float, poll_s: float = 0.05) -> None:
+        """Answer every approval question asked after `since` with
+        `answer`, as the person at the console would, until cancelled.
+
+        Through the Interface's own `_resolve_prompt`, the path a typed
+        reply and the phone's `POST /api/prompts` both take, so Guardian
+        hears the answer from where it would live. A beat typed at the
+        console cannot answer for itself: `type()` is still waiting for
+        the turn the question is holding up.
+        """
+        answered: set[str] = set()
+        while True:
+            for message in self.record.of("ui.prompt", since=since):
+                prompt_id = str(message.payload.get("prompt_id") or "")
+                if not prompt_id or prompt_id in answered:
+                    continue
+                answered.add(prompt_id)
+                interface = self.sandbox.service("interface")
+                if interface is not None:
+                    await interface._resolve_prompt(prompt_id, answer, note="(the scenario)")  # noqa: SLF001
+            await asyncio.sleep(poll_s)
+
     # -- time passes ------------------------------------------------------------------
     async def advance(self, seconds: float = 0.0, *, minutes: float = 0.0, hours: float = 0.0,
                       days: float = 0.0) -> None:

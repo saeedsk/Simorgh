@@ -5,14 +5,18 @@ reached the creator, written down so they can never come back
 unnoticed. Those came first on purpose: a harness anchored in bugs
 that happened is worth more than one anchored in bugs somebody
 imagined.
+
+`toolchain.py` (stage 14) is the exception to "one per stage": small
+household tool chains for a real model, every id under `toolchain/`,
+all of them skipped on the floor provider.
 """
 
-from . import live, stages
+from . import live, stages, toolchain
 
 #: Every scenario the pack knows, by id.
 def all_scenarios() -> list:
     found = []
-    for module in (live, stages):
+    for module in (live, stages, toolchain):
         found.extend(getattr(module, "SCENARIOS", ()))
     return found
 
@@ -46,8 +50,14 @@ def by_stage(stage: str) -> list:
     return [s for s in all_scenarios() if s.stage == stage]
 
 
+def by_prefix(prefix: str) -> list:
+    """Every scenario whose id starts with `prefix`, in pack order --
+    what `house --only` selects, and what the `toolchain` suite runs."""
+    return [s for s in all_scenarios() if s.id.startswith(prefix)]
+
+
 def by_id(scenario_id: str):
     return next((s for s in all_scenarios() if s.id == scenario_id), None)
 
 
-__all__ = ["FAST", "all_scenarios", "by_id", "by_stage", "fast", "live", "stages"]
+__all__ = ["FAST", "all_scenarios", "by_id", "by_prefix", "by_stage", "fast", "live", "stages", "toolchain"]

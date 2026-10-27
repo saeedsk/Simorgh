@@ -48,6 +48,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `tooluse` | BFCL cases from `simorgh/benchmark` | real | dollars |
 | `research` | GAIA cases from `simorgh/benchmark` | real | dollars |
 | `code` | the SWE-bench Verified slice | real | dollars, Docker |
+| `toolchain` | the `toolchain/` house scenarios (stage 14), one case per scenario, level = category | real | dollars; every case skipped without `--paid` |
 
 A paid suite refuses to start without `--paid`. `household` is the one
 the bless runs: no model, no network, no money, and it measures the
@@ -111,12 +112,30 @@ First scores, 2026-09-20: **tooluse (BFCL parallel) 5/5**, **research (GAIA leve
 
 Which voices those are is a **measurement**, kept in `tools/house_voices.py`. The first hand-picked set had `af_heart` and `af_bella` at 0.77 against each other -- two personas the embedder could not tell apart, which would have read as Sim misidentifying people in every scenario. The measured set (`af_river`, `bm_lewis`, `bf_isabella`, `am_puck`, `af_nicole`) has a worst pair of 0.24, and each persona identifies itself at 0.89-0.95 with a profile coherence of 0.86-0.92.
 
+**Tool chains** (`scenarios/toolchain.py`, stage 14 items 1-2). 22 scenarios with ids `toolchain/<category>/<name>` in forge's eight categories -- plumbing, selection, fidelity (argument fidelity), chaining, conditional, recovery, relevance, safety -- each typed at the console by the owner (`Beat(says=..., ask_directly=True)`, no `who`, so `play` routes it to `Director.type`), each `needs_model=True` with `needs_model_because` as its skip reason. Every device and service they name is in `contracts/home/fakes.py::DEFAULT_HOUSE`/`DEFAULT_SERVICES` and every tool in `agents/chat.md`; a test holds both. Their expectations read the house or the bus, never the wording:
+
+- `called_with(tool, **args)`: some `action.proposed` for `tool` carries these arguments as a subset (`matches`: dicts as subsets, also when sent as a JSON string; numbers equal whatever their type; text equal ignoring case and surrounding space; a callable such as `containing("18:45")` is asked).
+- `called_in_order(*tools)`: a subsequence of the proposed tools since the beat; an item may be a tuple of alternatives (`called_in_order(READS, "home_call")`). `called_any(*tools)`: at least one of them.
+- `steps_at_most(n)`: distinct `task.step` numbers of the beat's session (the heads-up before a model call carries the number of the step it starts, so this counts steps, not messages); a session with no steps falls back to its `cognition.think` count. The beat's session is the `task.started` ids since the mark, narrowed to the percept's `session_id` when they meet.
+- `recovered()`: an `action.result` with `ok: false` for one of the session's proposals, and then `task.completed` for that session without `floor`. Nothing failing fails it (the fault never fired), as does `task.failed`, a floor ending, or no ending.
+- `the_house_did(service, target, **data)` now also matches the service data the house received (`the_house_did("climate.set_temperature", "climate.hallway", temperature=21.5)`); without data its name is unchanged. `the_house_left(entity)`: nothing reached that one device.
+- `answered()` also accepts a completed `cli` turn with text in it, since nothing reads a typed reply aloud; a voice turn still has to be spoken.
+
+**Fault injection.** `Beat(fails={"service": "light.turn_on", "times": 1, "error": "...", "target": "", "kind": "transient"})` arms `Sandbox.fail(...)` (also `Director.fail`) for that beat and disarms it after (`times=0`). The sandbox's wrapper around `FakeHomeAssistant.call` raises `HomeUnavailable(error, error_kind=kind)` -- what the real client raises -- for the next `times` matching calls, so the tool reports an ordinary failure and nothing is written to `Record.house`. `contracts/home/fakes.py` is unchanged. The sandbox now wires the `media_` tools to the same fake house as the `home_` ones (`_MediaTool` shares the client seam), so `media_control` can be the right tool in a scenario.
+
+**Answering Guardian.** `Beat(answers="no")` runs `Director.answer_prompts(answer, since=mark)` for the beat: every `ui.prompt` after the mark is answered through `Interface._resolve_prompt`, the path a typed reply and `POST /api/prompts` take. A typed beat needs it, because `type()` is waiting for the turn the question is holding up; unanswered, the turn sits on Guardian's 30-minute prompt and the scenario times out. The three safety scenarios answer `no`.
+
+**On the floor** `run_pack` skips a `needs_model` scenario in the parent, without booting a child, with the scenario's `needs_model_because`; `python -m simorgh.evals house --only toolchain/` lists all 22 as skipped in about a second. `house.run.per_scenario(outcomes, scenarios)` folds per-expectation outcomes into one per scenario -- PASSED only if every expectation passed, FAILED if any failed (why = the first failure and its beat), SKIPPED if any could not be judged or nothing came back -- which is stage 14's unit of success and what the `toolchain` suite reports. The suite sets `SIMORGH_HOUSE_PAID` for its scenario children only when `--paid` set `SIMORGH_EVALS_PAID`.
+
 ## Public Python surface
 
 - `simorgh.evals.run(suite, *, repeats=1, isolate=None) -> Report`
 - `simorgh.evals.table(report) -> str`, `record(report, data_dir=...) -> Path`, `last(data_dir, suite="") -> dict | None`
 - `simorgh.evals.api`: `Case`, `Outcome`, `Report`, `bootstrap_ci`, `outcomes_from`, `PASSED`/`FAILED`/`SKIPPED`
-- `simorgh.evals.suites`: `SUITES`, `PAID`, `find`
+- `simorgh.evals.suites`: `SUITES`, `PAID`, `find`, `toolchain`
+- `simorgh.evals.house.script`: the expectations above, plus `called_with`, `called_in_order`, `called_any`, `steps_at_most`, `recovered`, `the_house_left`, `containing`, `matches`; `Beat.fails`, `Beat.answers`, `Scenario.needs_model_because`
+- `simorgh.evals.house.sandbox.Sandbox.fail`, `simorgh.evals.house.director.Director.fail` / `answer_prompts`
+- `simorgh.evals.house.run.per_scenario`; `simorgh.evals.house.scenarios.by_prefix`, `scenarios.toolchain` (`SCENARIOS`, `CATEGORIES`, `READS`, `category`)
 - `simorgh.evals.scenario`: `run`, `SCRIPT`, `main` -- `tools/recall_scenario.py` is a shim onto it
 - Read by `simloader.py::run_evals` (the bless gate) and `tools/recall_scenario.py`. Nothing else imports it.
 
@@ -127,6 +146,8 @@ python -m simorgh.evals run household --repeats 3        # the acceptance case
 python -m simorgh.evals run household --json --record ~/.simorgh/loader
 python -m simorgh.evals run trials --paid                # real money
 python -m simorgh.evals list
+python -m simorgh.evals house --only toolchain/ --json   # the tool-chain pack; all skipped on the floor
+python -m simorgh.evals run toolchain --paid              # one case per scenario, real money
 python -m simorgh.evals scenario --verbose               # per-probe context
 ```
 
@@ -168,6 +189,8 @@ interesting question about an eval is what it did last week.
 
 - `tests/simorgh/evals/test_evals.py` -- the arithmetic and the wiring: skipped cases out of the denominator, a suite that could not start, per-level reporting, a stable interval, the JSON round trip, the record, the table, a dead repeat.
 - `tests/simorgh/evals/test_scenario.py` -- the household scenario against the real booted system: 3 of 3 probes (integration mark).
+- `tests/simorgh/evals/house/test_tool_chain_expectations.py` -- each stage-14 expectation passing and failing against a hand-built record.
+- `tests/simorgh/evals/house/test_the_toolchain_pack.py` -- the pack's shape, every device/service/tool it names exists, the floor run skips all without booting, `per_scenario`, the suite, `play` arming a fault and an answer, and (integration) a fault firing once in a real sandbox, the media tools reaching the house, and a "no" keeping the door locked.
 
 ## Known issues
 

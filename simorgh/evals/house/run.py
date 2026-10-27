@@ -33,16 +33,25 @@ async def run_one(scenario) -> list[Outcome]:
     from .script import play
 
     if scenario.needs_model and not _a_real_provider():
-        return [Outcome(case=Case(name=scenario.id, kind="scenario", level=scenario.stage),
-                        status=SKIPPED,
-                        why="needs a model that can judge whether words were for it; "
-                            "the floor provider answers everything")]
+        return _skipped_for_the_floor(scenario)
     async with Sandbox(**_paid_sandbox()) as box:
         director = Director(box)
         director.scene.room = scenario.room
         if _needs_voices(scenario):
             await _enrol_into(box, director)
         return await play(scenario, director)
+
+
+def _skipped_for_the_floor(scenario) -> list[Outcome]:
+    """One skipped case naming why, for a scenario only a real model can
+    pass. Never a failure: the floor not choosing a tool says nothing
+    about Sim."""
+    why = (scenario.needs_model_because
+           or "needs a model that can judge whether words were for it; "
+              "the floor provider answers everything")
+    return [Outcome(case=Case(name=scenario.id, kind="scenario", level=scenario.stage,
+                              detail={"scenario": scenario.id}),
+                    status=SKIPPED, why=why)]
 
 
 def _a_real_provider() -> bool:
@@ -136,7 +145,56 @@ async def run_pack(scenarios, *, in_child: bool = True) -> list[Outcome]:
     """Every scenario, each in its own process unless told otherwise."""
     out: list[Outcome] = []
     for scenario in scenarios:
+        if scenario.needs_model and not _a_real_provider():
+            # Decided here rather than in a child: the answer is the
+            # same, and a pack of twenty such scenarios should list its
+            # reasons in a second rather than boot twenty interpreters.
+            out.extend(_skipped_for_the_floor(scenario))
+            continue
         out.extend(await _in_a_child(scenario) if in_child else await run_one(scenario))
+    return out
+
+
+def per_scenario(outcomes, scenarios=()) -> list[Outcome]:
+    """One outcome per scenario, from its per-expectation outcomes.
+
+    Stage 14's definition of success: a scenario PASSED when every
+    expectation on every beat passed; FAILED when any failed (the why is
+    the first failure, with its beat); SKIPPED when it could not be
+    judged -- the scenario itself was skipped, or an expectation could
+    not be evaluated -- so it leaves the denominator rather than
+    counting either way. `scenarios` supplies ids that produced nothing
+    at all, which report as skipped rather than vanishing.
+
+    The case's `level` is the scenario's category: the second segment
+    of `toolchain/<category>/<name>`, else its stage.
+    """
+    from ..api import PASSED
+
+    grouped: dict[str, list[Outcome]] = {}
+    for outcome in outcomes:
+        sid = str(outcome.case.detail.get("scenario") or outcome.case.name)
+        grouped.setdefault(sid, []).append(outcome)
+    for scenario in scenarios:
+        grouped.setdefault(scenario.id, [])
+    out: list[Outcome] = []
+    for sid, mine in grouped.items():
+        parts = sid.split("/")
+        level = parts[1] if len(parts) > 2 else (mine[0].case.level if mine else "")
+        failed = [o for o in mine if o.status == FAILED]
+        skipped = [o for o in mine if o.status == SKIPPED]
+        if failed:
+            first = failed[0]
+            beat = first.case.detail.get("beat", "")
+            status, why = FAILED, f"{first.case.name}: {first.why}" + (f" [{beat}]" if beat else "")
+        elif skipped or not mine:
+            status, why = SKIPPED, (skipped[0].why if skipped else "the scenario produced no outcome")
+        else:
+            status, why = PASSED, ""
+        out.append(Outcome(case=Case(name=sid, kind="scenario", level=level,
+                                     detail={"scenario": sid, "expectations": len(mine)}),
+                           status=status, seconds=round(sum(o.seconds for o in mine), 2),
+                           cost_usd=round(sum(o.cost_usd for o in mine), 6), why=why[:300]))
     return out
 
 
@@ -184,4 +242,4 @@ def as_json(outcomes) -> str:
                         "why": o.why, "detail": o.case.detail} for o in outcomes])
 
 
-__all__ = ["SCENARIO_TIMEOUT_S", "as_json", "run_one", "run_pack"]
+__all__ = ["SCENARIO_TIMEOUT_S", "as_json", "per_scenario", "run_one", "run_pack"]
