@@ -3640,11 +3640,16 @@ class SessionRunner:
         every member in it acts for `who`: a caller who learnt another
         caller's contextId, a session's crew id or a project's would
         otherwise put its member, its messages and its report into that
-        crew. Those are refused, with one answer for all of them. An id
+        crew. Those are refused, with one answer for all of them. A caller
+        acting for nobody (`requester` "") never joins. An id
         with no crew in memory and nothing on `crew:<id>` is None: a
         caller's own made-up id never becomes a crew id here, so it can
         never take one a session or a project will use later."""
-        if not context_id:
+        if not context_id or not who[0]:
+            # A caller who names nobody (a paired device with no person,
+            # another Sim's say) cannot be told apart from another such
+            # caller, so its contextId joins nothing: a fresh crew, as
+            # before contextIds were read.
             return None
         crew = self._crews.get(context_id)
         if crew is None and context_id not in self._open and self._ledger is not None:
@@ -3652,8 +3657,10 @@ class SessionRunner:
                 events = await self._ledger.read(crew_stream(context_id))
             except Exception:  # noqa: BLE001 -- an unreadable stream is no crew to join
                 events = []
-            if events:
-                crew = self._new_crew(context_id, events)
+            # Two follow-ups naming the same ended crew may both have read
+            # it: the one that folded first is the crew, or the second
+            # would replace it and its member's handle would be taken twice.
+            crew = self._crews.get(context_id) or (self._new_crew(context_id, events) if events else None)
         if crew is None and context_id not in self._open:
             return None
         refused = CrewRefused(f"context {context_id} is not a conversation this caller started; "

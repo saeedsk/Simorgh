@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import zlib
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -428,8 +429,12 @@ class Service:
                     raise CrewRefused("requester_channel is empty: a crew must act for somebody, through some channel")
                 # A caller's `context_id` (A2A's contextId) joins its own
                 # earlier crew, on the Worker already holding it when one does.
+                # One nobody holds goes to the Worker its id picks, so two
+                # follow-ups to an ended crew fold it in one runner, not two.
                 context_id = str(p.get("context_id") or "")
                 worker = next((w for w in self._workers if w.holds_crew(context_id)), None)
+                if worker is None and context_id:
+                    worker = self._workers[zlib.crc32(context_id.encode("utf-8")) % len(self._workers)]
                 if worker is None:
                     worker = self._workers[self._next_worker % len(self._workers)]
                     self._next_worker += 1

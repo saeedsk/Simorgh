@@ -742,12 +742,63 @@ class AnA2aContextIsTheSameConversation(unittest.TestCase):
             await cognition.start(); await gx.start()
             crew_id, handle = await self._spawn(runner)
             crew = runner._crews[crew_id]  # noqa: SLF001
-            for who in (("Saeed", "a2a"), ("Soodeh", "telegram"), ("", "a2a")):
+            for who in (("Saeed", "a2a"), ("Soodeh", "telegram")):
                 with self.assertRaises(CrewRefused) as caught:
                     await self._spawn(runner, requester=who[0], channel=who[1], context_id=crew_id)
                 self.assertIn("not a conversation this caller started", str(caught.exception))
+            # A caller acting for nobody cannot be told from another such
+            # caller: its contextId joins nothing, and it gets a fresh crew.
+            other, stray = await self._spawn(runner, requester="", context_id=crew_id)
+            self.assertNotEqual(other, crew_id)
             self.assertEqual(set(crew.members), {handle}, "a refused caller put nothing in the crew")
-            await asyncio.wait_for(crew.members[handle].task, 20)
+            await asyncio.wait_for(asyncio.gather(crew.members[handle].task,
+                                                  runner._crews[other].members[stray].task), 20)  # noqa: SLF001
+            await cognition.stop(); await gx.stop()
+
+    @run
+    async def test_nobody_joins_nobodys_crew(self):
+        async with Harness() as h:
+            runner = _runner(h)
+            gx = FakeGuardianExecution(h.client("guardian"))
+            cognition = CrewCognition(h.client("cognition"), {"*": [{"text": "A is 500.\n- a.md"}]},
+                                      delay={"*": 0.5})
+            await cognition.start(); await gx.start()
+            crew_id, handle = await self._spawn(runner, requester="")
+            other, stray = await self._spawn(runner, requester="", context_id=crew_id, brief="and B?")
+            self.assertNotEqual(other, crew_id, "two unnamed callers are not one conversation")
+            self.assertEqual(set(runner._crews[crew_id].members), {handle})  # noqa: SLF001
+            await asyncio.wait_for(asyncio.gather(runner._crews[crew_id].members[handle].task,  # noqa: SLF001
+                                                  runner._crews[other].members[stray].task), 20)  # noqa: SLF001
+            await cognition.stop(); await gx.stop()
+
+    @run
+    async def test_two_follow_ups_to_an_ended_crew_fold_it_once(self):
+        async with Harness() as h:
+            runner = _runner(h, keep=False)
+            gx = FakeGuardianExecution(h.client("guardian"))
+            cognition = CrewCognition(h.client("cognition"), {"*": [{"text": "A is 500.\n- a.md"}]})
+            await cognition.start(); await gx.start()
+            crew_id, first = await self._spawn(runner)
+            await asyncio.wait_for(runner._crews[crew_id].members[first].task, 20)  # noqa: SLF001
+            await _until(lambda: crew_id not in runner._crews)  # noqa: SLF001
+            # A real ledger reads off the loop: both follow-ups read the
+            # ended crew before either has folded it.
+            read = h.ledger.read
+
+            async def slow_read(*args, **kwargs):
+                events = await read(*args, **kwargs)
+                await asyncio.sleep(0.05)
+                return events
+
+            h.ledger.read = slow_read
+            (a, ha), (b, hb) = await asyncio.gather(self._spawn(runner, context_id=crew_id, brief="and B?"),
+                                                    self._spawn(runner, context_id=crew_id, brief="and C?"))
+            self.assertEqual((a, b), (crew_id, crew_id))
+            self.assertNotEqual(ha, hb, "one fold, one handle each")
+            folded = runner._crews.get(crew_id)  # noqa: SLF001
+            self.assertIsNotNone(folded)
+            self.assertEqual(set(folded.members), {first, ha, hb})
+            await asyncio.wait_for(asyncio.gather(folded.members[ha].task, folded.members[hb].task), 20)
             await cognition.stop(); await gx.stop()
 
     @run
