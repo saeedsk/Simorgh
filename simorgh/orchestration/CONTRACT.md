@@ -156,7 +156,7 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 - `simorgh.orchestration.Service` (`service.py:30`): the Subsystem. Built only by the Kernel (`kernel/registry.py:131`, `kernel/service.py:651`); `kernel/configcheck.py` imports `Config`. A `Config` passed to the constructor wins over `ctx.config`.
 - `api.py` types (`Profile`, `Session`, `Step`, `Budget`, `Outcome`) are internal: no other package imports them, and nothing here is exported through `simorgh.contracts`. Other packages see only messages.
 - Types this package takes from `simorgh.contracts`: `topics`, `envelope.Message/Event`, `protocols.Context/Health`, `settings.conversation_key`, `scratch.SCRATCH_PREFIX/is_scratch`, `pytestfailures.hoist_marker`.
-- String constants other packages duplicate by agreement (no import allowed): `CONTINUATION_REASON = "step budget exhausted"` (`session.py:47`, matched by `planning/service.py`), `DENIED_PREFIX = "denied: "` (`session.py:37`).
+- String constants other packages duplicate by agreement (no import allowed): `CONTINUATION_REASON = "step budget exhausted"` (`session.py:47`, matched by `planning/service.py`), `PREREQUISITE_REASON = "prerequisite not done"` (stage 16, matched by `planning/service.py` for the continuation delay), `DENIED_PREFIX = "denied: "` (`session.py:37`).
 - Module-level mutable singletons (risks: shared across every Worker and every Kernel in one process, emptied only by `Service.stop`):
   - `tools._TOOL_POLICY`, `tools._DYNAMIC_TOOLS`, `tools._REGISTERED` (`tools.py:29, 559, 569`): the policy table and known-tool set, mutated by `tool.registered`. A hand-written entry wins over an announced one.
   - `scaffolds._UNAVAILABLE` (`scaffolds.py:35`): tools currently probed down.
