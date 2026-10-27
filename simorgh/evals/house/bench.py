@@ -88,15 +88,14 @@ async def score(suite: str, *, limit: int = DEFAULT_LIMIT, level: str = "",
         # cap once failed over to the Claude CLI unannounced, 2026-09-15).
         # The floor stays last so a dead provider shows as skipped cases.
         chosen, order = provider_order(os.environ.get("SIMORGH_EVALS_PROVIDERS", ""))
-        cognition = {"provider_order": order, "max_spend_usd": float(spend_cap_usd)}
-        if dialect:
-            # Stage 2's open question, and the reason this argument
-            # exists: markers scored 6/7 against native's 6/7 in a
-            # trial round, and a tie is not a win, so nothing was
-            # flipped. A tool-use benchmark is the harness that was
-            # missing -- the same cases, the same model, one setting
-            # apart (stage 2's definition of done).
-            cognition["providers"] = {name: {"tool_dialect": dialect} for name in (chosen or PAID_PROVIDERS)}
+        # Stage 2's open question is why `dialect` exists: markers scored
+        # 6/7 against native's 6/7 in a trial round, and a tie is not a
+        # win, so nothing was flipped. A tool-use benchmark is the harness
+        # that was missing -- the same cases, the same model, one setting
+        # apart (stage 2's definition of done).
+        extra = {"tool_dialect": dialect} if dialect else {}
+        cognition = {"provider_order": order,
+                     "providers": capped_providers(chosen or PAID_PROVIDERS, spend_cap_usd, **extra)}
         config = {**(config or {}), "cognition": cognition}
         secrets = dict(os.environ)
     async with Sandbox(config=config, spend_cap_usd=spend_cap_usd, secrets=secrets) as sandbox:
@@ -131,6 +130,34 @@ def suite_runner(suite: str, *, level: str = "", limit: int = DEFAULT_LIMIT, pai
     return runner
 
 
+def capped_providers(names, spend_cap_usd: float, **extra) -> dict:
+    """`[cognition.providers.<name>]` tables holding `spend_cap_usd`.
+
+    The cap has to sit on each provider: cognition's budget reads
+    `max_spend_usd` there and nowhere else, and a section-wide
+    `[cognition] max_spend_usd` -- what this file and `run.py` wrote
+    until 2026-10-27 -- is a key nothing reads, so a paid house run was
+    held only by the provider's shipped day budget. Each table starts
+    from the shipped defaults, because cognition replaces a provider's
+    whole table when one is given: naming only the cap (or a dialect)
+    would zero the prices the router's pre-call estimate uses."""
+    import dataclasses
+
+    from simorgh.cognition.config import Config
+
+    shipped = Config().providers
+    tables = {}
+    for name in names:
+        if name == "floor" or name not in shipped:
+            continue
+        table = {k: (list(v) if isinstance(v, tuple) else v)
+                 for k, v in dataclasses.asdict(shipped[name]).items()}
+        table.update(extra)
+        table["max_spend_usd"] = float(spend_cap_usd)
+        tables[name] = table
+    return tables
+
+
 def provider_order(named: str) -> tuple[tuple[str, ...], list[str]]:
     """`(chosen, order)` for a paid run: the named providers then the
     floor, or the library's paid order when none are named."""
@@ -138,4 +165,4 @@ def provider_order(named: str) -> tuple[tuple[str, ...], list[str]]:
     return chosen, ([*chosen, "floor"] if chosen else list(PAID_PROVIDERS))
 
 
-__all__ = ["DEFAULT_LIMIT", "PAID_PROVIDERS", "SPEND_CAP_USD", "provider_order", "score", "suite_runner"]
+__all__ = ["DEFAULT_LIMIT", "PAID_PROVIDERS", "SPEND_CAP_USD", "capped_providers", "provider_order", "score", "suite_runner"]

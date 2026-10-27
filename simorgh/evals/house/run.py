@@ -189,10 +189,10 @@ def _paid_sandbox() -> dict:
 
     if not _a_real_provider():
         return {}
-    from .bench import PAID_PROVIDERS, SPEND_CAP_USD
+    from .bench import PAID_PROVIDERS, SPEND_CAP_USD, capped_providers
 
     return {"config": {"cognition": {"provider_order": list(PAID_PROVIDERS),
-                                     "max_spend_usd": SPEND_CAP_USD}},
+                                     "providers": capped_providers(PAID_PROVIDERS, SPEND_CAP_USD)}},
             "secrets": dict(os.environ), "spend_cap_usd": SPEND_CAP_USD}
 
 
