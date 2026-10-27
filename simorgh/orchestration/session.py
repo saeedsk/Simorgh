@@ -921,6 +921,14 @@ class SessionRunner:
             self._open.pop(session.task_id, None)
             self._forget_crew(session.crew_id)
             await self._persist_transcript(session)
+        if outcome.kind == "failed" and outcome.reason == CANCELLED_REASON:
+            # A cancelled parent takes its members with it: each stops at its
+            # next step, and one asleep in `ask_parent` or `await_agents`
+            # wakes now. (Not on a process stop -- that raises past here,
+            # and a restart resumes the crew.)
+            crew = self._crew_of(session)
+            for member in [m for m in crew.children(session.task_id) if not is_terminal(m.status)] if crew else ():
+                await crew.cancel(member.handle, "its parent was cancelled")
         if outcome.kind == "completed":
             # `_transcript_echo` catches a fabrication written in our own
             # bracket syntax. Plain prose walked straight past it: "I've
@@ -1224,7 +1232,7 @@ class SessionRunner:
             spec, crew.root_await = crew.root_await, None
             known = [h for h in spec.get("handles") or () if h in crew.members]
             if known:
-                result = await self._await_members(session, crew, {**spec, "handles": known})
+                result, _woke = await self._await_members(session, crew, {**spec, "handles": known})
                 session.messages.append({"role": "user", "content": (
                     f"Results of await_agents (taken up again after a restart):\n{result}\n\n"
                     "If the task is now finished, reply with your final answer in plain text. "
@@ -2077,7 +2085,8 @@ class SessionRunner:
             member = await crew.admit(
                 parent=session.task_id, agent=agent.name, brief=brief, depth=session.depth + 1,
                 budget=MemberBudget(steps=steps), isolation=isolation, writer=self._writes(agent),
-                via="delegate", brief_ref=await self._brief_ref(brief))
+                via="delegate", brief_ref=await self._brief_ref(brief),
+                requester=session.speaker, requester_channel=session.channel)
         except CrewRefused as exc:
             text = f"delegate: refused -- {exc}"
             return False, text, text
@@ -2151,10 +2160,12 @@ class SessionRunner:
             depth=member.depth, parent_id=member.parent, crew_id=self._crew_id_of(member),
             crew_member=member.via == "spawn",
         )
-        if parent is not None:
-            # The requester, as Guardian sees it on every proposal.
-            child.speaker = parent.speaker
-            child.channel = parent.channel
+        # The requester, as Guardian sees it on every proposal: the parent's,
+        # or -- for a member resumed after a restart, with no parent session
+        # in hand -- the one `crew.spawned` recorded. Never the owner's
+        # console by default.
+        child.speaker = parent.speaker if parent is not None else member.requester
+        child.channel = parent.channel if parent is not None else member.requester_channel
         if parent is not None and member.isolation == "fork":
             # A fork starts from what the parent has already seen -- its
             # conversation so far, copied, so nothing the child does
@@ -2321,8 +2332,20 @@ class SessionRunner:
                         deliver=crew.policy_allows(member.handle, "progress", automatic=True))
 
     def _crew_cancelled(self, session: Session) -> bool:
+        """Cancelled in the crew, or under an ancestor somebody cancelled as
+        a task (`task.cancel` names the root; the cascade reaches every
+        member, not only the root's own children)."""
         crew = self._crew_of(session)
-        return bool(crew and crew.is_cancelled(session.task_id))
+        if crew is None:
+            return False
+        if crew.is_cancelled(session.task_id):
+            return True
+        up = crew.parent_of(session.task_id)
+        while up:
+            if self._is_cancelled(up):
+                return True
+            up = crew.parent_of(up)
+        return False
 
     async def _crew_inbox(self, session: Session) -> None:
         """What arrived for this session since its last think, as one
@@ -2451,7 +2474,8 @@ class SessionRunner:
             member = await crew.admit(
                 parent=session.task_id, agent=agent.name, brief=brief, depth=session.depth + 1, budget=carved,
                 report_policy=policy, isolation=isolation, writer=self._writes(agent),
-                brief_ref=await self._brief_ref(brief))
+                brief_ref=await self._brief_ref(brief),
+                requester=session.speaker, requester_channel=session.channel)
         except CrewRefused as exc:
             return False, f"spawn: refused -- {exc}"
         child = self._member_session(session, member, agent, job=brief_text)
@@ -2484,12 +2508,22 @@ class SessionRunner:
             timeout_s = float(args.get("timeout_s") or 180.0)
         except (TypeError, ValueError):
             timeout_s = 180.0
-        # Waiting is not working: the step this call took is given back.
-        session.budget.steps_used = max(0, session.budget.steps_used - 1)
-        return True, await self._await_members(session, crew, {"handles": handles, "mode": mode,
+        pending = any(not is_terminal(crew.members[h].status) for h in handles)
+        text, woke = await self._await_members(session, crew, {"handles": handles, "mode": mode,
                                                                "timeout_s": timeout_s})
+        if pending and woke:
+            # Waiting is not working: the step this call took is given back
+            # -- but only when a member it waited on finished or asked
+            # something. An await on members already done, or one that ran
+            # out its timeout, costs its step, or a model that awaits again
+            # and again would think for ever without spending any.
+            session.budget.steps_used = max(0, session.budget.steps_used - 1)
+        return True, text
 
-    async def _await_members(self, session: Session, crew: Crew, spec: dict) -> str:
+    async def _await_members(self, session: Session, crew: Crew, spec: dict) -> tuple[str, bool]:
+        """The await itself: the text the parent reads, and whether it woke
+        for a reason (the condition held, or a member asked a question)
+        rather than at its timeout."""
         handles, mode = list(spec["handles"]), spec["mode"]
         timeout_s = max(0.0, float(spec.get("timeout_s") or 0.0))
         left = crew.remaining().wall_s
@@ -2517,6 +2551,7 @@ class SessionRunner:
         # the stream, which is how the restarted root knows to re-enter.
         held = await crew.wait_until(wake, timeout_s)
         await crew.set_status(me, "running")
+        asked = bool(inbox and inbox.questions)
         held = held and holds()
         lines = []
         if mode == "first_ok" and held:
@@ -2540,7 +2575,7 @@ class SessionRunner:
         messages = render_inbox(inbox.drain()) if inbox is not None else ""
         if messages:
             lines.append(messages)
-        return "\n".join(lines)
+        return "\n".join(lines), held or asked
 
     async def _check_agents(self, session: Session, args: dict) -> tuple[bool, str]:
         crew = self._crew_of(session)
@@ -2638,6 +2673,11 @@ class SessionRunner:
             timeout_s = max(0.0, float(args.get("timeout_s") or 120.0))
         except (TypeError, ValueError):
             timeout_s = 120.0
+        if crew.max_wall_s:
+            # Never past the crew's wall-clock: a member asleep here would
+            # otherwise outlive the bound, since nothing else is stepping
+            # to notice that it ran out.
+            timeout_s = min(timeout_s, crew.remaining().wall_s + 1.0)
         sent = await crew.send(member.handle, member.parent, "question",
                                question + (f" (default if no answer: {default})" if default else ""))
         inbox = crew.inboxes[member.handle]

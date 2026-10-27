@@ -138,7 +138,8 @@ class Config:
     # members in all, this many writers (patch, skill) at once, and one
     # budget every member's is carved from -- dollars, wall-clock seconds
     # and tokens (0: no bound of that kind). Spent out, every member is
-    # cancelled with reason `crew budget` and reports `partial`.
+    # cancelled with reason `crew budget` and reports `partial`. A `delegate`
+    # helper is outside these bounds and keeps its old ones (`Crew.bounded`).
     crew_max_members: int = 8
     crew_max_writers: int = 1
     crew_max_usd: float = 0.5

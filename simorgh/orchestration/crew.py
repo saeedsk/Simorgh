@@ -115,6 +115,11 @@ class CrewMember:
     isolation: str = "fresh"
     writer: bool = False
     via: str = "spawn"            # "spawn" | "delegate" (delegate keeps its old shape)
+    # Who asked, as Guardian sees it on every proposal (`Session.speaker`,
+    # `Session.channel`): kept on `crew.spawned` so a member resumed after
+    # a restart acts for the same person, never for the owner's console.
+    requester: str = ""
+    requester_channel: str = ""
     brief: str = ""
     brief_ref: str = ""
     brief_blob: bool = False      # `brief_ref` is a ledger blob, not the brief
@@ -162,7 +167,9 @@ class Crew:
         self.seq = 0
         self.spent_usd = 0.0
         self.spent_tokens = 0
-        self.started = now()
+        #: When the first `spawn` member joined: the crew's wall-clock runs
+        #: from there. None while the crew has only `delegate` helpers.
+        self.started: float | None = None
         self.exhausted = ""
         #: refs a report, message or board value has named: `read_ref` reads only these.
         self.refs: set[str] = set()
@@ -198,13 +205,26 @@ class Crew:
     def live(self) -> list[CrewMember]:
         return [m for m in self.members.values() if not is_terminal(m.status)]
 
+    @staticmethod
+    def bounded(member: CrewMember) -> bool:
+        """Whether the crew's bounds (members, dollars, tokens, wall-clock)
+        apply to `member`. A `delegate` helper keeps the bounds it always
+        had -- its step cap, one at a time, its parent's own budget -- so a
+        task that delegates is not refused or cut short by a crew it never
+        asked for (the plan: "with `delegate` used as today, the behaviour
+        is unchanged")."""
+        return member.via != "delegate"
+
+    def _elapsed(self) -> float:
+        return self._now() - self.started if self.started is not None else 0.0
+
     # -- budgets -------------------------------------------------------------------------
 
     def remaining(self) -> MemberBudget:
         """What the crew has left; 0 in a field means that kind is unbounded."""
         usd = max(0.0, self.max_usd - self.spent_usd) if self.max_usd else 0.0
         tokens = max(0, self.max_tokens - self.spent_tokens) if self.max_tokens else 0
-        wall = max(0.0, self.max_wall_s - (self._now() - self.started)) if self.max_wall_s else 0.0
+        wall = max(0.0, self.max_wall_s - self._elapsed()) if self.max_wall_s else 0.0
         return MemberBudget(tokens=tokens, usd=usd, wall_s=wall)
 
     def carve(self, parent: str, asked: MemberBudget) -> MemberBudget:
@@ -241,8 +261,8 @@ class Crew:
             return f"usd (${self.spent_usd:.3f} of ${self.max_usd:.2f})"
         if self.max_tokens and self.spent_tokens >= self.max_tokens:
             return f"tokens ({self.spent_tokens} of {self.max_tokens})"
-        if self.max_wall_s and self._now() - self.started >= self.max_wall_s:
-            return f"wall ({self._now() - self.started:.0f} s of {self.max_wall_s:.0f} s)"
+        if self.max_wall_s and self.started is not None and self._elapsed() >= self.max_wall_s:
+            return f"wall ({self._elapsed():.0f} s of {self.max_wall_s:.0f} s)"
         return ""
 
     async def charge(self, handle: str, *, usd: float = 0.0, tokens: int = 0) -> str:
@@ -252,6 +272,8 @@ class Crew:
         if member is not None:
             member.cost_usd += float(usd or 0.0)
             member.tokens += int(tokens or 0)
+            if not self.bounded(member):
+                return ""
         self.spent_usd += float(usd or 0.0)
         self.spent_tokens += int(tokens or 0)
         return await self.enforce()
@@ -261,7 +283,8 @@ class Crew:
         if spent and not self.exhausted:
             self.exhausted = spent
             for member in self.live():
-                await self.cancel(member.handle, CREW_BUDGET, cascade=False, record=True)
+                if self.bounded(member):
+                    await self.cancel(member.handle, CREW_BUDGET, cascade=False, record=True)
         return spent
 
     # -- membership ----------------------------------------------------------------------
@@ -278,13 +301,16 @@ class Crew:
     async def admit(self, *, parent: str, agent: str, brief: str, depth: int, budget: MemberBudget,
                     report_policy: str = "end", isolation: str = "fresh", writer: bool = False,
                     via: str = "spawn", background: bool = False, brief_ref: str = "",
-                    handle: str = "") -> CrewMember:
+                    handle: str = "", requester: str = "", requester_channel: str = "") -> CrewMember:
         """Add a member and record `crew.spawned`; CrewRefused with the reason.
-        `brief_ref` is a blob ref for a long brief; "" keeps it inline."""
-        if self.exhausted:
+        `brief_ref` is a blob ref for a long brief; "" keeps it inline.
+        A `delegate` helper is outside the crew's bounds (`bounded`)."""
+        bounded = via != "delegate"
+        counted = [m for m in self.members.values() if self.bounded(m)]
+        if bounded and self.exhausted:
             raise CrewRefused(f"the crew budget is spent ({self.exhausted})")
-        if len(self.members) >= self.max_members:
-            raise CrewRefused(f"the crew already has {len(self.members)} members; "
+        if bounded and len(counted) >= self.max_members:
+            raise CrewRefused(f"the crew already has {len(counted)} members; "
                               f"{self.max_members} is the cap")
         parse_report_policy(report_policy)  # ValueError for the caller to say
         up = self.members.get(parent)
@@ -297,9 +323,11 @@ class Crew:
             handle=handle or self.next_handle(parent), agent=agent, parent=parent, depth=depth,
             budget=budget, report_policy=report_policy, isolation=isolation, writer=writer, via=via,
             brief=brief, brief_ref=brief_ref or brief, brief_blob=bool(brief_ref), background=background,
-            started_at=self._now(),
+            started_at=self._now(), requester=requester, requester_channel=requester_channel,
         )
         member.reported_at = member.started_at
+        if bounded and self.started is None:
+            self.started = member.started_at
         self.members[member.handle] = member
         self.inboxes.setdefault(member.handle, Inbox())
         await self._record(topics.CREW_SPAWNED, self.spawned_payload(member))
@@ -315,6 +343,7 @@ class Crew:
             # Extra fields (the schema admits them): what a restart needs to
             # run the member again as what it was.
             "via": member.via, "writer": member.writer, "brief_blob": member.brief_blob,
+            "requester": member.requester, "requester_channel": member.requester_channel,
         }
 
     async def set_status(self, handle: str, status: str, reason: str = "") -> None:
@@ -448,11 +477,7 @@ class Crew:
         self.refs.update(f.evidence_ref for f in report.findings if f.evidence_ref)
         await self._record(topics.CREW_REPORT, {"crew_id": self.crew_id, "handle": handle,
                                                 "report": report.to_dict()})
-        status = {"ok": "done", "partial": "done", "failed": "failed", "blocked": "blocked",
-                  "cancelled": "cancelled"}.get(report.status, "failed")
-        if member is not None and member.cancel_reason and report.status != "ok":
-            status = "cancelled"
-        await self.set_status(handle, status)
+        await self.set_status(handle, _status_of(report, cancelled=bool(member and member.cancel_reason)))
         self._notify()
 
     # -- blackboard ----------------------------------------------------------------------
@@ -514,7 +539,13 @@ class Crew:
                     via=str(p.get("via") or "spawn"), brief="" if p.get("brief_blob") else ref, brief_ref=ref,
                     brief_blob=bool(p.get("brief_blob")),
                     background=bool(p.get("background")), started_at=crew._now(),
+                    requester=str(p.get("requester") or ""),
+                    requester_channel=str(p.get("requester_channel") or ""),
                 )
+                if crew.bounded(crew.members[p["handle"]]) and crew.started is None:
+                    # The wall-clock starts again from the restart: the
+                    # process was down, and a member is not charged for that.
+                    crew.started = crew._now()
                 crew.inboxes.setdefault(p["handle"], Inbox())
             elif e.type == MEMBER_STATUS_CHANGED:
                 handle = str(p.get("handle") or "")
@@ -534,11 +565,18 @@ class Crew:
                 report = Report.from_dict(p.get("report") or {})
                 crew.refs.update(report.artifacts)
                 if handle in crew.members:
-                    crew.members[handle].report = report
-                    crew.members[handle].cost_usd = report.cost_usd
-                    crew.members[handle].tokens = report.tokens
-                    crew.spent_usd += report.cost_usd
-                    crew.spent_tokens += report.tokens
+                    member = crew.members[handle]
+                    member.report = report
+                    member.cost_usd = report.cost_usd
+                    member.tokens = report.tokens
+                    if crew.bounded(member):
+                        crew.spent_usd += report.cost_usd
+                        crew.spent_tokens += report.tokens
+                    if not is_terminal(member.status):
+                        # A filed report is the end, even when the process
+                        # stopped before the status event that follows it:
+                        # a restart must not run the member a second time.
+                        member.status = _status_of(report, cancelled=bool(member.cancel_reason))
             elif e.type == topics.CREW_CANCEL:
                 for member in ([crew.members[p["handle"]]] if p.get("handle") in crew.members else []) + (
                         crew.descendants(p.get("handle", "")) if p.get("cascade", True) else []):
@@ -548,6 +586,14 @@ class Crew:
                 crew.board[str(p.get("key"))] = {"handle": p.get("handle"), "key": p.get("key"),
                                                  "value": p.get("value")}
         return crew
+
+
+def _status_of(report: Report, *, cancelled: bool) -> str:
+    """The member status a filed report leaves behind."""
+    if cancelled and report.status != "ok":
+        return "cancelled"
+    return {"ok": "done", "partial": "done", "failed": "failed", "blocked": "blocked",
+            "cancelled": "cancelled"}.get(report.status, "failed")
 
 
 def _await_of(payload: dict) -> dict | None:

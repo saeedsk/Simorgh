@@ -500,5 +500,138 @@ class TheConfigReachesTheCrew(unittest.TestCase):
         self.assertEqual(Config().crew_max_usd, 0.5)
 
 
+class ReviewFindings(unittest.TestCase):
+    """What the stage 18 item 2 review found: each was a way past one of
+    the plan's "What this must never do" lines."""
+
+    @run
+    async def test_an_await_on_members_already_done_costs_its_step(self):
+        # Before: every await gave its step back, so a model that awaited
+        # finished members again and again thought for ever, free.
+        async with Harness() as h:
+            cognition = CrewCognition(h.client("cognition"), {
+                "t-root": [{"tool_calls": [_call(1, "spawn", brief="one")]},
+                           {"tool_calls": [_call(2, "await_agents", timeout_s=20)]},
+                           {"tool_calls": [_call(3, "await_agents", timeout_s=20)]}],
+                "*": [{"text": "One.\n- found it"}]})
+            await cognition.start()
+            root = _root()
+            outcome = await asyncio.wait_for(_runner(h).run(root, user_text="x"), timeout=30)
+            await cognition.stop()
+        self.assertNotEqual(outcome.kind, "completed")
+        self.assertEqual(root.budget.steps_used, root.budget.max_steps, "the step budget ended it")
+        self.assertLessEqual(len(cognition.calls["t-root"]), root.budget.max_steps + 2)
+
+    @run
+    async def test_ask_parent_does_not_sleep_past_the_crews_wall_clock(self):
+        async with Harness() as h:
+            cognition = CrewCognition(h.client("cognition"), {
+                "t-root": [{"tool_calls": [_call(1, "spawn", brief="ask")]},
+                           {"tool_calls": [_call(2, "read_file", path="x")]},
+                           {"text": "done"}],
+                "t-root-h1": [{"tool_calls": [_call(1, "ask_parent", question="which?", timeout_s=600,
+                                                    default="the first")]},
+                              {"text": "Took the first.\n- no answer came"}]})
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start(); await gx.start()
+            runner = _runner(h, crew_max_wall_s=0.5)
+            started = time.monotonic()
+            await asyncio.wait_for(runner.run(_root(), user_text="x"), timeout=30)
+            member = runner._crews["t-root"].members["t-root-h1"]  # noqa: SLF001
+            await asyncio.wait_for(member.task, timeout=20)
+            await cognition.stop(); await gx.stop()
+        self.assertLess(time.monotonic() - started, 10, "the 600 s ask was cut to the crew's 0.5 s")
+        self.assertEqual(member.report.status, "partial", "the wall-clock ran out: a typed partial")
+
+    @run
+    async def test_delegate_is_not_cut_by_crew_bounds_it_never_asked_for(self):
+        # Before: a task's ninth delegate was refused by `crew_max_members`,
+        # and a helper was cancelled by `crew_max_usd` -- neither existed.
+        async with Harness() as h:
+            cognition = CrewCognition(h.client("cognition"), {
+                "t-root": [{"tool_calls": [{"tool": "delegate", "args": {"job": "first"}}]},
+                           {"tool_calls": [{"tool": "delegate", "args": {"job": "second"}}]},
+                           {"text": "both done"}],
+                "*": [{"tool_calls": [{"tool": "read_file", "args": {"path": "x"}}]},
+                      {"text": "Done.\n- read x"}]}, cost={"*": 0.05, "t-root": 0.0})
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start(); await gx.start()
+            root = _root()
+            runner = _runner(h, crew_max_members=1, crew_max_usd=0.01)
+            outcome = await asyncio.wait_for(runner.run(root, user_text="x"), timeout=30)
+            await cognition.stop(); await gx.stop()
+        self.assertEqual(outcome.kind, "completed", outcome.reason)
+        self.assertTrue(root.steps[0].summary.startswith("Helper t-root-h1 (completed, 2 steps)"), root.steps[0].summary)
+        self.assertTrue(root.steps[1].summary.startswith("Helper t-root-h2 (completed, 2 steps)"), root.steps[1].summary)
+        crew = runner._crews["t-root"]  # noqa: SLF001
+        self.assertEqual(crew.exhausted, "")
+        self.assertIsNone(crew.started, "a delegate-only crew has no wall-clock running")
+
+    @run
+    async def test_a_cancelled_root_takes_its_crew_with_it(self):
+        cancelled: set = set()
+        async with Harness() as h:
+            cognition = CrewCognition(h.client("cognition"), {
+                "t-root": [{"tool_calls": [_call(1, "spawn", brief="dig")]},
+                           {"tool_calls": [_call(2, "read_file", path="x")]}],
+                "t-root-h1": [{"tool_calls": [_call(1, "spawn", brief="dig deeper")]},
+                              {"tool_calls": [_call(2, "ask_parent", question="deeper?", timeout_s=60)]}],
+                "*": [{"tool_calls": [{"tool": "read_file", "args": {"path": "x"}}]}],
+            }, delay={"*": 0.05, "t-root": 0.3, "t-root-h1": 0.0})
+            gx = FakeGuardianExecution(h.client("guardian"))
+            await cognition.start(); await gx.start()
+            runner = _runner(h, delegate_max_steps=40, is_cancelled=lambda task_id: task_id in cancelled)
+            root_run = asyncio.ensure_future(runner.run(_root(), user_text="x"))
+            for _ in range(300):
+                await asyncio.sleep(0.02)
+                crew = runner._crews.get("t-root")  # noqa: SLF001
+                if crew and "t-root-h1-h1" in crew.members and crew.members["t-root-h1"].status == "waiting":
+                    break
+            cancelled.add("t-root")  # `task.cancel` names the root only
+            started = time.monotonic()
+            outcome = await asyncio.wait_for(root_run, timeout=20)
+            for handle in ("t-root-h1", "t-root-h1-h1"):
+                await asyncio.wait_for(crew.members[handle].task, timeout=20)
+            await cognition.stop(); await gx.stop()
+        self.assertEqual(outcome.reason, "the task was cancelled")
+        self.assertLess(time.monotonic() - started, 15, "the member asleep in ask_parent woke")
+        for handle in ("t-root-h1", "t-root-h1-h1"):
+            self.assertEqual(crew.members[handle].report.status, "cancelled", handle)
+
+    def test_a_report_filed_before_a_stop_is_not_run_again(self):
+        async def go():
+            events = []
+
+            async def append(type_, payload):
+                events.append(type("E", (), {"type": type_, "payload": dict(payload)})())
+
+            crew = Crew("t", append=append)
+            m = await crew.admit(parent="t", agent="research", brief="b", depth=1, budget=MemberBudget(steps=3))
+            await crew.set_status(m.handle, "running")
+            await crew.file_report(m.handle, Report(status="ok", summary="s"))
+            # The process stopped between the report and its status event.
+            return [e for e in events if not (e.type == "crew.member.status" and e.payload["status"] == "done")]
+        folded = Crew.fold("t", asyncio.run(go()))
+        self.assertEqual(folded.members["t-h1"].status, "done")
+        self.assertEqual(folded.live(), [], "nothing for a restart to run twice")
+
+    @run
+    async def test_a_resumed_member_still_acts_for_the_person_who_asked(self):
+        async with Harness() as h:
+            runner = _runner(h)
+            root = _root()
+            root.speaker, root.channel = "Ira", "voice"
+            crew = await runner._crew_for(root)  # noqa: SLF001
+            member = await crew.admit(parent=root.task_id, agent="research", brief="b", depth=1,
+                                      budget=MemberBudget(steps=3), requester=root.speaker,
+                                      requester_channel=root.channel)
+            events = await h.ledger.read("crew:t-root")
+            folded = Crew.fold("t-root", events)
+            again = folded.members[member.handle]
+            child = runner._member_session(None, again, profiles.RESEARCH)  # noqa: SLF001
+        self.assertEqual((child.speaker, child.channel), ("Ira", "voice"),
+                         "not the owner's console after a restart")
+
+
 if __name__ == "__main__":
     unittest.main()
