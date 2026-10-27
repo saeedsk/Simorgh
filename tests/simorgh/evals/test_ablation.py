@@ -117,7 +117,12 @@ class TheChildsConfig(unittest.TestCase):
         # The shipped prices survive: cognition replaces a provider's whole table.
         self.assertGreater(table["price_in"], 0)
         self.assertEqual(table["max_spend_usd"], 2.5)
-        self.assertEqual(cognition["max_spend_usd"], 2.5)
+        # Only the provider's cap: `[cognition]` has no section-wide
+        # `max_spend_usd`, and a key nothing reads is no cap at all.
+        self.assertNotIn("max_spend_usd", cognition)
+        from simorgh.cognition.config import Config
+
+        self.assertEqual(Config.from_mapping(cognition).providers["together"].max_spend_usd, 2.5)
         json.dumps(config)  # it has to cross a process boundary
 
     def test_the_floor_names_no_provider_table(self):
@@ -155,6 +160,18 @@ class TheChildsConfig(unittest.TestCase):
             self.assertNotIn("SIMORGH_HOUSE_PAID", ablation.child_env(run, paid=False, spend_cap_usd=None))
             self.assertNotIn("SIMORGH_HOUSE_PAID", ablation.child_env(floor, paid=True, spend_cap_usd=None))
             self.assertEqual(ablation.child_env(run, paid=True, spend_cap_usd=1.0)["SIMORGH_HOUSE_PAID"], "1")
+
+    def test_an_inherited_provider_order_does_not_reach_a_real_models_child(self):
+        """Cognition lets `SIMORGH_COGNITION_PROVIDER_ORDER` override the
+        config; the test session sets it to `floor`. Inherited, the child
+        would measure the floor under the model's name."""
+        run = ablation.Run(Model("together", "m"), "sim", _Scenario("toolchain/x/y"), 1)
+        floor = ablation.Run(Model("floor", "floor"), "sim", _Scenario("toolchain/x/y"), 1)
+        with mock.patch.dict(os.environ, {"SIMORGH_COGNITION_PROVIDER_ORDER": "floor"}):
+            self.assertNotIn("SIMORGH_COGNITION_PROVIDER_ORDER",
+                             ablation.child_env(run, paid=True, spend_cap_usd=1.0))
+            self.assertEqual(ablation.child_env(floor, paid=False, spend_cap_usd=None)
+                             ["SIMORGH_COGNITION_PROVIDER_ORDER"], "floor")
 
 
 class TheMatrix(unittest.TestCase):
@@ -209,9 +226,37 @@ class TheMatrix(unittest.TestCase):
         self.assertEqual(len(child.envs), 3)
         self.assertEqual([r.status for r in results].count(SKIPPED), 5)
         self.assertIn("spend cap reached", results[-1].why)
-        # Each child is capped at what was left, not the whole cap.
-        caps = [json.loads(e["SIMORGH_HOUSE_CONFIG"])["cognition"]["max_spend_usd"] for e in child.envs]
+        # Each child is capped at what was left (at most its per-run
+        # share), on the provider the cognition budget really enforces.
+        caps = [json.loads(e["SIMORGH_HOUSE_CONFIG"])["cognition"]["providers"]["together"]["max_spend_usd"]
+                for e in child.envs]
         self.assertEqual([round(c, 2) for c in caps], [1.0, 0.6, 0.2])
+
+    def test_no_run_gets_more_than_its_per_run_share(self):
+        child = _FakeChild(cost=0.01)
+        self._go(child, cap=50.0, repeats=1, presets=("sim",))
+        caps = [json.loads(e["SIMORGH_HOUSE_CONFIG"])["cognition"]["providers"]["together"]["max_spend_usd"]
+                for e in child.envs]
+        self.assertEqual(caps, [ablation.PER_RUN_CAP_USD, ablation.PER_RUN_CAP_USD])
+
+    def test_a_child_that_reports_no_spend_is_charged_its_whole_share(self):
+        """A child that died or timed out said nothing about its dollars.
+        Counting that as $0 is how a total cap gets overspent."""
+        class _Silent(_FakeChild):
+            async def __call__(self, scenario, env):
+                self.envs.append(env)
+                return [Outcome(case=Case(name=scenario.id, kind="scenario"), status=FAILED,
+                                why="the scenario did not finish in 600s")]
+
+        child = _Silent()
+        with mock.patch.object(ablation, "PER_RUN_CAP_USD", 0.4):
+            results = self._go(child, cap=1.0)  # 8 runs; each unknown one counts $0.40
+        self.assertEqual(len(child.envs), 3)
+        self.assertEqual([round(r.cost_usd, 2) for r in results[:3]], [0.4, 0.4, 0.2])
+        self.assertIn("spend unknown", results[0].why)
+        self.assertTrue(all("spend cap reached" in r.why for r in results[3:]))
+        broken = self._go(_FakeChild(raises=True), cap=1.0, repeats=1, presets=("sim",))
+        self.assertGreater(sum(r.cost_usd for r in broken), 0)
 
     def test_a_broken_child_is_a_skip(self):
         results = self._go(_FakeChild(raises=True), repeats=1, presets=("sim",))
@@ -220,13 +265,28 @@ class TheMatrix(unittest.TestCase):
 
     def test_a_model_that_never_answered_is_a_skip_not_a_failure(self):
         run = ablation.Run(Model("together", "m"), "sim", _Scenario("toolchain/a/one"), 1)
-        never = {"steps": 1, "cost_usd": 0.0, "model_answers": 0, "floor_answers": 0, "model_errors": 2}
+        never = {"steps": 1, "cost_usd": 0.0, "model_answers": 0, "floor_answers": 0, "model_errors": 2,
+                 "budget_errors": 0}
         floor = {"steps": 1, "cost_usd": 0.0, "model_answers": 1, "floor_answers": 1, "model_errors": 0}
         for summary in (never, floor):
             result = ablation.judge(run, [_outcome("toolchain/a/one", FAILED, run=summary)])
             self.assertEqual(result.status, SKIPPED, summary)
         ok = {"steps": 2, "cost_usd": 0.01, "model_answers": 2, "floor_answers": 0, "model_errors": 0}
         self.assertEqual(ablation.judge(run, [_outcome("toolchain/a/one", FAILED, run=ok)]).status, FAILED)
+
+    def test_a_run_that_reached_its_share_of_the_cap_is_a_skip(self):
+        """The plan: "spend cap reached" is a skip, also when it happens
+        halfway through a chain rather than before it."""
+        run = ablation.Run(Model("together", "m"), "sim", _Scenario("toolchain/a/one"), 1)
+        refused = {"steps": 3, "cost_usd": 0.2, "model_answers": 2, "floor_answers": 0, "model_errors": 1,
+                   "budget_errors": 1}
+        result = ablation.judge(run, [_outcome("toolchain/a/one", FAILED, run=refused)], child_cap_usd=0.2)
+        self.assertEqual(result.status, SKIPPED)
+        self.assertIn("spend cap reached", result.why)
+        # The provider's budget capped, so the floor answered the rest.
+        floored = {"steps": 3, "cost_usd": 0.2, "model_answers": 2, "floor_answers": 1, "model_errors": 0}
+        result = ablation.judge(run, [_outcome("toolchain/a/one", FAILED, run=floored)], child_cap_usd=0.2)
+        self.assertIn("spend cap reached", result.why)
 
     def test_one_jsonl_row_per_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -262,6 +322,21 @@ class TheReport(unittest.TestCase):
                                scenarios=scenarios, repeats=1, paid=True)
         self.assertIn("= 2 runs", dry)
         self.assertIn("estimated total", dry)
+
+    def test_dry_run_names_the_presets_that_cannot_change_a_chat_turn(self):
+        """The chat profile already runs with verify = false and
+        max_revisions = 0, so on a pack of typed turns `no_verify` and
+        `no_revisions` are `sim` again; paying for them should be a
+        choice made knowing that."""
+        from simorgh.evals.house.scenarios import by_prefix
+
+        pack = by_prefix("toolchain/")
+        self.assertEqual(ablation.inert_presets(list(PRESETS), pack), ["no_verify", "no_revisions"])
+        self.assertEqual(ablation.inert_presets(list(PRESETS), [_Scenario("x/y/z")]), [])
+        runs = ablation.matrix([Model("together", "m")], list(PRESETS), pack, 1)
+        dry = ablation.dry_run(runs, models=[Model("together", "m")], presets=list(PRESETS),
+                               scenarios=pack, repeats=1, paid=True)
+        self.assertIn("no_verify, no_revisions change nothing", dry)
 
     def test_the_rule_on_skips_in_the_row(self):
         results = [ablation.RunResult(ablation.Run(Model("t", "m"), "sim", _Scenario("x/y/z"), 1), s)
@@ -312,6 +387,12 @@ class TheCommand(unittest.TestCase):
 
 class TheRunSummary(unittest.TestCase):
     def test_steps_cost_and_who_answered(self):
+        """Who answered and the dollars come from the sandbox's ledger
+        (`cognition:calls`, `cognition:budget:*`); the think errors from
+        the `task.step` a session publishes for one. Not from
+        `cognition.think.reply`: a reply goes only to the asker's inbox,
+        so the observer never sees it, and a summary built from replies
+        read $0 and "nobody answered" for every real run."""
         from simorgh.evals.house.record import Record
         from simorgh.evals.house.run import run_summary, with_run_summary
 
@@ -319,16 +400,49 @@ class TheRunSummary(unittest.TestCase):
         for type_, payload in [
             ("task.step", {"task_id": "t", "step_no": 1}), ("task.step", {"task_id": "t", "step_no": 1}),
             ("task.step", {"task_id": "t", "step_no": 2}),
-            ("cognition.think.reply", {"cost_usd": 0.01}), ("cognition.think.reply", {"cost_usd": 0.02}),
-            ("cognition.think.reply", {"ok": False, "error": {"code": "x"}}),
+            ("task.step", {"task_id": "t", "step_no": 3, "ok": False,
+                           "summary": "cognition error: budget_exceeded -- every candidate's estimate"}),
+            ("task.step", {"task_id": "t", "step_no": 4, "ok": False, "summary": "home_call failed"}),
+            # Seen or not, a reply is not what the summary counts.
+            ("cognition.think.reply", {"cost_usd": 9.0}),
         ]:
             record.saw(SimpleNamespace(type=type_, payload=payload))
-        summary = run_summary(record)
-        self.assertEqual(summary, {"steps": 2, "cost_usd": 0.03, "model_answers": 2,
-                                   "floor_answers": 0, "model_errors": 1})
-        outs = with_run_summary([_outcome("s"), _outcome("s")], record)
-        self.assertEqual([o.cost_usd for o in outs], [0.03, 0.0])
+        calls = [{"cost_usd": 0.01, "floor": False}, {"cost_usd": 0.02, "floor": False},
+                 {"cost_usd": 0.0, "floor": True}]
+        summary = run_summary(record, calls=calls, spend_usd=0.035)
+        self.assertEqual(summary, {"steps": 4, "cost_usd": 0.035, "model_answers": 2, "floor_answers": 1,
+                                   "model_errors": 1, "budget_errors": 1, "known": True})
+        outs = with_run_summary([_outcome("s"), _outcome("s")], record, calls=calls, spend_usd=0.035)
+        self.assertEqual([o.cost_usd for o in outs], [0.035, 0.0])
         self.assertTrue(all(o.case.detail["run"] == summary for o in outs))
+        # Without the ledger the dollars are unknown, which the parent charges.
+        self.assertFalse(run_summary(record)["known"])
+        run = ablation.Run(Model("together", "m"), "sim", _Scenario("s"), 1)
+        unknown = ablation.judge(run, with_run_summary([_outcome("s")], record))
+        self.assertFalse(unknown.spend_known)
+
+    def test_the_ledger_facts_of_a_sandbox(self):
+        from simorgh.evals.house.run import ledger_facts
+        from simorgh.ledger.api import Event
+        from simorgh.ledger.factory import make_ledger
+
+        async def go():
+            ledger = make_ledger({"backend": "memory"})
+            await ledger.start()
+            for stream, payload in [("cognition:calls", {"cost_usd": 0.01, "floor": False}),
+                                    ("cognition:calls", {"cost_usd": 0.0, "floor": True}),
+                                    ("cognition:budget:together", {"cost_usd": 0.01}),
+                                    ("cognition:budget:together", {"cost_usd": 0.004})]:
+                await ledger.append(stream, Event(stream=stream, type="x", ts=0.0, trace_id="",
+                                                  causation_id=None, payload=payload))
+            facts = await ledger_facts(SimpleNamespace(kernel=SimpleNamespace(ledger=ledger)))
+            await ledger.stop()
+            return facts
+
+        facts = _run(go())
+        self.assertEqual(len(facts["calls"]), 2)
+        self.assertAlmostEqual(facts["spend_usd"], 0.014)
+        self.assertEqual(_run(ledger_facts(SimpleNamespace(kernel=None))), {})
 
 
 class NeverInTheLiveSim(unittest.TestCase):

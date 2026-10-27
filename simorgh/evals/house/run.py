@@ -39,7 +39,8 @@ async def run_one(scenario) -> list[Outcome]:
         director.scene.room = scenario.room
         if _needs_voices(scenario):
             await _enrol_into(box, director)
-        return with_run_summary(await play(scenario, director), director.record)
+        outcomes = await play(scenario, director)
+        return with_run_summary(outcomes, director.record, **await ledger_facts(box))
 
 
 #: The environment variable an ablation run (`simorgh/evals/ablation.py`)
@@ -77,33 +78,76 @@ def _sandbox_args() -> dict:
     return args
 
 
-def run_summary(record) -> dict:
-    """What one scenario run cost, read off the bus.
+#: How a session reports a `cognition.think` that came back an error
+#: (`orchestration/session.py`, the `ok: false` reply branch): a
+#: published `task.step` whose summary starts with this, then the code.
+_THINK_ERROR = "cognition error: "
+
+
+async def ledger_facts(box) -> dict:
+    """Who answered and what it cost, from the sandbox's own ledger.
+
+    Not from the bus: a `cognition.think.reply` is routed only to the
+    asker's inbox (`bus/router.py`), so the observer never sees one --
+    a summary built from replies read $0 and "nobody answered" for every
+    run, and the ablation cap never moved. `cognition:calls` has one row
+    per answered think (`floor` on each), and `cognition:budget:<p>` is
+    what each provider's own budget counted, billed failures included:
+    the same money the child's `max_spend_usd` is held to.
+    """
+    ledger = getattr(getattr(box, "kernel", None), "ledger", None)
+    if ledger is None:
+        return {}
+    calls: list[dict] = []
+    spend = 0.0
+    try:
+        calls = [dict(e.payload or {}) for e in await ledger.read("cognition:calls")]
+        for stream in await ledger.streams("cognition:budget:"):
+            spend += sum(float((e.payload or {}).get("cost_usd") or 0.0) for e in await ledger.read(stream))
+    except Exception:  # noqa: BLE001 -- a ledger that cannot be read leaves the summary unknown, not zero
+        return {}
+    return {"calls": calls, "spend_usd": spend}
+
+
+def run_summary(record, *, calls=None, spend_usd: float | None = None) -> dict:
+    """What one scenario run cost and who answered it.
 
     `steps`: distinct numbered `task.step`s across the run, else the
     `cognition.think` count (the counting `steps_at_most` uses, over the
-    whole evening rather than one beat). `cost_usd`: the sum of the
-    `cognition.think.reply` costs. `model_answers`, `floor_answers` and
-    `model_errors` let an ablation run tell "the model failed the chain"
-    from "no model answered at all", which is a skip.
+    whole evening rather than one beat). `calls` and `spend_usd` come
+    from the sandbox's ledger (`ledger_facts`): `cost_usd` is the
+    providers' budget spend (else the calls' costs), `model_answers` /
+    `floor_answers` the `cognition:calls` rows by their `floor` flag.
+    `model_errors` counts the think errors the sessions published, and
+    `budget_errors` those that were `budget_exceeded` -- a child that
+    reached its share of the cap. Together they let an ablation run tell
+    "the model failed the chain" from "no model answered at all", which
+    is a skip. `known` is False when the ledger could not be read: the
+    dollars are then unknown, not zero.
     """
     steps = {(m.payload.get("task_id"), m.payload.get("step_no")) for m in record.of("task.step")}
-    replies = record.of("cognition.think.reply")
+    errors = [str(m.payload.get("summary") or "")[len(_THINK_ERROR):]
+              for m in record.of("task.step")
+              if m.payload.get("ok") is False and str(m.payload.get("summary") or "").startswith(_THINK_ERROR)]
+    rows = list(calls or ())
+    cost = spend_usd if spend_usd is not None else sum(float(r.get("cost_usd") or 0.0) for r in rows)
     return {
         "steps": len(steps) or len(record.of("cognition.think")),
-        "cost_usd": round(sum(float(m.payload.get("cost_usd") or 0.0) for m in replies), 6),
-        "model_answers": sum(1 for m in replies if not m.payload.get("error") and not m.payload.get("floor")),
-        "floor_answers": sum(1 for m in replies if m.payload.get("floor")),
-        "model_errors": sum(1 for m in replies if m.payload.get("error")),
+        "cost_usd": round(cost, 6),
+        "model_answers": sum(1 for r in rows if not r.get("floor")),
+        "floor_answers": sum(1 for r in rows if r.get("floor")),
+        "model_errors": len(errors),
+        "budget_errors": sum(1 for e in errors if e.startswith("budget_exceeded")),
+        "known": calls is not None,
     }
 
 
-def with_run_summary(outcomes: list[Outcome], record) -> list[Outcome]:
+def with_run_summary(outcomes: list[Outcome], record, *, calls=None, spend_usd: float | None = None) -> list[Outcome]:
     """Every outcome carries the run's summary as `detail["run"]`; the
     first also carries its cost, so a sum over outcomes counts it once."""
     from dataclasses import replace
 
-    summary = run_summary(record)
+    summary = run_summary(record, calls=calls, spend_usd=spend_usd)
     out = []
     for index, outcome in enumerate(outcomes):
         detail = {**outcome.case.detail, "run": summary}
@@ -314,5 +358,5 @@ def as_json(outcomes) -> str:
                         "why": o.why, "detail": o.case.detail} for o in outcomes])
 
 
-__all__ = ["HOUSE_CONFIG_ENV", "SCENARIO_TIMEOUT_S", "as_json", "house_config", "per_scenario",
+__all__ = ["HOUSE_CONFIG_ENV", "SCENARIO_TIMEOUT_S", "as_json", "house_config", "ledger_facts", "per_scenario",
            "run_one", "run_pack", "run_summary", "with_run_summary"]

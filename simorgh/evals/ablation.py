@@ -66,6 +66,15 @@ EST_STEPS_PER_RUN = 4
 EST_INPUT_TOKENS_PER_STEP = 9_000
 EST_OUTPUT_TOKENS_PER_STEP = 300
 
+#: The most one run may spend, whatever is left of the total cap. A
+#: child's spend is read from its ledger when it finishes; a child that
+#: dies or times out first reports nothing, and is then charged this
+#: whole share -- the most it could have spent -- so the total cap holds
+#: even when the dollars are unknown. Without a per-run share, that
+#: charge would have to be everything left, and one hung house would end
+#: the matrix.
+PER_RUN_CAP_USD = 1.0
+
 #: Where the per-run rows go, relative to the repo root (gitignored).
 DEFAULT_LOG = Path(__file__).resolve().parents[2] / ".simorgh_evals" / "ablation.jsonl"
 
@@ -102,6 +111,10 @@ class RunResult:
     steps: int | None = None
     cost_usd: float = 0.0
     seconds: float = 0.0
+    #: False when the child never said what it spent (it died, timed
+    #: out, or its ledger could not be read). `run_matrix` then charges
+    #: the run its whole share of the cap.
+    spend_known: bool = True
 
     def row(self, suite: str) -> dict:
         return {"ts": round(time.time(), 3), "suite": suite, "model": self.run.model.label,
@@ -198,6 +211,10 @@ def preset_config(preset: str, model: Model, *, spend_cap_usd: float | None = No
     shipped defaults (prices, call caps, timeouts) because cognition
     replaces a provider's whole table when one is given: naming only the
     model would zero the prices the router's pre-call estimate uses.
+
+    The cap is the provider's own `max_spend_usd` -- the one cognition's
+    budget enforces. `[cognition]` has no section-wide `max_spend_usd`;
+    writing one would be a key nothing reads.
     """
     switches = PRESETS[preset]
     cognition: dict = {"ablate": list(switches["cognition"]), "provider_order": [model.provider]}
@@ -207,8 +224,6 @@ def preset_config(preset: str, model: Model, *, spend_cap_usd: float | None = No
         if spend_cap_usd is not None:
             table["max_spend_usd"] = float(spend_cap_usd)
         cognition["providers"] = {model.provider: table}
-    if spend_cap_usd is not None:
-        cognition["max_spend_usd"] = float(spend_cap_usd)
     return {"orchestration": {"ablate": list(switches["orchestration"])}, "cognition": cognition}
 
 
@@ -268,19 +283,26 @@ def child_env(run: Run, *, paid: bool, spend_cap_usd: float | None) -> dict:
 
     env = dict(os.environ)
     env.pop("SIMORGH_HOUSE_PAID", None)
+    if not run.model.is_floor:
+        # Cognition lets this override `provider_order` (the test session
+        # sets it to `floor`); inherited, it would quietly measure the
+        # floor under the model's name.
+        env.pop("SIMORGH_COGNITION_PROVIDER_ORDER", None)
     if paid and not run.model.is_floor:
         env["SIMORGH_HOUSE_PAID"] = "1"
     env[HOUSE_CONFIG_ENV] = json.dumps(preset_config(run.preset, run.model, spend_cap_usd=spend_cap_usd))
     return env
 
 
-def judge(run: Run, outcomes: list[Outcome]) -> RunResult:
+def judge(run: Run, outcomes: list[Outcome], *, child_cap_usd: float | None = None) -> RunResult:
     """One run's raw outcomes as one result, by the plan's definition of
     success (`house/run.py::per_scenario`), with the steps and dollars
     the child read off the bus.
 
     A real model that never answered -- every think came back an error,
     or from the floor -- is a skip ("no provider"), not a failed chain.
+    So is a run that reached its share of the cap (`child_cap_usd`)
+    before it finished: the plan's "spend cap reached".
     """
     from .house.run import per_scenario
 
@@ -290,13 +312,18 @@ def judge(run: Run, outcomes: list[Outcome]) -> RunResult:
     cost = float(summary.get("cost_usd") or 0.0) if summary else sum(o.cost_usd for o in outcomes)
     steps = summary.get("steps") if summary else None
     status, why = one.status, one.why
-    if status != SKIPPED and not run.model.is_floor and summary:
+    capped = bool(summary.get("budget_errors")) or (
+        child_cap_usd is not None and cost >= child_cap_usd * 0.95 and bool(summary.get("floor_answers")))
+    if status != PASSED and status != SKIPPED and not run.model.is_floor and summary and capped:
+        status, why = SKIPPED, f"spend cap reached during the run (${cost:.2f} of its ${child_cap_usd or 0:.2f})"
+    elif status != SKIPPED and not run.model.is_floor and summary:
         if summary.get("floor_answers"):
             status, why = SKIPPED, f"{summary['floor_answers']} answer(s) came from the floor, not {run.model.label}"
         elif not summary.get("model_answers") and summary.get("model_errors"):
             status, why = SKIPPED, f"{run.model.label} never answered ({summary['model_errors']} error replies)"
     return RunResult(run=run, status=status, why=why, steps=steps, cost_usd=cost,
-                     seconds=sum(o.seconds for o in outcomes))
+                     seconds=sum(o.seconds for o in outcomes),
+                     spend_known=bool(summary) and summary.get("known", True) is not False)
 
 
 def _skip(run: Run, why: str) -> RunResult:
@@ -309,9 +336,10 @@ async def run_matrix(runs: list[Run], *, suite: str, paid: bool, cap_usd: float 
     """Every run, one child at a time, under one total dollar cap.
 
     The cap is checked before each run and handed to the child as its
-    own `max_spend_usd` (what is left), so no single run can spend past
-    it either. Once it is reached the rest are skipped "spend cap
-    reached" and reported, never dropped.
+    provider's `max_spend_usd`: what is left, at most `PER_RUN_CAP_USD`,
+    so no single run can spend past it either. A child that reports no
+    spend is charged that whole share. Once the cap is reached the rest
+    are skipped "spend cap reached" and reported, never dropped.
 
     A scenario that needs a model, on the floor or without `--paid`, is
     skipped here without a child: the answer is the same and a matrix of
@@ -328,14 +356,20 @@ async def run_matrix(runs: list[Run], *, suite: str, paid: bool, cap_usd: float 
         elif spends and cap_usd and spent >= cap_usd:
             result = _skip(run, f"spend cap reached (${spent:.2f} of ${cap_usd:.2f})")
         else:
-            remaining = max(0.0, cap_usd - spent) if spends and cap_usd else None
-            env = child_env(run, paid=paid, spend_cap_usd=remaining)
+            share = min(max(0.0, cap_usd - spent), PER_RUN_CAP_USD) if spends and cap_usd else None
+            env = child_env(run, paid=paid, spend_cap_usd=share)
             started = time.monotonic()
             try:
-                result = judge(run, await child(run.scenario, env))
+                result = judge(run, await child(run.scenario, env), child_cap_usd=share)
             except Exception as exc:  # noqa: BLE001 -- one broken child is one skipped run
                 result = _skip(run, f"the child did not run: {exc!r}")
+                result.spend_known = False
             result.seconds = result.seconds or round(time.monotonic() - started, 2)
+            if share is not None and not result.spend_known:
+                # Unknown is not free: count the most it could have cost.
+                result.cost_usd = max(result.cost_usd, share)
+                result.why = (result.why + "; " if result.why else "") + \
+                    f"spend unknown, counted as its ${share:.2f} share of the cap"
             spent += result.cost_usd
         out.append(result)
         if log is not None:
@@ -414,6 +448,11 @@ def dry_run(runs: list[Run], *, models: list[Model], presets: list[str], scenari
         switches = PRESETS[name]
         lines.append(f"  {name:<13} orchestration={list(switches['orchestration'])} "
                      f"cognition={list(switches['cognition'])}")
+    inert = inert_presets(presets, scenarios)
+    if inert:
+        lines.append(f"  note: {', '.join(inert)} change nothing for these scenarios -- every one is a chat "
+                     "turn, and the chat profile already runs with verify = false and max_revisions = 0; "
+                     "those rows can only equal sim")
     lines.append("")
     total, unknown = 0.0, []
     for model in models:
@@ -436,6 +475,28 @@ def dry_run(runs: list[Run], *, models: list[Model], presets: list[str], scenari
     return "\n".join(lines)
 
 
-__all__ = ["Cell", "DEFAULT_LOG", "FLOOR", "Model", "PRESETS", "Run", "RunResult", "SUITE_PREFIXES",
+def inert_presets(presets: list[str], scenarios: list) -> list[str]:
+    """The presets that cannot change anything for `scenarios`: those
+    whose only switches are `verify`/`revisions` when every scenario is a
+    chat turn (typed or spoken, never a task) and the chat profile
+    already has Verification off and no revisions. Paying for those rows
+    buys a second `sim` row, so `--dry-run` says so before anything is
+    spent."""
+    from simorgh.orchestration import profiles
+
+    chat = profiles.for_percept("cli")
+    if chat.verify or chat.max_revisions:
+        return []
+    beats = [b for s in scenarios for b in (getattr(s, "beats", None) or ())]
+    if not beats or not all(getattr(s, "beats", None) for s in scenarios) \
+            or any(not getattr(b, "says", "") or getattr(b, "proposes", None) for b in beats):
+        return []
+    owned = {"verify", "revisions"}
+    return [p for p in presets
+            if PRESETS[p]["orchestration"] and set(PRESETS[p]["orchestration"]) <= owned
+            and not PRESETS[p]["cognition"]]
+
+
+__all__ = ["Cell", "DEFAULT_LOG", "FLOOR", "PER_RUN_CAP_USD", "inert_presets", "Model", "PRESETS", "Run", "RunResult", "SUITE_PREFIXES",
            "cells", "child_env", "dry_run", "estimate_usd", "judge", "matrix", "parse_models",
            "parse_presets", "preset_config", "run_matrix", "scenarios_for", "table", "wilson"]
