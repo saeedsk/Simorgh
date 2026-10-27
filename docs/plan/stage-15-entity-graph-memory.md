@@ -1,6 +1,6 @@
 # Stage 15 -- Entity-graph memory (native), measured against Graphiti as a sidecar
 
-Status: **in progress** (2026-10-27: plan written; nothing built) · Depends on: stage 5 (memory tiers), stage 4 (`simorgh/evals/`), stage 14 item 4's runner shape · Modules touched: memory (owner), evals; `docs/`
+Status: **in progress** (2026-10-27: items 1-3 merged (`94613194`), entities off by default until item 4; item 7 building. Contracts follow-ups the memory lock could not make: `Person.relations` (kinship words resolve only once it exists), a `memory.summary`/`memory.reconcile` purpose with its own budget, and `hop`/`summary`/`entity` declared on `MemoryRetrieveReply.facts`; orchestration's `context.py::_fact_lines` shows only 8 facts and ignores `hop`) · Depends on: stage 5 (memory tiers), stage 4 (`simorgh/evals/`), stage 14 item 4's runner shape · Modules touched: memory (owner), evals; `docs/`
 
 ## Outcome
 
