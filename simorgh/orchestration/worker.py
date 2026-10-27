@@ -150,7 +150,7 @@ class Worker:
         skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"),
         attempt_limits: tuple[int, float, float] = (0, 0.0, 0.0), telemetry=None,
-        ablate: tuple[str, ...] = (),
+        ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
     ) -> None:
         self._review_benchmark = review_benchmark
         self._attempt_limits = attempt_limits
@@ -195,7 +195,7 @@ class Worker:
             parallel_read_tools=parallel_read_tools, skills_enabled=skills_enabled,
             escalate_below_posterior=escalate_below_posterior, escalate_min_samples=escalate_min_samples,
             skills_catalog_max_chars=skills_catalog_max_chars, skills_roots=skills_roots,
-            skills_channels=skills_channels, telemetry=telemetry, ablate=ablate, **runner_kwargs,
+            skills_channels=skills_channels, telemetry=telemetry, ablate=ablate, guard_limits=guard_limits, **runner_kwargs,
         )
         self._subs: list = []
         # Task ids somebody has asked to stop -> whether that cancel was

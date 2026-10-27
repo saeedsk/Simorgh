@@ -176,9 +176,14 @@ async def restore_session(session: Session, ledger) -> int:
         for p in last["steps"]:
             session.record(Step(
                 p.get("step_no", len(session.steps) + 1), p.get("phase", "act"), p.get("summary", ""),
-                tool=p.get("tool"), ok=p.get("ok"),
+                tool=p.get("tool"), ok=p.get("ok"), nudge=str(p.get("nudge") or ""), tier=int(p.get("tier") or 0),
             ))
-        session.budget.steps_used = len(last["steps"])
+            if isinstance(p.get("steps_state"), dict):
+                # Stage 16: the step state as of the dead worker's last
+                # step, so the steps it had done stay done.
+                session.step_state = p["steps_state"]
+        # A guardrail nudge (stage 16) spends no step of `max_steps`.
+        session.budget.steps_used = sum(1 for p in last["steps"] if not p.get("nudge"))
         session.resumed_from_step = len(last["steps"])
         # The dead worker's own transcript (stage 4 item 2): the messages it
         # had shown the model, not only its step count (evaluation L5).

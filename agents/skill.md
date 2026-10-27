@@ -10,6 +10,9 @@ max_revisions = 2
 scaffold = "skill"
 max_output_tokens = 16000
 verify = true
+# Stage 16 (orchestration/guardrails.py::Steps): a commit only after the
+# tests have run. Ran, not passed -- Verification judges the result.
+prerequisites = { git_commit = ["run_tests"] }
 +++
 <!--
 `run_python_sandboxed` because `run_tests` on a brand-new skill

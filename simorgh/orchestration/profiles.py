@@ -23,7 +23,9 @@ AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
 #: policy changed nothing Sim did.
 RULES_DIR = Path(__file__).resolve().parents[2] / "rules"
 
-_FIELDS = ("tools", "read_only", "max_steps", "max_revisions", "scaffold", "max_output_tokens", "verify")
+_FIELDS = ("tools", "read_only", "max_steps", "max_revisions", "scaffold", "max_output_tokens", "verify",
+           # Step enforcement (stage 16, `guardrails.Steps`); all optional.
+           "required_steps", "terminal_tools", "prerequisites")
 _NOTES = re.compile(r"<!--.*?-->\n?", re.S)
 
 
@@ -47,6 +49,25 @@ def parse(text: str, *, source: str = "") -> tuple[dict, str]:
         # A key nothing reads is the unconnected wire this project keeps finding.
         raise AgentFileError(f"{source}: unknown keys {sorted(unknown)} (known: name, extends, {', '.join(_FIELDS)})")
     return meta, _NOTES.sub("", body).strip()
+
+
+def _prerequisites(raw, *, source: str) -> dict:
+    """`prerequisites = { git_commit = ["run_tests"], worktree_land =
+    [{ tool = "git_commit", match_arg = "path" }] }`, checked here so a
+    typo is refused at load like an unknown key, not ignored at run."""
+    if not isinstance(raw, dict):
+        raise AgentFileError(f"{source}: prerequisites must be a table of tool = [prerequisites]")
+    out: dict = {}
+    for tool, entries in raw.items():
+        if not isinstance(entries, list):
+            raise AgentFileError(f"{source}: prerequisites.{tool} must be a list")
+        for entry in entries:
+            if isinstance(entry, dict) and (not entry.get("tool") or set(entry) - {"tool", "match_arg"}):
+                raise AgentFileError(f"{source}: prerequisites.{tool}: {entry!r} needs `tool` and at most `match_arg`")
+            if not isinstance(entry, (str, dict)):
+                raise AgentFileError(f"{source}: prerequisites.{tool}: {entry!r} is not a tool name or table")
+        out[str(tool)] = list(entries)
+    return out
 
 
 def rules_for(name: str, directory: Path = RULES_DIR) -> str:
@@ -81,6 +102,11 @@ def load(directory: Path = AGENTS_DIR, rules: Path | None = RULES_DIR) -> dict[s
         fields = {f: getattr(base, f) for f in _FIELDS} if base else {}
         fields.update({f: meta[f] for f in _FIELDS if f in meta})
         fields["tools"] = tuple(fields.get("tools") or ())
+        for f in ("required_steps", "terminal_tools"):
+            if f in fields:
+                fields[f] = tuple(fields[f] or ())
+        if "prerequisites" in fields:
+            fields["prerequisites"] = _prerequisites(fields["prerequisites"], source=key)
         missing = [f for f in ("tools", "read_only", "max_steps", "max_revisions", "scaffold") if f not in fields]
         if missing:
             raise AgentFileError(f"{key}: missing {missing}")
