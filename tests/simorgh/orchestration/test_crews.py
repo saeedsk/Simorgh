@@ -26,9 +26,15 @@ from .harness import Harness, run
 class CrewCognition:
     """Answers `cognition.think` per session (the think's trace id is the
     session's task id): a script per task id, the last reply repeating; a
-    fixed delay and cost per call; every call kept with its timing."""
+    fixed delay and cost per call; every call kept with its timing.
 
-    def __init__(self, bus, scripts: dict, *, delay=None, cost=None) -> None:
+    `together=n`: a session's first think waits until n sessions have
+    thought, so n sessions that run at once all have a think in flight at
+    the same instant whatever the machine's load, and sessions that run in
+    turn never meet (`apart` is set once the generous ceiling passes)."""
+
+    def __init__(self, bus, scripts: dict, *, delay=None, cost=None, together: int = 0,
+                 together_ceiling_s: float = 15.0) -> None:
         self._bus = bus
         self._scripts = scripts
         self._delay = delay or {}
@@ -36,6 +42,10 @@ class CrewCognition:
         self.calls: dict[str, list] = {}
         self.spans: list[tuple[str, float, float]] = []
         self._sub = None
+        self._together = together
+        self._ceiling = together_ceiling_s
+        self._met = asyncio.Event()
+        self.apart = False
 
     async def start(self):
         self._sub = await self._bus.subscribe(topics.COGNITION_THINK, self._on)
@@ -55,6 +65,14 @@ class CrewCognition:
         mine = self.calls.setdefault(task_id, [])
         mine.append(message)
         start = time.monotonic()
+        if self._together and len(mine) == 1:
+            if len(self.calls) >= self._together:
+                self._met.set()
+            try:
+                await asyncio.wait_for(self._met.wait(), self._ceiling)
+            except asyncio.TimeoutError:
+                self.apart = True
+                self._met.set()
         delay = self._pick(self._delay, task_id, 0.0)
         if delay:
             await asyncio.sleep(delay)

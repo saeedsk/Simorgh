@@ -48,7 +48,7 @@ class SpawnDetached(unittest.TestCase):
     async def test_plan_nodes_run_together_as_one_crew_under_their_own_handles(self):
         async with Harness() as h:
             cognition = CrewCognition(h.client("cognition"), {"*": CHILD},
-                                      delay={"node-a": 0.15, "node-b": 0.25, "node-c": 0.2})
+                                      delay={"node-a": 0.15, "node-b": 0.25, "node-c": 0.2}, together=3)
             gx = FakeGuardianExecution(h.client("guardian"))
             verify = FakeVerification(h.client("verification"))
             for f in (cognition, gx, verify):
@@ -63,12 +63,10 @@ class SpawnDetached(unittest.TestCase):
                 if len(reports) == 3:
                     done.set()
             await h.client("planning").subscribe(topics.CREW_REPORT, _report)
-            started = time.monotonic()
             got = [await runner.spawn_detached(_node(f"node-{x}", f"find the {x} day",
                                                      acceptance=[f"the {x} day is named"]), plan_node=True)
                    for x in "abc"]
             await asyncio.wait_for(done.wait(), 20)
-            wall = time.monotonic() - started
             for f in (cognition, gx, verify):
                 await f.stop()
             events = await h.ledger.read("crew:proj-1")
@@ -76,8 +74,12 @@ class SpawnDetached(unittest.TestCase):
                         for r in verify.requests]
         self.assertEqual(got, [("proj-1", "node-a"), ("proj-1", "node-b"), ("proj-1", "node-c")])
         self.assertEqual({r["status"] for r, _ in reports.values()}, {"ok"})
-        # Each node thinks twice: serial is 2 x (0.15 + 0.25 + 0.2) = 1.2 s.
-        self.assertLess(wall, 0.6 * 1.2, f"the nodes did not run together: {wall:.2f}s")
+        # Together, not in turn: every node's first think was in flight at
+        # once (`together=3`), which a load-free wall bound only implied.
+        self.assertFalse(cognition.apart, "the nodes did not run together")
+        firsts = [min(s for t, s, _ in cognition.spans if t == x) for x in ("node-a", "node-b", "node-c")]
+        first_end = min(e for _, _, e in cognition.spans)
+        self.assertLess(max(firsts), first_end, "a node waited for another to finish before it started")
         spawned = [e.payload for e in events if e.type == topics.CREW_SPAWNED]
         self.assertEqual({p["via"] for p in spawned}, {"project"})
         self.assertEqual({p["parent"] for p in spawned}, {"proj-1"})
@@ -168,7 +170,10 @@ class AThreeNodeProjectEndToEnd(unittest.TestCase):
             orchestration = OrchestrationService(Config(workers=1, metrics_interval_s=0, worktrees=False))
             await orchestration.start(_ctx(h, "orchestration"))
             delays = {}
-            cognition = CrewCognition(h.client("cognition"), {"*": CHILD}, delay=delays)
+            # On a crew the three nodes meet at their first think; on the
+            # queue's one Worker they cannot, so nothing waits there.
+            cognition = CrewCognition(h.client("cognition"), {"*": CHILD}, delay=delays,
+                                      together=3 if crews else 0)
             gx = FakeGuardianExecution(h.client("guardian"))
             verify = FakeVerification(h.client("verification"))
             for f in (cognition, gx, verify):
@@ -199,38 +204,40 @@ class AThreeNodeProjectEndToEnd(unittest.TestCase):
                     delays[task.id] = self.DELAYS[kw["description"].split()[2]]
                 return task
             store.create = create
-            started = time.monotonic()
             await planning._approve_plan(state, approved_by="auto")  # noqa: SLF001
             await asyncio.wait_for(finished.wait(), 30)
-            wall = time.monotonic() - started
             children = store.children(project.id)
             for f in (cognition, gx, verify):
                 await f.stop()
             await orchestration.stop()
             await planning.stop()
-        return wall, outcome, children, cognition
+        return outcome, children, cognition
 
     @run
     async def test_it_finishes_in_about_the_time_of_its_longest_node(self):
         from simorgh.planning.model import COMPLETED
 
-        wall, outcome, children, cognition = await self._run_project(crews=True)
-        queue_wall, queue_outcome, _, _ = await self._run_project(crews=False)
+        outcome, children, cognition = await self._run_project(crews=True)
+        queue_outcome, queue_children, queue_cognition = await self._run_project(crews=False)
         self.assertEqual(outcome["type"], topics.PROJECT_COMPLETED, outcome)
         self.assertEqual(outcome["payload"]["done"], 3)
         self.assertEqual(queue_outcome["type"], topics.PROJECT_COMPLETED, queue_outcome)
         self.assertEqual({c.status for c in children}, {COMPLETED})
-        # Both pay the same per-node overhead (assembly with no Memory or
-        # Persona running, verification); only the crew pays it once.
-        self.assertLess(wall, 0.6 * queue_wall, f"crew {wall:.2f}s against the queue's {queue_wall:.2f}s")
-        longest = 2 * max(self.DELAYS.values())
-        self.assertLess(wall, longest + 0.5 * queue_wall / 3,
-                        f"crew {wall:.2f}s: more than the longest node ({longest:.1f}s) and one node's overhead")
+        # "About the time of its longest node" holds because the three run at
+        # once. That is asserted as an order of events, not a wall-clock
+        # bound: a loaded machine (the core tier under -n auto) turned the
+        # bound red. The measured times are in stage 18 item 4's note.
+        self.assertFalse(cognition.apart, "the crew's nodes never had a think in flight together")
         self.assertEqual(sorted(cognition.calls), sorted(c.id for c in children),
                          "every think was a node's own, under its task id")
         firsts = sorted(min(s for t, s, _ in cognition.spans if t == c.id) for c in children)
         first_end = min(max(e for t, _, e in cognition.spans if t == c.id) for c in children)
         self.assertLess(firsts[-1], first_end, "a node waited for another to finish before it started")
+        # The queue's one Worker ran the same three nodes in turn.
+        self.assertEqual(len(queue_children), 3)
+        spans = sorted((s, e) for _, s, e in queue_cognition.spans)
+        self.assertTrue(all(a_end <= b_start for (_, a_end), (b_start, _) in zip(spans, spans[1:])),
+                        "the queue's one Worker had two thinks in flight")
 
 class ReviewFindings(unittest.TestCase):
     """The stage 18 item 4 review (2026-10-27)."""
