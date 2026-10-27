@@ -35,6 +35,12 @@ task = "stages 9/17/18 parallel wave"
 since = "2026-10-27T09:37:27+00:00"
 until = "2026-10-27T17:37:27+00:00"
 
+[locks.guardian]
+by = "claude-stage18"
+task = "stage 18 items 4 and 12"
+since = "2026-10-27T10:40:56+00:00"
+until = "2026-10-27T18:40:56+00:00"
+
 [locks.interface]
 by = "claude-stage18"
 task = "stages 9/17/18 parallel wave"
@@ -46,6 +52,12 @@ by = "claude-stage14"
 task = "stage 14: toolchain evals + ablation"
 since = "2026-10-27T09:04:23+00:00"
 until = "2026-10-27T17:04:23+00:00"
+
+[locks.planning]
+by = "claude-stage18"
+task = "stage 18 items 4 and 12"
+since = "2026-10-27T10:40:56+00:00"
+until = "2026-10-27T18:40:56+00:00"
 
 [locks.telemetry]
 by = "claude-stage18"
