@@ -1,6 +1,6 @@
 # Stage 16 -- Forge's guardrails in Sim's loop
 
-Status: **in progress** (2026-10-27: plan written; items 1-3 being built on top of the stage 14 branches) · Depends on: stage 2 (native tools), stage 14 (the ablation switches and runner measure this stage) · Modules touched: cognition, orchestration; `agents/` (orchestration lock); `docs/`
+Status: **in progress** (2026-10-27: items 1 and 2 merged and reviewed; item 3 (preset table) and 4 (measure) open. Open decisions from review: a chat/voice reply that quotes a valid JSON call for an offered tool is now rescued and run; on the LAST step `git_commit` still skips its `run_tests` prerequisite) · Depends on: stage 2 (native tools), stage 14 (the ablation switches and runner measure this stage) · Modules touched: cognition, orchestration; `agents/` (orchestration lock); `docs/`
 
 ## Outcome
 
