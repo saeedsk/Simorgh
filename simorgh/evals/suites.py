@@ -16,6 +16,7 @@ Registered today:
     tooluse       BFCL, through `simorgh/benchmark`
     research      GAIA, through `simorgh/benchmark`
     code          the SWE-bench Verified slice, through `simorgh/benchmark`
+    toolchain     the household tool-chain pack (stage 14), one case per scenario
 
 `household` is the one the loader's bless runs: it needs no model, no
 network and no money, it takes about two seconds, and it measures the
@@ -35,7 +36,7 @@ Runner = Callable[[], Awaitable[list[Outcome]]]
 
 #: Suites that cost real money. `run` refuses them without `--paid`,
 #: because "I ran the evals" should never be a surprise on a bill.
-PAID: frozenset[str] = frozenset({"trials", "tooluse", "research", "code"})
+PAID: frozenset[str] = frozenset({"trials", "tooluse", "research", "code", "toolchain"})
 
 
 async def household() -> list[Outcome]:
@@ -298,6 +299,33 @@ async def ledger() -> list[Outcome]:
     return outcomes
 
 
+async def toolchain() -> list[Outcome]:
+    """The `toolchain/` scenario pack (stage 14 item 2), one case per
+    scenario, its level the category (plumbing, selection, ...).
+
+    Per scenario rather than per expectation because that is the
+    plan's unit of success: a chain is finished when every expectation
+    on every beat held, and a rate over expectations would credit half
+    a chain. Each scenario runs in its own child as the house pack does.
+
+    `--paid` reaches the scenario children as `SIMORGH_HOUSE_PAID`,
+    which is what lets a sandbox use a real provider; without it every
+    scenario is skipped with its reason, never failed.
+    """
+    import os
+
+    from .house.run import per_scenario, run_pack
+    from .house.scenarios import by_prefix
+
+    if os.environ.get("SIMORGH_EVALS_PAID"):
+        os.environ["SIMORGH_HOUSE_PAID"] = "1"
+    chosen = by_prefix("toolchain/")
+    if not chosen:
+        return [Outcome(case=Case(name="toolchain", kind="scenario"), status=SKIPPED,
+                        why="no toolchain/ scenarios are registered")]
+    return per_scenario(await run_pack(chosen), chosen)
+
+
 SUITES: dict[str, Runner] = {
     "ledger": ledger,
     "household": household,
@@ -309,6 +337,7 @@ SUITES: dict[str, Runner] = {
     "tooluse": _benchmark_suite("bfcl-parallel"),
     "research": _benchmark_suite("gaia", level="1"),
     "code": _benchmark_suite("swebench-verified", level="<15 min fix"),
+    "toolchain": toolchain,
 }
 
 
@@ -326,4 +355,4 @@ async def timed(runner: Runner) -> tuple[list[Outcome], float]:
     return outcomes, time.monotonic() - started
 
 
-__all__ = ["PAID", "Runner", "SUITES", "find", "household", "timed", "trials"]
+__all__ = ["PAID", "Runner", "SUITES", "find", "household", "timed", "toolchain", "trials"]
