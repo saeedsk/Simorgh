@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import urllib.request
 from collections import OrderedDict
 
@@ -294,11 +295,36 @@ class Embedder:
 
     `embed(text)` returns `(provider, vector)` -- the provider included
     because a vector is only comparable to another from the same one.
+
+    Thread-safe (2026-10-27): `memory.embed` runs `embed_many` in a worker
+    thread while recall calls `embed` on the event loop, and neither the
+    LRU `OrderedDict` nor a `SentenceTransformer` may be entered by two
+    threads at once. Two locks, each held only as long as its state needs:
+    `_cache_lock` around every cache read and write (microseconds, never
+    across a model or HTTP call), and `_encoder_lock` around loading and
+    calling the local encoder (CPU-bound and not re-entrant, so serialising
+    it costs nothing a second core could have saved). A remote provider's
+    HTTP call holds neither: it is I/O, `urlopen` is thread-safe, and
+    holding a lock across a 20 s timeout would stall every recall behind
+    it. The price is that two threads missing the cache on the same text
+    at the same moment may both pay for it; the second write is the same
+    answer.
+
+    A remote failure starts a cooldown of `retry_after_s` (default 30 s):
+    until it ends every miss answers from hashing at once, uncached,
+    without calling out. Not caching a fallback means a provider that is
+    down is asked again on every miss, and one `retrieve` embeds every
+    working-memory turn -- so without the cooldown an outage that times
+    out would block recall for (turns + 1) x `timeout_s` on EVERY turn,
+    where the old cache paid it once per text.
     """
 
     def __init__(self, provider: str = "auto", *, env=None, opener=None,
                  timeout_s: float = 20.0, local_check=local_model_available,
-                 encoder=None, logger=None) -> None:
+                 encoder=None, logger=None, retry_after_s: float = 30.0,
+                 clock=None) -> None:
+        import time
+
         self._env = env if env is not None else os.environ
         self._opener = opener or urllib.request.urlopen
         self._timeout_s = timeout_s
@@ -307,6 +333,12 @@ class Embedder:
         self._degraded = ""
         self._cache: OrderedDict[str, tuple[str, tuple[float, ...]]] = OrderedDict()
         self._cache_max = 4096
+        self._cache_lock = threading.Lock()
+        self._encoder_lock = threading.Lock()
+        self._retry_after_s = retry_after_s
+        self._clock = clock or time.monotonic
+        # When a failed remote provider may be asked again; 0.0 = now.
+        self._remote_down_until = 0.0
         try:
             self.provider = choose_provider(provider, self._env, local_check=local_check)
         except EmbeddingUnavailable as exc:
@@ -332,7 +364,10 @@ class Embedder:
         be billed for the whole memory store on every single query, and
         a local model would re-encode it."""
         key = (text or "").strip()
-        hit = self._cache.get(key)
+        with self._cache_lock:
+            hit = self._cache.get(key)
+            if hit is not None:
+                self._cache.move_to_end(key)
         if hit is not None:
             # Least-RECENTLY-USED, not first-in-first-out. Eviction used
             # to take `next(iter(...))` -- the oldest insertion -- with
@@ -343,23 +378,32 @@ class Embedder:
             # still embedded every one of them: 306 ms for the first
             # call and 455 ms for the second, i.e. the warm path was
             # SLOWER than the cold one (observer, 2026-09-10).
-            self._cache.move_to_end(key)
             return hit
         answer = self._embed_uncached(key)
-        if len(self._cache) >= self._cache_max:
-            self._cache.popitem(last=False)
-        self._cache[key] = answer
+        # Only the configured provider's own answer is kept. A hashing
+        # stand-in -- a remote provider that failed once, a local model
+        # still loading -- would otherwise stay hashed for the life of
+        # the cache, long after the provider came back, and hand recall
+        # vectors from two spaces. Hashing is itself `lru_cache`d
+        # (`embed.embed_text`), so not caching it here costs nothing.
+        if answer[0] == self.provider:
+            with self._cache_lock:
+                if key not in self._cache and len(self._cache) >= self._cache_max:
+                    self._cache.popitem(last=False)
+                self._cache[key] = answer
         return answer
 
     def warm(self) -> float:
         """Load the local model; the seconds it took. Blocking -- run it in
-        a thread. Clears the cache, which holds hashing stand-ins."""
+        a thread. Clears the cache (a stand-in is never kept in it now;
+        the clear is cheap insurance)."""
         import time
 
         started = time.monotonic()
         if self.provider == "local" and not self.ready:
             self._encode_local("warm up")
-            self._cache.clear()
+            with self._cache_lock:
+                self._cache.clear()
             self.ready = True
         return time.monotonic() - started
 
@@ -379,8 +423,11 @@ class Embedder:
         text = (text or "").strip()
         if not text or self.provider == HASHING or not self.ready:
             return HASHING, embed_text(text)
+        remote = self.provider != "local"
+        if remote and self._clock() < self._remote_down_until:
+            return HASHING, embed_text(text)    # cooling down; see the class docstring
         try:
-            if self.provider == "local":
+            if not remote:
                 vector = tuple(float(x) for x in self._encode_local(text))
             else:
                 vector = _REMOTE[self.provider](text, self._env, self._opener, self._timeout_s)
@@ -390,22 +437,27 @@ class Embedder:
         except Exception as exc:  # noqa: BLE001
             # Worse recall is a bad day. A memory subsystem that raises
             # is a broken system, so this can only ever degrade.
+            if remote:
+                self._remote_down_until = self._clock() + self._retry_after_s
             if self._logger is not None:
                 self._logger.warning("embedding_fell_back", provider=self.provider, error=repr(exc))
             return HASHING, embed_text(text)
 
     def _encode_local(self, text: str):
-        if self._encoder is None:
-            hush_model_progress()
-            try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError as exc:  # pragma: no cover -- optional dependency
-                raise EmbeddingUnavailable(
-                    "the `sentence-transformers` package is not installed "
-                    "(pip install sentence-transformers)"
-                ) from exc
-            self._encoder = QuietEncoder(SentenceTransformer(_row("local")[2]))
-        return self._encoder.encode(text)
+        # One thread at a time loads and calls the model: a lazy load raced
+        # from two threads builds it twice, and `encode` is not re-entrant.
+        with self._encoder_lock:
+            if self._encoder is None:
+                hush_model_progress()
+                try:
+                    from sentence_transformers import SentenceTransformer
+                except ImportError as exc:  # pragma: no cover -- optional dependency
+                    raise EmbeddingUnavailable(
+                        "the `sentence-transformers` package is not installed "
+                        "(pip install sentence-transformers)"
+                    ) from exc
+                self._encoder = QuietEncoder(SentenceTransformer(_row("local")[2]))
+            return self._encoder.encode(text)
 
 
 def _normalise(vector: tuple[float, ...]) -> tuple[float, ...]:

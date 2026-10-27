@@ -205,6 +205,149 @@ class _FakeEncoder:
         return [0.2] * 384
 
 
+class _OneAtATimeEncoder:
+    """A model that records any moment two threads are inside it at once.
+
+    Deterministic, not a timing gamble: the first caller, once inside,
+    starts `on_first_entry` (the second thread) and waits for that thread
+    to arrive inside `encode` too. Without a lock it arrives and the
+    overlap is recorded; with one it cannot arrive while the first is
+    inside, whatever the scheduler does -- the wait just runs out."""
+
+    def __init__(self, wait_s=0.5):
+        import threading
+
+        self._guard = threading.Lock()
+        self._inside = 0
+        self._second_inside = threading.Event()
+        self.wait_s = wait_s
+        self.overlaps = 0
+        self.calls = 0
+        self.on_first_entry = None
+
+    def encode(self, text):
+        with self._guard:
+            self._inside += 1
+            self.calls += 1
+            if self._inside > 1:
+                self.overlaps += 1
+                self._second_inside.set()
+            first, self.on_first_entry = self.on_first_entry, None
+        try:
+            if first is not None:
+                first()
+                self._second_inside.wait(self.wait_s)
+            if isinstance(text, list):
+                return [[0.2] * 384 for _ in text]
+            return [0.2] * 384
+        finally:
+            with self._guard:
+                self._inside -= 1
+
+
+class ThreadSafetyTestCase(unittest.TestCase):
+    """`memory.embed` runs `embed_many` in a worker thread while recall
+    calls `embed` on the event loop (reviewer, 2026-10-27)."""
+
+    def test_embed_and_embed_many_never_enter_the_model_together(self):
+        import threading
+
+        encoder = _OneAtATimeEncoder()
+        embedder = Embedder("local", env={}, encoder=encoder, local_check=lambda: True)
+        results = {}
+        second = threading.Thread(target=lambda: results.update(one=embedder.embed("a recall query")))
+        encoder.on_first_entry = second.start
+        results["batch"] = embedder.embed_many(["routing text one", "routing text two"])
+        second.join(5)
+        self.assertFalse(second.is_alive())
+        self.assertEqual(encoder.overlaps, 0, "two threads were inside the encoder at once")
+        self.assertEqual(encoder.calls, 2)
+        self.assertEqual([p for p, _ in results["batch"]], ["local", "local"])
+        self.assertEqual(results["one"][0], "local")
+
+    def test_the_cache_stays_consistent_under_many_threads(self):
+        import threading
+
+        embedder = Embedder("local", env={}, encoder=_FakeEncoder(), local_check=lambda: True)
+        embedder._cache_max = 50
+        texts = [f"text {i}" for i in range(200)]
+        errors = []
+
+        def work(offset):
+            try:
+                for i in range(len(texts)):
+                    provider, vector = embedder.embed(texts[(i + offset) % len(texts)])
+                    if provider != "local" or len(vector) != 384:
+                        errors.append((provider, len(vector)))
+                embedder.embed_many(texts[offset:offset + 10])
+            except Exception as exc:  # noqa: BLE001 -- the failure under test
+                errors.append(repr(exc))
+
+        threads = [threading.Thread(target=work, args=(n * 7,)) for n in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+        self.assertEqual(errors, [])
+        self.assertLessEqual(len(embedder._cache), 50)
+        self.assertTrue(all(v[0] == "local" for v in embedder._cache.values()))
+
+
+class _FlakyOpener(_Opener):
+    """Down for its first `failures` calls, then answers."""
+
+    def __init__(self, body, failures):
+        super().__init__(body)
+        self.failures = failures
+
+    def __call__(self, request, timeout=None):
+        self.calls.append(request)
+        if len(self.calls) <= self.failures:
+            raise OSError("transient")
+        return _Response(self.body)
+
+
+class FallbackIsNotCachedTestCase(unittest.TestCase):
+    def test_a_transient_remote_failure_is_retried_not_remembered(self):
+        opener = _FlakyOpener(_openai_body(), failures=1)
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"}, opener=opener,
+                            retry_after_s=0.0, **NO_LOCAL)
+        self.assertEqual(embedder.embed("hello")[0], HASHING)
+        self.assertNotIn("hello", embedder._cache)
+        provider, vector = embedder.embed("hello")
+        self.assertEqual((provider, len(vector)), ("openai", 1536))
+        embedder.embed("hello")
+        self.assertEqual(len(opener.calls), 2, "the recovered answer is cached as before")
+
+    def test_a_down_provider_is_not_asked_again_until_the_cooldown_ends(self):
+        # One `retrieve` embeds every working-memory turn; without a
+        # cooldown an outage costs (turns + 1) x timeout on every turn.
+        now = [100.0]
+        opener = _FlakyOpener(_openai_body(), failures=1)
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"}, opener=opener,
+                            retry_after_s=30.0, clock=lambda: now[0], **NO_LOCAL)
+        self.assertEqual(embedder.embed("one")[0], HASHING)
+        for text in ("two", "three", "one"):
+            self.assertEqual(embedder.embed(text)[0], HASHING)
+        self.assertEqual(len(opener.calls), 1, "a cooling-down provider was called again")
+        self.assertEqual(len(embedder._cache), 0)
+        now[0] += 30.0
+        self.assertEqual(embedder.embed("one")[0], "openai")
+        self.assertEqual(len(opener.calls), 2)
+
+    def test_a_hashed_stand_in_while_a_model_loads_is_not_kept(self):
+        embedder = Embedder("local", env={}, local_check=lambda: True)
+        self.assertFalse(embedder.ready)
+        self.assertEqual(embedder.embed("hello")[0], HASHING)
+        self.assertEqual(len(embedder._cache), 0)
+
+    def test_the_hashing_embedder_still_caches_its_own_answers(self):
+        embedder = Embedder("hashing")
+        first = embedder.embed("hello")
+        self.assertIs(embedder.embed("hello"), first)
+        self.assertIn("hello", embedder._cache)
+
+
 class ComparabilityTestCase(unittest.TestCase):
     def test_vectors_from_different_embedders_are_not_comparable(self):
         self.assertFalse(comparable(HASHING, "openai"))
