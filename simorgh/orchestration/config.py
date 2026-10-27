@@ -158,8 +158,37 @@ class Config:
     # session that cannot open one says so and edits the live tree.
     worktrees: bool = True
     metrics_interval_s: float = 3.0  # 0 disables the periodic `system.metrics` publish
+    # Guardrails switched off for a measurement (stage 14 item 3, the
+    # ablation presets in docs/plan/stage-14-toolchain-evals-and-ablation.md).
+    # For the eval sandbox only: `sim.sh` and the shipped config never set
+    # it. Guardian is not among them and never will be -- every proposal is
+    # still gated. Names (see `ABLATABLE`):
+    #   scaffold  -- `task_rules` keeps only the task, who is speaking, the
+    #                turn's language and the tool list (scaffolds.render)
+    #   verify    -- every profile behaves as `verify = false`
+    #   revisions -- every profile behaves as `max_revisions = 0`
+    #   recovery  -- a failed tool result, an unknown tool or a malformed
+    #                call ends the session `failed` instead of going back
+    #                to the model
+    ablate: tuple[str, ...] = ()
+    #: What `from_mapping` had to ignore, logged by the service at start.
+    problems: tuple[str, ...] = ()
 
     @classmethod
     def from_mapping(cls, data: dict) -> "Config":
-        known = {f for f in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        known = {f for f in cls.__dataclass_fields__} - {"problems"}
+        kwargs = {k: v for k, v in data.items() if k in known}
+        problems: list[str] = []
+        if "ablate" in kwargs:
+            raw = kwargs["ablate"]
+            names = [raw] if isinstance(raw, str) else list(raw or ())
+            # An unknown switch is reported, not fatal: a typo here must not
+            # stop a boot, and must not silently measure the wrong preset.
+            problems += [f"ablate: unknown switch {n!r} ignored (known: {', '.join(sorted(ABLATABLE))})"
+                         for n in names if n not in ABLATABLE]
+            kwargs["ablate"] = tuple(dict.fromkeys(str(n) for n in names if n in ABLATABLE))
+        return cls(**kwargs, problems=tuple(problems))
+
+
+#: The guardrails `[orchestration] ablate` may switch off.
+ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery"})

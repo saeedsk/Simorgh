@@ -127,6 +127,24 @@ def for_task(kind: str, mode: str) -> Profile:
     return BY_KIND.get(kind, CHAT)
 
 
+def ablated(profile: Profile, ablate: tuple[str, ...] | frozenset[str] = ()) -> Profile:
+    """`profile` with the `[orchestration] ablate` switches it owns
+    applied (stage 14): `verify` turns Verification off, as
+    `review_benchmark = false` does for a benchmark case; `revisions`
+    leaves no revision after a rejected answer. With no switch set the
+    same object comes back, so the shipped path is untouched."""
+    changes: dict = {}
+    if "verify" in ablate and profile.verify:
+        changes["verify"] = False
+    if "revisions" in ablate and profile.max_revisions:
+        changes["max_revisions"] = 0
+    if not changes:
+        return profile
+    from dataclasses import replace
+
+    return replace(profile, **changes)
+
+
 def for_claimed(kind: str, mode: str, *, origin: str = "", review_benchmark: bool = True) -> Profile:
     """The profile for a claimed task: `for_task`, with Verification
     switched off for a benchmark case when `[orchestration]

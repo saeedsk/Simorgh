@@ -171,6 +171,10 @@ LANDING_REASON = "landing failed"
 # in their own worktree (execution/worktree.py) when one can be opened.
 WORKTREE_KINDS = frozenset({"patch", "skill"})
 CANCELLED_REASON = "the task was cancelled"
+#: How a session ends under `[orchestration] ablate = ["recovery"]`
+#: (stage 14): a failed tool, an unknown tool or a malformed call, not
+#: handed back to the model.
+NO_RECOVERY_REASON = "no recovery"
 
 # `workspace/` is the one directory that is both readable and writable
 # and never committed (execution/config.py::workspace_dir). The rule
@@ -710,6 +714,7 @@ class SessionRunner:
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"), telemetry=None,
         bridge_on_slow_turns: bool = False, bridge_timeout_s: float = 2.0,
+        ablate: tuple[str, ...] = (),
     ) -> None:
         # Counts each Stop-hook rule that fires (`stophook.py`); a no-op
         # stand-in when the runner is built without one (tests, harnesses).
@@ -763,6 +768,12 @@ class SessionRunner:
         # A revision after a rejected answer starts from the note and the
         # last few steps, not the whole transcript (design section 4).
         self._clean_revisions = bool(clean_revisions)
+        # Guardrails switched off for a measurement (`[orchestration]
+        # ablate`, stage 14). Empty in every shipped config.
+        self._ablate = frozenset(ablate or ())
+        #: Why a session under `ablate = ["recovery"]` must end now, by
+        #: task id: set where the failure is seen, read at the next step.
+        self._unrecovered: dict[str, str] = {}
         self._bus = bus
         # Re-grounding (orchestration/progress.py): every N steps the model
         # writes a progress note and the transcript is replaced by it. 0 is
@@ -840,6 +851,13 @@ class SessionRunner:
             # compare against, and this commit is that tree.
             session.base_ref = _git_head()
         self._open[session.task_id] = session
+        self._unrecovered.pop(session.task_id, None)
+        if self._ablate:
+            from . import profiles as _profiles
+
+            session.profile = _profiles.ablated(session.profile, self._ablate)
+            if "revisions" in self._ablate:
+                session.budget.max_revisions = 0
         if not session.estimate and session.profile.scaffold != "chat":
             # Asked once, before the first step (stage 6 item 2): what Sim's
             # own record says about this kind of work decides whether it
@@ -1155,6 +1173,9 @@ class SessionRunner:
         pending_user_text = user_text
         started = time.monotonic()
         while True:
+            ended = self._unrecovered_outcome(session)
+            if ended is not None:
+                return ended
             if self._paused():
                 return await self._pause(session)
             spent = session.budget.over(tokens=session.spent_tokens, usd=session.spent_usd,
@@ -1245,6 +1266,9 @@ class SessionRunner:
                 step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
+                ended = self._unrecovered_outcome(session)
+                if ended is not None:
+                    return ended
                 if session.profile.scaffold == "chat":
                     # A chat has no next attempt: the person asked for the
                     # edit and gets told what was done, not "step budget
@@ -1269,6 +1293,9 @@ class SessionRunner:
                 step = Step(step_no, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
+                ended = self._unrecovered_outcome(session)
+                if ended is not None:
+                    return ended
                 if ok:
                     # A successful finishing action leaves nothing for
                     # cleanup to undo. The `file_write`/`git_commit` side
@@ -1416,6 +1443,9 @@ class SessionRunner:
                 await self._record_step(session, step)
                 return Outcome("blocked", reason=f"{CONTINUATION_REASON} before the task was finished")
             stray = unhonoured_marker(text, offered_tools(session.profile.tools))
+            if stray and not is_last and "recovery" in self._ablate:
+                # `ablate = ["recovery"]`: a malformed call is not corrected.
+                return await self._end_unrecovered(session, step_no, f"a {stray} marker mid-sentence was not run")
             if stray and not is_last and session.markers_corrected < MARKER_CORRECTIONS:
                 # A few times per session, not once. The cap was one,
                 # on the reasoning that a repeat is "an answer about a
@@ -1460,6 +1490,9 @@ class SessionRunner:
                 continue
 
             invented = invented_markers(text, offered_tools(session.profile.tools))
+            if invented and not is_last and "recovery" in self._ablate:
+                return await self._end_unrecovered(
+                    session, step_no, f"a marker for a tool that does not exist: {invented[0]}")
             if invented and not is_last and not session.invented_corrected:
                 session.invented_corrected = True
                 step = Step(step_no, "act", f"rejected a marker for a tool that does not exist: {invented[0]}", ok=False)
@@ -1631,7 +1664,7 @@ class SessionRunner:
                     speaker_say_as=getattr(session, "speaker_say_as", ""),
                     heard_language=getattr(session, "heard_language", ""),
                     offered=() if no_tools else offered,
-                    skills=catalog,
+                    skills=catalog, workflow="scaffold" not in self._ablate,
                 ) + (f"\n\n{session.extra_rules}" if getattr(session, "extra_rules", "") else ""),
                 # Live-caught: this request never actually asked Cognition
                 # to parse tool calls -- `expected` was never set, so
@@ -2317,6 +2350,7 @@ class SessionRunner:
             # A native call whose arguments were not a JSON object (stage 2):
             # nothing to propose; the model is told and can send it again.
             text = f"{call.get('tool')}: {call['error']} -- send the call again with its arguments as a JSON object"
+            self._note_unrecovered(session, f"a malformed {call.get('tool')} call: {call['error']}")
             return False, text, text
         refused = unplaced_voice_refusal(session, str(call.get("tool") or ""))
         if refused:
@@ -2463,13 +2497,37 @@ class SessionRunner:
             kind = "" if ok else str(result.payload.get("error_kind") or "failed")
             if ok:
                 await self._checkpoint(session, call, full)
+            else:
+                self._note_unrecovered(session, f"{tool_name} failed: {' '.join(str(error or kind).split())[:200]}")
             return ok, self._bound_for_model(full), Detail(full[: self._DETAIL_CHARS], kind)
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
             text = f"{DENIED_PREFIX}{reasons}"
+            if str(tool_name or "") not in offered_tools(session.profile.tools):
+                # Only a refusal of a tool this session was never offered:
+                # a Guardian denial on safety grounds stays what it is.
+                self._note_unrecovered(session, f"{tool_name} is not a tool of this session ({text})")
             return False, text, Detail(text, DENIED_KIND)
         text = f"needs human: {result.payload.get('question', '')}"
         return False, text, Detail(text, "refused")
+
+    def _note_unrecovered(self, session: Session, reason: str) -> None:
+        """Under `[orchestration] ablate = ["recovery"]` (stage 14, forge's
+        `no_recovery`), remember why this session must end at its next
+        step boundary. A no-op otherwise, which is every shipped config."""
+        if "recovery" in self._ablate:
+            self._unrecovered.setdefault(session.task_id, reason)
+
+    def _unrecovered_outcome(self, session: Session) -> Outcome | None:
+        """The `failed` outcome a noted failure ends the session with, once."""
+        reason = self._unrecovered.pop(session.task_id, "")
+        return Outcome("failed", reason=f"{NO_RECOVERY_REASON}: {reason}") if reason else None
+
+    async def _end_unrecovered(self, session: Session, step_no: int, what: str) -> Outcome:
+        step = Step(step_no, "act", what, ok=False)
+        session.record(step)
+        await self._record_step(session, step)
+        return Outcome("failed", reason=f"{NO_RECOVERY_REASON}: {what}")
 
     async def _verify_then_finish(self, session: Session, text: str, *, floor: bool) -> Outcome:
         while True:
@@ -2582,6 +2640,9 @@ class SessionRunner:
                 step = Step(session.next_step_no(), "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
                 session.record(step)
                 await self._record_step(session, step)
+                ended = self._unrecovered_outcome(session)
+                if ended is not None:
+                    return ended
                 if ok and call.get("tool") in FINISHING_TOOLS:
                     session.uncommitted.clear()
                     session.created.clear()

@@ -72,6 +72,8 @@ class Service:
         # `config.py`'s docstring for which fields this actually changes.
         if self._config_from_caller is None and ctx.config:
             self.config = Config.from_mapping(dict(ctx.config))
+        for problem in self.config.problems:
+            ctx.logger.warning("orchestration.config_ignored", detail=problem)
         for i in range(max(1, self.config.workers)):
             # `local-multi` mode gives this Context a real per-process
             # `instance_id` (the operator's own `--id`, kernel/service.py's
@@ -91,6 +93,7 @@ class Service:
                             bridge_on_slow_turns=self.config.bridge_on_slow_turns,
                             bridge_timeout_s=self.config.bridge_timeout_s,
                             clean_revisions=self.config.clean_revisions,
+                            ablate=tuple(self.config.ablate),
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
                             max_children=self.config.max_children_concurrent,
                             delegate_max_steps=self.config.delegate_max_steps,
