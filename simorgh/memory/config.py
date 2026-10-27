@@ -99,6 +99,14 @@ class Config:
     #: turns the walk off and leaves the block exactly as it was.
     graph_hops: int = 2
     graph_max_facts: int = 12
+    #: Core memory blocks (stage 15 item 8, `core.py`): one small block per
+    #: person and one for the household, always in a chat turn's context and
+    #: kept current by the model through `memory_core_edit`. Off until the
+    #: memory eval runs with them on and off; off, a recall carries no
+    #: `core` and the prompt is what it was. Each block at most
+    #: `core_block_chars`.
+    core_blocks: bool = False
+    core_block_chars: int = 600
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":
