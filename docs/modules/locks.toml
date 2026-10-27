@@ -4,3 +4,27 @@
 # `python tools/modlock.py claim|release|check|status` edits and reads this.
 # A lock past `until` is stale and may be taken over.
 
+
+[locks.cognition]
+by = "claude-stage14"
+task = "stage 14: toolchain evals + ablation"
+since = "2026-10-27T09:04:24+00:00"
+until = "2026-10-27T17:04:24+00:00"
+
+[locks.docs]
+by = "claude-stage14"
+task = "stage 14: toolchain evals + ablation"
+since = "2026-10-27T09:04:24+00:00"
+until = "2026-10-27T17:04:24+00:00"
+
+[locks.evals]
+by = "claude-stage14"
+task = "stage 14: toolchain evals + ablation"
+since = "2026-10-27T09:04:23+00:00"
+until = "2026-10-27T17:04:23+00:00"
+
+[locks.orchestration]
+by = "claude-stage14"
+task = "stage 14: toolchain evals + ablation"
+since = "2026-10-27T09:04:23+00:00"
+until = "2026-10-27T17:04:23+00:00"
