@@ -41,12 +41,25 @@ class _Logger:
 
 class FakeCrewRuntime:
     """Answers `crew.spawn` and, after the node's delay, files `crew.report`.
-    `delays` and `statuses` are keyed by a word in the node's brief."""
+    `delays` and `statuses` are keyed by a word in the node's brief.
 
-    def __init__(self, bus, *, delays: dict, statuses: dict | None = None) -> None:
+    The delays alone made "together" and "still running" claims about wall
+    time, which a loaded machine broke. So: `holds` (keyed the same way)
+    keeps a node running until the test sets its Event, and `together=n`
+    keeps every node running until n have been spawned -- nodes started at
+    once meet, nodes started in turn never do (`apart` says so once the
+    generous ceiling passes)."""
+
+    def __init__(self, bus, *, delays: dict, statuses: dict | None = None, holds: dict | None = None,
+                 together: int = 0, together_ceiling_s: float = 10.0) -> None:
         self._bus = bus
         self._delays = delays
         self._statuses = statuses or {}
+        self._holds = holds or {}
+        self._together = together
+        self._ceiling = together_ceiling_s
+        self._met = asyncio.Event()
+        self.apart = False
         self.spawned: list[tuple[str, str, float]] = []   # (handle, brief, at)
         self.reported: list[tuple[str, float]] = []
         self.payloads: list[dict] = []
@@ -69,6 +82,17 @@ class FakeCrewRuntime:
         task.add_done_callback(self._running.discard)
 
     async def _run(self, p):
+        if self._together:
+            if len(self.spawned) >= self._together:
+                self._met.set()
+            try:
+                await asyncio.wait_for(self._met.wait(), self._ceiling)
+            except asyncio.TimeoutError:
+                self.apart = True
+                self._met.set()
+        hold = self._key(p["brief"], self._holds, None)
+        if hold is not None:
+            await hold.wait()
         await asyncio.sleep(self._key(p["brief"], self._delays, 0.0))
         status = self._key(p["brief"], self._statuses, "ok")
         summary = "done: " + p["brief"][:40] if status == "ok" else "the member stopped: it broke"
@@ -79,7 +103,10 @@ class FakeCrewRuntime:
 
 
 class ProjectsOnCrewsCase(unittest.IsolatedAsyncioTestCase):
-    config = Config(project_crews=True, project_crew_spawn_timeout_s=0.5)
+    # The spawn reply is an in-process round trip; 0.5 s was a budget a
+    # loaded machine could spend before the fake answered (only
+    # NobodyAnswers wants it to run out).
+    config = Config(project_crews=True, project_crew_spawn_timeout_s=5.0)
 
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -133,7 +160,15 @@ class ProjectsOnCrewsCase(unittest.IsolatedAsyncioTestCase):
         ids = {c.description.split()[0]: c.id for c in self.store.children(project.id)}
         return project.id, ids
 
-    async def _wait_finished(self, timeout=5.0):
+    async def _until(self, condition, ceiling_s=15.0):
+        """Poll `condition` until it holds or a generous wall ceiling
+        passes; the caller asserts. A count of short sleeps was a ceiling
+        that shrank as the machine got busier."""
+        deadline = time.monotonic() + ceiling_s
+        while not condition() and time.monotonic() < deadline:
+            await asyncio.sleep(0.005)
+
+    async def _wait_finished(self, timeout=15.0):
         await asyncio.wait_for(self.finished.wait(), timeout)
         for _ in range(20):
             await asyncio.sleep(0)
@@ -141,7 +176,7 @@ class ProjectsOnCrewsCase(unittest.IsolatedAsyncioTestCase):
 
 class ThreeIndependentNodes(ProjectsOnCrewsCase):
     async def test_they_run_together_and_the_project_takes_its_longest_node(self):
-        runtime = FakeCrewRuntime(self.other, delays={"alpha": 0.3, "beta": 0.5, "gamma": 0.4})
+        runtime = FakeCrewRuntime(self.other, delays={"alpha": 0.3, "beta": 0.5, "gamma": 0.4}, together=3)
         await runtime.start()
         started = time.monotonic()
         project, ids = await self._project([
@@ -153,8 +188,10 @@ class ThreeIndependentNodes(ProjectsOnCrewsCase):
         wall = time.monotonic() - started
         self.assertEqual(self.project_events[0][0], topics.PROJECT_COMPLETED)
         self.assertEqual(self.project_events[0][1]["done"], 3)
-        # The longest node is 0.5 s and the three in turn are 1.2 s.
-        self.assertLess(wall, 0.6 * 1.2, f"the nodes did not run together: {wall:.2f}s")
+        # Together, not in turn: no node could finish before all three were
+        # spawned (`together=3`). Asserted as an order of events, since a
+        # wall-clock bound went red on a loaded machine.
+        self.assertFalse(runtime.apart, f"the nodes did not run together: {wall:.2f}s")
         self.assertGreaterEqual(wall, 0.5)
         self.assertEqual(sorted(h for h, _, _ in runtime.spawned), sorted(ids.values()))
         # Every node was spawned before the first one finished.
@@ -184,10 +221,12 @@ class ThreeIndependentNodes(ProjectsOnCrewsCase):
 
 
 class TheCap(ProjectsOnCrewsCase):
-    config = Config(project_crews=True, project_crew_concurrency=2, project_crew_spawn_timeout_s=0.5)
+    config = Config(project_crews=True, project_crew_concurrency=2, project_crew_spawn_timeout_s=5.0)
 
     async def test_no_more_than_the_cap_run_at_once(self):
-        runtime = FakeCrewRuntime(self.other, delays={"n": 0.2})
+        # The first two meet, so the peak reaches the cap however slow the
+        # machine; a third running at once would show above it.
+        runtime = FakeCrewRuntime(self.other, delays={"n": 0.2}, together=2)
         await runtime.start()
         await self._project([Step(f"s{i}", "research", f"n{i}: part {i}") for i in range(4)])
         await self._wait_finished()
@@ -196,23 +235,29 @@ class TheCap(ProjectsOnCrewsCase):
         for _, delta in events:
             running += delta
             peak = max(peak, running)
+        self.assertFalse(runtime.apart)
         self.assertEqual(peak, 2)
         self.assertEqual(self.project_events[0][1]["done"], 4)
 
 
 class Dependencies(ProjectsOnCrewsCase):
     async def test_a_dependent_node_waits_for_its_dependency(self):
-        runtime = FakeCrewRuntime(self.other, delays={"alpha": 0.3, "beta": 0.1, "gamma": 0.1})
+        alpha = asyncio.Event()   # alpha runs until the test lets it report
+        runtime = FakeCrewRuntime(self.other, delays={"alpha": 0.05, "beta": 0.1, "gamma": 0.1},
+                                  holds={"alpha": alpha})
         await runtime.start()
         project, ids = await self._project([
             Step("s1", "research", "alpha: find where the version lives"),
             Step("s2", "patch", "beta: bump the version", depends_on=("s1",)),
             Step("s3", "research", "gamma: read the changelog"),
         ])
-        # Before alpha reports, beta is still pending and has not been spawned.
-        await asyncio.sleep(0.15)
+        # Before alpha reports, beta is still pending and has not been spawned,
+        # while gamma, independent, has run to the end.
+        await self._until(lambda: self.store.index.tasks[ids["gamma:"]].status == COMPLETED)
+        self.assertEqual(self.store.index.tasks[ids["gamma:"]].status, COMPLETED)
         self.assertEqual(self.store.index.tasks[ids["beta:"]].status, PENDING)
         self.assertNotIn(ids["beta:"], [h for h, _, _ in runtime.spawned])
+        alpha.set()
         await self._wait_finished()
         spawned_at = {h: at for h, _, at in runtime.spawned}
         reported_at = dict(runtime.reported)
@@ -250,10 +295,7 @@ class AFailedNode(ProjectsOnCrewsCase):
         runtime = FakeCrewRuntime(self.other, delays={}, statuses={"alpha": "partial"})
         await runtime.start()
         project, ids = await self._project([Step("s1", "research", "alpha: a long job")])
-        for _ in range(200):
-            await asyncio.sleep(0.005)
-            if self.store.index.tasks[ids["alpha:"]].status == BLOCKED:
-                break
+        await self._until(lambda: self.store.index.tasks[ids["alpha:"]].status == BLOCKED)
         node = self.store.index.tasks[ids["alpha:"]]
         self.assertEqual(node.status, BLOCKED)
         self.assertEqual(node.attempts, 1)
@@ -265,10 +307,7 @@ class NobodyAnswers(ProjectsOnCrewsCase):
 
     async def test_the_project_goes_back_to_the_queue(self):
         project, ids = await self._project([Step("s1", "research", "alpha: something")])
-        for _ in range(100):
-            await asyncio.sleep(0.01)
-            if self.service._project_crews.fallback:  # noqa: SLF001
-                break
+        await self._until(lambda: self.service._project_crews.fallback)  # noqa: SLF001
         self.assertIn(project, self.service._project_crews.fallback)  # noqa: SLF001
         node = self.store.index.tasks[ids["alpha:"]]
         self.assertEqual(node.status, AVAILABLE)
@@ -329,12 +368,15 @@ class TheQueuesHoldsApply(ProjectsOnCrewsCase):
 class AHumanTaskDoesNotPreemptACrewNode(ProjectsOnCrewsCase):
     # A project weighs as much as a human by default, so only a deployment
     # that lowers it reaches the preemption at all.
-    config = Config(project_crews=True, project_crew_spawn_timeout_s=0.5,
+    config = Config(project_crews=True, project_crew_spawn_timeout_s=5.0,
                     priority_weights={"human": 3, "project": 1, "benchmark": 2, "reflection": 2,
                                       "assistant": 2, "curiosity": 1, "research": 1})
 
     async def test_the_running_node_is_left_alone(self):
-        runtime = FakeCrewRuntime(self.other, delays={"alpha": 0.3})
+        # Held, not delayed: on a loaded machine a 0.3 s node had finished
+        # before the test looked at it running.
+        alpha = asyncio.Event()
+        runtime = FakeCrewRuntime(self.other, delays={}, holds={"alpha": alpha})
         await runtime.start()
         cancels = []
 
@@ -342,20 +384,18 @@ class AHumanTaskDoesNotPreemptACrewNode(ProjectsOnCrewsCase):
             cancels.append(dict(message.payload))
         await self.other.subscribe(topics.TASK_CANCEL, _cancel)
         project, ids = await self._project([Step("s1", "research", "alpha: x")])
-        for _ in range(50):
-            await asyncio.sleep(0.01)
-            if runtime.spawned:
-                break
+        await self._until(lambda: runtime.spawned)
         await self.other.publish(Message.new(topics.TASK_STARTED, source="orchestration",
                                              payload={"task_id": ids["alpha:"], "worker_id": "w0"}))
-        for _ in range(20):
-            await asyncio.sleep(0.005)
+        await self._until(lambda: self.store.index.tasks[ids["alpha:"]].status == "in_progress")
         self.assertEqual(self.store.index.tasks[ids["alpha:"]].status, "in_progress")
         human = await self.store.create(kind="research", description="mine now", origin="human",
                                         initial_status=AVAILABLE)
         await self.service._preempt_for(human)  # noqa: SLF001
         await asyncio.sleep(0.02)
         self.assertEqual(cancels, [])
+        self.assertEqual(self.store.index.tasks[ids["alpha:"]].status, "in_progress")
+        alpha.set()
         await self._wait_finished()
         self.assertEqual(self.project_events[0][0], topics.PROJECT_COMPLETED)
 
