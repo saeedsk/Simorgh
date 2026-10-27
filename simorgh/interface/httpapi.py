@@ -1202,7 +1202,9 @@ class HttpApi:
 
         async def _card(query, _body, headers):
             if self._a2a_caller(headers, query) is None:
-                return 401, _A2A_UNPAIRED, "application/json"
+                # The challenge names the scheme: a client sends its bearer
+                # to a card only when the card's origin asks for one.
+                return 401, _A2A_UNPAIRED, "application/json", ('WWW-Authenticate: Bearer realm="simorgh"',)
             host = headers.get("host", "").strip() or f"{self._host}:{self.port}"
             return 200, json.dumps(server.card(f"http://{host}{RPC_PATH}")).encode("utf-8"), "application/json"
 
@@ -1222,7 +1224,7 @@ class HttpApi:
         `tasks/resubscribe` answer as server-sent events on this
         connection, for as long as the task runs; everything else is one
         JSON body."""
-        from .a2a import MAX_BODY_BYTES, PARSE_ERROR, RPC_PATH, SPAWN_RATE
+        from .a2a import MAX_BODY_BYTES, PARSE_ERROR, RPC_PATH, SPAWN_RATE, RpcError, check_version
 
         if split.path != RPC_PATH:
             await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
@@ -1253,10 +1255,18 @@ class HttpApi:
             await self._try_respond(writer, 200, json.dumps(payload).encode("utf-8"), "application/json")
             return
         server = self._a2a
+        # A version this server does not speak is refused by the server
+        # below, before anything runs; checked first here so the refusal
+        # costs the caller nothing of the spawn bound either.
+        try:
+            check_version(headers.get("a2a-version", ""))
+            spoken = True
+        except RpcError:
+            spoken = False
         # A raw route skips the route table's rate limit, so the two
         # methods that can start a crew get the bound `/api/chat` has.
         # Reading a task (`tasks/get`, the polling fallback) is not counted.
-        if isinstance(request, dict) and request.get("method") in ("message/send", "message/stream"):
+        if spoken and isinstance(request, dict) and request.get("method") in ("message/send", "message/stream"):
             limit, window = SPAWN_RATE
             if self._rate_limited(Route(method="POST", path=f"{RPC_PATH}#message", handler=None, rate=SPAWN_RATE)):
                 refused = json.dumps({"error": {

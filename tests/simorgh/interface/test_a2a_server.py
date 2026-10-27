@@ -116,12 +116,12 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.api.stop)
         self.addAsyncCleanup(self.a2a.stop)
 
-    async def _http(self, method: str, path: str, body=None, *, token: str | None = None):
+    async def _http(self, method: str, path: str, body=None, *, token: str | None = None, extra: dict | None = None):
         token = self.device_token if token is None else token
 
         def _do():
             conn = http.client.HTTPConnection("127.0.0.1", self.api.port, timeout=10)
-            headers = {"Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json", **(extra or {})}
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             conn.request(method, path, body=json.dumps(body) if body is not None else None, headers=headers)
@@ -154,6 +154,13 @@ class TheCard(_Base):
         self.assertTrue(card["capabilities"]["streaming"])
         self.assertFalse(card["capabilities"]["pushNotifications"])
         self.assertEqual(card["security"], [{"bearer": []}])
+
+    async def test_an_unpaired_card_request_is_told_the_scheme(self):
+        # A client re-asks with its bearer only when the 401 names one.
+        await self._start(expose=("research",))
+        resp = await self._http("GET", "/.well-known/agent-card.json", token="")
+        self.assertEqual(resp.status, 401, resp.body)
+        self.assertTrue(str(resp.getheader("WWW-Authenticate") or "").startswith("Bearer"))
 
     def test_an_agent_without_a_file_is_not_listed(self):
         card = agent_card(url="http://x/a2a", expose=("research", "no_such_agent", "../etc"), agents_dir=AGENTS)
@@ -294,6 +301,22 @@ class TheMethods(_Base):
         self.assertEqual(refused.status, 429, refused.body)
         self.assertEqual(len(self.bus.requests), limit, "the refused message started nothing")
         self.assertIn("result", await self._rpc("tasks/get", {"id": first["id"]}))
+
+    async def test_a_version_refused_costs_nothing_of_the_spawn_bound(self):
+        await self._start(script="hang")
+        self.api._rate_hits.clear()
+        from simorgh.interface import a2a as a2a_mod
+
+        limit, _window = a2a_mod.SPAWN_RATE
+        for method in ("message/send", "message/stream"):
+            for _ in range(limit):
+                resp = await self._http("POST", "/a2a", {"jsonrpc": "2.0", "id": 1, "method": method,
+                                                         "params": self._message("go")}, extra={"A2A-Version": "9.9"})
+                self.assertEqual(resp.status, 200, resp.body)
+                self.assertIn(b"-32009", resp.body)
+        self.assertEqual(self.bus.requests, [], "a refused version started nothing")
+        reply = await self._rpc("message/send", {**self._message("go"), "configuration": {"blocking": False}})
+        self.assertIn("result", reply, "the bound is still whole for a version spoken here")
 
 
 class CallerFollowUps(unittest.IsolatedAsyncioTestCase):

@@ -711,7 +711,7 @@ class TestInteropFindings(_Case):
             async def card(self, headers=None):
                 asked.append(dict(headers or {}))
                 if not headers:
-                    raise a2a.CardUnauthorized()
+                    raise a2a.CardUnauthorized(challenge='Bearer realm="desk"')
                 return await super().card()
 
         agent = A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN", poll_interval_s=1.0)
@@ -728,6 +728,53 @@ class TestInteropFindings(_Case):
         self.assertIn("DESK_TOKEN", result.error)
         self.assertEqual(asked, [{}], "no secret: asked once, without one")
         self.assertEqual(self.methods(), ["card", "message/send"], "the refused call sent nothing")
+
+    async def test_the_secret_goes_to_a_card_only_behind_a_declared_bearer(self):
+        asked: list[dict] = []
+
+        def gated(challenge):
+            class _Gated(RawTransport):
+                async def card(self, headers=None):
+                    asked.append(dict(headers or {}))
+                    if not headers:
+                        raise a2a.CardUnauthorized(challenge=challenge)
+                    return await super().card()
+            return _Gated
+
+        # Basic, or a 401 that names no scheme: the secret is not sent, and
+        # the call is unconfigured naming what the card asked for.
+        for challenge, said in (('Basic realm="desk"', "Basic"), ("", "names no scheme")):
+            asked.clear()
+            agent = A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN")
+            tool = A2aCallTool((agent,), secrets={"DESK_TOKEN": "tok"}, transport_factory=gated(challenge))
+            result = await tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
+            self.assertEqual(result.error_kind, "unconfigured", challenge)
+            self.assertIn(said, result.error)
+            self.assertIn("auth_scheme", result.error)
+            self.assertEqual(asked, [{}], "the bearer never went to a card that did not ask for one")
+        self.assertEqual(self.methods(), [], "nothing was sent")
+
+        # The same silent 401, with the agent's table declaring a bearer.
+        asked.clear()
+        agent = A2aAgentConfig.from_mapping("desk", {"url": self.server.url, "auth_secret": "DESK_TOKEN",
+                                                     "auth_scheme": "Bearer", "poll_interval_s": 1.0})
+        self.assertEqual(agent.auth_scheme, "bearer")
+        tool = A2aCallTool((agent,), secrets={"DESK_TOKEN": "tok"}, transport_factory=gated(""))
+        result = await tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(asked, [{}, {"Authorization": "Bearer tok"}])
+
+    def test_the_challenge_scheme_is_read_from_the_header_and_from_an_sdk_error(self):
+        self.assertEqual(a2a.challenge_scheme('Bearer realm="simorgh"'), "bearer")
+        self.assertEqual(a2a.challenge_scheme('Basic realm="x", Bearer'), "basic")
+        self.assertEqual(a2a.challenge_scheme(""), "")
+        self.assertEqual(a2a.CardUnauthorized(challenge="Bearer").scheme, "bearer")
+        cause = Exception("401")
+        cause.response = types.SimpleNamespace(headers={"www-authenticate": "Bearer realm=x"})
+        outer = RuntimeError("A2AClientHTTPError")
+        outer.__cause__ = cause
+        self.assertEqual(a2a._challenge_of(outer), "Bearer realm=x")  # noqa: SLF001
+        self.assertEqual(a2a._challenge_of(RuntimeError("no response")), "")  # noqa: SLF001
 
 
 class TestReviewFindings(_Case):
