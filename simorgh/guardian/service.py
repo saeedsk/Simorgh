@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 import asyncio
+import time
 from dataclasses import dataclass
 
 from simorgh.contracts import topics
@@ -34,6 +35,14 @@ TRUST_STREAM = "guardian:trust"
 #: name, as `interface/dispatch.py` does, rather than by importing
 #: Execution.
 TOOLS_STREAM = "execution:tools"
+#: Guardian's protected subjects, written at every start (stage 18 item
+#: 12). Execution reads the last one at landing (`execution/worktree.py`)
+#: and refuses a diff that touches any of them: the list stays in
+#: `config.py`, never copied, and no subsystem imports another.
+PROTECTED_STREAM = "guardian:protected"
+#: A person's "yes" to the first call of the day of a
+#: `daily_human_tools` tool: `approved {tool, day}`; folded at start.
+DAILY_STREAM = "guardian:daily"
 
 # `action.denied`'s wire schema (contracts/messages/action.py's DENY_LAYER)
 # only enumerates {policy, denylist, immunity, budget, paused, scope,
@@ -203,6 +212,9 @@ class Service:
         #: record rather than for this judgement, because a handler
         #: that RAISED is also recent.
         self._deciding: set[str] = set()
+        #: tool -> the local day ("YYYY-MM-DD") a person last approved it,
+        #: for `daily_human_tools`.
+        self._daily: dict[str, str] = {}
         self.charter_text = ""
         self._tools = ToolRegistry()
 
@@ -223,6 +235,8 @@ class Service:
         await self._replay_tool_registrations()
         await self._rebuild_rejected_index()
         await self._restore_posture()
+        await self._publish_protected()
+        await self._load_daily()
 
         self._subs.append(await ctx.bus.subscribe(topics.ACTION_PROPOSED, self._on_proposed, group="guardian"))
         # `guardian.review` had a caller and no listener: Verification
@@ -502,12 +516,54 @@ class Service:
 
         token, expires_at, args_sha256 = self._tokens.issue(action_id, proposal["tool"], proposal["args"])
         await self._ctx.ledger.append(stream, self._event(stream, "answered", {"answer": answer, "outcome": "approved"}))
+        if proposal.get("tool") in self._config.daily_human_tools:
+            await self._record_daily(str(proposal["tool"]))
         await self._ctx.bus.publish(message.caused(
             topics.ACTION_APPROVED,
             {"action_id": action_id, "tool": proposal["tool"], "args_sha256": args_sha256, "expires_at": expires_at,
              "approval_token": token, "mode_at_approval": self._config.mode},
             source="guardian",
         ))
+
+    # -- protected subjects and once-a-day approvals (stage 18 item 12) ---
+
+    async def _publish_protected(self) -> None:
+        """Write the protected subjects for Execution's landing check.
+        A failure is logged, never fatal: Execution then finds no list
+        and refuses to land, which is the safe side."""
+        try:
+            await self._ctx.ledger.append(PROTECTED_STREAM, self._event(PROTECTED_STREAM, "subjects", {
+                "protected_subjects": list(self._config.protected_subjects),
+                "ask_subjects": list(self._config.ask_subjects),
+                "exempt": "a new tests/<protected dir>/test_*.py",
+            }))
+        except Exception as exc:  # noqa: BLE001
+            self._ctx.logger.warning("guardian_protected_publish_failed", error=repr(exc))
+
+    def _today(self) -> str:
+        return time.strftime("%Y-%m-%d", time.localtime(self._ctx.clock.now()))
+
+    def _approved_today(self, tool: str) -> bool:
+        return self._daily.get(tool) == self._today()
+
+    async def _load_daily(self) -> None:
+        self._daily = {}
+        try:
+            events = await self._ctx.ledger.read(DAILY_STREAM)
+        except Exception:  # noqa: BLE001 -- nothing readable means nobody said yes today
+            return
+        for event in events:
+            payload = event.payload or {}
+            if event.type == "approved" and payload.get("tool") and payload.get("day"):
+                self._daily[str(payload["tool"])] = str(payload["day"])
+
+    async def _record_daily(self, tool: str) -> None:
+        day = self._today()
+        self._daily[tool] = day
+        try:
+            await self._ctx.ledger.append(DAILY_STREAM, self._event(DAILY_STREAM, "approved", {"tool": tool, "day": day}))
+        except Exception as exc:  # noqa: BLE001 -- in memory it still holds until a restart
+            self._ctx.logger.warning("guardian_daily_record_failed", tool=tool, error=repr(exc))
 
     # -- standing approvals ----------------------------------------------
 
@@ -700,6 +756,7 @@ class Service:
             presence=self._presence_of,
             role=self._role_in_store,
             tool_answer=self._tool_answer_in_store,
+            approved_today=self._approved_today,
         )
 
         stream = f"action:{action_id}"

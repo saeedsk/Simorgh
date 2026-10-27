@@ -265,6 +265,9 @@ _TOOL_NOTES: dict[str, str] = {
     "propose_mcp_server": "propose a new MCP server to the human",
     "propose_a2a_agent": "propose a remote A2A agent for a person to approve",
     "a2a_call": "send a task to an approved remote A2A agent and get its report",
+    "claude_code_task": ("hand a coding task to Claude Code in this task's worktree: {feature, acceptance, files, "
+                         "module}; it commits there, Guardian approves each of its calls; then run_tests and "
+                         "land as usual. Costs money; the first run of the day asks a person"),
     "draft_candidate": "draft a change without applying it",
 }
 

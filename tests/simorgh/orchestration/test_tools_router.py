@@ -740,7 +740,8 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
 
         from simorgh.orchestration.session import SESSION_LOCAL
 
-        config = Config(shell=True, remote=True)
+        # Every switchable tool on, as a person may turn them on.
+        config = Config.from_mapping({"shell": True, "remote": True, "claude_code": {"enabled": True}})
         registered = {tool.name for tool in builtin_tools(config) + domain_tools(config, secrets=None)} | SESSION_LOCAL
         for kind, profile in BY_KIND.items():
             for name in profile.tools:

@@ -19,7 +19,8 @@ repository, so landing is a fast-forward rather than a copy back.
     work   every path tool resolves against the worktree, through
            `ToolContext.root`; scratch (`workspace/`) stays on the live
            tree so notes persist across tasks
-    land   refuse a dirty tree; rebase onto main's HEAD (a conflict is
+    land   refuse a dirty tree; refuse a branch whose diff touches a
+           Guardian-protected path (below); rebase onto main's HEAD (a conflict is
            the model's to resolve on the next attempt, never ours to
            guess at); run the gate -- the whole suite -- in a copy of
            the rebased tree; rebase again if main moved WHILE the gate
@@ -39,18 +40,34 @@ asked for.
 Worktrees live under the runtime data directory, never under the
 repository: a checkout nested inside the tree it came from is the
 mistake `tools/observer_kit.py` already guards against.
+
+Protected paths at landing (stage 18 item 12). Guardian's ProtectedRule
+judges each proposal by its TEXT: the path a patch names, the paths a
+shell command mentions. A file a program wrote without naming it -- a
+`run_shell` script, a test runner's side effect, Claude Code's own tools
+-- reaches a commit unseen, and until 2026-10-27 nothing looked at the
+diff that actually lands. `land` now refuses a branch whose diff against
+main touches any of Guardian's `protected_subjects`, matched the way
+`ProtectedRule` matches them (case-folded substring of the path and its
+normalised form), with the one exemption Guardian also makes: a NEW
+`test_*.py` under a protected package's `tests/` twin. The list is
+Guardian's, never a copy: Guardian writes it to `guardian:protected` at
+start, and the Service hands the manager a reader of that stream
+(`protected=`). A manager built without one -- a unit test of this
+module -- does not check; a reader that finds nothing refuses to land.
 """
 
 from __future__ import annotations
 
 import asyncio
+import posixpath
 import re
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable, Iterable
 
 from simorgh.contracts.protocols import ToolContext, ToolResult
 
@@ -68,6 +85,58 @@ def _git(cwd: Path, *args: str, timeout: float = _GIT_TIMEOUT_S) -> subprocess.C
 
 def _err(done: subprocess.CompletedProcess) -> str:
     return (done.stderr.strip() or done.stdout.strip())[:600]
+
+
+_NEW_TEST = re.compile(r"test_\w+\.py")
+
+
+def _new_test_beside(canonical_lower: str, protected_lower: str) -> bool:
+    """The exemption `guardian/rules.py::_a_new_test_beside` makes, for a
+    path the diff ADDS: `tests/<protected>/.../test_*.py`, where the
+    protected match is the package's `tests/` twin, never the package
+    itself, and never `conftest.py` or `__init__.py`."""
+    if not protected_lower.endswith("/") or ".." in canonical_lower.split("/"):
+        return False
+    twin = "tests/" + protected_lower
+    at = canonical_lower.find(twin)
+    if at < 0 or (at > 0 and canonical_lower[at - 1] != "/"):
+        return False
+    if canonical_lower.find(protected_lower) != at + len("tests/"):
+        return False
+    return bool(_NEW_TEST.fullmatch(posixpath.basename(canonical_lower)))
+
+
+def protected_hits(changes: Iterable[tuple[str, str]], protected: Iterable[str]) -> list[tuple[str, str]]:
+    """`(path, subject)` for every changed path that touches a protected
+    subject. `changes` is `(status, path)` from `git diff --name-status
+    --no-renames`: `A` added, `M` modified, `D` deleted, and so on. A
+    deletion is a change too; only an ADDED new test beside a protected
+    package is let through, as Guardian lets it through."""
+    subjects = tuple(s for s in protected if s)
+    hits: list[tuple[str, str]] = []
+    for status, path in changes:
+        canonical = posixpath.normpath(path).lower()
+        raw = path.lower()
+        for subject in subjects:
+            lowered = subject.lower()
+            if lowered in raw or lowered in canonical:
+                if status.upper().startswith("A") and _new_test_beside(canonical, lowered):
+                    continue
+                hits.append((path, subject))
+                break
+    return hits
+
+
+def _changes(cwd: Path, base: str, head: str = "HEAD") -> list[tuple[str, str]] | None:
+    done = _git(cwd, "diff", "--name-status", "--no-renames", f"{base}..{head}")
+    if done.returncode != 0:
+        return None
+    out: list[tuple[str, str]] = []
+    for line in done.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0]:
+            out.append((parts[0], parts[-1]))
+    return out
 
 
 @dataclass(frozen=True)
@@ -111,6 +180,10 @@ class WorktreeManager:
     # self-test here fails on every main since 2026-09-10) would mean
     # nothing ever lands.
     rerun: Callable[[Path, tuple[str, ...]], frozenset[str] | None] | None = None
+    # `await protected()` -> Guardian's protected subjects, or None when
+    # Guardian has not said (then nothing lands: an unknown list is not
+    # an empty one). None HERE means no check -- a test of this module.
+    protected: Callable[[], Awaitable[tuple[str, ...] | None]] | None = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def __post_init__(self) -> None:
@@ -177,9 +250,35 @@ class WorktreeManager:
 
     async def land(self, task_id: str) -> Landed:
         async with self._lock:
-            return await asyncio.to_thread(self._land, task_id)
+            subjects: tuple[str, ...] | None = None
+            if self.protected is not None:
+                try:
+                    subjects = await self.protected()
+                except Exception as exc:  # noqa: BLE001 -- an unreadable list refuses, never waves through
+                    return Landed(False, f"refused: Guardian's protected paths could not be read ({exc!r}); "
+                                         f"nothing lands until they can")
+                if subjects is None:
+                    return Landed(False, "refused: Guardian has not published its protected paths "
+                                         "(guardian:protected), so the diff cannot be checked; nothing lands")
+            return await asyncio.to_thread(self._land, task_id, subjects)
 
-    def _land(self, task_id: str) -> Landed:
+    def _protected_refusal(self, path: Path, base: str, subjects: tuple[str, ...] | None) -> Landed | None:
+        """A refusal when the branch's diff from `base` touches a
+        protected path, else None. `subjects` None means no check."""
+        if subjects is None:
+            return None
+        changes = _changes(path, base)
+        if changes is None:
+            return Landed(False, "refused: could not list the branch's changes to check them against "
+                                 "Guardian's protected paths")
+        hits = protected_hits(changes, subjects)
+        if not hits:
+            return None
+        shown = ", ".join(f"{p} ({s})" for p, s in hits[:10]) + (" ..." if len(hits) > 10 else "")
+        return Landed(False, f"refused: this branch changes {len(hits)} Guardian-protected path(s): {shown} -- "
+                             f"only the creator edits these; undo them on the branch and commit again")
+
+    def _land(self, task_id: str, subjects: tuple[str, ...] | None = None) -> Landed:
         path, branch = self.path_for(task_id), self.branch_for(task_id)
         if not (path / ".git").is_file():
             return Landed(False, f"no worktree is open for task {task_id}")
@@ -215,6 +314,12 @@ class WorktreeManager:
                 f"and commit again",
                 conflicts=names,
             )
+
+        # Before the gate, which takes minutes: a protected path is a
+        # refusal whatever the suite says.
+        refusal = self._protected_refusal(path, main_sha, subjects)
+        if refusal is not None:
+            return refusal
 
         gate_note = ""
         if self.gate is not None:
@@ -276,6 +381,9 @@ class WorktreeManager:
                     conflicts=names,
                 )
             landed_from = _git(path, "rev-parse", "HEAD").stdout.strip()
+            refusal = self._protected_refusal(path, now_main, subjects)
+            if refusal is not None:
+                return refusal
             moved = (f"; main moved on while the suite ran ({arrived} commit(s) arrived), so this was "
                      f"rebased onto {now_main[:12]} after the gate rather than before it")
             main_sha = now_main
@@ -461,4 +569,4 @@ def worktree_tools(manager: WorktreeManager, *, land_timeout_s: float) -> list:
 
 
 __all__ = ["BRANCH_PREFIX", "Landed", "Opened", "WorktreeCloseTool", "WorktreeLandTool",
-           "WorktreeManager", "WorktreeOpenTool", "worktree_tools"]
+           "WorktreeManager", "WorktreeOpenTool", "protected_hits", "worktree_tools"]

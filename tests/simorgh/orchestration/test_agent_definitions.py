@@ -14,7 +14,9 @@ class TheFiles(unittest.TestCase):
     def test_the_agents_load(self):
         self.assertEqual(set(profiles.AGENTS), {"chat", "voice_chat", "patch", "research", "plan", "skill",
                                                 # the helper roles (stage 7 item 2)
-                                                "planner", "verify", "skill-writer", "browser"})
+                                                "planner", "verify", "skill-writer", "browser",
+                                                # Claude Code as a coding worker (stage 18 item 12)
+                                                "claude_code"})
         self.assertEqual(profiles.VOICE_CHAT.name, "chat", "a spoken chat is still a chat to the session")
         # A spoken turn has its OWN body now. It inherited the typed
         # one until 2026-09-22, so the voice was told to answer like an

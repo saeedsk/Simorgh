@@ -174,6 +174,14 @@ class Config:
     # S4). The forerunner of stage 6's tier 3; `[guardian] human_only_tools
     # = []` returns to the old behaviour.
     human_only_tools: tuple[str, ...] = ("apply_skill",)
+    # Tools whose FIRST call of each local day a person approves, in every
+    # posture (rules.py::HumanOnlyRule, stage 18 item 12). Later calls that
+    # day go to the ordinary rules. `claude_code_task` spends the creator's
+    # Claude quota and runs an autonomous coder in a worktree: the creator
+    # asked to be told once a day, not on every run, and never to have it
+    # happen silently (the 2026-09-11 lesson). A "yes" is recorded on
+    # `guardian:daily`, so a restart does not ask again the same day.
+    daily_human_tools: tuple[str, ...] = ("claude_code_task",)
     # Physical tools that are `human` by name (rules.py::PhysicalRule.
     # _classify), whatever their arguments: sirens, and the setup or
     # pairing steps that store a credential or bind a device. Like every
@@ -235,7 +243,8 @@ class Config:
             kwargs["ask_subjects"] = tuple(kwargs["ask_subjects"])
         if "autonomous_origins" in kwargs:
             kwargs["autonomous_origins"] = tuple(kwargs["autonomous_origins"])
-        for key in ("physical_tool_prefixes", "physical_observe_tools", "physical_always_human_tools", "human_only_tools"):
+        for key in ("physical_tool_prefixes", "physical_observe_tools", "physical_always_human_tools", "human_only_tools",
+                    "daily_human_tools"):
             if key in kwargs:
                 kwargs[key] = tuple(kwargs[key])
         # `[guardian.physical]` is its own table so the house has its own

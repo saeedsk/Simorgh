@@ -52,6 +52,7 @@ from .mcp_sdk import make_client as make_mcp_client
 from .vision import CameraVision
 from .tools import RunTestsTool, SkillTool, builtin_tools
 from .worktree import WorktreeManager, worktree_tools
+from .claudecode import HOOK_PREFIX as CLAUDE_CODE_HOOK_PREFIX
 from .verifier import ApprovalVerifier
 
 from .capabilities import CAPABILITIES_STREAM, PROBES, connector_probe, degraded_detail, run_probes
@@ -63,6 +64,9 @@ def _probe_tools(name: str) -> tuple[str, ...]:
 
 INFLIGHT_STREAM = "execution:inflight"
 TOOLS_STREAM = "execution:tools"
+#: Written by Guardian at its start (`guardian/service.py::PROTECTED_STREAM`);
+#: kept in step by name, as Guardian keeps `execution:tools`.
+GUARDIAN_PROTECTED_STREAM = "guardian:protected"
 
 
 
@@ -388,6 +392,18 @@ class Service:
         # The dashboard on the TV, by itself, when a TV is remembered (`tv_show_on_start`).
         self._tv_autostart = asyncio.create_task(self._autostart_tv_show())
 
+    async def _guardian_protected_subjects(self) -> tuple[str, ...] | None:
+        """The protected subjects Guardian last wrote to
+        `guardian:protected` at its start, or None when it never has.
+        Read at every landing, so a changed `[guardian]
+        protected_subjects` holds from Guardian's next start."""
+        events = await self._ctx.ledger.read(GUARDIAN_PROTECTED_STREAM)
+        for event in reversed(events):
+            subjects = (event.payload or {}).get("protected_subjects")
+            if event.type == "subjects" and isinstance(subjects, list):
+                return tuple(str(s) for s in subjects if s)
+        return None
+
     def _build_worktrees(self, ctx) -> WorktreeManager | None:
         """Where a task's own worktree lives, and whether the feature is
         on at all. Never under the repository: the runtime data
@@ -414,7 +430,10 @@ class Service:
                                   # `gate_blocking`: the landing runs inside
                                   # `asyncio.to_thread`, where there is no loop to share.
                                   gate=tests.gate_blocking if gated else None,
-                                  rerun=tests.failing_alone if gated else None)
+                                  rerun=tests.failing_alone if gated else None,
+                                  # Guardian's list, read where Guardian writes it
+                                  # (stage 18 item 12): nothing lands that touches it.
+                                  protected=self._guardian_protected_subjects)
         if not manager.available:
             ctx.logger.warning("worktrees_unavailable", repo=str(self._config.repo_root))
             return None
@@ -939,6 +958,16 @@ class Service:
 
         if self._paused:
             await self._publish_result(message, action_id, ok=False, error="paused", error_kind="refused")
+            return
+
+        if str(approved.get("tool") or "").startswith(CLAUDE_CODE_HOOK_PREFIX):
+            # A Claude Code tool call its PreToolUse hook proposed
+            # (claudecode.py): Guardian approved it and the token checked
+            # out above. Claude Code runs it itself; this result is the
+            # hook's "allow". Nothing runs here, and it never waits on the
+            # semaphore the `claude_code_task` call itself is holding.
+            await self._publish_result(message, action_id, ok=True,
+                                        stdout_preview="approved; Claude Code runs this call itself")
             return
 
         tool = self._registry.get(approved["tool"])

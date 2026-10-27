@@ -259,6 +259,10 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # cannot be taken back, so it is irreversible and needs the network.
     "propose_a2a_agent": ("reversible", False),
     "a2a_call": ("irreversible", True),
+    # Stage 18 item 12: Claude Code as a coding worker. It spends the
+    # creator's Claude quota over the network and commits in the task's
+    # worktree; every one of its own tool calls is proposed to Guardian.
+    "claude_code_task": ("irreversible", True),
 }
 
 # `cognition/parser.py::_parse_markers` only ever extracts one string per

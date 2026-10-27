@@ -93,6 +93,10 @@ class DecisionContext:
     #: entry for that tool, the store has no record, or cannot be asked --
     #: then the role's ceiling decides, as before.
     tool_answer: Callable[[str, str], Awaitable[str]] | None = None
+    #: `(tool) -> bool`: has a person approved this tool today (local
+    #: date)? For `config.daily_human_tools` (stage 18 item 12). None
+    #: means nobody can say, which `HumanOnlyRule` reads as "not yet".
+    approved_today: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True)
