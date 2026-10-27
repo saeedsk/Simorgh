@@ -65,6 +65,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:111-131`, pinned by `t
 | `voice.room.speech` | `messages/voice.py::VoiceRoomSpeech` | httpapi.py `_on_room_speech` | A room satellite's reply piece (stage 13 item 3, 2026-09-26): its ref is listed for `ROOM_SPEECH_TTL_S` (120 s) and served at `GET /api/room/speech?ref=` **without a token** -- the board's media player cannot send one. Only a listed, unexpired ref is served; any other ref is a 404 that never reads the ledger. Producer: Voice (`voice/satellite.py` via the service) |
 | `ui.dash.state`, `ui.dash.key` | `messages/ui.py` | httpapi.py:683-684 | Dashboard state and remote keys for the page |
 | `percept.text.received` | `messages/percept.py::PerceptTextReceived` | httpapi.py:695-698 | Dashboard activity feed. Subscribed in a loop when HTTP starts; declared in `Service.consumes` since 618191e |
+| `crew.spawned`, `crew.message`, `crew.report`, `crew.cancel` | `messages/crew.py` | not yet (stage 18 item 5) | Declared 2026-10-27 (stage 18 item 1); the crew tree in the TUI, the `crew` command and the dashboard's crew panel will read them. Producer: orchestration |
 
 Replies received by request/reply: `task.list.reply`, `task.create.reply`, `system.status.reply`, `guardian.posture.reply`, `benchmark.*.reply`, `voice.*.reply`, `world.env.query.reply`, `curiosity.interest.list.reply`.
 

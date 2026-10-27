@@ -1,0 +1,110 @@
+{
+  "$id": "https://simorgh.local/schema/crew.report.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "A member's final typed Report; an A2A Task with artifacts.",
+  "properties": {
+    "crew_id": {
+      "type": "string"
+    },
+    "handle": {
+      "type": "string"
+    },
+    "report": {
+      "additionalProperties": true,
+      "properties": {
+        "artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "findings": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "claim": {
+                "type": "string"
+              },
+              "evidence_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "claim"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "questions_unanswered": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "partial",
+            "failed",
+            "blocked",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "steps": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wall_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "crew_id",
+    "handle",
+    "report"
+  ],
+  "title": "crew.report",
+  "type": "object"
+}

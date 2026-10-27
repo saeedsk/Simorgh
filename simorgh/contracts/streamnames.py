@@ -34,7 +34,22 @@ def stream_name_rule() -> str:
     return f"lowercase letters, digits, and _ . : - only, at most {MAX_STREAM_NAME} characters"
 
 
-__all__ = ["MAX_STREAM_NAME", "is_valid_stream", "stream_name_rule"]
+#: A crew's stream (stage 18): one event per change to the tree under one
+#: root session -- spawned, message, report, cancel, a member's status,
+#: a blackboard write -- appended, never edited.
+CREW_PREFIX = "crew:"
+
+
+def crew_stream(crew_id: str) -> str:
+    """`crew:<crew_id>`; ValueError when the result breaks the grammar,
+    so a caller learns before the crew starts, not at its first append."""
+    name = f"{CREW_PREFIX}{crew_id}"
+    if not crew_id or not is_valid_stream(name):
+        raise ValueError(f"crew id {crew_id!r} makes no legal stream name ({stream_name_rule()})")
+    return name
+
+
+__all__ = ["CREW_PREFIX", "MAX_STREAM_NAME", "crew_stream", "is_valid_stream", "stream_name_rule"]
 
 
 # Which subsystems may write which streams (stage 1 item 8). Filled from a
@@ -48,6 +63,8 @@ WRITERS: dict[str, frozenset[str]] = {
     "task:": frozenset({"planning", "orchestration"}),
     # Typed transcripts (stage 4): Orchestration runs every session.
     "session:": frozenset({"orchestration"}),
+    # Agent crews (stage 18): Orchestration runs every member and folds the tree.
+    "crew:": frozenset({"orchestration"}),
     "project:": frozenset({"planning"}),
     "plan:": frozenset({"planning"}),
     "planning:": frozenset({"planning"}),
