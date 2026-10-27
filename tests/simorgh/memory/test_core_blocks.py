@@ -10,7 +10,9 @@ reply carries no `core`, so the prompt is what it was.
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -154,6 +156,34 @@ class BlocksTestCase(_CoreCase):
         await self.edit("household", "Wednesday", "Tuesday", requester="Saeed")
         self.assertEqual((await self.recall(core_for="Saeed"))["core"][0]["text"], "bins go out Tuesday")
         self.assertEqual(len(await self.ledger.read(CORE_STREAM)), 3)
+
+    async def test_edits_at_once_each_start_from_the_last(self):
+        """Two calls in one think run side by side; a ledger that yields
+        (sqlite, jsonl) between the read and the append must not lose one."""
+        await self.edit("household", "", "bins go out Tuesday", requester="Saeed")
+        engine, ledger = self.service.engine, self.ledger
+        read, append = ledger.read, ledger.append
+
+        async def slow_read(*a, **kw):
+            await asyncio.sleep(0.01)
+            return await read(*a, **kw)
+
+        async def slow_append(*a, **kw):
+            await asyncio.sleep(0.01)
+            return await append(*a, **kw)
+
+        engine._ledger = types.SimpleNamespace(read=slow_read, append=slow_append)
+        try:
+            results = await asyncio.gather(*(engine.edit_core(block="household", old="", new=f"note {i}",
+                                                              requester="Saeed") for i in range(4)))
+        finally:
+            engine._ledger = ledger
+        self.assertTrue(all(r["ok"] for r in results), results)
+        text = (await self.recall(core_for="Saeed"))["core"][0]["text"]
+        for i in range(4):
+            self.assertIn(f"note {i}", text)
+        events = await ledger.read(CORE_STREAM)
+        self.assertEqual([e.payload["previous"] for e in events[1:]], [e.payload["text"] for e in events[:-1]])
 
     async def test_the_blocks_survive_a_restart(self):
         await self.edit("household", "", "bins go out Tuesday", requester="Saeed")

@@ -439,17 +439,25 @@ class MemoryEngine:
         if not target:
             return {"ok": False, "block": "", "text": "",
                     "error": f"{block!r} is not yours to edit: {name} may edit only `household` or their own block"}
-        index = await self._core_synced()
-        before = index.text(target)
-        after, why = apply_edit(before, old, new, limit=self._config.core_block_chars)
-        if why:
-            return {"ok": False, "block": target, "text": before, "error": why}
-        payload = {"block": target, "text": after, "previous": before, "old": old, "new": new,
-                   "by": name, "source_ref": source_ref, "action_id": action_id}
-        await self._ledger.append(CORE_STREAM, Event(
-            stream=CORE_STREAM, type=EDITED, ts=self._clock.now(), trace_id="", causation_id=None,
-            idempotency_key=f"{CORE_STREAM}:{uuid.uuid4().hex}", payload=payload))
-        await self._core_synced()
+        # One edit at a time: an edit is read, replace, append, and two at
+        # once (the bus runs up to 16 handlers per subscription; a think
+        # may make two calls) would each start from the same text, and the
+        # later event would drop the earlier edit while saying it kept it.
+        lock = getattr(self, "_core_lock", None)
+        if lock is None:
+            lock = self._core_lock = asyncio.Lock()
+        async with lock:
+            index = await self._core_synced()
+            before = index.text(target)
+            after, why = apply_edit(before, old, new, limit=self._config.core_block_chars)
+            if why:
+                return {"ok": False, "block": target, "text": before, "error": why}
+            payload = {"block": target, "text": after, "previous": before, "old": old, "new": new,
+                       "by": name, "source_ref": source_ref, "action_id": action_id}
+            await self._ledger.append(CORE_STREAM, Event(
+                stream=CORE_STREAM, type=EDITED, ts=self._clock.now(), trace_id="", causation_id=None,
+                idempotency_key=f"{CORE_STREAM}:{uuid.uuid4().hex}", payload=payload))
+            await self._core_synced()
         return {"ok": True, "block": target, "text": after, "error": ""}
 
     async def entity_for(self, text: str, *, speaker: str = "", person_scope: str = "*", source_refs=(),
