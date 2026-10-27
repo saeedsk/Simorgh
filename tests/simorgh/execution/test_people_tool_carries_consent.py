@@ -54,6 +54,20 @@ class TheToolCarriesConsent(unittest.IsolatedAsyncioTestCase):
                                        ctx=_Ctx(bus))
         self.assertEqual(bus.sent[0].payload["interest"], "astronomy")
 
+    async def test_a_relation_travels_too(self):
+        """Stage 15: kin are written through the same tier-3 tool, so "my
+        son" resolves only because a person confirmed who that is."""
+        bus = _Bus()
+        await PeopleTool(Config()).run({"action": "set_relation", "name": "Saeed", "relation": "son",
+                                        "other": "Aran"}, ctx=_Ctx(bus))
+        sent = bus.sent[0].payload
+        self.assertEqual((sent["action"], sent["name"], sent["relation"], sent["other"]),
+                         ("set_relation", "Saeed", "son", "Aran"))
+        self.assertIn("set_relation", PeopleTool.args_schema["properties"]["action"]["enum"])
+        proposal = Proposal(action_id="a", tool="people", args={"action": "set_relation"}, scope={},
+                            reversibility="reversible", rationale="", proposed_by="orchestration")
+        self.assertEqual(tier_of(proposal)[0], 3)
+
     def test_the_schema_offers_every_verb_the_store_accepts(self):
         from simorgh.contracts.messages.world import WorldPeopleUpdate
 

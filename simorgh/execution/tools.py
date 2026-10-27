@@ -3395,21 +3395,27 @@ class PeopleTool:
                    "permission: wellbeing_checkins, interest_shares) or what they care about "
                    "(add_interest | remove_interest), or one tool for one person above or below their "
                    "role (set_tool with `tool` and `answer` allow | ask | deny, \"\" to clear -- e.g. Iris may "
-                   "music_play without asking). `identity` looks like telegram:<handle>, "
+                   "music_play without asking), or who their kin are (set_relation with `relation` such as son, "
+                   "wife or mother and `other` the person's name, \"\" to forget -- Saeed's son is Aran). "
+                   "`identity` looks like telegram:<handle>, "
                    "whatsapp:<number> or voice:<name>. Every action asks a person.")
     read_only = False
     reversibility = "reversible"     # a link can be unlinked; the tier is what gates it
     args_schema = {
         "type": "object", "required": ["action"],
         "properties": {"action": {"type": "string", "enum": ["link", "unlink", "set_role", "grant", "revoke",
-                                                             "add_interest", "remove_interest", "set_tool"]},
+                                                             "add_interest", "remove_interest", "set_tool",
+                                                             "set_relation"]},
                        "name": {"type": "string"}, "identity": {"type": "string"},
                        "role": {"type": "string", "enum": ["owner", "adult", "child", "guest", "unknown"]},
                        # Consent (stage 10) travels the same tier-3 path as a link:
                        # a permission is never inferred from a turn.
                        "permission": {"type": "string", "enum": ["wellbeing_checkins", "interest_shares"]},
                        "interest": {"type": "string"},
-                       "tool": {"type": "string"}, "answer": {"type": "string", "enum": ["allow", "ask", "deny", ""]}},
+                       "tool": {"type": "string"}, "answer": {"type": "string", "enum": ["allow", "ask", "deny", ""]},
+                       # Kin (stage 15): `name`'s `relation` is `other`. Memory resolves
+                       # "my son" by it, so it takes a person's yes like a link does.
+                       "relation": {"type": "string"}, "other": {"type": "string"}},
     }
 
     def __init__(self, config: Config) -> None:
@@ -3423,7 +3429,8 @@ class PeopleTool:
                    "name": str(args.get("name") or ""), "identity": str(args.get("identity") or ""),
                    "role": str(args.get("role") or ""),
                    "permission": str(args.get("permission") or ""), "interest": str(args.get("interest") or ""),
-                   "tool": str(args.get("tool") or ""), "answer": str(args.get("answer") or "")}
+                   "tool": str(args.get("tool") or ""), "answer": str(args.get("answer") or ""),
+                   "relation": str(args.get("relation") or ""), "other": str(args.get("other") or "")}
         try:
             reply = await ctx.bus.request(ctx.bus.new(topics.WORLD_PEOPLE_UPDATE, payload), timeout=5.0)
         except TimeoutError:

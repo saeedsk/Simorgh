@@ -316,7 +316,9 @@ def _one_value(key: str, raw) -> object:
 _MARKER_ARG_HINT: dict[str, str] = {
     "people": (
         'one JSON object: {"action": "set_role", "name": "Ira", "role": "child"}; actions link, unlink, '
-        "set_role, grant, revoke, add_interest, remove_interest, set_tool (with tool and answer)"
+        "set_role, grant, revoke, add_interest, remove_interest, set_tool (with tool and answer), "
+        "set_relation (with relation and other: {\"action\": \"set_relation\", \"name\": \"Saeed\", "
+        "\"relation\": \"son\", \"other\": \"Aran\"})"
     ),
     "look_at_image": (
         "one to four image paths, then the question: `workspace/scratch/a.png workspace/scratch/b.png "
