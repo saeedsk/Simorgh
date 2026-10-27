@@ -310,6 +310,126 @@ def parse_marker(text: str, markers: tuple[str, ...]) -> tuple[str | None, str]:
     return None, stripped
 
 
+# -- strict parsing (`[cognition] ablate = ["rescue"]`, stage 14 item 3) ----------
+#
+# Everything above that repairs a reply -- case-folding a marker, unwrapping
+# a provider's own tool tags, reading an indented marker line, trimming the
+# prose a model kept writing after a one-line argument, cutting at an
+# embedded marker or an invented transcript turn, lifting code out of a
+# fence -- was added after a live failure, and none has ever been measured
+# switched off. Strict mode is that measurement: it takes the protocol
+# literally and repairs nothing. What stays is the protocol itself, not a
+# rescue of it:
+#
+# - the marker is the tool's name in capitals, then a colon, at the start
+#   of a line (after the reply's leading whitespace); a preamble line
+#   before it is allowed, since stage 14 defines a well-formed call as "a
+#   marker line at the start of a line";
+# - a leading tone tag (`[warm]`) goes: the voice prompt asks for it at the
+#   head of every reply, so it is part of the reply's shape, not an error;
+# - a code-bearing marker's payload is everything after the marker, kept
+#   intact -- that is the format, so nothing is cut out of it either;
+# - a one-line argument is the rest of the marker line, and every later
+#   line must be blank or another well-formed marker line (one action per
+#   step still counts and parses those, as the lenient path does).
+#
+# A reply that is not well-formed is a plain text answer, exactly as an
+# unparseable reply is treated in the default mode.
+
+
+def _strict_head(line: str, markers: tuple[str, ...]) -> str | None:
+    """The marker `line` begins with, exact capitals and column 0, or None."""
+    for marker in markers:
+        if line.startswith(f"{marker.upper()}:"):
+            return marker
+    return None
+
+
+def _strict_one_line(rest: str, markers: tuple[str, ...]) -> bool:
+    """A one-line argument with no other marker inside it: the lenient path
+    cuts `READ_FILE: a.py READ_FILE: a.py` at the second marker."""
+    return not any(f"{m.upper()}:" in rest for m in markers)
+
+
+def parse_markers_strict(text: str, markers: tuple[str, ...]) -> tuple[dict, ...] | None:
+    """The well-formed calls in `text`, first one first, or None when the
+    reply holds no well-formed call (a plain text answer)."""
+    from simorgh.contracts.tone import strip_tone
+
+    lines = strip_tone(text.strip()).splitlines()
+    start = next((i for i, line in enumerate(lines) if _strict_head(line, markers)), None)
+    if start is None:
+        return None
+    calls: list[dict] = []
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        marker = _strict_head(line, markers)
+        if marker is None:
+            if line.strip():
+                # Prose after a one-line call: lenient mode trims it away.
+                return None
+            index += 1
+            continue
+        rest = line[len(marker) + 1:].strip()
+        if marker.upper() in _CODE_BEARING_MARKERS:
+            payload = "\n".join([rest, *lines[index + 1:]]).strip()
+            calls.append({"tool": marker.lower(), "args": {"argument": payload}})
+            break
+        if not _strict_one_line(rest, markers):
+            return None
+        calls.append({"tool": marker.lower(), "args": {"argument": rest}})
+        index += 1
+    first = dict(calls[0])
+    if len(calls) > 1:
+        first["dropped_markers"] = len(calls) - 1
+    return (first, *calls[1:])
+
+
+_JSON_TYPES = {
+    "string": (str,), "integer": (int,), "number": (int, float), "boolean": (bool,),
+    "array": (list, tuple), "object": (dict,),
+}
+
+
+def _fits_schema(args: dict, schema: dict | None) -> bool:
+    """Top-level check of `args` against a tool's `input_schema`: every
+    required key present, no unknown key when `additionalProperties` is
+    false, and each declared JSON type matched. Deliberately shallow -- the
+    tool validates its own arguments; this only refuses what a lenient
+    decoder would have passed on for the model to fix."""
+    schema = schema or {}
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    if any(key not in args for key in schema.get("required") or ()):
+        return False
+    if schema.get("additionalProperties") is False and any(key not in props for key in args):
+        return False
+    for key, value in args.items():
+        kind = (props.get(key) or {}).get("type") if isinstance(props.get(key), dict) else None
+        if isinstance(kind, str) and kind in _JSON_TYPES:
+            if isinstance(value, bool) and kind in ("integer", "number"):
+                return False
+            if not isinstance(value, _JSON_TYPES[kind]):
+                return False
+    return True
+
+
+def accept_native_calls(calls, offered: tuple[str, ...], specs: dict | None = None) -> tuple[dict, ...]:
+    """The native typed calls strict mode accepts: an offered tool, no
+    decoding `error` (arguments that were not a JSON object), and arguments
+    that fit the tool's schema. In default mode a malformed call goes back
+    to the model as an error result to fix; that is the rescue switched off."""
+    specs = specs or {}
+    kept = []
+    for call in calls or ():
+        if call.get("error") or call.get("tool") not in offered or not isinstance(call.get("args"), dict):
+            continue
+        if not _fits_schema(call["args"], (specs.get(call["tool"]) or {}).get("input_schema")):
+            continue
+        kept.append(call)
+    return tuple(kept)
+
+
 def extract_code(text: str) -> str | None:
     match = _CODE_FENCE.search(text)
     stripped = (match.group(1) if match else text).strip()
@@ -349,7 +469,14 @@ def scan_verdict(text: str) -> bool | None:
 class OutputParser:
     """Parses a provider's raw text according to `expected` (04 section
     3.4's `OutputSpec`): `{kind: final|markers|edit_blocks|verdict, markers?: [...]}`.
+
+    `strict=True` is `[cognition] ablate = ["rescue"]`: only well-formed
+    calls are accepted and no repair is made (see "strict parsing" above).
+    Verdicts and empty replies are not calls and parse the same either way.
     """
+
+    def __init__(self, *, strict: bool = False) -> None:
+        self.strict = strict
 
     def parse(self, text: str, expected: dict | None) -> ParsedOutput:
         expected = expected or {"kind": "final"}
@@ -376,6 +503,13 @@ class OutputParser:
         return ParsedOutput(kind="final", text=text.strip())
 
     def _parse_markers(self, text: str, markers: tuple[str, ...]) -> ParsedOutput:
+        if self.strict:
+            from simorgh.contracts.tone import strip_tone
+
+            calls = parse_markers_strict(text, markers)
+            if calls is None:
+                return ParsedOutput(kind="final", text=strip_tone(text.strip()))
+            return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=calls)
         marker, payload = parse_marker(text, markers)
         if marker is None:
             return ParsedOutput(kind="final", text=payload)
@@ -418,6 +552,9 @@ class OutputParser:
     def _parse_edit_blocks(self, text: str) -> ParsedOutput:
         blocks = parse_search_replace_blocks(text)
         if blocks is None:
+            if self.strict:
+                # No code-fence extraction: the reply is the answer as written.
+                return ParsedOutput(kind="final", text=text.strip())
             candidate = extract_code(text)
             return ParsedOutput(kind="final", text=candidate or text.strip())
         return ParsedOutput(
@@ -433,7 +570,7 @@ class OutputParser:
 
 
 __all__ = [
-    "cut_at_next_marker",
+    "accept_native_calls", "cut_at_next_marker", "parse_markers_strict",
     "OutputParser", "extract_code", "first_line_argument", "is_valid_python",
     "parse_marker", "parse_search_replace_blocks", "preview", "scan_verdict",
 ]
