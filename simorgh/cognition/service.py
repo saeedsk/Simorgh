@@ -38,11 +38,15 @@ VERSION = "0.1.0"
 # verdict -- contracts/messages/cognition.py); `OutputParser.parse` wants a
 # `{kind, markers?}` dict (04 section 5's `OutputSpec`). "tool_calls" is the
 # one case needing real translation: the request's own `tools` list of names
-# doubles as the marker set `_parse_markers` scans for.
+# doubles as the marker set `_parse_markers` scans for. A conversation's
+# think (`purpose: "chat"`: the chat and voice_chat agents) rescues a call
+# only from a reply that is nothing but the call (`whole`, stage 16): a
+# call quoted inside a typed or spoken answer is part of the answer.
 def _expected_spec(payload: dict) -> dict:
     expected = payload.get("expected")
     if expected == "tool_calls":
-        return {"kind": "markers", "markers": tuple(payload.get("tools") or ())}
+        return {"kind": "markers", "markers": tuple(payload.get("tools") or ()),
+                "whole": payload.get("purpose") == "chat"}
     if expected in ("edit_blocks", "verdict"):
         return {"kind": expected}
     return {"kind": "final"}

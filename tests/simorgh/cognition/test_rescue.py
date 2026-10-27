@@ -152,8 +152,50 @@ class ReviewNarrowings(unittest.TestCase):
         self.assertEqual(_sig(rescue_tool_calls(text, ["fetch"])), [("fetch", {"p": 1})])
 
 
+class WholeReply(unittest.TestCase):
+    """Stage 16 edge case (decided 2026-10-27): in a conversation a call is
+    rescued only from a reply that is nothing but the call(s)."""
+
+    CALL = '{"tool": "fetch", "args": {"part": "X"}}'
+
+    def test_prose_around_a_call_is_an_answer(self):
+        for text in (
+            f"Sure, I'd run {self.CALL}",
+            f"{self.CALL} -- that is what I would send.",
+            f"Here it is:\n```json\n{self.CALL}\n```",
+            f"```json\n{self.CALL}\n```\nThat would fetch it.",
+            'You would write fetch[ARGS]{"p": 1} for that.',
+            "Like this: <function=fetch><parameter=q>x</parameter></function>",
+            'I apologize. [TOOL_CALLS]fetch{"p": "x"}',
+        ):
+            self.assertEqual(rescue_tool_calls(text, ["fetch"], whole=True), (), text)
+            # A task's reply keeps forge's rule: the same text is a call.
+            self.assertTrue(rescue_tool_calls(text, ["fetch"]), text)
+
+    def test_a_reply_that_is_only_the_call_is_rescued(self):
+        for text in (
+            self.CALL,
+            f"```json\n{self.CALL}\n```",
+            f"  ```\n{self.CALL}\n```  ",
+            f"<think>the user wants X</think>\n```json\n{self.CALL}\n```",
+            f"<tool_call>{self.CALL}</tool_call>",
+            f"[{self.CALL}, {self.CALL}]",
+            'fetch[ARGS]{"part": "X"}',
+            "```xml\n<function=fetch><parameter=part>X</parameter></function>\n```",
+            '[TOOL_CALLS]fetch{"part": "X"}',
+        ):
+            calls = rescue_tool_calls(text, ["fetch"], whole=True)
+            self.assertTrue(calls, text)
+            self.assertEqual(calls[0]["tool"], "fetch", text)
+
+    def test_the_rest_of_the_rules_still_hold(self):
+        self.assertEqual(rescue_tool_calls('{"tool": "run_shell", "args": {}}', ["fetch"], whole=True), ())
+        self.assertEqual(rescue_tool_calls("plain answer", ["fetch"], whole=True), ())
+
+
 MARKERS = ("read_file", "web_search", "run_shell")
 SPEC = {"kind": "markers", "markers": MARKERS}
+CHAT_SPEC = {**SPEC, "whole": True}
 
 
 class TheParser(unittest.TestCase):
@@ -185,6 +227,21 @@ class TheParser(unittest.TestCase):
         parsed = OutputParser(strict=True).parse('{"tool": "read_file", "args": {"path": "a.py"}}', SPEC)
         self.assertEqual((parsed.kind, parsed.rescued), ("final", False))
 
+    def test_whole_keeps_a_quoted_call_as_the_answer(self):
+        text = 'Sure, I\'d run {"tool": "read_file", "args": {"path": "a.py"}}'
+        parsed = OutputParser().parse(text, CHAT_SPEC)
+        self.assertEqual((parsed.kind, parsed.rescued, parsed.tool_calls), ("final", False, ()))
+        self.assertEqual(parsed.text, text)
+        self.assertEqual(OutputParser().parse(text, SPEC).kind, "tool_calls")
+
+    def test_whole_rescues_a_fenced_call_alone(self):
+        parsed = OutputParser().parse('```json\n{"tool": "read_file", "args": {"path": "a.py"}}\n```', CHAT_SPEC)
+        self.assertEqual((parsed.kind, parsed.rescued), ("tool_calls", True))
+
+    def test_whole_leaves_a_marker_alone(self):
+        parsed = OutputParser().parse("Let me look.\nREAD_FILE: a.py", CHAT_SPEC)
+        self.assertEqual(parsed.tool_calls, ({"tool": "read_file", "args": {"argument": "a.py"}},))
+
 
 class _Native:
     capabilities = Capabilities(supports_tools=True)
@@ -200,7 +257,7 @@ class _Native:
 
 
 class TheService(CognitionServiceTestCase):
-    async def _think(self, calls, text="", ablate=()):
+    async def _think(self, calls, text="", ablate=(), purpose="chat"):
         provider = _Native("p", calls, text)
         base = Config()
         config = dataclasses.replace(base, provider_order=("p", "floor"), assembly_request_timeout=0.05,
@@ -208,7 +265,7 @@ class TheService(CognitionServiceTestCase):
                                          max_calls=10, window_seconds=3600.0, tool_dialect="native")})
         await self._make(providers=[provider], config=config)
         reply = await self.bus.request(Message.new(topics.COGNITION_THINK, source="test", payload={
-            "purpose": "chat", "messages": [{"role": "user", "content": "read the readme"}],
+            "purpose": purpose, "messages": [{"role": "user", "content": "read the readme"}],
             "tools": ["read_file"], "expected": "tool_calls",
             "budget": {"max_tokens": 1000, "max_cost_usd": 0.1}, "require_real_provider": False,
         }), timeout=5.0)
@@ -224,6 +281,15 @@ class TheService(CognitionServiceTestCase):
         good = ({"id": "c1", "tool": "read_file", "args": {"path": "README.md"}},)
         payload = await self._think(good, text=self.QWEN)
         self.assertEqual(payload["tool_calls"], [{"tool": "read_file", "args": {"path": "README.md"}, "id": "c1"}])
+
+    async def test_a_chat_reply_quoting_a_call_is_not_run(self):
+        payload = await self._think((), text=f"Sure, I'd run {self.QWEN}")
+        self.assertEqual(payload["tool_calls"], [])
+        self.assertIn("Sure", payload["text"])
+
+    async def test_a_task_reply_quoting_a_call_is_still_rescued(self):
+        payload = await self._think((), text=f"Sure, I'd run {self.QWEN}", purpose="draft")
+        self.assertEqual(payload["tool_calls"], [{"tool": "read_file", "args": {"path": "README.md"}, "rescued": True}])
 
     async def test_ablated_rescue_leaves_it_text(self):
         payload = await self._think((), text=self.QWEN, ablate=("rescue",))

@@ -70,6 +70,10 @@ _QWEN_FUNCTION_RE = re.compile(r"<function=([^>\s]+)>(.*?)</function>", re.DOTAL
 _QWEN_PARAMETER_RE = re.compile(
     r"<parameter=([^>\s]+)>(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>)|$)", re.DOTALL)
 _MISTRAL_BRACKET_RE = re.compile(r"\[TOOL_CALLS\](\w+)\s*(?=\{)")
+# `whole=True`: one fence around the entire reply, and what may sit
+# between the calls of a reply that is nothing else.
+_WHOLE_FENCE_RE = re.compile(r"^```[\w-]*[ \t]*\n?(.*?)\n?[ \t]*```$", re.DOTALL)
+_GLUE_RE = re.compile(r"</?tool_call>|[\s,\[\]]")
 
 
 def strip_think(text: str) -> str:
@@ -136,10 +140,16 @@ def _call(name: str, args: dict) -> dict:
     return {"tool": name, "args": args, "rescued": True}
 
 
-def _json_calls(text: str, offered: dict[str, str]) -> list[dict]:
+# Each strategy returns `(text it scanned, [(call, start, end)])`, the span
+# being where the call sits in that text, so `whole=True` can tell a reply
+# that is only calls from one that quotes a call inside prose.
+_Found = list[tuple[dict, int, int]]
+
+
+def _json_calls(text: str, offered: dict[str, str]) -> tuple[str, _Found]:
     """Strategy 1: JSON objects naming an offered tool (fences removed)."""
     cleaned = _FENCE_RE.sub("", text).replace("```", "")
-    found: list[dict] = []
+    found: _Found = []
     unclosed = 0
     i = 0
     while i < len(cleaned):
@@ -164,18 +174,18 @@ def _json_calls(text: str, offered: dict[str, str]) -> list[dict]:
                 # else is in the object, or its other keys would be lost.
                 args = {} if set(data) <= _CALL_KEYS else None
             if tool and args is not None:
-                found.append(_call(tool, args))
+                found.append((_call(tool, args), i, end))
                 i = end
                 continue
         # Not a call (or not valid JSON): forge steps over the whole object,
         # so a call nested in someone else's object is not lifted out.
         i = end
-    return found
+    return cleaned, found
 
 
-def _bracketed_calls(pattern: re.Pattern, text: str, offered: dict[str, str]) -> list[dict]:
+def _bracketed_calls(pattern: re.Pattern, text: str, offered: dict[str, str]) -> tuple[str, _Found]:
     """Strategies 2 and 4: `name` from `pattern`, then one JSON object."""
-    found: list[dict] = []
+    found: _Found = []
     unclosed = 0
     for match in pattern.finditer(text):
         tool = offered.get(match.group(1).lower())
@@ -187,19 +197,19 @@ def _bracketed_calls(pattern: re.Pattern, text: str, offered: dict[str, str]) ->
             if unclosed >= _MAX_UNCLOSED:
                 break
         if args is not None:
-            found.append(_call(tool, args))
-    return found
+            found.append((_call(tool, args), match.start(), end))
+    return text, found
 
 
-def _qwen_calls(text: str, offered: dict[str, str]) -> list[dict]:
+def _qwen_calls(text: str, offered: dict[str, str]) -> tuple[str, _Found]:
     """Strategy 3: Qwen Coder XML. One leading and one trailing newline
     are stripped from each value, as Qwen's reference parser does."""
-    found: list[dict] = []
+    found: _Found = []
     # Only up to the last close tag: an open tag after it can never match,
     # and searching from each one to the end is quadratic.
     last = text.rfind("</function>")
     if last < 0:
-        return found
+        return text, found
     for fn in _QWEN_FUNCTION_RE.finditer(text, 0, last + len("</function>")):
         tool = offered.get(fn.group(1).strip().lower())
         if not tool:
@@ -212,29 +222,57 @@ def _qwen_calls(text: str, offered: dict[str, str]) -> list[dict]:
             if value.endswith("\n"):
                 value = value[:-1]
             args[param.group(1).strip()] = value
-        found.append(_call(tool, args))
-    return found
+        found.append((_call(tool, args), fn.start(), fn.end()))
+    return text, found
 
 
-def rescue_tool_calls(text: str, offered) -> tuple[dict, ...]:
+def _unfence(text: str) -> str:
+    """`text` without one code fence around the whole of it."""
+    match = _WHOLE_FENCE_RE.match(text)
+    return match.group(1).strip() if match else text
+
+
+def _only_calls(scanned: str, found: _Found) -> bool:
+    """Whether `scanned` is nothing but the calls in `found`: what is
+    left between them is whitespace, `<tool_call>` tags, or the commas
+    and brackets of a JSON list of calls."""
+    rest, at = [], 0
+    for _, start, end in sorted(found, key=lambda f: f[1]):
+        rest.append(scanned[at:start])
+        at = max(at, end)
+    rest.append(scanned[at:])
+    return not _GLUE_RE.sub("", "".join(rest))
+
+
+def rescue_tool_calls(text: str, offered, *, whole: bool = False) -> tuple[dict, ...]:
     """The tool calls in `text` for tools in `offered`, first one first, or
     () when there are none. Each is `{"tool", "args", "rescued": True}`:
     the shape a native call has, without an `id`, because the model never
-    issued one (a session keeps an id-less call in the text transcript)."""
+    issued one (a session keeps an id-less call in the text transcript).
+
+    `whole=True` is a conversation's rule (a `purpose: "chat"` think, which
+    is the chat and voice_chat agents): the reply, without its think blocks
+    and one code fence around all of it, must be nothing but the call(s).
+    "Sure, I'd run {...}" there is an answer that quotes a call -- the
+    person asked what it would do, or is being shown -- not a request to
+    run one. A task's reply keeps forge's rule: a call inside prose counts."""
     names = {str(n).lower(): str(n) for n in offered or () if n}
     if not names or not text:
         return ()
     cleaned = strip_think(text)
+    if whole:
+        cleaned = _unfence(cleaned)
     if not cleaned:
         return ()
-    found = _json_calls(cleaned, names)
-    if not found:
-        found = _bracketed_calls(_REHEARSAL_RE, cleaned, names)
-    if not found:
-        found = _qwen_calls(cleaned, names)
-    if not found:
-        found = _bracketed_calls(_MISTRAL_BRACKET_RE, cleaned, names)
-    return tuple(found)
+    scanned, found = _json_calls(cleaned, names)
+    for strategy in (lambda t, n: _bracketed_calls(_REHEARSAL_RE, t, n), _qwen_calls,
+                     lambda t, n: _bracketed_calls(_MISTRAL_BRACKET_RE, t, n)):
+        if found:
+            break
+        scanned, found = strategy(cleaned, names)
+    if whole and found and not _only_calls(scanned, found):
+        return ()
+    return tuple(call for call, _, _ in found)
 
 
 __all__ = ["THINK_TAG_RE", "rescue_tool_calls", "strip_think"]
