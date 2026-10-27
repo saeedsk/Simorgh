@@ -1,6 +1,6 @@
 # Stage 16 -- Forge's guardrails in Sim's loop
 
-Status: **in progress** (2026-10-27: items 1 and 2 merged and reviewed; item 3 (preset table) and 4 (measure) open. Open decisions from review: a chat/voice reply that quotes a valid JSON call for an offered tool is now rescued and run; on the LAST step `git_commit` still skips its `run_tests` prerequisite) · Depends on: stage 2 (native tools), stage 14 (the ablation switches and runner measure this stage) · Modules touched: cognition, orchestration; `agents/` (orchestration lock); `docs/`
+Status: **in progress** (2026-10-27: items 1 and 2 merged and reviewed; item 3 (preset table) and 4 (measure) open. Both edge cases from review decided on the safe side, 2026-10-27: (a) in a chat or voice session a call is rescued only when the reply, without think tags and one surrounding code fence, is nothing but the call(s) -- Cognition's `rescue_tool_calls(whole=True)` for a `purpose: "chat"` think, and Orchestration's `looks_like_call(whole=True)` so prose quoting a call is not nudged either; task scaffolds unchanged. (b) prerequisites hold on the last step: a last-step `git_commit` (or durable tool) whose prerequisite has not run is not proposed, and the session ends `blocked` `prerequisite not done: run_tests` with its edits kept for the next attempt (`Steps.check_last`)) · Depends on: stage 2 (native tools), stage 14 (the ablation switches and runner measure this stage) · Modules touched: cognition, orchestration; `agents/` (orchestration lock); `docs/`
 
 ## Outcome
 
