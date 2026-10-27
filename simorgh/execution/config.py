@@ -18,6 +18,7 @@ from .external import ExternalToolSpec
 from .shell import DEFAULT_SHELL_REFUSALS
 from .mcp import McpServerConfig
 from .a2a import A2aAgentConfig, a2a_agents_from_mapping
+from .claudecode import ClaudeCodeConfig
 
 
 def _looks_like_the_repo(candidate: Path) -> bool:
@@ -598,6 +599,11 @@ class Config:
     # `{name: {url, auth_secret, allowed_data}}`, set only by a person.
     # Empty means `a2a_call` is not registered at all.
     a2a_agents: tuple[A2aAgentConfig, ...] = ()
+    # -- Claude Code as a coding worker (claudecode.py, stage 18 item 12):
+    # `[execution.claude_code]` enabled (default false: the tool is not
+    # registered), max_usd_per_run, max_runs_per_day, max_turns, wall_s,
+    # hook_timeout_s, allow_network, model.
+    claude_code: ClaudeCodeConfig = field(default_factory=ClaudeCodeConfig)
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object] | None) -> "Config":
@@ -631,5 +637,7 @@ class Config:
             )
         if "a2a_agents" in kwargs:
             kwargs["a2a_agents"] = a2a_agents_from_mapping(kwargs["a2a_agents"])
-        kwargs = {k: v for k, v in kwargs.items() if k in cls.__dataclass_fields__}
+        if "claude_code" in kwargs:
+            kwargs["claude_code"] = ClaudeCodeConfig.from_mapping(kwargs["claude_code"])
+        kwargs ={k: v for k, v in kwargs.items() if k in cls.__dataclass_fields__}
         return cls(**kwargs)

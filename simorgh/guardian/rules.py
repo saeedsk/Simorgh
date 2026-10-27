@@ -897,11 +897,21 @@ class HumanOnlyRule:
     layer = "human_only"
 
     async def evaluate(self, proposal: Proposal, ctx: DecisionContext) -> Decision:
-        if proposal.tool not in ctx.config.human_only_tools:
+        always = proposal.tool in ctx.config.human_only_tools
+        daily = proposal.tool in getattr(ctx.config, "daily_human_tools", ())
+        if not always and not daily:
             return Decision("abstain", self.layer)
         if ctx.posture.level == "locked" or ctx.config.mode == "locked":
             return Decision("deny", self.layer, (f"locked: {proposal.tool} is denied",))
-        return Decision("escalate", self.layer, (f"{proposal.tool} always needs a person",))
+        if always:
+            return Decision("escalate", self.layer, (f"{proposal.tool} always needs a person",))
+        # `daily_human_tools` (stage 18 item 12): the first call of the
+        # day needs a person; once one has said yes today, the ordinary
+        # rules decide the rest. Unknown counts as "not yet".
+        approved = getattr(ctx, "approved_today", None)
+        if approved is not None and approved(proposal.tool):
+            return Decision("abstain", self.layer)
+        return Decision("escalate", self.layer, (f"the first {proposal.tool} of the day needs a person",))
 
 
 class PhysicalRule:

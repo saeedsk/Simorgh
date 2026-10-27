@@ -148,6 +148,7 @@ _VERBS: dict[tuple[str, str | None], str] = {
     ("act", "propose_mcp_server"): "Proposing",
     ("act", "propose_a2a_agent"): "Proposing",
     ("act", "a2a_call"): "Asking a remote agent",
+    ("act", "claude_code_task"): "Handing it to Claude Code",
     ("act", "policy_adopt"): "Adopting a lesson",
     ("verify", None): "Verifying",
 }

@@ -24,7 +24,11 @@ tools = [
     # AND a host is configured -- an unregistered tool is simply
     # refused, so the offer costs nothing when it is off (the same
     # bargain `run_shell` above already makes).
-    "run_remote"
+    "run_remote",
+    # Stage 18 item 12: hand a feature to Claude Code in this task's
+    # worktree. Registered only when `[execution.claude_code] enabled`;
+    # Guardian asks a person on the first run of each day.
+    "claude_code_task"
 ]
 read_only = false
 max_steps = 20

@@ -488,6 +488,8 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     # it. Minutes, not seconds -- and it runs off the event loop.
     "kb_sources": 900.0,
     "run_remote": 330.0,
+    # `[execution.claude_code] wall_s` (1800 s) plus collecting the diff.
+    "claude_code_task": 1900.0,
     "geocode": 15.0,
     "apply_source_patch": 60.0,
     "replace_in_file": 60.0,
