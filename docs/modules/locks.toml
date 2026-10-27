@@ -41,12 +41,6 @@ task = "stages 9/17/18 parallel wave"
 since = "2026-10-27T09:37:27+00:00"
 until = "2026-10-27T17:37:27+00:00"
 
-[locks.memory]
-by = "claude-stage15"
-task = "stage 15 item 7: mem0-style reconcile"
-since = "2026-10-27T09:40:36+00:00"
-until = "2026-10-27T17:40:36+00:00"
-
 [locks.orchestration]
 by = "claude-stage14"
 task = "stage 14: toolchain evals + ablation"
