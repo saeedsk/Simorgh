@@ -289,6 +289,10 @@ class Session:
     #: and `metadata_ref`), kept while it is in a crew: the crew's own refs,
     #: which `read_ref` may read (stage 18, `Crew.readable`).
     owned_refs: list = field(default_factory=list)
+    #: The tools this session's last think offered (with tools), so a
+    #: session-local tool is answered only when it was one of them (a crew
+    #: tool, stage 18). In memory only: a resumed session thinks first.
+    offered: tuple = ()
 
     @property
     def trace(self) -> str:

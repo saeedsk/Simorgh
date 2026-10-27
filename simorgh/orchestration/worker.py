@@ -436,6 +436,10 @@ class Worker:
     async def crew_cancel(self, payload: dict) -> bool:
         return await self._runner.crew_cancel_external(payload)
 
+    async def deliver_pending(self) -> int:
+        """Background reports a stop left undelivered, delivered once."""
+        return await self._runner.deliver_pending_background()
+
     def prefetch_recall(self, session_id: str, text: str, *, channel: str = "", trace_id: str = "") -> None:
         """Start this turn's recall before its session exists (stage 5 item
         5). Best effort: the session falls back to an ordinary recall."""

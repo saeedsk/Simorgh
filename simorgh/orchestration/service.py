@@ -52,6 +52,9 @@ class Service:
         # A background crew's report, to the person who asked (stage 18
         # item 3): the console's notice, or Initiative's reminder path.
         topics.UI_NOTICE, topics.PERCEPT_TIME_SCHEDULED,
+        # The crew tools' own schemas, for a native provider (stage 18):
+        # the session answers them, so Execution never announces them.
+        topics.TOOL_REGISTERED,
     )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -148,6 +151,14 @@ class Service:
         ]
         await self._replay_registrations(ctx)
         await self._replay_capabilities(ctx)
+        await self._announce_crew_tools(ctx)
+        if self._workers:
+            # Background reports a stop left undelivered (stage 18), once,
+            # by one runner: every worker reads the same `crew:` streams.
+            try:
+                await self._workers[0].deliver_pending()
+            except Exception as exc:  # noqa: BLE001 -- a lost notice must never stop the boot
+                ctx.logger.warning("orchestration.crew_pending_failed", error=repr(exc))
         if self.config.metrics_interval_s > 0:
             self._metrics_task = asyncio.create_task(self._metrics_loop(), name="orchestration-metrics")
         ctx.logger.info("orchestration.started", workers=len(self._workers))
@@ -262,7 +273,35 @@ class Service:
         if names:
             ctx.logger.info("orchestration.capabilities_replayed", count=len(names))
 
+    async def _announce_crew_tools(self, ctx) -> None:
+        """`tool.registered` for each crew tool (`crew.TOOL_SPECS`).
+
+        The crew tools are answered by the session itself and never reach
+        Execution, so nothing announced them and Cognition handed a native
+        provider ten names over `{"type": "object"}`. Announced here, every
+        start, the way Execution announces its own -- Cognition keeps the
+        description and schema, Guardian and the World Model see a tool
+        with no effect. The schemas are noted directly too, so
+        `guardrails.validate` has them whatever the bus does."""
+        from .crew import TOOL_SPECS
+
+        for name, spec in TOOL_SPECS.items():
+            note_schema(name, spec["input_schema"])
+            try:
+                await ctx.bus.publish(Message.new(topics.TOOL_REGISTERED, source=ctx.bus.source, payload={
+                    "name": name, "version": VERSION, "description": spec["description"], "read_only": True,
+                    "reversibility": "read_only", "schema_ref": "", "provider": "builtin",
+                    "input_schema": spec["input_schema"]}))
+            except Exception as exc:  # noqa: BLE001 -- a missing schema costs a native provider clarity, not a boot
+                ctx.logger.warning("orchestration.crew_tool_announce_failed", tool=name, error=repr(exc))
+
     async def _on_tool_registered(self, message) -> None:
+        if self._ctx is not None and self._ours(message):
+            # Our own crew tools (`_announce_crew_tools`): their schema is
+            # already noted, and they are no Execution tool to add to the
+            # known set or the policy table (a read-only policy would batch
+            # `await_agents` with reads).
+            return
         p = message.payload
         note_registered(p.get("name", ""))
         note_schema(p.get("name", ""), p.get("input_schema"))
