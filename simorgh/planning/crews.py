@@ -75,7 +75,7 @@ class ProjectCrews:
     def __init__(self, store, bus, clock, *, source: str, concurrency: int = 4,
                  spawn_timeout_s: float = 5.0, lease_seconds: float = 600.0,
                  brief_for: Callable[[Task], Awaitable[tuple[str, list[str]]]] | None = None,
-                 logger=None) -> None:
+                 may_start: Callable[[Task], bool] | None = None, logger=None) -> None:
         self._store = store
         self._bus = bus
         self._clock = clock
@@ -84,6 +84,11 @@ class ProjectCrews:
         self._spawn_timeout_s = float(spawn_timeout_s)
         self._lease_seconds = float(lease_seconds)
         self._brief_for = brief_for
+        #: False for a node the queue would hold back now: the system paused
+        #: or stopping, or `auto off` and the node's origin autonomous. The
+        #: queue's own rule (`Scheduler._offerable`), so a crew never starts
+        #: what a Worker would not have been offered.
+        self._may_start = may_start
         self._logger = logger
         #: node task id -> project id, for every member this process started.
         self.inflight: dict[str, str] = {}
@@ -134,7 +139,8 @@ class ProjectCrews:
             for task in sorted(ready, key=lambda t: t.created_at):
                 project = self.project_of(task)
                 if (task.id in self.inflight or project in self.fallback
-                        or len(self.running(project)) >= self.concurrency):
+                        or len(self.running(project)) >= self.concurrency
+                        or (self._may_start is not None and not self._may_start(task))):
                     # In flight already: its lease lapsed while the member
                     # runs, and its report is still to come.
                     continue

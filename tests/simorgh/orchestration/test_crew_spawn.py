@@ -232,5 +232,79 @@ class AThreeNodeProjectEndToEnd(unittest.TestCase):
         first_end = min(max(e for t, _, e in cognition.spans if t == c.id) for c in children)
         self.assertLess(firsts[-1], first_end, "a node waited for another to finish before it started")
 
+class ReviewFindings(unittest.TestCase):
+    """The stage 18 item 4 review (2026-10-27)."""
+
+    @run
+    async def test_a_plan_node_keeps_the_per_attempt_limits_a_claimed_task_has(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=1, metrics_interval_s=0, attempt_max_tokens=900,
+                                                  attempt_max_usd=0.25, attempt_max_wall_s=120.0))
+            await service.start(_ctx(h, "orchestration"))
+            children = []
+            for w in service._workers:  # noqa: SLF001 -- admission only
+                w._runner._start_member = lambda crew, member, child, *a: children.append(child)  # noqa: SLF001
+            reply = await h.client("planning").request(Message.new(
+                topics.CREW_SPAWN, source="planning", payload=_node("n1", "find it")), timeout=2.0)
+            self.assertEqual(reply.payload["handle"], "n1")
+            await service.stop()
+        b = children[0].budget
+        self.assertEqual((b.max_tokens, b.max_usd, b.max_wall_s), (900, 0.25, 120.0))
+
+    @run
+    async def test_one_crew_lives_in_one_worker(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=3, metrics_interval_s=0))
+            await service.start(_ctx(h, "orchestration"))
+            gate = asyncio.Event()
+
+            async def hold(*a, **k):
+                await gate.wait()
+            for w in service._workers:  # noqa: SLF001 -- members stay running
+                w._runner.run = hold  # noqa: SLF001
+            for i in range(3):
+                reply = await h.client("planning").request(Message.new(
+                    topics.CREW_SPAWN, source="planning", payload=_node(f"n{i}", "find it")), timeout=2.0)
+                self.assertEqual(reply.payload["crew_id"], "proj-1")
+            holders = [w for w in service._workers if "proj-1" in w._runner._crews]  # noqa: SLF001
+            self.assertEqual(len(holders), 1)
+            self.assertEqual(len(holders[0]._runner._crews["proj-1"].members), 3)  # noqa: SLF001
+            gate.set()
+            await asyncio.sleep(0.05)
+            await service.stop()
+
+    @run
+    async def test_an_outside_caller_neither_names_a_handle_nor_joins_anothers_crew(self):
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now, assemble_timeout_s=0.05)
+            runner._start_member = lambda *a, **k: None  # noqa: SLF001 -- admission only
+            crew_id, handle = await runner.spawn_detached({
+                "agent": "research", "brief": "x", "requester": "Ira", "requester_channel": "a2a",
+                "handle": "some-task-id"})
+            self.assertNotEqual(handle, "some-task-id")
+            # The same person on the same channel may come back to the crew.
+            again = await runner.spawn_detached({"agent": "research", "brief": "y", "requester": "Ira",
+                                                 "requester_channel": "a2a", "context_id": crew_id})
+            self.assertEqual(again[0], crew_id)
+            # Somebody else, or a project's node, may not.
+            with self.assertRaises(CrewRefused):
+                await runner.spawn_detached({"agent": "research", "brief": "z", "requester": "Aran",
+                                             "requester_channel": "a2a", "context_id": crew_id})
+            with self.assertRaises(CrewRefused):
+                await runner.spawn_detached(_node("n9", "x", context_id=crew_id), plan_node=True)
+            # Nor into a project's crew.
+            await runner.spawn_detached(_node("n1", "x"), plan_node=True)
+            with self.assertRaises(CrewRefused):
+                await runner.spawn_detached({"agent": "research", "brief": "z", "requester": "Ira",
+                                             "requester_channel": "a2a", "context_id": "proj-1"})
+            # Nor into a running session's own crew; a refused crew is not kept.
+            runner._open["sess-1"] = object()  # noqa: SLF001
+            with self.assertRaises(CrewRefused):
+                await runner.spawn_detached({"agent": "research", "brief": "z", "requester": "Ira",
+                                             "requester_channel": "a2a", "context_id": "sess-1"})
+            self.assertNotIn("sess-1", runner._crews)  # noqa: SLF001
+            runner._open.pop("sess-1")  # noqa: SLF001
+
+
 if __name__ == "__main__":
     unittest.main()

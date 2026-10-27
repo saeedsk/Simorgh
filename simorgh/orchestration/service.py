@@ -278,8 +278,16 @@ class Service:
                 raise ValueError("orchestration has no worker")
             if plan_node and str(message.source or "").split("@", 1)[0] != "planning":
                 raise ValueError("only Planning may start a plan node")
-            worker = self._workers[self._next_worker % len(self._workers)]
-            self._next_worker += 1
+            # A crew lives in one runner: its writer slot, member count and
+            # message order are that runner's. A spawn into a crew already in
+            # memory goes to the Worker that holds it (with `workers` > 1,
+            # round-robin put a project's patch nodes in two crews, two
+            # writer slots).
+            context_id = str(payload.get("context_id") or "")
+            worker = next((w for w in self._workers if w.holds_crew(context_id)), None)
+            if worker is None:
+                worker = self._workers[self._next_worker % len(self._workers)]
+                self._next_worker += 1
             crew_id, handle = await worker.spawn_detached(payload, plan_node=plan_node)
         except (CrewRefused, ValueError) as exc:
             if message.reply_to:

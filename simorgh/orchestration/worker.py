@@ -403,8 +403,15 @@ class Worker:
             await self._bus.publish(msg)
 
     async def spawn_detached(self, payload: dict, *, plan_node: bool = False) -> tuple[str, str]:
-        """`crew.spawn`: one member with no parent session (`SessionRunner.spawn_detached`)."""
-        return await self._runner.spawn_detached(payload, plan_node=plan_node)
+        """`crew.spawn`: one member with no parent session (`SessionRunner.spawn_detached`).
+        A plan node gets the per-attempt limits a claimed task gets here."""
+        return await self._runner.spawn_detached(payload, plan_node=plan_node,
+                                                 attempt_limits=self._attempt_limits if plan_node else None)
+
+    def holds_crew(self, crew_id: str) -> bool:
+        """Whether this Worker's runner has `crew_id` in memory: one crew
+        lives in one runner, or its writer slot and member counts split."""
+        return bool(crew_id) and crew_id in self._runner._crews  # noqa: SLF001
 
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
         self.current_task_id, self.current_kind = session.task_id, session.kind

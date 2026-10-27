@@ -291,6 +291,75 @@ class AWorkerMayNotClaimACrewNode(ProjectsOnCrewsCase):
         self.assertEqual(reply.payload["reason"], "runs_on_crew")
 
 
+class TheQueuesHoldsApply(ProjectsOnCrewsCase):
+    """Review 2026-10-27: a crew node starts only when the queue would have
+    offered it -- not while the system is paused, nor under `auto off`
+    (a plan node's origin, `project`, is autonomous)."""
+
+    async def _spawned_after(self, runtime, seconds=0.1):
+        for _ in range(int(seconds / 0.01)):
+            await asyncio.sleep(0.01)
+        return [h for h, _, _ in runtime.spawned]
+
+    async def test_nothing_starts_while_the_system_is_paused(self):
+        runtime = FakeCrewRuntime(self.other, delays={})
+        await runtime.start()
+        self.service._scheduler.paused = True  # noqa: SLF001
+        project, ids = await self._project([Step("s1", "research", "alpha: x")])
+        await self.service._project_crews.dispatch()  # noqa: SLF001
+        self.assertEqual(await self._spawned_after(runtime), [])
+        self.service._scheduler.paused = False  # noqa: SLF001
+        await self.service._project_crews.dispatch()  # noqa: SLF001
+        await self._wait_finished()
+        self.assertEqual([h for h, _, _ in runtime.spawned], [ids["alpha:"]])
+
+    async def test_nothing_starts_under_auto_off(self):
+        runtime = FakeCrewRuntime(self.other, delays={})
+        await runtime.start()
+        self.service._scheduler.autonomous_paused = True  # noqa: SLF001
+        await self._project([Step("s1", "research", "alpha: x")])
+        await self.service._project_crews.dispatch()  # noqa: SLF001
+        self.assertEqual(await self._spawned_after(runtime), [])
+        self.service._scheduler.autonomous_paused = False  # noqa: SLF001
+        await self.service._project_crews.dispatch()  # noqa: SLF001
+        await self._wait_finished()
+        self.assertEqual(self.project_events[0][0], topics.PROJECT_COMPLETED)
+
+
+class AHumanTaskDoesNotPreemptACrewNode(ProjectsOnCrewsCase):
+    # A project weighs as much as a human by default, so only a deployment
+    # that lowers it reaches the preemption at all.
+    config = Config(project_crews=True, project_crew_spawn_timeout_s=0.5,
+                    priority_weights={"human": 3, "project": 1, "benchmark": 2, "reflection": 2,
+                                      "assistant": 2, "curiosity": 1, "research": 1})
+
+    async def test_the_running_node_is_left_alone(self):
+        runtime = FakeCrewRuntime(self.other, delays={"alpha": 0.3})
+        await runtime.start()
+        cancels = []
+
+        async def _cancel(message):
+            cancels.append(dict(message.payload))
+        await self.other.subscribe(topics.TASK_CANCEL, _cancel)
+        project, ids = await self._project([Step("s1", "research", "alpha: x")])
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if runtime.spawned:
+                break
+        await self.other.publish(Message.new(topics.TASK_STARTED, source="orchestration",
+                                             payload={"task_id": ids["alpha:"], "worker_id": "w0"}))
+        for _ in range(20):
+            await asyncio.sleep(0.005)
+        self.assertEqual(self.store.index.tasks[ids["alpha:"]].status, "in_progress")
+        human = await self.store.create(kind="research", description="mine now", origin="human",
+                                        initial_status=AVAILABLE)
+        await self.service._preempt_for(human)  # noqa: SLF001
+        await asyncio.sleep(0.02)
+        self.assertEqual(cancels, [])
+        await self._wait_finished()
+        self.assertEqual(self.project_events[0][0], topics.PROJECT_COMPLETED)
+
+
 class OffByDefault(unittest.TestCase):
     def test_the_switch_is_off_and_reads_from_the_mapping(self):
         self.assertFalse(Config().project_crews)

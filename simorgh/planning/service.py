@@ -202,7 +202,8 @@ class Service:
                 self._store, ctx.bus, ctx.clock, source=ctx.source,
                 concurrency=self.config.project_crew_concurrency,
                 spawn_timeout_s=self.config.project_crew_spawn_timeout_s,
-                lease_seconds=self.config.lease_seconds, brief_for=self._node_brief, logger=ctx.logger)
+                lease_seconds=self.config.lease_seconds, brief_for=self._node_brief,
+                may_start=self._crew_may_start, logger=ctx.logger)
             # A node that runs on a crew is never offered on the queue.
             self._scheduler.hold = self._project_crews.holds
 
@@ -503,6 +504,10 @@ class Service:
         running = [
             t for t in self._store.index.tasks.values()
             if t.status == IN_PROGRESS and weight.get(t.origin, 0) < mine
+            # A plan node on a crew holds no Worker, so preempting it frees
+            # nothing; and its member, cancelled, reports `cancelled`, which
+            # would end the node and its project as failed (stage 18 item 4).
+            and not self._crew_holds(t)
         ]
         if not running:
             return
@@ -1048,6 +1053,16 @@ class Service:
 
     def _crew_holds(self, task: Task) -> bool:
         return self._project_crews is not None and self._project_crews.holds(task)
+
+    def _crew_may_start(self, task: Task) -> bool:
+        """The queue's hold, applied to a crew node: nothing starts while the
+        system is paused or stopping, and an autonomous-origin node (a plan
+        node's origin is `project`) waits out `auto off` -- the 2026-09-09
+        rule that the backlog stops when autonomy is off."""
+        s = self._scheduler
+        if s is None:
+            return True
+        return not (s.paused or (s.autonomous_paused and task.origin in s._autonomous_origins))  # noqa: SLF001
 
     def _kick_crews(self) -> None:
         if self._project_crews is not None:
