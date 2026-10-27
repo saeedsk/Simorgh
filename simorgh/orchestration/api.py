@@ -289,6 +289,14 @@ class Session:
     #: and `metadata_ref`), kept while it is in a crew: the crew's own refs,
     #: which `read_ref` may read (stage 18, `Crew.readable`).
     owned_refs: list = field(default_factory=list)
+    #: Tool routing (stage 17, `routing.py`), on a chat turn with
+    #: `[orchestration] tool_routing` not off: the groups the turn was
+    #: routed to (None until its first think routes it), whether the
+    #: conversational class won, and the groups added since -- by
+    #: `tool_more`, or by a call to a tool of a group that was not offered.
+    route: tuple | None = None
+    route_conversational: bool = False
+    route_more: list = field(default_factory=list)
 
     @property
     def trace(self) -> str:

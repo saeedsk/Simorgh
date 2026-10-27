@@ -162,6 +162,7 @@ from simorgh.contracts.pytestfailures import hoist_marker
 from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -- re-export
 from simorgh.contracts.envelope import Event, Message
 
+from . import routing as routing_mod
 from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
@@ -784,7 +785,26 @@ class SessionRunner:
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
         crew_max_members: int = 8, crew_max_writers: int = 1, crew_max_usd: float = 0.5,
         crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0, chat_crews: bool = False,
+        tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
+        route_none_margin: float = 0.15, route_groups=None, route_embed=None,
     ) -> None:
+        #: `[orchestration] tool_routing` (stage 17, `routing.py`): off,
+        #: shadow or on, for chat and spoken turns. `ablate = ["routing"]`
+        #: is off whatever this says. `route_groups` and `route_embed`
+        #: stand in for `agents/groups.toml` and the lexical default.
+        self._routing = tool_routing if tool_routing in routing_mod.MODES else "off"
+        if "routing" in (ablate or ()):
+            self._routing = "off"
+        self._route_params = (max(1, int(route_top_k)), max(0, int(route_sticky_turns)), float(route_none_margin))
+        self._route_groups = tuple(route_groups) if route_groups is not None else None
+        # The plan's centroid needs a semantic embedder; the lexical
+        # stand-in scores each group by its nearest example
+        # (`routing.AGGREGATES`).
+        self._route_embed = route_embed or routing_mod.lexical_embed
+        self._route_aggregate = "centroid" if route_embed is not None else "nearest"
+        #: The groups each conversation (`transcript.conversation_id`)
+        #: used in its last turns, newest last: `route_sticky_turns`.
+        self._route_history: dict[str, list[tuple[str, ...]]] = {}
         #: `[orchestration] chat_crews` (stage 18 item 3): a chat or voice
         #: turn is offered `spawn` (read-only agents; voice only in the
         #: background). Off by default.
@@ -961,6 +981,10 @@ class SessionRunner:
             outcome = await self._run(session, user_text=user_text)
         finally:
             self._open.pop(session.task_id, None)
+            try:
+                self._route_done(session)
+            except Exception:  # noqa: BLE001 -- a routing record is never worth a turn
+                pass
             crew = self._crew_of(session)
             if crew is not None and crew.root == session.task_id:
                 # A background crew whose members all finished while the
@@ -1490,7 +1514,10 @@ class SessionRunner:
                         ok, summary, detail = await self._recall_result(call)
                     elif call.get("tool") == MEMORY_SEARCH:
                         ok, summary, detail = await self._memory_search(session, call)
+                    elif call.get("tool") == routing_mod.TOOL_MORE:
+                        ok, summary, detail = await self._tool_more(session, call, step_no)
                     else:
+                        self._route_note_use(session, str(call.get("tool") or ""))
                         ok, summary, detail = await self._propose_and_await(session, call, step_no)
                     # `detail` (narration/Ledger, generously bounded) vs `summary`
                     # (the model's own next-turn context, tightly bounded) are
@@ -1766,6 +1793,112 @@ class SessionRunner:
         text = str((reply.payload or {}).get("text") or "").strip()
         return text[:200]
 
+    # -- tool routing (stage 17 items 3 and 6, `routing.py`) -----------------
+
+    def _routes(self, session: Session) -> bool:
+        """Whether this session is routed: a chat or spoken turn of the
+        person's own, with `tool_routing` not off. Tasks, helpers and crew
+        members are offered their agent's whole list, as before."""
+        return (self._routing != "off" and session.kind == "chat" and session.profile.scaffold == "chat"
+                and not session.depth and not session.crew_member)
+
+    def _groups(self) -> tuple:
+        if self._route_groups is None:
+            self._route_groups = routing_mod.load_groups()
+        return self._route_groups
+
+    @staticmethod
+    def _conversation(session: Session) -> str:
+        from .transcript import conversation_id
+
+        return conversation_id(session.channel, session.speaker)
+
+    def _route_offer(self, session: Session, offered: tuple) -> tuple[tuple, tuple]:
+        """`(shown, not_shown)`: what the model is offered this step, and
+        the agent's other tools, which stay callable. Routed once per turn,
+        at its first think; `tool_more` widens the later steps."""
+        if not self._routes(session):
+            return tuple(offered), ()
+        groups = self._groups()
+        if session.route is None:
+            top_k, sticky, margin = self._route_params
+            text = session.user_text or ""
+            history = self._route_history.get(self._conversation(session), [])
+            session.route = routing_mod.route(text, history, groups, self._route_embed, top_k=top_k,
+                                              sticky_turns=sticky, none_margin=margin,
+                                              aggregate=self._route_aggregate)
+            scored = routing_mod.scores(text, groups, self._route_embed, aggregate=self._route_aggregate)
+            session.route_conversational = routing_mod.conversational(scored, groups, margin)
+        if self._routing != "on":
+            # Shadow: the route is recorded at the end of the turn; the
+            # model is offered exactly what it would be with routing off.
+            return tuple(offered), ()
+        names = tuple(session.route) + tuple(session.route_more)
+        shown = routing_mod.tools_for(names, groups, tuple(offered) + (routing_mod.TOOL_MORE,))
+        return shown, tuple(t for t in offered if t not in shown)
+
+    def _route_note_use(self, session: Session, tool: str) -> None:
+        """A call to a tool of a group this turn was not offered (the model
+        knew it from an earlier turn): it goes to Guardian like any call,
+        and its group is offered from the next step on."""
+        if not self._routes(session) or session.route is None or not tool:
+            return
+        group = routing_mod.group_of(tool, self._groups())
+        if group and group not in session.route and group not in session.route_more:
+            session.route_more.append(group)
+
+    async def _tool_more(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
+        """`tool_more{group}`: the model asks for a group the router left
+        out. The name is checked here, then the call is proposed to
+        Guardian like any other (Execution answers it), and only an
+        approved call adds the group to the next step."""
+        args = call.get("args") or {}
+        raw = (args.get("group") or args.get("argument") or "") if isinstance(args, dict) else args
+        name = str(raw or "").strip().strip("\"'`").lower()
+        groups = [g for g in self._groups() if g.tools and g.name != routing_mod.CONVERSATIONAL]
+        if name not in {g.name for g in groups}:
+            text = (f"{routing_mod.TOOL_MORE}: no group called {name!r}. The groups are: "
+                    + "; ".join(f"{g.name} ({g.description})" for g in groups))
+            return False, text, Detail(text, "refused")
+        ok, summary, detail = await self._propose_and_await(session, {**call, "args": {"group": name}}, step_no)
+        if not ok:
+            return ok, summary, detail
+        if self._routes(session) and name not in (session.route or ()) and name not in session.route_more:
+            session.route_more.append(name)
+        group = next(g for g in groups if g.name == name)
+        tools = routing_mod.tools_for((name,), self._groups(), offered_tools(session.profile.tools))
+        tools = tuple(t for t in tools if routing_mod.group_of(t, self._groups()) == name)
+        text = (f"The {name} tools are offered from your next step: {', '.join(tools)}." if tools
+                else f"This agent has no {name} tools.")
+        return True, text, Detail(f"{routing_mod.TOOL_MORE}: {name} -- {group.description}", "")
+
+    def _route_done(self, session: Session) -> None:
+        """The end of a routed turn: remember which groups it used, for
+        the next turns' stickiness, and record the route beside what was
+        used -- `routing.shadow` in shadow mode, `routing.on` in on -- so
+        the miss rate (a tool used that the router would not have
+        offered) can be counted from telemetry (plan, item 3)."""
+        if not self._routes(session) or session.route is None:
+            return
+        groups = self._groups()
+        used = list(dict.fromkeys(str(s.tool) for s in session.steps
+                                  if s.tool and s.tool != routing_mod.TOOL_MORE))
+        used_groups = tuple(sorted({g for t in used if (g := routing_mod.group_of(t, groups))}))
+        sticky = self._route_params[1]
+        if sticky:
+            turns = self._route_history.setdefault(self._conversation(session), [])
+            turns.append(used_groups)
+            del turns[:-sticky]
+        would = routing_mod.tools_for(session.route, groups,
+                                      offered_tools(session.profile.tools) + (routing_mod.TOOL_MORE,))
+        self._telemetry.event(
+            f"routing.{self._routing}", trace_id=session.trace or session.task_id, span_id=uuid.uuid4().hex,
+            ts=_epoch(self._clock) or None,
+            attrs={"offered": list(session.route), "used": used, "used_groups": list(used_groups),
+                   "missed": [t for t in used if t not in would], "more": list(session.route_more),
+                   "conversational": session.route_conversational,
+                   "tools_offered": len(would), "channel": session.channel or ""})
+
     async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message | None:
         # Everything up to this call is durable before the model is asked.
         await self._persist_transcript(session)
@@ -1773,6 +1906,10 @@ class SessionRunner:
         # `offered_tools(())` means "every registered tool" (skills arrive
         # that way); the wrap-up call wants none at all.
         offered = () if no_tools else offered_tools(session.profile.tools)
+        # Tool routing (stage 17): `on` narrows what the model is shown to
+        # the routed groups; the rest stay callable (`not_shown`), since a
+        # tool not offered is not a tool denied. Off returns `offered` as is.
+        offered, not_shown = self._route_offer(session, offered) if offered else (offered, ())
         if (offered and self._delegation and session.depth < self._max_depth
                 and session.profile.scaffold in ("patch", "research") and "delegate" not in offered):
             offered = tuple(offered) + ("delegate",)
@@ -1797,7 +1934,7 @@ class SessionRunner:
         if offered and any(str(m.get("content") or "").startswith(pressure_mod.STUB_MARK) for m in session.messages):
             offered = tuple(offered) + (pressure_mod.RECALL_TOOL,)
         if session.guards is not None and not no_tools:
-            session.guards.offered = tuple(offered)
+            session.guards.offered = tuple(offered) + tuple(not_shown)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         # Per-turn material goes to the latest user turn, so the system
         # prefix stays byte-identical from turn to turn (stage 4 item 4).
@@ -2069,6 +2206,9 @@ class SessionRunner:
             return await self._memory_search(session, call)
         if call.get("tool") == WAIT:
             return await self._wait(session, call)
+        if call.get("tool") == routing_mod.TOOL_MORE:
+            return await self._tool_more(session, call, step_no)
+        self._route_note_use(session, str(call.get("tool") or ""))
         return await self._propose_and_await(session, call, step_no)
 
     async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:

@@ -1,6 +1,6 @@
 # Stage 17 -- Tool routing and prompt compression, measured first
 
-Status: **planned** (2026-10-27: plan written; item 1 is the gate for the rest) · Depends on: stage 14 (ablation runner, `toolchain/` selection scenarios), stage 4 (cacheable prefix), stage 2 (tool schemas to the model) · Modules touched: orchestration (owner), cognition, telemetry, evals; `docs/`
+Status: **in progress** (2026-10-27: plan written; gate OPEN -- tool schemas are 50% of uncached input tokens on GLM-5.3-Flash chat turns, cache hit 0%; items 3 and 6 built, default `off`: `agents/groups.toml`, `orchestration/routing.py`, `tool_more`, `[orchestration] tool_routing` off/shadow/on with `routing.shadow` telemetry; the router uses a lexical stand-in embedder until Memory's is reachable over the bus; next: the shadow week) · Depends on: stage 14 (ablation runner, `toolchain/` selection scenarios), stage 4 (cacheable prefix), stage 2 (tool schemas to the model) · Modules touched: orchestration (owner), cognition, telemetry, evals; `docs/`
 
 ## Outcome
 

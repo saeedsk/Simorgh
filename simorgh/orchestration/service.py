@@ -125,6 +125,9 @@ class Service:
                             skills_roots=tuple(self.config.skills_roots),
                             skills_channels=tuple(self.config.skills_channels),
                             chat_crews=self.config.chat_crews,
+                            tool_routing=self.config.tool_routing,
+                            route_params=(self.config.route_top_k, self.config.route_sticky_turns,
+                                          self.config.route_none_margin),
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)
