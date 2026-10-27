@@ -2222,6 +2222,75 @@ class SessionRunner:
         self._forget_crew(crew.crew_id)
         return outcome
 
+    async def spawn_detached(self, payload: dict, *, plan_node: bool = False) -> tuple[str, str]:
+        """`crew.spawn` (stage 18 items 4 and 10): start one member with no
+        parent session, under the crew `context_id` names (a new one when it
+        names none), and return `(crew_id, handle)` at once. CrewRefused or
+        ValueError with the reason.
+
+        `plan_node` is a project's plan node, sent by Planning: its handle
+        is the node's task id (so its `task:<id>` stream, `task.started`
+        and `task.step` are the node's, as when a Worker claimed it), it
+        keeps its agent's verifier and acceptance criteria, it resumes
+        from what an earlier attempt left, and it is outside the crew's
+        member, dollar and wall bounds -- the bounds a queued task never
+        had. It acts with a claimed task's authority (no requester, the
+        console channel), which is why the caller must check who sent it."""
+        from dataclasses import replace as _replace
+
+        from . import profiles as _agents
+
+        wanted = str(payload.get("agent") or "").strip().lower()
+        if wanted not in _agents.AGENTS:
+            raise ValueError(f"no agent called {wanted!r}; the agents are {', '.join(sorted(_agents.AGENTS))}")
+        brief = str(payload.get("brief") or "").strip()
+        if not brief:
+            raise ValueError("say what the member should do (`brief`)")
+        channel = str(payload.get("requester_channel") or "")
+        if not plan_node and not channel:
+            # Guardian reads "" as the owner's console (contracts CONTRACT.md).
+            raise ValueError("a crew started from outside needs a requester_channel")
+        policy = str(payload.get("report") or "end").strip()
+        crew_id = str(payload.get("context_id") or "") or f"crew-{uuid.uuid4().hex[:12]}"
+        crew = self._crews.get(crew_id)
+        if crew is None:
+            events = []
+            if self._ledger is not None:
+                try:
+                    events = await self._ledger.read(crew_stream(crew_id))
+                except Exception:  # noqa: BLE001 -- an unreadable stream starts the crew afresh
+                    events = []
+            crew = self._new_crew(crew_id, events)
+            self._crews[crew_id] = crew
+        agent = _agents.AGENTS[wanted]
+        handle = str(payload.get("handle") or "")
+        running = crew.members.get(handle)
+        if running is not None and running.task is not None and not running.task.done():
+            raise CrewRefused(f"{handle} is already running in crew {crew_id}")
+        steps = int(payload.get("max_steps") or 0) or (agent.max_steps if plan_node else self._delegate_max_steps)
+        member = await crew.admit(
+            parent=crew_id, agent=agent.name, brief=brief, depth=1, budget=MemberBudget(steps=steps),
+            report_policy=policy, writer=self._writes(agent), via="project" if plan_node else "spawn",
+            background=bool(payload.get("background")), brief_ref=await self._brief_ref(brief),
+            # A node retried keeps its handle: the member before it has ended
+            # (or died with an earlier process), and this one replaces it.
+            handle=handle,
+            requester="" if plan_node else str(payload.get("requester") or ""),
+            requester_channel="" if plan_node else channel)
+        child = self._member_session(None, member, agent)
+        if plan_node:
+            child.profile = _replace(child.profile, verify=agent.verify)
+            child.acceptance = [str(a) for a in (payload.get("acceptance") or [])]
+            child.subject = payload.get("subject") or None
+            from .resume import restore_session
+
+            try:
+                await restore_session(child, self._ledger)
+            except Exception:  # noqa: BLE001 -- a node with no stream yet starts fresh
+                pass
+        self._start_member(crew, member, child, brief, None)
+        return crew_id, member.handle
+
     @staticmethod
     def _report_status(outcome: Outcome, member) -> str:
         if member.cancel_reason:

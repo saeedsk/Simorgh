@@ -14,6 +14,7 @@ Planning owns the task queue: every task's lifecycle as an event-sourced `task:<
 | `simorgh/planning/api.py` | internal protocols (`TaskStoreProtocol`, `DependencyGraphProtocol`) |
 | `simorgh/planning/bridge.py` | `BusCognitionCaller`: `cognition.think` with a timeout, `None` on no answer |
 | `simorgh/planning/config.py` | `[planning]` dataclass (plus `SIMORGH_PLANNING_LEASE_SECONDS`) |
+| `simorgh/planning/crews.py` | `ProjectCrews`: a project's ready plan nodes started as crew members (`crew.spawn`), the per-project cap, the hold that keeps them off the queue, `outcome_of(report)` (stage 18 item 4) |
 | `simorgh/planning/dag.py` | dependency validation (unknown id, cycle), dependents, readiness |
 | `simorgh/planning/decomposer.py` | `parse_steps` (numbered-list regex) and `decompose` via `purpose="decompose"` |
 | `simorgh/planning/dedupe.py` | `difflib` fuzzy duplicate test (threshold 0.45) |
@@ -56,6 +57,7 @@ Authority: the handler table in `service.py:157-183`. `Service.consumes` (`servi
 | `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/planning/service.py | lease scan, cancelled-after-expiry, blocked retries, approval timeouts, dispatch; backlog metrics every 30 s |
 | `system.tick.idle` | `messages/system.py::SystemTickIdle` | simorgh/planning/service.py | dispatch ready work |
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/planning/service.py | pause/resume the scheduler, honour `autonomous_paused`, requeue paused tasks on resume |
+| `crew.report` | `messages/crew.py::CrewReport` | simorgh/planning/service.py `_on_crew_report` | only with `project_crews` on, and only for a node this process spawned (`ProjectCrews.inflight`): `ok` -> publishes `task.completed` for the node; `partial`/`blocked` -> retry-or-block with the report's first line as the reason; `failed`/`cancelled` -> publishes `task.failed{terminal}`. The existing handlers then do the bookkeeping, so the rollup, the DAG and the dependents' readiness are unchanged (stage 18 item 4) |
 
 Requests it makes: `cognition.think` (`purpose="decompose"` on replan, `purpose="reground"`) through `bridge.py`, timeout `think_timeout_s`; reads a plan artifact blob from the Ledger (`service.py:1088-1090`).
 
@@ -85,6 +87,8 @@ Requests it makes: `cognition.think` (`purpose="decompose"` on replan, `purpose=
 | `ui.notice` | `messages/ui.py::UiNotice` | simorgh/planning/service.py | duplicates, empty plans, rejections, approval timeouts |
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/planning/service.py | every 30 s: backlog and counts by status |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/planning/bridge.py | request, for replan and re-grounding |
+| `crew.spawn` | `messages/crew.py::CrewSpawn` | simorgh/planning/crews.py | request, with `project_crews` on: one per ready plan node, up to `project_crew_concurrency` per project: `{agent: <node kind>, brief: <whole description + "Done when: ...">, requester: "", requester_channel: "planning", report: "end", context_id: <project id>, handle: <node task id>, plan_node: true, subject?, acceptance?, max_steps?}`. The node is claimed first under worker id `crew:<project id>`. An error reply or no reply within `project_crew_spawn_timeout_s` releases the node and puts that project back on the queue for the rest of the process (`planning.project_crew_fallback` warning) |
+| `task.completed` | `messages/task.py::TaskCompleted` | simorgh/planning/service.py `_on_crew_report` | a crew-run plan node's `ok` report (`verification_ref: null`; the member was verified inside its session) |
 
 `task.cancel` and `task.cleared` are published but not in `Service.produces` (the publish direction is not pinned by any test).
 
@@ -124,6 +128,9 @@ Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus
 | `priority_weights` | `field(default_factory=lambda: {'human': 3, 'project': 3, 'be` | yes |
 | `leader` | `True` | NO (declared, never read) |
 | `think_timeout_s` | `200.0` | yes |
+| `project_crews` | `False` | yes: projects on crews (stage 18 item 4); off until a live trial |
+| `project_crew_concurrency` | `4` | yes: crew members per project at once (Orchestration's `max_children_concurrent` caps the crew again) |
+| `project_crew_spawn_timeout_s` | `5.0` | yes: how long a `crew.spawn` may go unanswered before the project falls back to the queue |
 
 `max_task_attempts` and `leader` are listed in `kernel/configcheck.py:147` `KNOWN_DEAD_FIELDS`. `SIMORGH_PLANNING_LEASE_SECONDS` overrides `lease_seconds` (`config.py`, `from_mapping`).
 
@@ -171,6 +178,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/planning/test_project_decomposition.py` -- `parse_steps` keeps only steps under the live source roots, and the plan scaffold's format is what the parser reads.
 - `tests/simorgh/planning/test_decomposer_dedupe_planmode.py` -- the plan approval matrix, the human-approval timeout predicate, the dedupe threshold.
 - `tests/simorgh/planning/test_the_backlog_is_offered_without_an_idle_tick.py` -- ready work is offered on the second tick, once per generation.
+- `tests/simorgh/planning/test_projects_on_crews.py` -- stage 18 item 4 against a fake crew runtime: three independent nodes run together (the project takes its longest node), the spawn names the node, the project and its acceptance, the per-project cap, a dependent node waits for its dependency, a failed node reports and ends the project, a `partial` report goes through the retry path, an unanswered spawn puts the project back on the queue, and a Worker may not claim a crew-run node. The end-to-end run with Orchestration is `tests/simorgh/orchestration/test_crew_spawn.py`.
 
 ## Known issues (2026-09-18 evaluation)
 
@@ -189,6 +197,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - Stage 7 item 5: a WAITING state (`task.waiting{until | event | human}`, `task.wake`, `task.answer`) that holds no worker.
 - Stage 7 item 6: two consecutive `drifting` checkpoint verdicts re-plan the subtree; `reground.py` becomes a structured subtree revision.
 - Stage 7 item 9: standing intents as `wait{event}` nodes (with `worldmodel`).
+- Stage 18 item 4 (built 2026-10-27, `project_crews` off by default): a project's ready nodes run as crew members, one crew per project. Not yet: a live trial, and switching it on; a member that `wait`s parks its node (`task.waiting`) and then reports `blocked`, which retries it rather than waking it.
 - This file is to be updated when stage 7 lands.
 
 ## Working on this module

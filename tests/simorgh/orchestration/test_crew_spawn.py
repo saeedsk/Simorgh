@@ -1,0 +1,236 @@
+"""`crew.spawn` answered (stage 18 items 4 and 10): a member started from
+outside any session, and a project's plan nodes running as one crew.
+
+The last case is item 4's acceptance end to end: Planning with
+`project_crews` on and Orchestration's real Service on one bus, a three-node
+independent plan, fake providers with a fixed delay per node. Nothing here
+calls a model."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+import unittest
+from pathlib import Path
+
+from simorgh.contracts import topics
+from simorgh.contracts.envelope import Message
+from simorgh.contracts.protocols import Context
+from simorgh.orchestration.config import Config
+from simorgh.orchestration.crew import CrewRefused
+from simorgh.orchestration.service import Service as OrchestrationService
+from simorgh.orchestration.session import SessionRunner
+
+from .fakes import FakeGuardianExecution, FakeVerification
+from .harness import Harness, run
+from .test_crews import CHILD, CrewCognition
+
+
+class _Logger:
+    def debug(self, event, **f): pass
+    def info(self, event, **f): pass
+    def warning(self, event, **f): pass
+    def error(self, event, **f): pass
+
+
+def _ctx(h: Harness, name: str, config=None) -> Context:
+    return Context(name=name, instance_id="", run_id="test", mode="single", bus=h.client(name), ledger=h.ledger,
+                   config=config or {}, secrets={}, clock=h.clock, logger=_Logger(), data_dir=Path("."))
+
+
+def _node(handle: str, brief: str, **kw) -> dict:
+    return {"agent": "research", "brief": brief, "requester": "", "requester_channel": "planning",
+            "context_id": "proj-1", "handle": handle, "plan_node": True, **kw}
+
+
+class SpawnDetached(unittest.TestCase):
+    @run
+    async def test_plan_nodes_run_together_as_one_crew_under_their_own_handles(self):
+        async with Harness() as h:
+            cognition = CrewCognition(h.client("cognition"), {"*": CHILD},
+                                      delay={"node-a": 0.15, "node-b": 0.25, "node-c": 0.2})
+            gx = FakeGuardianExecution(h.client("guardian"))
+            verify = FakeVerification(h.client("verification"))
+            for f in (cognition, gx, verify):
+                await f.start()
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now,
+                                   assemble_timeout_s=0.05, think_timeout_s=30.0)
+            reports = {}
+            done = asyncio.Event()
+
+            async def _report(message):
+                reports[message.payload["handle"]] = (message.payload["report"], time.monotonic())
+                if len(reports) == 3:
+                    done.set()
+            await h.client("planning").subscribe(topics.CREW_REPORT, _report)
+            started = time.monotonic()
+            got = [await runner.spawn_detached(_node(f"node-{x}", f"find the {x} day",
+                                                     acceptance=[f"the {x} day is named"]), plan_node=True)
+                   for x in "abc"]
+            await asyncio.wait_for(done.wait(), 20)
+            wall = time.monotonic() - started
+            for f in (cognition, gx, verify):
+                await f.stop()
+            events = await h.ledger.read("crew:proj-1")
+            subjects = [(await h.ledger.get_blob(r.payload["subject_ref"])).decode("utf-8")
+                        for r in verify.requests]
+        self.assertEqual(got, [("proj-1", "node-a"), ("proj-1", "node-b"), ("proj-1", "node-c")])
+        self.assertEqual({r["status"] for r, _ in reports.values()}, {"ok"})
+        # Each node thinks twice: serial is 2 x (0.15 + 0.25 + 0.2) = 1.2 s.
+        self.assertLess(wall, 0.6 * 1.2, f"the nodes did not run together: {wall:.2f}s")
+        spawned = [e.payload for e in events if e.type == topics.CREW_SPAWNED]
+        self.assertEqual({p["via"] for p in spawned}, {"project"})
+        self.assertEqual({p["parent"] for p in spawned}, {"proj-1"})
+        # Verified, as the queued task would have been, against its criteria.
+        self.assertEqual(len(verify.requests), 3)
+        self.assertTrue(any("the a day is named" in text for text in subjects), subjects[0][:400])
+        # The node's own stream holds its steps, as when a Worker ran it.
+        streams = {e.stream for e in await h.ledger.read("task:node-a")}
+        self.assertEqual(streams, {"task:node-a"})
+
+    @run
+    async def test_a_node_is_outside_the_crews_dollar_and_member_bounds(self):
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now,
+                                   assemble_timeout_s=0.05, crew_max_members=1, crew_max_usd=0.0001)
+            runner._start_member = lambda *a, **k: None  # noqa: SLF001 -- admission only
+            for i in range(3):
+                await runner.spawn_detached(_node(f"n{i}", "x"), plan_node=True)
+            crew = runner._crews["proj-1"]  # noqa: SLF001
+            self.assertEqual(len(crew.members), 3)
+            await crew.charge("n0", usd=1.0)
+            self.assertEqual(crew.exhausted, "")
+
+    @run
+    async def test_refusals(self):
+        async with Harness() as h:
+            runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now, assemble_timeout_s=0.05)
+            with self.assertRaises(ValueError):
+                await runner.spawn_detached({"agent": "nobody", "brief": "x", "requester": "", "requester_channel": "a2a"})
+            with self.assertRaises(ValueError):
+                await runner.spawn_detached({"agent": "research", "brief": "x", "requester": "Ira",
+                                             "requester_channel": ""})
+            gate = asyncio.Event()
+
+            async def hold(*a, **k):
+                await gate.wait()
+            runner.run = hold  # the member stays running
+            await runner.spawn_detached(_node("n1", "x"), plan_node=True)
+            with self.assertRaises(CrewRefused):
+                await runner.spawn_detached(_node("n1", "x"), plan_node=True)
+            gate.set()
+
+
+class TheServiceAnswers(unittest.TestCase):
+    @run
+    async def test_who_may_ask_for_what(self):
+        async with Harness() as h:
+            service = OrchestrationService(Config(workers=1, metrics_interval_s=0))
+            await service.start(_ctx(h, "orchestration"))
+            for w in service._workers:  # noqa: SLF001 -- admission only, no member runs
+                w._runner._start_member = lambda *a, **k: None  # noqa: SLF001
+
+            async def ask(source, payload):
+                reply = await h.client(source).request(Message.new(topics.CREW_SPAWN, source=source,
+                                                                   payload=payload), timeout=2.0)
+                return reply.payload
+
+            ok = await ask("planning", _node("n1", "find it"))
+            self.assertEqual(ok, {"crew_id": "proj-1", "handle": "n1"})
+            forged = await ask("interface", _node("n2", "find it"))
+            self.assertIs(forged.get("ok"), False)
+            self.assertIn("only Planning", forged["error"]["detail"])
+            a2a = await ask("interface", {"agent": "research", "brief": "look", "requester": "Ira",
+                                          "requester_channel": "a2a", "background": True})
+            self.assertTrue(a2a["crew_id"].startswith("crew-"))
+            self.assertTrue(a2a["handle"].startswith(a2a["crew_id"] + "-h"))
+            console = await ask("interface", {"agent": "research", "brief": "look", "requester": "",
+                                              "requester_channel": ""})
+            self.assertIs(console.get("ok"), False)
+            await service.stop()
+
+
+class AThreeNodeProjectEndToEnd(unittest.TestCase):
+    """Stage 18 item 4's acceptance: Planning and Orchestration together,
+    the same three-node plan run on a crew and on the queue (one Worker)."""
+
+    DELAYS = {"bin": 0.2, "recycling": 0.4, "garden": 0.3}   # per think; each node thinks twice
+
+    async def _run_project(self, *, crews: bool):
+        from simorgh.planning import planmode
+        from simorgh.planning.config import Config as PlanningConfig
+        from simorgh.planning.model import AVAILABLE, Step
+        from simorgh.planning.service import Service as PlanningService
+
+        async with Harness() as h:
+            planning = PlanningService(PlanningConfig(project_crews=crews))
+            await planning.start(_ctx(h, "planning"))
+            orchestration = OrchestrationService(Config(workers=1, metrics_interval_s=0, worktrees=False))
+            await orchestration.start(_ctx(h, "orchestration"))
+            delays = {}
+            cognition = CrewCognition(h.client("cognition"), {"*": CHILD}, delay=delays)
+            gx = FakeGuardianExecution(h.client("guardian"))
+            verify = FakeVerification(h.client("verification"))
+            for f in (cognition, gx, verify):
+                await f.start()
+            finished = asyncio.Event()
+            outcome = {}
+
+            async def _done(message):
+                outcome["type"], outcome["payload"] = message.type, dict(message.payload)
+                finished.set()
+            await h.client("interface").subscribe(topics.PROJECT_COMPLETED, _done)
+            await h.client("interface").subscribe(topics.PROJECT_FAILED, _done)
+
+            store = planning._store  # noqa: SLF001
+            project = await store.create(kind="project", description="sort the bins", origin="human",
+                                         mode="plan", initial_status=AVAILABLE)
+            steps = [Step(f"s{i}", "research", f"find the {x} collection day") for i, x in
+                     enumerate(self.DELAYS)]
+            state = planmode.PlanState(plan_id="p1", task_id=project.id, goal="sort the bins", steps=steps,
+                                       risk="low")
+            planning._plans["p1"] = state  # noqa: SLF001
+            planning._plan_by_task[project.id] = "p1"  # noqa: SLF001
+            original = store.create
+
+            async def create(**kw):
+                task = await original(**kw)
+                if kw.get("parent_id") == project.id:
+                    delays[task.id] = self.DELAYS[kw["description"].split()[2]]
+                return task
+            store.create = create
+            started = time.monotonic()
+            await planning._approve_plan(state, approved_by="auto")  # noqa: SLF001
+            await asyncio.wait_for(finished.wait(), 30)
+            wall = time.monotonic() - started
+            children = store.children(project.id)
+            for f in (cognition, gx, verify):
+                await f.stop()
+            await orchestration.stop()
+            await planning.stop()
+        return wall, outcome, children, cognition
+
+    @run
+    async def test_it_finishes_in_about_the_time_of_its_longest_node(self):
+        from simorgh.planning.model import COMPLETED
+
+        wall, outcome, children, cognition = await self._run_project(crews=True)
+        queue_wall, queue_outcome, _, _ = await self._run_project(crews=False)
+        self.assertEqual(outcome["type"], topics.PROJECT_COMPLETED, outcome)
+        self.assertEqual(outcome["payload"]["done"], 3)
+        self.assertEqual(queue_outcome["type"], topics.PROJECT_COMPLETED, queue_outcome)
+        self.assertEqual({c.status for c in children}, {COMPLETED})
+        # Both pay the same per-node overhead (assembly with no Memory or
+        # Persona running, verification); only the crew pays it once.
+        self.assertLess(wall, 0.6 * queue_wall, f"crew {wall:.2f}s against the queue's {queue_wall:.2f}s")
+        longest = 2 * max(self.DELAYS.values())
+        self.assertLess(wall, longest + 0.5 * queue_wall / 3,
+                        f"crew {wall:.2f}s: more than the longest node ({longest:.1f}s) and one node's overhead")
+        self.assertEqual(sorted(cognition.calls), sorted(c.id for c in children),
+                         "every think was a node's own, under its task id")
+        firsts = sorted(min(s for t, s, _ in cognition.spans if t == c.id) for c in children)
+        first_end = min(max(e for t, _, e in cognition.spans if t == c.id) for c in children)
+        self.assertLess(firsts[-1], first_end, "a node waited for another to finish before it started")
+
+if __name__ == "__main__":
+    unittest.main()

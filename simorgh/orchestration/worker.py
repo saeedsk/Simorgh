@@ -402,6 +402,10 @@ class Worker:
             )
             await self._bus.publish(msg)
 
+    async def spawn_detached(self, payload: dict, *, plan_node: bool = False) -> tuple[str, str]:
+        """`crew.spawn`: one member with no parent session (`SessionRunner.spawn_detached`)."""
+        return await self._runner.spawn_detached(payload, plan_node=plan_node)
+
     async def run(self, session: Session, *, user_text: str = "") -> Outcome:
         self.current_task_id, self.current_kind = session.task_id, session.kind
         try:

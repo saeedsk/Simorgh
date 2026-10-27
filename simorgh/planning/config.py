@@ -91,6 +91,18 @@ class Config:
     # above Cognition's 180-second per-call ceiling, so a slow provider
     # is waited for rather than declared absent.
     think_timeout_s: float = 200.0
+    # Projects on crews (stage 18 item 4, `crews.py`): a project's ready
+    # plan nodes start at once as members of the crew rooted at the project,
+    # up to `project_crew_concurrency` per project, instead of being offered
+    # on the queue for the Worker to run one at a time; each node's outcome
+    # is read from its member's `crew.report`. Off until a live trial: the
+    # nodes then run beside the queued work rather than in turn with it,
+    # against the same providers. Orchestration's `max_children_concurrent`
+    # caps it again per crew. A spawn nothing answers within the timeout
+    # puts that project back on the queue.
+    project_crews: bool = False
+    project_crew_concurrency: int = 4
+    project_crew_spawn_timeout_s: float = 5.0
 
     @classmethod
     def from_mapping(cls, data: dict | None) -> "Config":

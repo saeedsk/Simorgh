@@ -37,6 +37,8 @@ class Service:
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
         topics.TASK_CANCEL,
         topics.TOOL_PROBED,
+        # A crew started from outside any session (stage 18 items 4 and 10).
+        topics.CREW_SPAWN,
     )
     produces: tuple[str, ...] = (
         topics.TASK_STARTED, topics.TASK_STEP, topics.TASK_PAUSED, topics.TASK_COMPLETED,
@@ -54,6 +56,7 @@ class Service:
         self._situation_sub = None
         self._tool_sub = None
         self._capability_sub = None
+        self._crew_spawn_sub = None
         self._next_worker = 0
         self._metrics_task: asyncio.Task | None = None
         # Chat sessions in flight, each run off the bus handler so the
@@ -130,6 +133,7 @@ class Service:
         # said so in the prompt, once, instead of costing a task three
         # steps to discover by failing (execution/capabilities.py).
         self._capability_sub = await ctx.bus.subscribe(topics.TOOL_PROBED, self._on_capability_probed)
+        self._crew_spawn_sub = await ctx.bus.subscribe(topics.CREW_SPAWN, self._on_crew_spawn)
         await self._replay_registrations(ctx)
         await self._replay_capabilities(ctx)
         if self.config.metrics_interval_s > 0:
@@ -256,7 +260,40 @@ class Service:
             marker_arg_key=p.get("marker_arg_key"),
         )
 
+    async def _on_crew_spawn(self, message: Message) -> None:
+        """`crew.spawn` -> `crew.spawn.reply{crew_id, handle}`, or an error
+        reply. The member runs off the handler; this answers at once.
+
+        A plan node acts with a claimed task's authority, so only Planning
+        may ask for one (stage 18 item 4); the A2A server's requests carry
+        their device's person (item 10)."""
+        from simorgh.contracts.registry import error_reply_payload
+
+        from .crew import CrewRefused
+
+        payload = dict(message.payload or {})
+        plan_node = bool(payload.get("plan_node"))
+        try:
+            if not self._workers:
+                raise ValueError("orchestration has no worker")
+            if plan_node and str(message.source or "").split("@", 1)[0] != "planning":
+                raise ValueError("only Planning may start a plan node")
+            worker = self._workers[self._next_worker % len(self._workers)]
+            self._next_worker += 1
+            crew_id, handle = await worker.spawn_detached(payload, plan_node=plan_node)
+        except (CrewRefused, ValueError) as exc:
+            if message.reply_to:
+                await self._ctx.bus.reply(message, type=topics.CREW_SPAWN_REPLY,
+                                          payload=error_reply_payload("refused", str(exc)))
+            return
+        if message.reply_to:
+            await self._ctx.bus.reply(message, type=topics.CREW_SPAWN_REPLY,
+                                      payload={"crew_id": crew_id, "handle": handle})
+
     async def stop(self) -> None:
+        if self._crew_spawn_sub is not None:
+            await self._crew_spawn_sub.unsubscribe()
+            self._crew_spawn_sub = None
         if self._tool_sub is not None:
             await self._tool_sub.unsubscribe()
             self._tool_sub = None

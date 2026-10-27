@@ -39,6 +39,10 @@ CREW_BUDGET = "crew budget"
 BRIEF_INLINE_MAX = 1000
 #: The most of one claim a parsed finding keeps.
 CLAIM_MAX = 300
+#: How a member joined when the crew's bounds (members, dollars, tokens,
+#: wall-clock) do not apply to it: a `delegate` helper, and a project's plan
+#: node (stage 18 item 4), each keeping the bounds it had before crews.
+UNBOUNDED_VIA = ("delegate", "project")
 
 Append = Callable[[str, dict], Awaitable[None]]
 
@@ -212,8 +216,10 @@ class Crew:
         had -- its step cap, one at a time, its parent's own budget -- so a
         task that delegates is not refused or cut short by a crew it never
         asked for (the plan: "with `delegate` used as today, the behaviour
-        is unchanged")."""
-        return member.via != "delegate"
+        is unchanged"). A project's plan node (`via="project"`, stage 18
+        item 4) likewise keeps the bounds it had as a queued task: its step
+        cap and the per-attempt limits, not the crew's."""
+        return member.via not in UNBOUNDED_VIA
 
     def _elapsed(self) -> float:
         return self._now() - self.started if self.started is not None else 0.0
@@ -305,7 +311,7 @@ class Crew:
         """Add a member and record `crew.spawned`; CrewRefused with the reason.
         `brief_ref` is a blob ref for a long brief; "" keeps it inline.
         A `delegate` helper is outside the crew's bounds (`bounded`)."""
-        bounded = via != "delegate"
+        bounded = via not in UNBOUNDED_VIA
         counted = [m for m in self.members.values() if self.bounded(m)]
         if bounded and self.exhausted:
             raise CrewRefused(f"the crew budget is spent ({self.exhausted})")
