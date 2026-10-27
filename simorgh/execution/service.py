@@ -590,6 +590,11 @@ class Service:
             self._mcp_errors.append(str(exc))
             self._ctx.logger.warning("mcp_server_refused", server=server.name, detail=str(exc))
             return
+        except Exception as exc:  # noqa: BLE001 -- "never raises", even for a client that cannot be built
+            detail = f"mcp server {server.name!r} could not be set up: {exc!r}"
+            self._mcp_errors.append(detail)
+            self._ctx.logger.warning("mcp_server_refused", server=server.name, detail=repr(exc))
+            return
         try:
             await asyncio.wait_for(client.start(), timeout=server.timeout_s)
             specs = await asyncio.wait_for(client.list_tools(), timeout=server.timeout_s)

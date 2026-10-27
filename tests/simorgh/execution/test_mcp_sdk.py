@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -121,7 +123,7 @@ def _fake_sdk(server: _FakeServer, *, major: int = 1, opened: list | None = None
     return Sdk(
         ClientSession=lambda read, write, **kw: _FakeSession(server, read, write, **kw),
         StdioServerParameters=lambda **kw: SimpleNamespace(**kw),
-        stdio_client=lambda params: _streams("stdio", params),
+        stdio_client=lambda params, **kw: _streams("stdio", params, **kw),
         sse_client=lambda url, **kw: _streams("sse", url, **kw),
         streamablehttp_client=(lambda url, **kw: _streams("http1", url, **kw)) if major == 1 else None,
         streamable_http_client=(lambda url, **kw: _streams("http2", url, **kw)) if major >= 2 else None,
@@ -204,6 +206,54 @@ class TestHeaders(unittest.TestCase):
             self.assertIn("REMOTE_MCP_TOKEN", str(caught.exception))
             self.assertNotIn("s3cret", str(caught.exception))
 
+    def test_a_credential_written_inline_in_place_of_a_key_name_is_never_echoed(self):
+        for inline in ("Bearer sk-live-0123456789", "ghp_abcDEF0123456789", "sk-proj-abc.def"):
+            server = _http(headers={"Authorization": inline})
+            with self.assertRaises(McpTransportError) as caught:
+                resolve_headers(server, {})
+            self.assertNotIn(inline, str(caught.exception))
+            self.assertIn("not shown", str(caught.exception))
+        server = _http(headers={"Authorization": "vault:mcp:github"})
+        with self.assertRaises(McpTransportError) as caught:
+            resolve_headers(server, {})
+        self.assertIn("vault:mcp:github", str(caught.exception))
+
+
+class _BrokenSdkImport:
+    """A meta-path finder that makes `import mcp` fail the way a broken
+    install does: not with ImportError."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "mcp" or name.startswith("mcp."):
+            raise TypeError("incompatible pydantic")
+        return None
+
+
+@contextlib.contextmanager
+def _broken_sdk():
+    saved = {k: v for k, v in sys.modules.items() if k == "mcp" or k.startswith("mcp.")}
+    for name in saved:
+        del sys.modules[name]
+    finder = _BrokenSdkImport()
+    sys.meta_path.insert(0, finder)
+    try:
+        yield
+    finally:
+        sys.meta_path.remove(finder)
+        sys.modules.update(saved)
+        mcp_sdk.load_sdk()
+
+
+class TestABrokenSdk(unittest.TestCase):
+    def test_an_sdk_that_fails_to_import_counts_as_absent_and_says_why(self):
+        with _broken_sdk():
+            self.assertIsNone(mcp_sdk.load_sdk())
+            self.assertIsInstance(make_client(_stdio()), McpClient)
+            with self.assertRaises(McpSdkMissing) as caught:
+                make_client(_http(name="search"))
+        self.assertIn(INSTALL_HINT, str(caught.exception))
+        self.assertIn("incompatible pydantic", str(caught.exception))
+
 
 class TestMakeClient(unittest.TestCase):
     def test_without_the_sdk_stdio_falls_back_to_the_hand_rolled_client(self):
@@ -244,6 +294,14 @@ class TestOpenTransport(unittest.IsolatedAsyncioTestCase):
         kind, (params,), _ = opened[0]
         self.assertEqual(kind, "stdio")
         self.assertEqual((params.command, params.args, params.env["K"]), ("npx", ["-y", "pkg"], "v"))
+
+    async def test_stdio_server_stderr_goes_to_devnull_not_the_console(self):
+        # The SDK's default `errlog` is this process's stderr; the
+        # hand-rolled client sends a server's stderr to DEVNULL.
+        opened = await self._open(_stdio())
+        errlog = opened[0][2]["errlog"]
+        self.assertEqual(errlog.name, os.devnull)
+        self.assertTrue(errlog.closed)
 
     async def test_sse_passes_url_headers_and_timeout(self):
         opened = await self._open(_http(transport="sse", timeout_s=7.0), headers={"Authorization": "t"})
@@ -360,6 +418,20 @@ class TestExecutionBoot(_ExecutionServiceTestCase):
         names = sorted(n for n in self.service._registry if n.startswith("mcp_"))  # noqa: SLF001
         self.assertEqual(names, ["mcp_local_add", "mcp_remote_add"])
         self.assertNotIn("mcp", (await self.service.health()).detail)
+
+    async def test_a_client_that_cannot_be_built_degrades_instead_of_failing_the_boot(self):
+        from simorgh.execution.service import Service
+
+        def _explode(*_a, **_kw):
+            raise RuntimeError("sdk blew up")
+
+        with mock.patch("simorgh.execution.service.make_mcp_client", _explode):
+            self.service = Service(config=ExecutionConfig(repo_root=self.root, mcp_servers=(_stdio(name="bad"),)))
+            await self.service.start(self.ctx)
+        health = await self.service.health()
+        self.assertEqual(health.status, "degraded")
+        self.assertIn("'bad'", health.detail)
+        self.assertIn("sdk blew up", health.detail)
 
     async def test_a_missing_header_secret_degrades_and_names_the_key(self):
         await self._boot([_http(headers={"Authorization": "REMOTE_MCP_TOKEN"})], sdk=_fake_sdk(_FakeServer()))

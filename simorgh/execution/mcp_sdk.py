@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable
@@ -78,13 +79,28 @@ class Sdk:
     major: int = 1
 
 
+#: Why the last `load_sdk()` found no usable SDK, when the package is
+#: present but fails to import (a dependency it was built against is the
+#: wrong version, say). `refusal` appends it to the install hint.
+_load_error = ""
+
+
 def load_sdk() -> Sdk | None:
-    """The installed SDK, or `None` when the `mcp` package is absent."""
+    """The installed SDK, or `None` when the `mcp` package is absent or
+    cannot be imported. Any exception from the import counts as absent:
+    an installed but broken SDK must leave stdio servers on the
+    hand-rolled client, not stop Execution's boot."""
+    global _load_error
     try:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
     except ImportError:
+        _load_error = ""
         return None
+    except Exception as exc:  # noqa: BLE001 -- a broken install is "no SDK", named in the refusal
+        _load_error = f"the installed mcp package failed to import: {exc!r}"
+        return None
+    _load_error = ""
     sse = old_http = new_http = http_factory = None
     try:
         from mcp.client.sse import sse_client as sse
@@ -144,8 +160,21 @@ def refusal(server: McpServerConfig, *, sdk_present: bool | None = None) -> str 
         return f"mcp server {server.name!r}: a {server.transport} server needs an http(s) `url`"
     present = sdk_available() if sdk_present is None else sdk_present
     if not present:
-        return f"mcp server {server.name!r} ({server.transport}) {INSTALL_HINT}"
+        detail = f" ({_load_error})" if _load_error else ""
+        return f"mcp server {server.name!r} ({server.transport}) {INSTALL_HINT}{detail}"
     return None
+
+
+#: What a secrets.toml key name looks like here: `REMOTE_MCP_TOKEN`, or a
+#: vault name such as `vault:mcp:github`. Anything else in `headers` is
+#: probably the credential itself written inline, and is never echoed.
+_KEY_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,63}|[A-Za-z_][\w-]*(?::[\w.-]+)+")
+
+
+def _shown_key(key: str) -> str:
+    if len(key) <= 96 and _KEY_NAME.fullmatch(key):
+        return repr(key)
+    return "named by a value that is not a secrets.toml key name (an inline credential? not shown)"
 
 
 def resolve_headers(server: McpServerConfig, secrets) -> dict[str, str]:
@@ -161,8 +190,11 @@ def resolve_headers(server: McpServerConfig, secrets) -> dict[str, str]:
             except Exception:  # noqa: BLE001 -- MissingSecret for an unscoped key: the refusal below says which
                 value = None
         if not value:
+            # The key is echoed only when it looks like a key name: a
+            # token pasted inline in place of the name would otherwise
+            # land in health() and the log.
             raise McpTransportError(
-                f"mcp server {server.name!r}: header {header!r} needs secret {key!r} "
+                f"mcp server {server.name!r}: header {header!r} needs secret {_shown_key(key)} "
                 "in secrets.toml, listed in `[execution] secrets`")
         resolved[header] = str(value)
     return resolved
@@ -192,7 +224,7 @@ def open_transport(sdk: Sdk, server: McpServerConfig, headers: dict[str, str]):
     if server.transport == "stdio":
         params = sdk.StdioServerParameters(
             command=server.command, args=list(server.args), env={**os.environ, **server.env})
-        return sdk.stdio_client(params)
+        return _stdio_quiet(sdk, params)
     if server.transport == "sse":
         if sdk.sse_client is None:
             raise McpTransportError(f"mcp server {server.name!r}: the installed mcp SDK has no SSE client")
@@ -203,6 +235,16 @@ def open_transport(sdk: Sdk, server: McpServerConfig, headers: dict[str, str]):
     if sdk.streamable_http_client is not None and sdk.create_http_client is not None:
         return _http_v2(sdk, server, headers)
     raise McpTransportError(f"mcp server {server.name!r}: the installed mcp SDK has no Streamable HTTP client")
+
+
+@contextlib.asynccontextmanager
+async def _stdio_quiet(sdk: Sdk, params):
+    """`stdio_client` with the server's stderr sent to /dev/null, as
+    `mcp.McpClient` does. The SDK's default is this process's own stderr,
+    so a server's log lines would print over the console."""
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        async with sdk.stdio_client(params, errlog=devnull) as streams:
+            yield streams
 
 
 @contextlib.asynccontextmanager
