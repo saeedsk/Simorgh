@@ -145,6 +145,44 @@ A `question` always goes to the parent whatever the policy.
 
 7. **Measure and write down.** *No lock.* Run `crew-bench`, and the crew scenarios within a spend cap the creator sets. Write `docs/findings/<date>-agent-crews.md`: speedup, message latency, tokens per crew against one agent doing it alone, and failure shapes.
 
+## Interoperability: A2A, which ACP has become
+
+The creator asked for **ACP** (IBM's Agent Communication Protocol). ACP **merged into Google's A2A protocol under the Linux Foundation in August 2025**. Its repository was archived on 2025-08-27 with a migration guide, and IBM's ACP lead joined the A2A technical steering committee. So the vendor-neutral standard to implement is **A2A**: JSON-RPC 2.0 over HTTP, an Agent Card at `/.well-known/agent-card.json`, `message/send`, `message/stream` (SSE), `tasks/get`, `tasks/cancel`, push notifications, and a task lifecycle (`submitted | working | input-required | completed | failed | canceled`) with message parts and artifacts. Zed's *Agent Client Protocol*, also abbreviated "ACP", is an unrelated editor-to-agent protocol and is out of scope.
+
+**Design rule.** Inside one Sim, crew members talk over the in-process Bus. Putting HTTP between two coroutines in one process would add latency and failure modes for nothing. But the crew's **data model is A2A's**:
+- `crew.*` member status maps 1:1 to A2A task states (`waiting` = `input-required`);
+- a `crew.message` is an A2A `Message` with parts (`text`, `data`, `file` as a ref);
+- a `Report` is an A2A `Task` with `artifacts`.
+
+So a crew member can be a remote A2A agent, and a Sim agent can be served to a remote caller, with a pure mapping and no glue. Item 1's schemas follow this rule.
+
+8. **A2A mapping.** *Lock `contracts`; with item 1.* Add `contracts/a2a.py`, with pure functions `to_a2a_task(member, report)`, `to_a2a_message(crew_message)`, `from_a2a_task(...)` and `from_a2a_message(...)`, plus round-trip tests against the A2A JSON schema fixtures. The schema is vendored as test data under `tests/simorgh/contracts/fixtures/a2a/`, with its version pinned.
+
+9. **Sim calls remote agents (A2A client).** *Lock `execution`, `orchestration`, `docs`; after items 2 and 8.*
+   - `spawn{agent: "a2a:<name>", ...}` makes a crew member whose work is done by a remote agent.
+   - Each remote call is a tool, `a2a_call`, in Execution, so it is **proposed to and gated by Guardian**, because it sends household data out of the house. Its reversibility is `irreversible` (data sent cannot be unsent), and its policy row says which agents may receive what.
+   - Remote agents are configured only by a person, under `[crew.a2a_agents.<name>] url`, `auth_secret` (a key name in `secrets.toml`) and `allowed_data`, and approved with a console `a2a approve <name>`, like `mcp approve`. Sim may *propose* one and never add one itself.
+   - The client fetches the Agent Card, uses `message/stream` when the card says it streams (each A2A status update becomes a `crew.message{kind:"progress"}`), and falls back to `message/send` plus `tasks/get` polling at a bounded interval.
+   - `input-required` becomes an `ask_parent`; `cancel_agent` sends `tasks/cancel`.
+   - It uses the official `a2a-sdk` Python package under `try/except ImportError`, as with the MCP SDK (stage 9 item 12). Without the SDK, the member reports `blocked` with "needs `pip install a2a-sdk`".
+
+   Acceptance:
+   - tests against an in-process fake A2A server: stream, send+poll, input-required round trip, cancel, and a Guardian denial meaning no HTTP request is made;
+   - a card that asks for a scheme Sim cannot meet is refused by name.
+
+10. **Sim serves its agents (A2A server).** *Lock `interface`, `contracts`; after items 2 and 8.*
+    - Interface's HTTP server gains `/.well-known/agent-card.json` and the A2A JSON-RPC endpoint. It is **off by default** (`[interface.a2a] enabled = false`) and bound to the same listener and token as the phone pairing.
+    - The card lists only the agents named in `[interface.a2a] expose` (default `["research"]`), with their skills taken from the agent files.
+    - An inbound `message/send` or `message/stream` becomes a crew whose **requester is the paired caller**, and Guardian treats it as that person. An unpaired caller gets a 401 and nothing runs.
+    - Streaming sends the crew's `crew.message` progress as A2A status updates; `tasks/get` and `tasks/cancel` map to the crew; push notifications are left out for now.
+
+    Acceptance:
+    - an A2A client test (the SDK's client when installed, a raw JSON-RPC client otherwise) runs a `research` task end to end with the floor provider, and streams at least one progress event;
+    - no token gives a 401;
+    - an agent not in `expose` is not in the card and is refused.
+
+11. **Interop proof.** *No lock; after items 9-10.* One Sim calls another Sim's `research` agent over A2A (two sandboxes, `tools/trial.py`), and Sim calls one third-party A2A sample agent. Write the latency, the failure shapes, and the data each one sent into the stage 18 findings.
+
 ## What this must never do
 
 - Let a member act outside Guardian, or with more authority than the person who asked. Children inherit the requester; they never escalate.
