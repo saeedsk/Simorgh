@@ -45,6 +45,9 @@ RETRIES_EXHAUSTED = "retries exhausted"
 TOOL_ERRORS_EXHAUSTED = "tool errors exhausted"
 STEPS_NOT_DONE = "required steps not done"
 PREREQUISITES_NOT_DONE = "prerequisites not done"
+#: A last-step call whose prerequisite has not run: there is no next think
+#: to nudge, so the attempt ends (`Steps.check_last`).
+PREREQUISITE_NOT_DONE = "prerequisite not done"
 NO_RETRY_FIXES = "the same call was refused twice"
 
 
@@ -226,17 +229,41 @@ def validate(calls: list[dict], offered: Iterable[str], schemas: Mapping[str, Ma
 
 _THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
 _FENCED = re.compile(r"```(?:json)?\s*\n?(\{.*?\})\s*```", re.S)
+_WHOLE_FENCE = re.compile(r"^```[\w-]*[ \t]*\n?(.*?)\n?[ \t]*```$", re.S)
 
 
-def looks_like_call(text: str, offered: Iterable[str]) -> bool:
+def _only_a_call(body: str, offered: tuple) -> bool:
+    """Whether `body`, without one code fence around all of it, is shaped
+    like nothing but a call: it opens with `{`, `[`, `<` or an offered
+    tool's name and closes with `}`, `)`, `]` or `>`. Any sentence before
+    or after makes it an answer."""
+    body = body.strip()
+    fenced = _WHOLE_FENCE.match(body)
+    if fenced:
+        body = fenced.group(1).strip()
+    if not body:
+        return False
+    opens = body[0] in "{[<" or any(body.startswith(name) for name in offered)
+    return opens and body[-1] in "})]>"
+
+
+def looks_like_call(text: str, offered: Iterable[str], *, whole: bool = False) -> bool:
     """Whether a text reply is a tool call that failed to come through
     (ADR-013's line): an offered tool's name followed by `(`, `{` or
     `[`, or a fenced JSON object whose `tool` or `name` key names an
     offered tool. Prose that merely mentions a tool is an answer, and so
     is JSON that is the answer itself (`{"name": "Ira", "age": 5}`):
-    rescue would accept neither as a call either."""
+    rescue would accept neither as a call either.
+
+    `whole=True` is a conversation's rule, the same one Cognition's rescue
+    keeps there (`rescue_tool_calls(whole=True)`): only a reply that is
+    nothing but the call-shaped text counts. "Sure, I'd run ```{...}```"
+    quotes a call inside an answer; nudging it would ask the model to run
+    what it was only showing."""
     offered = tuple(n for n in offered if n)
     body = _THINK.sub("", text or "")
+    if whole and not _only_a_call(body, offered):
+        return False
     for name in offered:
         if re.search(rf"(?<![\w.]){re.escape(name)}[({{\[]", body):
             return True
@@ -411,6 +438,20 @@ class Steps:
                              problem=f"{tool} before {', '.join(missing)}")
         return None
 
+    def check_last(self, call: dict, *, args_of: Callable[[dict], Any] | None = None) -> End | None:
+        """The one call the LAST step would still run (a finishing or
+        durable tool, `session.py`): its prerequisites hold there too.
+        There is no next think to read a nudge, so an unmet one ends the
+        attempt `blocked`, `prerequisite not done: <missing>`; nothing is
+        counted, and the edits stay for the next attempt. Before this
+        (stage 16 review, decided 2026-10-27) a last-step `git_commit`
+        skipped its `run_tests`."""
+        tool = str(call.get("tool") or "")
+        if not self.prerequisites.get(tool):
+            return None
+        missing = self._missing(tool, args_of(call) if args_of else call.get("args"))
+        return End("blocked", f"{PREREQUISITE_NOT_DONE}: {', '.join(missing)}") if missing else None
+
     def check_finish(self) -> Nudge | End | None:
         """A final answer in text while required steps are pending."""
         pending = self.pending()
@@ -478,6 +519,9 @@ class Guards:
     #: An ending a result asked for (the same call refused twice), taken
     #: at the next step boundary.
     ended: End | None = None
+    #: A chat or voice session (scaffold `chat`): text is a retry only
+    #: when it is nothing but a call (`looks_like_call(whole=True)`).
+    conversation: bool = False
 
     def __post_init__(self) -> None:
         if not self.count_results:
@@ -501,11 +545,16 @@ class Guards:
         call (ADR-013). Any other text is an answer, and a clean one."""
         if not self.validate_calls:
             return None
-        if looks_like_call(text, self.offered):
+        if looks_like_call(text, self.offered, whole=self.conversation):
             return self.budget.retry("retry") or Nudge("user", retry_text(), "retry",
                                                        problem="a reply that looked like a call did not come through")
         self.budget.clean_proposal()
         return None
+
+    def check_last(self, call: dict, *, args_of: Callable[[dict], Any] | None = None) -> End | None:
+        """The last step's one call: are its prerequisites done? Under
+        `ablate = ["steps"]` nothing is checked, as before."""
+        return self.steps.check_last(call, args_of=args_of) if self.steps is not None else None
 
     def check_finish(self) -> Nudge | End | None:
         """A final answer in text: are the required steps done?"""

@@ -791,7 +791,7 @@ class Service:
         answer) still paid the full five-minute delay every time --
         dominating a project's wall-clock time far more than any amount
         of test-suite speedup could (observer, 2026-09-08)."""
-        if reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON)):
+        if reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON, PREREQUISITE_REASON)):
             return self.config.continuation_delay_seconds
         return self.config.blocked_retry_delay_seconds
 
@@ -1652,6 +1652,10 @@ class Service:
 CONTINUATION_REASON = "step budget exhausted"
 VERIFICATION_REASON = "verification failed"
 UNCOMMITTED_REASON = "finished with uncommitted changes"
+# Stage 16: the last step's `git_commit` was held back because its
+# `run_tests` never ran; the edit is kept, and the next attempt tests and
+# commits it (`orchestration/session.py::PREREQUISITE_REASON`).
+PREREQUISITE_REASON = "prerequisite not done"
 
 
 def _task_payload(task: Task) -> dict:

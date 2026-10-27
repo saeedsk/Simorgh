@@ -496,14 +496,15 @@ class OutputParser:
             # expectation did not. Observer, 2026-09-10.
             return ParsedOutput(kind="non_answer", text="", non_answer=True)
         if kind == "markers":
-            return self._parse_markers(text, tuple(expected.get("markers", ())))
+            return self._parse_markers(text, tuple(expected.get("markers", ())),
+                                       whole=bool(expected.get("whole")))
         if kind == "edit_blocks":
             return self._parse_edit_blocks(text)
         if kind == "verdict":
             return self._parse_verdict(text)
         return ParsedOutput(kind="final", text=text.strip())
 
-    def _parse_markers(self, text: str, markers: tuple[str, ...]) -> ParsedOutput:
+    def _parse_markers(self, text: str, markers: tuple[str, ...], *, whole: bool = False) -> ParsedOutput:
         if self.strict:
             from simorgh.contracts.tone import strip_tone
 
@@ -518,8 +519,9 @@ class OutputParser:
             # Mistral `[TOOL_CALLS]`). This is also the native dialect's
             # fallback: a native reply with no typed call is parsed here.
             # Strict mode (`ablate = ["rescue"]`) returned above and never
-            # reaches it.
-            rescued = rescue_tool_calls(text, markers)
+            # reaches it. `whole` (a conversation's think, stage 16): only
+            # a reply that is nothing but the call is one.
+            rescued = rescue_tool_calls(text, markers, whole=whole)
             if rescued:
                 return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=rescued, rescued=True)
             return ParsedOutput(kind="final", text=payload)

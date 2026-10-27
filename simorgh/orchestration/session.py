@@ -293,6 +293,9 @@ def record_side_effects(session, effects) -> None:
 
 # An attempt that says it finished while its edit is still uncommitted.
 UNCOMMITTED_REASON = "finished with uncommitted changes"
+#: A last-step call held back by an unmet prerequisite (stage 16;
+#: `guardrails.PREREQUISITE_NOT_DONE`, same text).
+PREREQUISITE_REASON = "prerequisite not done"
 FABRICATED_REASON = "the answer claims work the step log does not show"
 # Ledger-only record type: which uncommitted edits an exhausted attempt
 # left in the tree for the next one.
@@ -1243,7 +1246,11 @@ class SessionRunner:
         # threw away a correct, tested patch that only lacked a commit
         # (watched trial, 2026-09-08) -- the next attempt inherits the
         # edit and the objection, and can finish the job.
-        return reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON, LANDING_REASON))
+        # A third: the last step's commit was held back because its tests
+        # never ran (stage 16, `guardrails.Steps.check_last`) -- the edit
+        # is what the next attempt tests and commits.
+        return reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON, LANDING_REASON,
+                                  PREREQUISITE_REASON))
 
     async def _keep_uncommitted(self, session: Session) -> None:
         kept = sorted(session.uncommitted)
@@ -1391,6 +1398,20 @@ class SessionRunner:
                     if ended is not None:
                         return ended
                     continue
+
+            if (tool_calls and is_last and session.guards is not None
+                    and (tool_calls[0].get("tool") in DURABLE_TOOLS
+                         or (tool_calls[0].get("tool") in FINISHING_TOOLS and session.uncommitted))):
+                # Stage 16: the one call the last step still runs keeps its
+                # prerequisites -- a git_commit there used to skip run_tests.
+                # No next think can read a nudge, so an unmet one ends the
+                # attempt; the edits stay for the next one (`_continues`).
+                ended = session.guards.check_last(tool_calls[0], args_of=_proposed_args)
+                if ended is not None:
+                    step = Step(step_no, "act", ended.reason, ok=False)
+                    session.record(step)
+                    await self._record_step(session, step)
+                    return Outcome(ended.outcome, reason=ended.reason)
 
             if tool_calls and is_last and tool_calls[0].get("tool") in DURABLE_TOOLS:
                 # Run it, then end the attempt as a continuation. The
@@ -3855,7 +3876,7 @@ class SessionRunner:
             validate_calls=validate_calls,
             count_results=validate_calls and "recovery" not in self._ablate,
             budget=guardrails.ErrorBudget(max_retries=max_retries, max_tool_errors=max_tool_errors),
-            steps=steps,
+            steps=steps, conversation=session.profile.scaffold == "chat",
         )
 
     def _calls_to_run(self, tool_calls: list) -> list:

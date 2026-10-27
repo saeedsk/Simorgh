@@ -201,7 +201,11 @@ class LastStepMayStillFinishTestCase(unittest.TestCase):
         async with Harness() as h:
             gx = FakeGuardianExecution(h.client("guardian"))
             await gx.start()
+            # The tests run first: since stage 16 (decided 2026-10-27) the
+            # patch agent's `git_commit` prerequisite holds on the last step
+            # too (test_guardrails.py covers the commit held back without it).
             cognition = FakeCognition(h.client("cognition"), script=[
+                {"tool_calls": [{"tool": "run_tests", "args": {"target": "tests"}}]},
                 {"tool_calls": [{"tool": "git_commit", "args": {"path": "simorgh/x.py", "message": "add it"}}]},
             ])
             await cognition.start()
@@ -209,13 +213,13 @@ class LastStepMayStillFinishTestCase(unittest.TestCase):
                 from simorgh.orchestration.session import SessionRunner
 
                 session = Session(task_id="t-last", kind="patch", mode="execute", profile=profiles.PATCH)
-                session.budget.max_steps = 1
+                session.budget.max_steps = 2
                 session.uncommitted.add("simorgh/x.py")
                 runner = SessionRunner(h.client("orchestration"), h.ledger, clock=h.clock.now, verify_timeout_s=0.05)
                 outcome = await runner.run(session, user_text="add a constant")
                 self.assertEqual(outcome.kind, "completed", outcome.reason)
                 self.assertIn("Committed the change", outcome.result_summary)
-                self.assertEqual([s.tool for s in session.steps if s.tool], ["git_commit"])
+                self.assertEqual([s.tool for s in session.steps if s.tool], ["run_tests", "git_commit"])
             finally:
                 await cognition.stop()
                 await gx.stop()

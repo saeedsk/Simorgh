@@ -84,6 +84,14 @@ class LooksLikeCall(unittest.TestCase):
         self.assertFalse(g.looks_like_call('```json\n{"tool": "a hammer"}\n```', OFFERED))
         self.assertTrue(g.looks_like_call('```json\n{"tool": "run_tests", "args": {}}\n```', OFFERED))
 
+    def test_whole_counts_only_a_reply_that_is_nothing_but_the_call(self):
+        call = '```json\n{"tool": "run_tests", "args": {}}\n```'
+        self.assertTrue(g.looks_like_call(call, OFFERED, whole=True))
+        self.assertTrue(g.looks_like_call('read_file({"path": "a"})', OFFERED, whole=True))
+        self.assertFalse(g.looks_like_call(f"Sure, I'd run {call}", OFFERED, whole=True))
+        self.assertFalse(g.looks_like_call(f"{call}\nShall I?", OFFERED, whole=True))
+        self.assertFalse(g.looks_like_call('Sure.\nrun_tests{"target": "tests"}', OFFERED, whole=True))
+
 
 class ErrorBudgetTest(unittest.TestCase):
     def test_retries_exhaust_after_the_limit_and_a_clean_proposal_resets(self):
@@ -173,6 +181,15 @@ class StepsTest(unittest.TestCase):
         self.assertIsInstance(s.check(commit), g.Nudge)
         self.assertIsInstance(s.check(commit), g.Nudge)
         self.assertEqual(s.check(commit).outcome, "blocked")
+
+    def test_check_last_ends_blocked_without_counting(self):
+        steps = g.Steps(prerequisites={"git_commit": ["run_tests"]})
+        commit = {"tool": "git_commit", "args": {"path": "a.py"}}
+        self.assertEqual(steps.check_last(commit), g.End("blocked", "prerequisite not done: run_tests"))
+        self.assertEqual(steps.prereq_violations, 0)
+        self.assertIsNone(steps.check_last({"tool": "read_file", "args": {}}))
+        steps.record("run_tests", {}, ok=False, ran=True)
+        self.assertIsNone(steps.check_last(commit))
 
     def test_state_round_trips(self):
         s = g.Steps(required=("run_tests",), prerequisites={"git_commit": ["run_tests"]})
@@ -411,6 +428,56 @@ class InTheSession(unittest.TestCase):
                                                session=session)
             self.assertEqual([m.payload["tool"] for m in gx.proposals], ["run_tests", "git_commit"])
             self.assertEqual([p["nudge"] for p in await _steps(h) if p.get("nudge")], ["prerequisite"])
+
+    async def _last_step_commit(self, h, script, max_steps, ablate=()):
+        profile = replace(profiles.PATCH, verify=False, max_revisions=0, max_steps=max_steps)
+        session = Session(task_id="t-l", kind="patch", mode="execute", profile=profile, subject="a.py",
+                          budget=Budget(max_steps=max_steps, max_revisions=0))
+        session.uncommitted.add("a.py")  # an edit applied by an earlier attempt
+        return await _session(h, script=script, session=session, max_steps=max_steps, ablate=ablate)
+
+    @run
+    async def test_a_last_step_commit_without_its_tests_is_not_proposed(self):
+        # Stage 16 edge case (decided 2026-10-27): prerequisites hold on
+        # the last step too, and the edit stays for the next attempt.
+        async with Harness() as h:
+            commit = {"tool_calls": [{"tool": "git_commit", "args": {"path": "a.py", "message": "m"}}]}
+            outcome, _, gx, session = await self._last_step_commit(h, [commit], max_steps=1)
+            self.assertEqual((outcome.kind, outcome.reason), ("blocked", "prerequisite not done: run_tests"))
+            self.assertEqual(gx.proposals, [])
+            self.assertEqual(session.uncommitted, {"a.py"})
+            summaries = [p.get("summary", "") for p in await _steps(h, "t-l")]
+            self.assertTrue(any(s.startswith("kept 1 uncommitted edit") for s in summaries), summaries)
+
+    @run
+    async def test_a_last_step_commit_after_its_tests_runs(self):
+        async with Harness() as h:
+            tests = {"tool_calls": [{"tool": "run_tests", "args": {"target": "tests"}}]}
+            commit = {"tool_calls": [{"tool": "git_commit", "args": {"path": "a.py", "message": "m"}}]}
+            outcome, _, gx, _ = await self._last_step_commit(h, [tests, commit], max_steps=2)
+            self.assertEqual(outcome.kind, "completed", outcome.reason)
+            self.assertEqual([m.payload["tool"] for m in gx.proposals], ["run_tests", "git_commit"])
+
+    @run
+    async def test_a_last_step_commit_with_steps_ablated_runs_as_before(self):
+        async with Harness() as h:
+            commit = {"tool_calls": [{"tool": "git_commit", "args": {"path": "a.py", "message": "m"}}]}
+            outcome, _, gx, _ = await self._last_step_commit(h, [commit], max_steps=1, ablate=("steps",))
+            self.assertEqual(outcome.kind, "completed", outcome.reason)
+            self.assertEqual([m.payload["tool"] for m in gx.proposals], ["git_commit"])
+
+    @run
+    async def test_a_chat_reply_quoting_a_call_in_prose_is_an_answer(self):
+        # Stage 16 edge case (decided 2026-10-27): the orchestration half
+        # of Cognition's whole-reply rescue -- not nudged as a failed call.
+        async with Harness() as h:
+            chat = replace(profiles.CHAT, verify=False)
+            tool = offered_tools(chat.tools)[1]
+            session = Session(task_id="t-g", kind="chat", mode="execute", profile=chat,
+                              budget=Budget(max_steps=chat.max_steps, max_revisions=0))
+            text = f'Sure, I\'d run this:\n```json\n{{"tool": "{tool}", "args": {{}}}}\n```\nWant me to?'
+            outcome, cognition, gx, _ = await _session(h, script=[{"text": text}], session=session)
+            self.assertEqual((outcome.kind, len(cognition.calls), gx.proposals), ("completed", 1, []))
 
     @run
     async def test_step_state_survives_a_resume(self):
