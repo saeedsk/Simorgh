@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import shutil
+import os
 import tempfile
 from pathlib import Path
 
@@ -95,6 +96,7 @@ class Sandbox:
         self._keep = keep
         self._spend_cap_usd = float(spend_cap_usd)
         self._secrets = dict(secrets) if secrets is not None else {}
+        self._saved_repo_env: object = _UNSET
         self.data_dir: Path | None = None
         self.kernel = None
         self.record = Record()
@@ -125,6 +127,19 @@ class Sandbox:
                         {"runtime": {"data_dir": str(self.data_dir)},
                          "voice": {"speakers_dir": str(self.data_dir / "speakers")}},
                         self._extra)
+        if self._secrets and "repo_root" not in (self._extra.get("execution") or {}):
+            # A sandbox with keys has a model that can edit files and call
+            # git_commit, and Execution's repo root defaulted to THIS
+            # checkout (`find_repo_root`, and `SIMORGH_EXECUTION_REPO_ROOT`
+            # over any config). On 2026-10-27 a paid ablation run's
+            # sandboxed Sim committed two self-improvement changes to the
+            # live checkout's main and left two more half-made in its
+            # working tree. Its own clone: what it reads is this checkout's
+            # files; what it commits or lands moves only the clone's refs.
+            repo = _isolated_repo(self.data_dir / "repo")
+            config = _merge(config, {"execution": {"repo_root": str(repo)}})
+            self._saved_repo_env = os.environ.get(_REPO_ENV)
+            os.environ[_REPO_ENV] = str(repo)
         with _voice_fakes(self._voice_fakes, recogniser=self._recogniser):
             self.kernel = Kernel(LoadedConfig(config, None), secrets=EnvSecretStore(self._secrets),
                                  clock=self.clock)
@@ -135,6 +150,12 @@ class Sandbox:
         return self
 
     async def stop(self) -> None:
+        if self._saved_repo_env is not _UNSET:
+            if self._saved_repo_env is None:
+                os.environ.pop(_REPO_ENV, None)
+            else:
+                os.environ[_REPO_ENV] = self._saved_repo_env
+            self._saved_repo_env = _UNSET
         for sub in self._subs:
             with contextlib.suppress(Exception):
                 await sub.unsubscribe()
@@ -341,6 +362,29 @@ def _voice_fakes(into: dict, *, recogniser=None):
         yield
     finally:
         kernel_service.build_factories = original
+
+
+#: What overrides `[execution] repo_root` (`kernel/service.py`) and what a
+#: session reads for the checkout it works in (`orchestration/session.py`).
+_REPO_ENV = "SIMORGH_EXECUTION_REPO_ROOT"
+_UNSET = object()
+
+
+def _isolated_repo(path: Path) -> Path:
+    """A clone of this checkout at `path` (`--local --shared`: under a
+    second, nothing copied but the working tree), or an empty directory
+    when git cannot make one -- never the live checkout."""
+    import subprocess
+
+    from simorgh.execution.config import find_repo_root
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(["git", "clone", "-q", "--local", "--shared", str(find_repo_root()), str(path)],
+                       check=True, capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _merge(*layers: dict) -> dict:
