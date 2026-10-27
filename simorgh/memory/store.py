@@ -209,6 +209,12 @@ class MemoryEngine:
             await self.write_vector(ref, provider, vector)
         return len(fresh)
 
+    @property
+    def embedder(self):
+        """The one embedder this engine was built with (`memory.embed`
+        lends it to other subsystems; stage 17's tool router)."""
+        return self._embedder
+
     async def warm_embedder(self) -> float:
         """Load a local model in a thread, then re-embed and persist what
         was hashed while it loaded. Recall answers from hashing meanwhile.

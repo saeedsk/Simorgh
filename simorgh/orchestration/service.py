@@ -131,6 +131,7 @@ class Service:
                             tool_routing=self.config.tool_routing,
                             route_params=(self.config.route_top_k, self.config.route_sticky_turns,
                                           self.config.route_none_margin),
+                            route_embed_timeout_s=self.config.route_embed_timeout_s,
                             fact_lines=(self.config.memory_fact_lines, self.config.memory_graph_lines),
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()

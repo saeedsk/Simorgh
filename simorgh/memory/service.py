@@ -9,6 +9,7 @@ import asyncio
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
+from simorgh.contracts.messages.memory import EMBED_MAX_CHARS, EMBED_MAX_TEXTS
 from simorgh.contracts.protocols import Context, Health
 
 from .config import Config
@@ -27,6 +28,7 @@ UNPLACED_VOICE_TAG = "person:unknown"
 _PEOPLE_TIMEOUT_S = 5.0
 
 from .consolidation import run_consolidation
+from .embedders import HASHING
 from .store import MemoryEngine
 
 VERSION = "0.1.0"
@@ -43,11 +45,14 @@ class Service:
         topics.MEMORY_FORGET,
         # Stage 15 item 8: `memory_core_edit`'s edit of a core block.
         topics.MEMORY_CORE_EDIT,
+        # Stage 17: the tool router embeds with Memory's embedder, never its own.
+        topics.MEMORY_EMBED,
     )
     produces: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE_REPLY, topics.MEMORY_STORED, topics.MEMORY_CONTRADICTION_FLAGGED,
         topics.MEMORY_CONSOLIDATED, topics.MEMORY_FORGOTTEN, topics.SYSTEM_METRICS,
         topics.MEMORY_CORE_EDIT_REPLY,
+        topics.MEMORY_EMBED_REPLY,
     )
 
     def __init__(self, *, config: Config | None = None, keep_per_kind: dict[str, int] | None = None) -> None:
@@ -80,6 +85,7 @@ class Service:
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
         self._sub_forget = await ctx.bus.subscribe(topics.MEMORY_FORGET, self._on_forget)
         self._sub_core_edit = await ctx.bus.subscribe(topics.MEMORY_CORE_EDIT, self._on_core_edit)
+        self._sub_embed = await ctx.bus.subscribe(topics.MEMORY_EMBED, self._on_embed)
         self._sub_sleep = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
         self._sub_turn = await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._sub_tick = await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick)
@@ -132,7 +138,7 @@ class Service:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a background pass
                 pass
             self._first_consolidation = None
-        for sub in (self._sub_retrieve, self._sub_store, self._sub_forget, self._sub_core_edit, self._sub_sleep,
+        for sub in (self._sub_retrieve, self._sub_store, self._sub_forget, self._sub_core_edit, self._sub_embed, self._sub_sleep,
                     self._sub_turn, self._sub_tick):
             await sub.unsubscribe()
 
@@ -189,6 +195,47 @@ class Service:
                                                     payload={"refs": refs, "reason": reason}))
         await self._ctx.bus.reply(message, type=topics.MEMORY_FORGET_REPLY,
                                   payload={"forgotten": len(refs), "refs": refs, "since": since})
+
+    async def _on_embed(self, message: Message) -> None:
+        """`memory.embed{texts}` -> `memory.embed.reply{vectors, model,
+        dimension, refused?}`: the configured embedder, lent to another
+        subsystem (stage 17's tool router), so nothing loads a second model.
+
+        Refused -- no vectors, `refused` saying why -- when the embedder is
+        the hashing floor (configured, or degraded to it): a caller with
+        its own stand-in (the router's lexical one knows Farsi stems and
+        character trigrams) does better without it. Refused too while a
+        local model is loading, when a text came back hashed mid-batch (a
+        provider that failed for one text: a mixed batch is not comparable),
+        for an empty text, and past `EMBED_MAX_TEXTS`. Each text is cut to
+        `EMBED_MAX_CHARS`. The batch runs in a thread (`embed_many`: one
+        model call for a local model), so the loop is never held."""
+        texts = [str(t or "").strip()[:EMBED_MAX_CHARS] for t in (message.payload or {}).get("texts") or ()]
+        embedder = self.engine.embedder
+        model = str(getattr(embedder, "provider", "") or "")
+        dimension = int(embedder.dimension())
+        refused = ""
+        if len(texts) > EMBED_MAX_TEXTS:
+            refused = f"{len(texts)} texts; at most {EMBED_MAX_TEXTS} a request"
+        elif model == HASHING:
+            degraded = getattr(embedder, "degraded", "")
+            refused = "the embedder is hashing" + (f" ({degraded})" if degraded else "")
+        elif not getattr(embedder, "ready", True):
+            refused = f"the {model} model is still loading"
+        elif any(not t for t in texts):
+            refused = "an empty text"
+        vectors: list[list[float]] = []
+        if not refused and texts:
+            pairs = await asyncio.to_thread(embedder.embed_many, texts)
+            if any(provider != model for provider, _ in pairs):
+                refused = f"the {model} embedder fell back to hashing for part of the batch"
+            else:
+                vectors = [[float(x) for x in vector] for _, vector in pairs]
+                dimension = len(vectors[0]) if vectors else dimension
+        payload = {"vectors": vectors, "model": model, "dimension": dimension}
+        if refused:
+            payload["refused"] = refused
+        await self._ctx.bus.reply(message, type=topics.MEMORY_EMBED_REPLY, payload=payload)
 
     async def _announce_fact(self, fact, superseded_id: str, *, also=()) -> None:
         """A fact that now holds, and the one it replaced (stage 5 item 3);

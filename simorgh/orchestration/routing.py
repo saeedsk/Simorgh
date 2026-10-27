@@ -17,13 +17,16 @@ recoverable inside the same turn.
 
 The embedding. The plan says Memory's configured embedder, so no second
 model is loaded. Orchestration may not import `simorgh.memory`
-(tests/simorgh/test_module_boundaries.py) and there is no bus topic that
-embeds a text, so the function is injected. Until such a seam exists the
-default is `lexical_embed` below: a hashed bag of words and character
-trigrams, a few microseconds a turn, no model at all, and good enough to
-tell "turn the kitchen light off" from "what's on today" in English and
-in Farsi. It is not a semantic embedding, and the shadow week is what
-says whether it is good enough.
+(tests/simorgh/test_module_boundaries.py), so the function is injected:
+the session asks Memory over the bus (`memory.embed`) for the groups'
+utterances once and for each turn's text, and hands `route` a `Vectors`
+table of the answers. When Memory refuses (its embedder is the hashing
+floor, or a model is still loading) or does not answer in time, the
+turn falls back to `lexical_embed` below: a hashed bag of words and
+character trigrams, a few microseconds a turn, no model at all, and good
+enough to tell "turn the kitchen light off" from "what's on today" in
+English and in Farsi. It is not a semantic embedding, and the shadow
+week is what says whether it is good enough.
 """
 
 from __future__ import annotations
@@ -134,6 +137,49 @@ def lexical_embed(text: str) -> tuple[float, ...]:
             vec[_slot("g:" + gram)] += _GRAM_WEIGHT / len(grams)
     norm = math.sqrt(sum(v * v for v in vec))
     return tuple(v / norm for v in vec) if norm else tuple(vec)
+
+
+class Vectors:
+    """An `Embed` over vectors computed elsewhere: Memory's, from
+    `memory.embed`. `base` holds the groups' utterances, embedded once;
+    `with_text` adds one turn's vector without copying them.
+
+    Equal (and hashed alike) per (model, dimension, base), whatever turn
+    text it carries, so `_examples` and `_centroids` -- cached per
+    (groups, embedder) -- compute the centroids once per table, not once
+    per turn. A text it was not given is a KeyError: `route` raising is
+    the session's cue to fall back, never a silent zero vector."""
+
+    __slots__ = ("model", "dimension", "_base", "_extra")
+
+    def __init__(self, model: str, dimension: int, base: dict[str, tuple[float, ...]],
+                 extra: dict[str, tuple[float, ...]] | None = None) -> None:
+        self.model = str(model)
+        self.dimension = int(dimension)
+        self._base = base
+        self._extra = extra or {}
+
+    def __call__(self, text: str) -> tuple[float, ...]:
+        hit = self._extra.get(text)
+        return hit if hit is not None else self._base[text]
+
+    def with_text(self, text: str, vector: Sequence[float]) -> "Vectors":
+        return Vectors(self.model, self.dimension, self._base, {text: tuple(float(x) for x in vector)})
+
+    def _key(self) -> tuple:
+        return (self.model, self.dimension, id(self._base))
+
+    def __hash__(self) -> int:
+        return hash(self._key())
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Vectors) and self._key() == other._key()
+
+
+def utterances(groups: Iterable[Group]) -> tuple[str, ...]:
+    """Every utterance `route` embeds, once each, in file order: what a
+    `Vectors` table must hold."""
+    return tuple(dict.fromkeys(u for g in groups for u in g.utterances if u.strip()))
 
 
 def _unit(vec: Sequence[float]) -> tuple[float, ...]:

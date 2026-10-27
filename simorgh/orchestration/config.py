@@ -231,6 +231,10 @@ class Config:
     #: The conversational class must beat the best tool group by this
     #: much before a turn is offered only the core group (item 6).
     route_none_margin: float = 0.15
+    #: How long a routed turn waits for Memory's embedder (`memory.embed`)
+    #: before it is routed with the lexical stand-in instead. Short: it
+    #: sits before the first token of every routed turn. 0 never asks.
+    route_embed_timeout_s: float = 0.3
     # The facts block of a turn's prompt (`context.py::_fact_lines`, stage
     # 15). `memory_fact_lines`: facts Memory found by the query's words (8,
     # what it always showed, so a reply without graph facts renders byte for
@@ -272,12 +276,15 @@ class Config:
                 except (TypeError, ValueError):
                     problems.append(f"{key}: {kwargs[key]!r} is not a whole number, using the default")
                     del kwargs[key]
-        if "route_none_margin" in kwargs:
-            try:
-                kwargs["route_none_margin"] = float(kwargs["route_none_margin"])
-            except (TypeError, ValueError):
-                problems.append(f"route_none_margin: {kwargs['route_none_margin']!r} is not a number, using the default")
-                del kwargs["route_none_margin"]
+        for key in ("route_none_margin", "route_embed_timeout_s"):
+            if key in kwargs:
+                try:
+                    kwargs[key] = float(kwargs[key])
+                except (TypeError, ValueError):
+                    problems.append(f"{key}: {kwargs[key]!r} is not a number, using the default")
+                    del kwargs[key]
+        if "route_embed_timeout_s" in kwargs:
+            kwargs["route_embed_timeout_s"] = max(0.0, kwargs["route_embed_timeout_s"])
         return cls(**kwargs, problems=tuple(problems))
 
 

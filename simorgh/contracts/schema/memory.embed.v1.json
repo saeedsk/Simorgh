@@ -1,0 +1,19 @@
+{
+  "$id": "https://simorgh.local/schema/memory.embed.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Payload of `memory.embed` (catalog v1).",
+  "properties": {
+    "texts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "texts"
+  ],
+  "title": "memory.embed",
+  "type": "object"
+}

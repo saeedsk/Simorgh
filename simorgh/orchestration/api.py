@@ -301,6 +301,12 @@ class Session:
     route: tuple | None = None
     route_conversational: bool = False
     route_more: list = field(default_factory=list)
+    #: Which embedder routed the turn: `memory:<model>/<dimension>`
+    #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
+    #: `injected`; and, when Memory's was wanted and the turn went
+    #: lexical, why (no table yet, refused, no answer in time).
+    route_embedder: str = ""
+    route_fallback: str = ""
     #: Core memory blocks (stage 15 item 8) as the turn's recall returned
     #: them, `[{block, label, text}]`; None when Memory sent none, which is
     #: `[memory] core_blocks` off. An empty list means on with no block

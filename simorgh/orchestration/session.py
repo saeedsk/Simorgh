@@ -180,6 +180,7 @@ from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -
 from simorgh.contracts.envelope import Event, Message
 
 from . import routing as routing_mod
+from simorgh.contracts.messages.memory import EMBED_MAX_TEXTS
 from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
@@ -230,6 +231,14 @@ def was_denied(detail: str) -> bool:
     return (detail or "").startswith(DENIED_PREFIX)
 
 ACTION_TIMEOUT_S = 30.0
+#: Tool routing with Memory's embedder (stage 17, `memory.embed`): how
+#: long the background fetch of the groups' utterance vectors may take
+#: (a local model encodes ~200 in about a second), and how long after a
+#: refusal or no answer it is not asked again -- the hashing floor
+#: refuses every time, and a model still loading is ready in tens of
+#: seconds. Until then every routed turn is lexical.
+ROUTE_TABLE_TIMEOUT_S = 30.0
+ROUTE_TABLE_RETRY_S = 60.0
 # The reason an attempt gives when it spends its whole step budget with
 # a tool call still pending. Planning matches it by prefix to re-offer
 # the task soon (`planning/service.py::CONTINUATION_REASON`, same text;
@@ -808,7 +817,7 @@ class SessionRunner:
         crew_max_members: int = 8, crew_max_writers: int = 1, crew_max_usd: float = 0.5,
         crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0, chat_crews: bool = False,
         tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
-        route_none_margin: float = 0.15, route_groups=None, route_embed=None,
+        route_none_margin: float = 0.15, route_groups=None, route_embed=None, route_embed_timeout_s: float = 0.3,
         fact_lines: tuple[int, int] = (8, 8),
     ) -> None:
         #: `[orchestration] tool_routing` (stage 17, `routing.py`): off,
@@ -825,6 +834,21 @@ class SessionRunner:
         # (`routing.AGGREGATES`).
         self._route_embed = route_embed or routing_mod.lexical_embed
         self._route_aggregate = "centroid" if route_embed is not None else "nearest"
+        #: Memory's embedder over the bus (`memory.embed`), unless one was
+        #: injected: the groups' utterances once per (model, dimension),
+        #: in the background (`_route_tables`, `_route_current`), then
+        #: each routed turn's text within `route_embed_timeout_s`. A turn
+        #: Memory does not answer in time is routed with the lexical
+        #: stand-in, and says so (`Session.route_fallback`).
+        self._route_remote = route_embed is None and route_embed_timeout_s > 0
+        self._route_embed_timeout_s = max(0.0, float(route_embed_timeout_s))
+        self._route_tables: dict[tuple[str, int], routing_mod.Vectors] = {}
+        self._route_current: routing_mod.Vectors | None = None
+        self._route_warming: asyncio.Task | None = None
+        #: `time.monotonic()` before which the table is not asked for
+        #: again, and why the last ask got none.
+        self._route_retry_at = 0.0
+        self._route_why = ""
         #: The groups each conversation (`transcript.conversation_id`)
         #: used in its last turns, newest last: `route_sticky_turns`.
         self._route_history: dict[str, list[tuple[str, ...]]] = {}
@@ -1879,19 +1903,12 @@ class SessionRunner:
         if not groups:
             return tuple(offered), ()
         if session.route is None:
-            top_k, sticky, margin = self._route_params
-            text = session.user_text or ""
-            history = self._route_history.get(self._conversation(session), [])
             try:
-                route = routing_mod.route(text, history, groups, self._route_embed, top_k=top_k,
-                                          sticky_turns=sticky, none_margin=margin,
-                                          aggregate=self._route_aggregate)
-                scored = routing_mod.scores(text, groups, self._route_embed, aggregate=self._route_aggregate)
-                session.route_conversational = routing_mod.conversational(scored, groups, margin)
+                self._route_with(session, groups, self._route_embed, self._route_aggregate)
             except Exception as exc:  # noqa: BLE001 -- an embedder that fails offers everything, as off
                 self._route_failed(session.trace or session.task_id, repr(exc))
                 return tuple(offered), ()
-            session.route = route
+            session.route_embedder = "lexical" if self._route_embed is routing_mod.lexical_embed else "injected"
         if self._routing != "on":
             # Shadow: the route is recorded at the end of the turn; the
             # model is offered exactly what it would be with routing off.
@@ -1899,6 +1916,140 @@ class SessionRunner:
         names = tuple(session.route) + tuple(session.route_more)
         shown = routing_mod.tools_for(names, groups, tuple(offered) + (routing_mod.TOOL_MORE,))
         return shown, tuple(t for t in offered if t not in shown)
+
+    def _route_with(self, session: Session, groups: tuple, embed, aggregate: str) -> None:
+        """Route `session`'s turn with `embed`: `session.route` and
+        `route_conversational`. Raises what the embedder raises."""
+        top_k, sticky, margin = self._route_params
+        text = session.user_text or ""
+        history = self._route_history.get(self._conversation(session), [])
+        route = routing_mod.route(text, history, groups, embed, top_k=top_k, sticky_turns=sticky,
+                                  none_margin=margin, aggregate=aggregate)
+        scored = routing_mod.scores(text, groups, embed, aggregate=aggregate)
+        session.route_conversational = routing_mod.conversational(scored, groups, margin)
+        session.route = route
+
+    def warm_routing(self) -> None:
+        """Ask Memory, in the background, for the groups' utterance vectors
+        (`memory.embed`), unless routing is off, an embedder was injected,
+        a table is already here or being fetched, or the last ask got none
+        less than `ROUTE_TABLE_RETRY_S` ago. Never raises."""
+        if (self._routing == "off" or not self._route_remote or self._route_current is not None
+                or (self._route_warming is not None and not self._route_warming.done())
+                or time.monotonic() < self._route_retry_at or self._bus is None):
+            return
+        try:
+            self._route_warming = asyncio.get_running_loop().create_task(
+                self._route_fetch_table(), name="routing-embed-utterances")
+        except RuntimeError:  # no running loop: the first routed turn asks
+            self._route_warming = None
+
+    async def stop_routing(self) -> None:
+        """Cancel a table fetch still in flight (`Worker.stop`)."""
+        task, self._route_warming = self._route_warming, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise
+                pass
+
+    async def _route_embed_texts(self, texts: list[str], timeout: float) -> tuple[str, int, list]:
+        """`(model, dimension, vectors)` from Memory, one per text, in
+        order, in requests of at most `EMBED_MAX_TEXTS`. Raises
+        `RuntimeError` with Memory's reason when it refuses or errs, and
+        what the bus raises when it does not answer within `timeout`."""
+        out: list = []
+        model, dimension = "", 0
+        for i in range(0, len(texts), EMBED_MAX_TEXTS):
+            chunk = texts[i:i + EMBED_MAX_TEXTS]
+            req = Message.new(topics.MEMORY_EMBED, source=self._bus.source, payload={"texts": chunk},
+                              clock=self._clock)
+            reply = await asyncio.wait_for(self._bus.request(req, timeout=timeout), timeout=timeout + 0.05)
+            payload = reply.payload or {}
+            if payload.get("ok") is False:
+                error = payload.get("error") or {}
+                raise RuntimeError(f"memory.embed: {error.get('detail') or error.get('code') or error}")
+            if payload.get("refused"):
+                raise RuntimeError(f"memory.embed refused: {payload['refused']}")
+            vectors = payload.get("vectors") or []
+            if len(vectors) != len(chunk):
+                raise RuntimeError(f"memory.embed: {len(vectors)} vectors for {len(chunk)} texts")
+            here = (str(payload.get("model") or ""), int(payload.get("dimension") or 0))
+            if out and here != (model, dimension):
+                raise RuntimeError(f"memory.embed: the embedder changed mid-table ({model}/{dimension} -> "
+                                   f"{here[0]}/{here[1]})")
+            model, dimension = here
+            out.extend(tuple(float(x) for x in v) for v in vectors)
+        return model, dimension, out
+
+    async def _route_fetch_table(self) -> None:
+        """The groups' utterance vectors, from Memory, into `_route_tables`
+        keyed by (model, dimension). A refusal, an error or no answer
+        within `ROUTE_TABLE_TIMEOUT_S` leaves the router lexical, and it
+        is not asked again for `ROUTE_TABLE_RETRY_S`."""
+        texts = list(routing_mod.utterances(self._groups()))
+        if not texts:
+            return
+        try:
+            model, dimension, vectors = await self._route_embed_texts(texts, ROUTE_TABLE_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- no table is the lexical router, never a failed turn
+            self._route_why = (str(exc) or type(exc).__name__)[:300]
+            self._route_retry_at = time.monotonic() + ROUTE_TABLE_RETRY_S
+            return
+        table = self._route_tables.get((model, dimension))
+        if table is None:
+            table = routing_mod.Vectors(model, dimension, dict(zip(texts, vectors)))
+            self._route_tables[(model, dimension)] = table
+        self._route_current, self._route_why = table, ""
+
+    async def _route_remote_turn(self, session: Session) -> None:
+        """Route a turn with Memory's embedder before `_route_offer` sees
+        it: the turn's text is embedded within `route_embed_timeout_s` and
+        scored against the utterance centroids. Anything short of that --
+        no table yet, a refusal, a timeout, an error, a vector of another
+        model -- leaves `session.route` None, so `_route_offer` routes the
+        turn with the lexical stand-in, and `session.route_fallback` says
+        why. Off, or a session that is not routed: nothing at all."""
+        if not self._route_remote or session.route is not None or not self._routes(session):
+            return
+        groups = self._groups()
+        text = session.user_text or ""
+        if not groups or not text.strip():
+            return
+        table = self._route_current
+        if table is None:
+            self.warm_routing()
+            session.route_fallback = f"no utterance vectors yet ({self._route_why or 'warming'})"
+            return
+        try:
+            model, dimension, vectors = await self._route_embed_texts([text], self._route_embed_timeout_s)
+        except Exception as exc:  # noqa: BLE001 -- a slow or refusing embedder costs the turn nothing
+            timed_out = isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "Timeout" in type(exc).__name__
+            session.route_fallback = (f"no answer within {self._route_embed_timeout_s}s" if timed_out
+                                      else (str(exc) or type(exc).__name__))[:300]
+            return
+        if (model, dimension) != (table.model, table.dimension):
+            # Memory's embedder changed under the table (a model finished
+            # loading, a config edit): use or fetch that one's table; this
+            # turn is lexical.
+            self._route_current = self._route_tables.get((model, dimension))
+            if self._route_current is None:
+                self._route_retry_at = 0.0
+                self.warm_routing()
+            session.route_fallback = (f"the turn came back {model}/{dimension}, "
+                                      f"the table is {table.model}/{table.dimension}")
+            return
+        try:
+            self._route_with(session, groups, table.with_text(text, vectors[0]), "centroid")
+        except Exception as exc:  # noqa: BLE001 -- lexical instead
+            session.route = None
+            session.route_fallback = repr(exc)[:300]
+            return
+        session.route_embedder = f"memory:{model}/{dimension}"
+        session.route_fallback = ""
 
     def _route_note_use(self, session: Session, tool: str) -> None:
         """A call to a tool of a group this turn was not offered (the model
@@ -1964,6 +2115,10 @@ class SessionRunner:
                    "missed": [t for t in used if t in routable and t not in would],
                    "more": list(session.route_more),
                    "conversational": session.route_conversational,
+                   # Which embedder routed the turn (`memory:<model>/<dim>`,
+                   # `lexical`, `injected`) and, when Memory's was wanted
+                   # and the turn went lexical, why.
+                   "embedder": session.route_embedder, "fallback": session.route_fallback,
                    "tools_offered": len(would), "channel": session.channel or ""})
 
     async def _think(self, session: Session, user_text: str, *, last_step: bool, no_tools: bool = False) -> Message | None:
@@ -1976,6 +2131,8 @@ class SessionRunner:
         # Tool routing (stage 17): `on` narrows what the model is shown to
         # the routed groups; the rest stay callable (`not_shown`), since a
         # tool not offered is not a tool denied. Off returns `offered` as is.
+        if offered:
+            await self._route_remote_turn(session)
         offered, not_shown = self._route_offer(session, offered) if offered else (offered, ())
         if (offered and self._delegation and session.depth < self._max_depth
                 and session.profile.scaffold in ("patch", "research") and "delegate" not in offered):
