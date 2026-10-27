@@ -39,6 +39,15 @@ class Profile:
     # The scaffold text from the agent's definition file (agents/<name>.md);
     # "" leaves `scaffolds.py` to its built-in text for `scaffold`.
     body: str = ""
+    # Step enforcement (stage 16, `guardrails.Steps`), from the agent's
+    # frontmatter; all empty is none. `required_steps` must succeed before
+    # the session may finish; `terminal_tools` are the calls that end it
+    # (empty: the final text answer does); `prerequisites` maps a tool to
+    # the tools that must have run first, by name or as
+    # `{tool, match_arg}` when the same argument value must match.
+    required_steps: tuple[str, ...] = ()
+    terminal_tools: tuple[str, ...] = ()
+    prerequisites: dict = field(default_factory=dict, hash=False, compare=False)
 
 
 @dataclass
@@ -61,6 +70,11 @@ class Step:
     # (two observers, 2026-09-11 -- an honest no-op after a refusal was
     # told to run the whole suite, then blocked for not having run it).
     denied: bool = False
+    #: A guardrail nudge (stage 16, `guardrails.Nudge.kind`) rather than a
+    #: tool step; "" for every other step. A nudge spends no step of
+    #: `max_steps`, and `resume.py` does not count it as one.
+    nudge: str = ""
+    tier: int = 0
 
 
 @dataclass
@@ -257,6 +271,13 @@ class Session:
     # conversation shared one trace and "why was that turn slow" had no
     # single answer.
     trace_id: str = ""
+    #: This session's guardrails (stage 16, `guardrails.Guards`), set by
+    #: `SessionRunner.run`; None when every one is switched off.
+    guards: object = None
+    #: `guardrails.Steps.to_state()` from the last step on the stream,
+    #: restored by `resume.py` after a crash so the steps already done
+    #: stay done.
+    step_state: dict = field(default_factory=dict)
 
     @property
     def trace(self) -> str:

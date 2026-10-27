@@ -76,6 +76,16 @@ def _chat_floor_reason(error: str) -> str:
     return _CHAT_FLOOR_REASONS.get(code) or (_CHAT_FLOOR_REASONS[""] if not code else code.replace("_", " "))
 
 
+def _proposed_args(call: dict):
+    """A call's arguments as they will be proposed (a marker's
+    `{"argument": ...}` mapped to the tool's own keys), or the raw value
+    when it is not an object -- what Guardian will check."""
+    raw = call.get("args", {})
+    if not isinstance(raw, dict):
+        return raw
+    return to_action_payload(action_id="", task_id="", call=call, rationale="")["args"]
+
+
 def _args_hash(args: dict) -> str:
     import hashlib
     import json as _json
@@ -109,7 +119,7 @@ from . import scaffolds
 from .api import Outcome, Session, Step
 from .context import DEFAULT_TIMEOUT_S, Assembler
 from .claims import unsupported_claims
-from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_action_payload
+from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_action_payload, tool_schemas
 
 # What a Guardian refusal looks like on a step, in one place. The step's
 # `denied` flag is set from it, and Verification reads the flag rather
@@ -714,7 +724,7 @@ class SessionRunner:
         skills_enabled: bool = False, skills_catalog_max_chars: int = 3000, skills_roots: tuple[str, ...] = (),
         skills_channels: tuple[str, ...] = ("", "cli", "http"), telemetry=None,
         bridge_on_slow_turns: bool = False, bridge_timeout_s: float = 2.0,
-        ablate: tuple[str, ...] = (),
+        ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
     ) -> None:
         # Counts each Stop-hook rule that fires (`stophook.py`); a no-op
         # stand-in when the runner is built without one (tests, harnesses).
@@ -771,6 +781,9 @@ class SessionRunner:
         # Guardrails switched off for a measurement (`[orchestration]
         # ablate`, stage 14). Empty in every shipped config.
         self._ablate = frozenset(ablate or ())
+        # The guardrails' budgets (stage 16): `[orchestration] max_retries,
+        # max_tool_errors, max_premature_attempts, max_prereq_violations`.
+        self._guard_limits = tuple(guard_limits)
         #: Why a session under `ablate = ["recovery"]` must end now, by
         #: task id: set where the failure is seen, read at the next step.
         self._unrecovered: dict[str, str] = {}
@@ -858,6 +871,7 @@ class SessionRunner:
             session.profile = _profiles.ablated(session.profile, self._ablate)
             if "revisions" in self._ablate:
                 session.budget.max_revisions = 0
+        session.guards = self._guards_for(session)
         if not session.estimate and session.profile.scaffold != "chat":
             # Asked once, before the first step (stage 6 item 2): what Sim's
             # own record says about this kind of work decides whether it
@@ -1256,6 +1270,18 @@ class SessionRunner:
             tool_calls = think_reply.payload.get("tool_calls") or []
             floor = think_reply.payload.get("floor", False)
 
+            if tool_calls and not is_last and session.guards is not None:
+                # Stage 16: validation and step enforcement, before any of
+                # these calls is proposed. Guardian still gates every call
+                # that gets past this.
+                verdict = session.guards.check_calls(
+                    self._calls_to_run(tool_calls), tool_schemas(), args_of=_proposed_args)
+                if verdict is not None:
+                    ended = await self._guard_verdict(session, step_no, verdict, think_reply, tool_calls)
+                    if ended is not None:
+                        return ended
+                    continue
+
             if tool_calls and is_last and tool_calls[0].get("tool") in DURABLE_TOOLS:
                 # Run it, then end the attempt as a continuation. The
                 # edit stays in the tree and the next attempt starts
@@ -1442,6 +1468,13 @@ class SessionRunner:
                 session.record(step)
                 await self._record_step(session, step)
                 return Outcome("blocked", reason=f"{CONTINUATION_REASON} before the task was finished")
+            if not is_last and not tool_calls and session.guards is not None:
+                verdict = session.guards.check_text(text)
+                if verdict is not None:
+                    ended = await self._guard_verdict(session, step_no, verdict, think_reply, [])
+                    if ended is not None:
+                        return ended
+                    continue
             stray = unhonoured_marker(text, offered_tools(session.profile.tools))
             if stray and not is_last and "recovery" in self._ablate:
                 # `ablate = ["recovery"]`: a malformed call is not corrected.
@@ -1521,6 +1554,13 @@ class SessionRunner:
                 session.messages.append({"role": "assistant", "content": text})
                 session.messages.append({"role": "user", "content": bounce.reply})
                 continue
+            if not is_last and session.guards is not None:
+                verdict = session.guards.check_finish()
+                if verdict is not None:
+                    ended = await self._guard_verdict(session, step_no, verdict, think_reply, [])
+                    if ended is not None:
+                        return ended
+                    continue
 
             step = Step(step_no, "gather" if step_no == 1 else "act", "final answer", ok=True)
             session.record(step)
@@ -1629,6 +1669,8 @@ class SessionRunner:
             offered = tuple(offered) + ("use_skill",)
         if offered and any(str(m.get("content") or "").startswith(pressure_mod.STUB_MARK) for m in session.messages):
             offered = tuple(offered) + (pressure_mod.RECALL_TOOL,)
+        if session.guards is not None and not no_tools:
+            session.guards.offered = tuple(offered)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
         # Per-turn material goes to the latest user turn, so the system
         # prefix stays byte-identical from turn to turn (stage 4 item 4).
@@ -2372,6 +2414,7 @@ class SessionRunner:
             # ended the last attempt (stage 7 item 7). Doing it again is
             # a second commit, a second message, a second purchase.
             text = f"{call.get('tool')} was already done before this attempt was interrupted: {already}"
+            self._guard_result(session, payload, ok=True, kind="")
             return True, text, Detail(text, "")
         refused = chat_outside_workspace_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
         if refused:
@@ -2437,6 +2480,7 @@ class SessionRunner:
                 text = f"{tool_name}: cancelled while waiting for a response"
             else:
                 text = f"{tool_name}: no response (timed out)"
+            self._guard_result(session, payload, ok=False, kind="transient")
             return False, text, Detail(text, "transient")
         if result.type == topics.ACTION_RESULT:
             ok = result.payload.get("ok", False)
@@ -2499,6 +2543,7 @@ class SessionRunner:
                 await self._checkpoint(session, call, full)
             else:
                 self._note_unrecovered(session, f"{tool_name} failed: {' '.join(str(error or kind).split())[:200]}")
+            self._guard_result(session, payload, ok=bool(ok), kind=kind)
             return ok, self._bound_for_model(full), Detail(full[: self._DETAIL_CHARS], kind)
         if result.type == topics.ACTION_DENIED:
             reasons = "; ".join(result.payload.get("reasons", [])) or result.payload.get("layer", "denied")
@@ -2507,6 +2552,8 @@ class SessionRunner:
                 # Only a refusal of a tool this session was never offered:
                 # a Guardian denial on safety grounds stays what it is.
                 self._note_unrecovered(session, f"{tool_name} is not a tool of this session ({text})")
+            # Fed back as it always was; never a nudge, never retried.
+            self._guard_result(session, payload, ok=False, kind=DENIED_KIND)
             return False, text, Detail(text, DENIED_KIND)
         text = f"needs human: {result.payload.get('question', '')}"
         return False, text, Detail(text, "refused")
@@ -2519,9 +2566,111 @@ class SessionRunner:
             self._unrecovered.setdefault(session.task_id, reason)
 
     def _unrecovered_outcome(self, session: Session) -> Outcome | None:
-        """The `failed` outcome a noted failure ends the session with, once."""
+        """The `failed` outcome a noted failure ends the session with, once;
+        or, at this step boundary, the ending a guardrail budget asks for
+        (stage 16)."""
         reason = self._unrecovered.pop(session.task_id, "")
-        return Outcome("failed", reason=f"{NO_RECOVERY_REASON}: {reason}") if reason else None
+        if reason:
+            return Outcome("failed", reason=f"{NO_RECOVERY_REASON}: {reason}")
+        ended = session.guards.end_step() if session.guards is not None else None
+        return Outcome(ended.outcome, reason=ended.reason) if ended is not None else None
+
+    # -- guardrails (stage 16, orchestration/guardrails.py) -------------------------------
+
+    def _guards_for(self, session: Session):
+        """This session's `guardrails.Guards`, or None when `ablate` has
+        switched every one of them off -- the loop is then exactly what it
+        was before stage 16."""
+        from . import guardrails
+
+        max_retries, max_tool_errors, max_premature, max_prereq = self._guard_limits
+        validate_calls = "nudge" not in self._ablate
+        steps = None
+        if "steps" not in self._ablate:
+            steps = guardrails.steps_for(session.profile, max_premature=max_premature, max_prereq=max_prereq)
+            steps = steps.load(session.step_state) if steps.active else None
+        if not validate_calls and steps is None:
+            return None
+        return guardrails.Guards(
+            validate_calls=validate_calls,
+            count_results=validate_calls and "recovery" not in self._ablate,
+            budget=guardrails.ErrorBudget(max_retries=max_retries, max_tool_errors=max_tool_errors),
+            steps=steps,
+        )
+
+    def _calls_to_run(self, tool_calls: list) -> list:
+        """The calls of one reply this step would run: a native reply's
+        first `MAX_NATIVE_CALLS`, or a marker reply's first call and the
+        read batch after it. Calls that would be dropped are not judged."""
+        if all(c.get("id") for c in tool_calls):
+            return tool_calls[:MAX_NATIVE_CALLS]
+        return self._read_batch(tool_calls)
+
+    def _guard_result(self, session: Session, payload: dict, *, ok: bool, kind: str) -> None:
+        if session.guards is None:
+            return
+        tool = str(payload.get("tool") or "")
+        args = payload.get("args") or {}
+        session.guards.result(tool, args, ok=ok, kind=kind, key=(tool, _args_hash(args)))
+
+    async def _guard_verdict(self, session: Session, step_no: int, verdict, think_reply: Message,
+                             calls: list) -> Outcome | None:
+        """Apply a guardrail's verdict: an `End` ends the session; a
+        `Nudge` goes into the transcript for the next think, is recorded
+        on the task stream, and gives back the step the think took."""
+        from .guardrails import RETRY_KINDS, End
+
+        if isinstance(verdict, End):
+            step = Step(step_no, "act", verdict.reason, ok=False)
+            session.record(step)
+            await self._record_step(session, step)
+            return Outcome(verdict.outcome, reason=verdict.reason)
+        nudge = verdict
+        if nudge.kind in RETRY_KINDS and "recovery" in self._ablate:
+            # `ablate = ["recovery"]` (stage 14): nothing goes back to the
+            # model, so a would-be correction ends the session instead.
+            return await self._end_unrecovered(session, step_no, nudge.problem or nudge.kind)
+        # A nudge is not a step of `max_steps` (the plan's Definitions):
+        # the retry budget bounds it instead.
+        session.budget.steps_used = max(0, session.budget.steps_used - 1)
+        what = f"nudge {nudge.kind}" + (f" (tier {nudge.tier})" if nudge.tier else "")
+        # No `tool` on the step: the call it answered never ran, and the
+        # step log is what the honesty checks read (`claims._tools_used`,
+        # `stophook.claimed_to_commit`, the procedure a completed task
+        # records) -- a held-back git_commit must not read as a commit.
+        # The summary names the call.
+        step = Step(step_no, "act", f"{what}: {nudge.problem or nudge.content}",
+                    nudge=nudge.kind, tier=nudge.tier)
+        session.record(step)
+        await self._record_step(session, step)
+        text = think_reply.payload.get("text") or ""
+        if calls and all(c.get("id") for c in calls):
+            # Typed calls are answered call by call: the faulty one with
+            # the correction (forge's tool channel), the rest "not run".
+            run = calls[:MAX_NATIVE_CALLS]
+            session.messages.append({
+                "role": "assistant", "content": text,
+                "tool_calls": [{"id": c["id"], "tool": c.get("tool"),
+                                "args": c.get("args") if isinstance(c.get("args"), dict) else {}} for c in run],
+            })
+            answered = False
+            for c in run:
+                if nudge.role == "tool" and not answered and c.get("tool") == nudge.tool:
+                    content, answered = nudge.content, True
+                else:
+                    content = f"{c.get('tool')}: not run -- see the note on this reply"
+                session.messages.append({"role": "tool", "tool_call_id": c["id"], "name": c.get("tool"),
+                                         "content": content})
+            if nudge.role != "tool" or not answered:
+                session.messages.append({"role": "user", "content": nudge.content})
+            return None
+        if calls:
+            tool = str(calls[0].get("tool") or "")
+            session.messages.append({"role": "assistant", "content": text or f"{tool.upper()}:"})
+        else:
+            session.messages.append({"role": "assistant", "content": text})
+        session.messages.append({"role": "user", "content": nudge.content})
+        return None
 
     async def _end_unrecovered(self, session: Session, step_no: int, what: str) -> Outcome:
         step = Step(step_no, "act", what, ok=False)
@@ -2763,6 +2912,17 @@ class SessionRunner:
             payload["cost_usd"] = step.cost_usd
         if step.tokens:
             payload["tokens"] = step.tokens
+        if step.nudge:
+            # Stage 16: a guardrail nudge, so resume and the TUI can tell
+            # it from a tool step (`task.step` admits extra fields).
+            payload["nudge"] = step.nudge
+            if step.tier:
+                payload["tier"] = step.tier
+        steps = getattr(session.guards, "steps", None)
+        if steps is not None:
+            # The step state as of this step, which `resume.py` reads back
+            # after a crash: it lives on the session, not in the transcript.
+            payload["steps_state"] = steps.to_state()
         # Only on a step a think paid for: attaching the last provider
         # to a pure tool step would say a model served something it did
         # not.

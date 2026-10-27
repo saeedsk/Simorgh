@@ -169,8 +169,25 @@ class Config:
     #   revisions -- every profile behaves as `max_revisions = 0`
     #   recovery  -- a failed tool result, an unknown tool or a malformed
     #                call ends the session `failed` instead of going back
-    #                to the model
+    #                to the model; the tool-error budget below is moot
+    #   nudge     -- no validation before a proposal and no retry nudges
+    #                (stage 16): calls go straight to Guardian as before,
+    #                and the tool-error budget is off with them
+    #   steps     -- no step enforcement (stage 16): the agent's
+    #                required_steps / terminal_tools / prerequisites are
+    #                not checked
     ablate: tuple[str, ...] = ()
+    # The guardrails' budgets (stage 16, orchestration/guardrails.py; the
+    # plan's Definitions). Consecutive retry nudges (unknown tool, bad
+    # arguments, a text reply that looked like a failed call) before the
+    # session ends `failed`; consecutive steps with a hard tool error
+    # (`error_kind = "failed"`) before it ends `failed`; premature
+    # finishes, and consecutive prerequisite violations, before it ends
+    # `blocked`. A nudge never spends a step of `max_steps`.
+    max_retries: int = 3
+    max_tool_errors: int = 2
+    max_premature_attempts: int = 3
+    max_prereq_violations: int = 2
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -191,4 +208,4 @@ class Config:
 
 
 #: The guardrails `[orchestration] ablate` may switch off.
-ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery"})
+ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps"})

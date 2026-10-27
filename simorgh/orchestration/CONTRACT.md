@@ -15,7 +15,8 @@ Orchestration owns the agent loop: it claims a task (or takes a conversational p
 | `simorgh/orchestration/claims.py` | `unsupported_claims`: a final answer's claims checked against the step log |
 | `simorgh/orchestration/config.py` | `[orchestration]` dataclass |
 | `simorgh/orchestration/context.py` | `Assembler`: conversation window, memory block and transcript for one think |
-| `simorgh/orchestration/profiles.py` | Loads the agent definitions (`agents/<name>.md`: TOML frontmatter `tools` (globs allowed), `read_only`, `max_steps`, `max_revisions`, `scaffold`, `max_output_tokens`, `verify`, `extends`; the scaffold as body; `<!-- -->` notes never reach the prompt) into CHAT, VOICE_CHAT, PATCH, RESEARCH, PLAN, SKILL; an unknown key is refused |
+| `simorgh/orchestration/profiles.py` | Loads the agent definitions (`agents/<name>.md`: TOML frontmatter `tools` (globs allowed), `read_only`, `max_steps`, `max_revisions`, `scaffold`, `max_output_tokens`, `verify`, `extends`, and since stage 16 the optional `required_steps`, `terminal_tools`, `prerequisites` (checked at load); the scaffold as body; `<!-- -->` notes never reach the prompt) into CHAT, VOICE_CHAT, PATCH, RESEARCH, PLAN, SKILL; an unknown key is refused |
+| `simorgh/orchestration/guardrails.py` | Stage 16, ported from forge (MIT): `validate` (unknown tool, bad arguments) before a proposal, `ErrorBudget` (retries, hard tool errors), `Steps` (required steps, terminal tools, prerequisites, escalating nudges), `Guards` (one session's set). Pure: no bus |
 | `simorgh/orchestration/pressure.py` | Compaction by token pressure: stub old tool results at 70%, progress note at 85%; `recall_result` |
 | `simorgh/orchestration/progress.py` | Progress note used by re-grounding and clean revisions |
 | `simorgh/orchestration/resume.py` | Rebuilds a session from its `task:<id>` stream (crash vs retry) |
@@ -23,7 +24,7 @@ Orchestration owns the agent loop: it claims a task (or takes a conversational p
 | `simorgh/orchestration/service.py` | The `Service`: starts workers, chat hand-off, tool registry replay, metrics |
 | `simorgh/orchestration/stophook.py` | The Stop hook: one bounce per turn for a final answer that claims what no tool did (commit, promise, TV, pronunciation, any effect in chat) |
 | `simorgh/orchestration/session.py` | `SessionRunner`: the step loop, proposals, verify, worktree landing, honesty guards |
-| `simorgh/orchestration/tools.py` | Tool policy table and marker-call to `action.proposed` payload router |
+| `simorgh/orchestration/tools.py` | Tool policy table and marker-call to `action.proposed` payload router; each registered tool's `input_schema` (`note_schema`, `tool_schemas`, stage 16) |
 | `simorgh/orchestration/worker.py` | `Worker`: claim, lease heartbeat, cancel, terminal reporting, procedural memory |
 
 ## Consumes
@@ -36,7 +37,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:32-41`, pinned by `tes
 | `task.cancel` | `messages/task.py::TaskCancel` | worker.py:218, 247 | Remembers the id; the loop stops at the next step boundary (requeue = no report) |
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | worker.py:262 | `paused`/`stopping`/`stopped` makes sessions pause between steps, and before a verification round; a verify wait that runs out while paused parks the task (`task.paused`) instead of accepting it unverified, because Verification holds its checks through a pause |
 | `percept.text.received` | `messages/percept.py::PerceptTextReceived` | service.py:266 | Runs an ephemeral chat session off the bus handler, keyed by the percept's `session_id`; `speaker_doubt` makes the voice prompt say "probably <name>" and ask for no name (`scaffolds.who_is_here`); `speaker_score` makes it say the speaker is enrolled and at what score this turn matched |
-| `tool.registered` | `messages/tool.py::ToolRegistered` | service.py:227 | Adds the tool to the known set and its reversibility to the policy table |
+| `tool.registered` | `messages/tool.py::ToolRegistered` | service.py:227 | Adds the tool to the known set, its reversibility to the policy table, and its `input_schema` to `tools._SCHEMAS` for `guardrails.validate` (stage 16) |
 | `tool.probed` | `messages/tool.py::ToolProbed` | service.py:118 | Records a tool as down/up so `task_rules` says so once |
 | `action.result` | `messages/action.py::ActionResult` | session.py (`_propose_and_await`) | Ends a proposal wait; side effects fill `uncommitted`/`created`/`wrote`. `error_kind` (stage 2 item 8) rides on the step detail as `session.Detail.kind` (`denied` for `action.denied`); `was_denied` reads that kind, and falls back to the `denied: ` prefix only for a plain string with no kind (an older record) |
 | `action.denied` | `messages/action.py::ActionDenied` | session.py:1719 | Ends a proposal wait as `denied: <reasons>`; step marked `denied` |
@@ -59,6 +60,8 @@ Replies received by request/reply: `task.claim.reply` (Planning), `cognition.thi
 | `task.lease_heartbeat` | `messages/task.py::TaskLeaseHeartbeat` | worker.py:374 | Every `min(heartbeat_s, lease/3)` while a claimed task runs |
 | `task.started` | `messages/task.py::TaskStarted` | session.py:890 | Start of every attempt (also appended to the ledger) |
 | `task.step` | `messages/task.py::TaskStep` | session.py:918, 1338, 1943 | Every recorded step, thinking announcements, cognition errors |
+
+`task.step` carries, since stage 16, `nudge` (`unknown_tool | bad_args | retry | step | prerequisite`) and `tier` (1-3, step nudges only) on a guardrail nudge -- `phase` stays `act`, `ok` and `tool` are absent (the call it answered never ran, and a `tool` would read as one that did to `claims`, `stophook` and the procedure record), and `summary` names the call -- and `steps_state` (`guardrails.Steps.to_state()`: completed steps, the prerequisite tools that ran with their matched argument, the two violation counters) on every step of a session whose agent has step keys. Both are extra fields, which `TaskStep` admits; `resume.py` reads them back.
 
 `task.step` carries `provider` (2026-09-20): which model served the think that step paid for, from `cognition.think.reply`, and only on a step a think contributed to -- attaching the last provider to a pure tool step would say a model served something it did not. Cognition always named it and nothing carried it further, so a benchmark run could not check its own headline: the creator's GAIA run was labelled with one model while six provider changes went past in the log.
 | `task.paused` | `messages/task.py::TaskPaused` | session.py:1917 | Session saw the system paused |
@@ -109,8 +112,19 @@ Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905
 | `worktrees` | `True` | yes |
 | `metrics_interval_s` | `3.0` | yes |
 | `ablate` | `()` | yes (stage 14; eval sandbox only) |
+| `max_retries` | `3` | yes (stage 16) |
+| `max_tool_errors` | `2` | yes (stage 16) |
+| `max_premature_attempts` | `3` | yes (stage 16) |
+| `max_prereq_violations` | `2` | yes (stage 16) |
 
-`ablate` switches guardrails off for the stage 14 ablation matrix (docs/plan/stage-14-toolchain-evals-and-ablation.md). Known names (`config.ABLATABLE`): `scaffold` -- `task_rules` is `scaffolds.bare_rules`: the task, who is speaking, the turn's language and the tool list, no workflow text; `verify` -- every profile runs as `verify = false` (`profiles.ablated`); `revisions` -- every profile runs as `max_revisions = 0`; `recovery` -- a failed `action.result`, a malformed native call, a Guardian denial of a tool the session was never offered, a marker mid-sentence or a marker for a tool that does not exist ends the session `failed` with reason `no recovery: <what>` (`session.NO_RECOVERY_REASON`) instead of going back to the model. A Guardian denial of an offered tool is unchanged: Guardian is not ablatable. Unknown names are dropped into `Config.problems`, which `Service.start` logs as `orchestration.config_ignored`; they never fail the boot. The default `()` leaves every prompt and behaviour byte-identical (`tests/simorgh/orchestration/test_ablation_switches.py`). `sim.sh` never sets it.
+`ablate` switches guardrails off for the stage 14 ablation matrix (docs/plan/stage-14-toolchain-evals-and-ablation.md). Known names (`config.ABLATABLE`): `scaffold` -- `task_rules` is `scaffolds.bare_rules`: the task, who is speaking, the turn's language and the tool list, no workflow text; `verify` -- every profile runs as `verify = false` (`profiles.ablated`); `revisions` -- every profile runs as `max_revisions = 0`; `recovery` -- a failed `action.result`, a malformed native call, a Guardian denial of a tool the session was never offered, a marker mid-sentence or a marker for a tool that does not exist ends the session `failed` with reason `no recovery: <what>` (`session.NO_RECOVERY_REASON`) instead of going back to the model. A Guardian denial of an offered tool is unchanged: Guardian is not ablatable. Unknown names are dropped into `Config.problems`, which `Service.start` logs as `orchestration.config_ignored`; they never fail the boot. The default `()` leaves every prompt byte-identical (`tests/simorgh/orchestration/test_ablation_switches.py`). `sim.sh` never sets it. Stage 16 adds `nudge` -- no validation before a proposal and no retry nudges, so every call goes straight to Guardian, and the tool-error budget and the refused-twice rule are off with them -- and `steps` -- no step enforcement. `ablate = ["nudge", "steps"]` leaves `Session.guards` None and the loop exactly as it was before stage 16 (`test_guardrails.py::AllSwitchesOff`). Under `recovery` a would-be `unknown_tool | bad_args | retry` nudge ends the session `no recovery: <what>` instead, and the tool-error budget is off (the first failure ends the session anyway).
+
+The guardrails (stage 16, docs/plan/stage-16-forge-guardrails.md, `guardrails.py`), on by default:
+- At the proposal point, before any `action.proposed`, the calls the step would run are validated: a tool the last think did not offer is `unknown_tool`; arguments that are not an object, a native call's decode `error`, or arguments failing the top-level part of the tool's `input_schema` that Guardian enforces (required, narrowed for a marker tool; kind, with Guardian's widening) are `bad_args`. Both ride the tool channel (a `tool` message answering the call, for a native call). Nothing else is pre-filtered: every surviving call is proposed and gated, and a Guardian denial is fed back as before -- never a nudge, never retried.
+- A text reply is an answer (ADR-013). It is nudged (`retry`, a `user` message) only when it names an offered tool directly followed by `(`, `{` or `[`, or holds a fenced JSON object whose `tool`/`name` key is an offered tool (JSON with any other `name` is an answer, not a call).
+- `max_retries` consecutive nudges of those three kinds, then `failed` `retries exhausted: <kind>`; a clean proposal resets the count. `max_tool_errors` consecutive steps with a hard error (`error_kind = "failed"`), then `failed` `tool errors exhausted`; `transient` is not counted; a fully ok step resets it. A `refused` or `unconfigured` result for the same tool and arguments twice ends the session `blocked` (`the same call was refused twice`).
+- Steps from the agent's frontmatter: a terminal call, or a final text answer, while a `required_steps` tool has not succeeded gets a `step` nudge at tier 1, 2, 3 (forge's polite / direct / "STOP"), then `blocked` `required steps not done: <pending>`; a call whose `prerequisites` have not run (ok, or a hard failure the tool reported) blocks the whole batch with a `prerequisite` nudge, and the third consecutive one is `blocked` `prerequisites not done: ...`. Shipped: `agents/patch.md` and `agents/skill.md` (and so `skill-writer`) carry `prerequisites = { git_commit = ["run_tests"] }`; nothing in `chat.md` or `voice_chat.md`.
+- A nudge gives back the step its think took (`max_steps` is not spent), is recorded on `task:<id>` as a `task.step` with `nudge`, and is not counted by `resume.py`. Nudges run only before the last step. Step state lives on the session (`Session.guards.steps`), is written on each step as `steps_state`, and a crash-resumed session continues from it (`Session.step_state`).
 
 There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, carried on each `task.available` and read by `worker.py` from the payload. The unread copy here was removed on 2026-09-19, so writing it is now reported by `kernel/configcheck.py` as a section that changed nothing (`test_config.py`).
 
@@ -123,6 +137,8 @@ There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, c
 - Module-level mutable singletons (risks: shared across every Worker and every Kernel in one process, emptied only by `Service.stop`):
   - `tools._TOOL_POLICY`, `tools._DYNAMIC_TOOLS`, `tools._REGISTERED` (`tools.py:29, 559, 569`): the policy table and known-tool set, mutated by `tool.registered`. A hand-written entry wins over an announced one.
   - `scaffolds._UNAVAILABLE` (`scaffolds.py:35`): tools currently probed down.
+  - `tools._SCHEMAS` (stage 16): each tool's `input_schema` from `tool.registered` (live and replayed), read by `guardrails.validate`; emptied by `forget_registered`.
+- `api.Profile` gained `required_steps`, `terminal_tools`, `prerequisites`; `api.Step` gained `nudge`, `tier`; `api.Session` gained `guards`, `step_state` (stage 16).
 
 - `home_blink` (2026-09-27) is in `_TOOL_POLICY` (reversible), the marker help, `session` tool time budgets (45 s) and `scaffolds` tool lines, and in `agents/chat.md` / `agents/voice_chat.md`: the one way to blink a light, never a shell loop.
 
@@ -202,6 +218,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/orchestration/test_never_leave_a_broken_tree.py` -- uncommitted edits are discarded or kept, never abandoned.
 - `tests/simorgh/orchestration/test_cancel.py` -- `task.cancel` stops a session at a step boundary.
 - `tests/simorgh/orchestration/test_scaffolds.py` -- `Profile.scaffold` reaches Cognition's `task_rules`.
+- `tests/simorgh/orchestration/test_guardrails.py` -- stage 16: each nudge kind, the budgets, steps and prerequisites, a denial never nudged, chat text never nudged, step state across a resume, and `ablate = ["nudge", "steps"]` as before.
 
 ## Known issues (2026-09-18 evaluation)
 

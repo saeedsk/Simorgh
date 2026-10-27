@@ -663,6 +663,25 @@ def note_registered(name: str) -> None:
 
 def forget_registered() -> None:
     _REGISTERED.clear()
+    _SCHEMAS.clear()
+
+
+#: Each registered tool's `input_schema`, from `tool.registered` (stage
+#: 16): what `guardrails.validate` checks a call's arguments against
+#: before it is proposed -- the same schema Guardian checks it against
+#: after.
+_SCHEMAS: dict[str, dict] = {}
+
+
+def note_schema(name: str, schema) -> None:
+    """Remember `name`'s argument schema. A record with none (an older
+    ledger entry) keeps the one already known."""
+    if name and isinstance(schema, dict):
+        _SCHEMAS[name] = schema
+
+
+def tool_schemas() -> dict[str, dict]:
+    return dict(_SCHEMAS)
 
 
 def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:

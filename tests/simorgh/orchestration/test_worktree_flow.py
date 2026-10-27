@@ -72,6 +72,8 @@ class WorktreeExecution:
 
 _SCRIPT = [
     {"tool_calls": [{"tool": "apply_source_patch", "args": {"subject": "simorgh/new.py", "code": "X = 1\n"}}]},
+    # agents/patch.md: `prerequisites = { git_commit = ["run_tests"] }` (stage 16).
+    {"tool_calls": [{"tool": "run_tests", "args": {"target": "tests"}}]},
     {"tool_calls": [{"tool": "git_commit", "args": {"path": "simorgh/new.py", "message": "add X"}}]},
     {"text": "Added simorgh/new.py with X = 1 and committed it."},
 ]
@@ -107,7 +109,7 @@ class TestAPatchTaskLandsThroughItsWorktree(unittest.TestCase):
             outcome = await runner.run(session, user_text="add X")
 
             self.assertEqual(outcome.kind, "completed", outcome.reason)
-            self.assertEqual(gx.tools, ["worktree_open", "apply_source_patch", "git_commit", "worktree_land"])
+            self.assertEqual(gx.tools, ["worktree_open", "apply_source_patch", "run_tests", "git_commit", "worktree_land"])
             self.assertIn("[landed 1 commit(s) on main", outcome.result_summary)
             self.assertEqual(session.worktree, "")  # landing removed it
             self.assertEqual(session.base_ref, "abc123def")
@@ -164,7 +166,7 @@ class TestAPatchTaskLandsThroughItsWorktree(unittest.TestCase):
             outcome = await runner.run(session, user_text="add X")
 
             self.assertEqual(outcome.kind, "completed", outcome.reason)
-            self.assertEqual(gx.tools, ["apply_source_patch", "git_commit"])
+            self.assertEqual(gx.tools, ["apply_source_patch", "run_tests", "git_commit"])
             self.assertEqual(session.worktree, "")
 
             for fake in (cognition, gx, verification):
@@ -199,7 +201,7 @@ class TestAPatchTaskLandsThroughItsWorktree(unittest.TestCase):
             outcome = await runner.run(session, user_text="add X")
 
             self.assertEqual(outcome.kind, "completed", outcome.reason)
-            self.assertEqual(gx.tools, ["worktree_open", "apply_source_patch", "git_commit"])
+            self.assertEqual(gx.tools, ["worktree_open", "apply_source_patch", "run_tests", "git_commit"])
             self.assertEqual(session.worktree, "")
             self.assertIn("working in the live tree", session.steps[0].summary)
             self.assertIn("no git", session.steps[0].summary)

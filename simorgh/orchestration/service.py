@@ -13,7 +13,7 @@ from simorgh.contracts.protocols import Context, Health
 
 from . import scaffolds
 from .config import Config
-from .tools import forget_registered, note_registered, register_tool_policy
+from .tools import forget_registered, note_registered, note_schema, register_tool_policy
 
 # Execution's own stream names, duplicated rather than imported: a
 # subsystem may not import another subsystem
@@ -94,6 +94,9 @@ class Service:
                             bridge_timeout_s=self.config.bridge_timeout_s,
                             clean_revisions=self.config.clean_revisions,
                             ablate=tuple(self.config.ablate),
+                            guard_limits=(self.config.max_retries, self.config.max_tool_errors,
+                                          self.config.max_premature_attempts,
+                                          self.config.max_prereq_violations),
                             delegation=self.config.delegation, max_depth=self.config.max_depth,
                             max_children=self.config.max_children_concurrent,
                             delegate_max_steps=self.config.delegate_max_steps,
@@ -185,6 +188,7 @@ class Service:
                 continue
             names.append(name)
             note_registered(name)
+            note_schema(name, payload.get("input_schema"))
             if "reversibility" in payload:
                 register_tool_policy(
                     name, reversibility=payload.get("reversibility", "irreversible"),
@@ -242,6 +246,7 @@ class Service:
     async def _on_tool_registered(self, message) -> None:
         p = message.payload
         note_registered(p.get("name", ""))
+        note_schema(p.get("name", ""), p.get("input_schema"))
         register_tool_policy(
             p.get("name", ""), reversibility=p.get("reversibility", "irreversible"),
             provider=p.get("provider", "builtin"),
