@@ -245,6 +245,8 @@ _TOOL_NOTES: dict[str, str] = {
     "ring_live": "WebRTC signalling for a Ring camera's live view on the dashboard (the page calls it; not for chat)",
     "cast_setup": "one-time: open your API to the network with a token so the TV can fetch your page; then a restart",
     "propose_mcp_server": "propose a new MCP server to the human",
+    "propose_a2a_agent": "propose a remote A2A agent for a person to approve",
+    "a2a_call": "send a task to an approved remote A2A agent and get its report",
     "draft_candidate": "draft a change without applying it",
 }
 

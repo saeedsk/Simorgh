@@ -63,7 +63,7 @@ tools = [
     # resumes. Chat only: a task that starts tasks is a fork
     # bomb, and the tool refuses from inside one anyway.
     "start_task", "list_tasks", "cancel_task", "memory_forget", "remember", "memory_search", "voice_setting",
-    "propose_mcp_server",
+    "propose_mcp_server", "propose_a2a_agent",
     # The TV (execution/media/cast.py): "put yourself on the TV",
     # "play this on the TV" are chat requests too.
     "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key", "tv_app", "tv_key", "tv_charts",

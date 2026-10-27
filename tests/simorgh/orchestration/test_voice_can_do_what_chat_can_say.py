@@ -84,6 +84,8 @@ class VoiceHasTheSpokenToolsTestCase(unittest.TestCase):
         voice does not must be deliberate, not drift."""
         allowed_absent = set(BUILDING) | {
             "geocode", "list_dir", "propose_mcp_server", "render_page", "search_listings",
+            # Proposing a remote agent is a typed act, like proposing an MCP server.
+            "propose_a2a_agent",
             "sec_findings", "sec_posture", "sec_show",
             # Takes file paths; a spoken turn does not name one.
             "look_at_image",

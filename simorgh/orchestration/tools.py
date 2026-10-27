@@ -254,6 +254,11 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # pipeline can reach that code path in any posture -- not a Guardian
     # policy this entry could loosen, a structural one.
     "propose_mcp_server": ("reversible", False),
+    # Stage 18 item 9: the same shape for remote A2A agents. The proposal
+    # only records; `a2a_call` sends household data out of the house and
+    # cannot be taken back, so it is irreversible and needs the network.
+    "propose_a2a_agent": ("reversible", False),
+    "a2a_call": ("irreversible", True),
 }
 
 # `cognition/parser.py::_parse_markers` only ever extracts one string per
@@ -329,6 +334,11 @@ _MARKER_ARG_HINT: dict[str, str] = {
         "command (one of npx/uvx/node/python/python3), args (comma-separated, optional), "
         "reason (required, why this server is needed). Example:\n"
         "name: web_search\ncommand: npx\nargs: -y, some-mcp-package\nreason: real web search, no key needed"
+    ),
+    "propose_a2a_agent": (
+        "key: value lines, one per line -- name (lowercase_snake_case), url (http or https), "
+        "allowed_data (comma-separated data classes it may receive), auth_secret (a key NAME in "
+        "secrets.toml, never the value, optional), reason (required). A person approves it with `a2a approve`"
     ),
 }
 
