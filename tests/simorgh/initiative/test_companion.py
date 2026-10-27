@@ -1,6 +1,8 @@
 """Stage 10 item 3: the companion classes. A consented adult, alone in the
 kitchen in the evening, with a strong posterior, gets a spoken check-in;
-at night, or with somebody else in the room, it goes to the phone; a
+at night, or with somebody else in the room, it waits -- the phone is
+the owner's (`notify` has no recipient), so only the owner's own
+check-in goes there (wave A review, 2026-10-27); a
 child, a guest, an unknown voice or an adult who has not said yes never
 gets one, whatever the posterior; the model may say NOTHING and a line
 that names a condition never becomes a proposal."""
@@ -48,16 +50,19 @@ class WhetherAndWhere(unittest.TestCase):
         self.assertEqual(delivery.channel, "speaker")
         self.assertEqual(delivery.tool, "speak")
 
-    def test_at_night_it_goes_to_the_phone(self):
-        delivery = decide(STRONG, NIGHT_ALONE)
-        self.assertIsNotNone(delivery)
-        self.assertEqual(delivery.channel, "phone")
-        self.assertEqual(delivery.to, "Soodeh")
+    def test_at_night_it_does_not_go_to_the_owners_phone(self):
+        # Stage 10 sent this to "her phone", which was `notify`: Saeed's.
+        self.assertIsNone(decide(STRONG, NIGHT_ALONE))
 
     def test_with_somebody_else_in_the_room_it_is_not_said_aloud(self):
-        delivery = decide(STRONG, EVENING_TOGETHER)
+        # Not aloud, and not on the owner's phone either: it waits.
+        self.assertIsNone(decide(STRONG, EVENING_TOGETHER))
+
+    def test_the_owners_own_check_in_may_use_his_phone(self):
+        for_saeed = Notice("check_in", "Saeed seems quieter", person="Saeed", weight=0.75)
+        delivery = decide(for_saeed, Situation(quiet_hours=True, someone_asleep=True, people={"Saeed": "office"}))
         self.assertIsNotNone(delivery)
-        self.assertNotEqual(delivery.channel, "speaker", "a private word is not said in front of somebody else")
+        self.assertEqual((delivery.channel, delivery.to), ("phone", "Saeed"))
 
     def test_somebody_in_another_room_leaves_her_alone(self):
         self.assertTrue(alone("Soodeh", EVENING_APART))
@@ -286,25 +291,40 @@ class TheService(_CompanionHarness):
         self.assertIn("Soodeh", think[0].payload["messages"][0]["content"])
         self.assertNotIn("0.75", think[0].payload["messages"][0]["content"], "the note carries no raw numbers")
 
-    async def test_at_night_it_goes_to_her_phone(self):
+    async def test_at_night_it_is_held_back_with_the_reason(self):
+        # `notify` has no recipient -- it reaches the person who runs Sim
+        # -- so stage 10's "her phone" put Soodeh's check-in on Saeed's.
         self.situation = NIGHT_ALONE
         await self._low("Soodeh")
-        proposals = self.bus.of(topics.ACTION_PROPOSED)
-        self.assertEqual(len(proposals), 1)
-        self.assertEqual(proposals[0]["tool"], "notify")
-        # `notify` takes `body` and has no recipient field -- it reaches
-        # the person who runs Sim. Asserting `args["to"]` passed while
-        # every real notification was denied for a missing `body`
-        # (2026-09-20); who it is for rides in the subject.
-        self.assertEqual(proposals[0]["args"]["body"], LINE)
-        self.assertIn("Soodeh", proposals[0]["args"]["subject"])
+        self.assertEqual(self.bus.of(topics.ACTION_PROPOSED), [])
+        suppressed = self.bus.of(topics.INITIATIVE_SUPPRESSED)
+        self.assertEqual(len(suppressed), 1)
+        self.assertIn("the phone is the owner's", suppressed[0]["why"])
+        self.assertIn("Soodeh", suppressed[0]["why"])
 
     async def test_with_saeed_in_the_kitchen_it_is_not_said_aloud(self):
         self.situation = EVENING_TOGETHER
         await self._low("Soodeh")
+        self.assertEqual(self.bus.of(topics.ACTION_PROPOSED), [])
+        self.assertIn("the phone is the owner's", self.bus.of(topics.INITIATIVE_SUPPRESSED)[0]["why"])
+
+    async def test_two_people_at_night_only_the_owner_hears_on_his_phone(self):
+        # Both low, both consented, both at night: Saeed's check-in goes to
+        # his phone; Soodeh's does not follow it there.
+        self.people = [SOODEH, SAEED.with_permission("wellbeing_checkins"), IRA, BOBBY, ARAN]
+        self.situation = Situation(quiet_hours=True, someone_asleep=True,
+                                   people={"Soodeh": "bedroom", "Saeed": "office"})
+        await self._low("Soodeh")
+        await self._low("Saeed")
         proposals = self.bus.of(topics.ACTION_PROPOSED)
-        self.assertEqual(len(proposals), 1)
+        self.assertEqual(len(proposals), 1, self.bus.of(topics.INITIATIVE_SUPPRESSED))
         self.assertEqual(proposals[0]["tool"], "notify")
+        self.assertIn("Saeed", proposals[0]["args"]["subject"])
+        offered = self.bus.of(topics.INITIATIVE_OFFERED)
+        self.assertEqual([o["person"] for o in offered], ["Saeed"])
+        suppressed = [s for s in self.bus.of(topics.INITIATIVE_SUPPRESSED) if "Soodeh" in s["why"]]
+        self.assertEqual(len(suppressed), 1)
+        self.assertIn("the phone is the owner's", suppressed[0]["why"])
 
     async def test_a_child_a_guest_an_unknown_voice_and_an_ungranted_adult_never_get_a_check_in(self):
         for person, expect in (("Ira", "child"), ("Bobby", "guest"), ("Nobody", "nobody"), ("Saeed", "not said yes")):

@@ -1389,7 +1389,7 @@ class SessionRunner:
             # waiting, not just after.
             await self._publish(session, topics.TASK_STEP, {
                 "task_id": session.task_id, "step_no": step_no, "phase": "gather",
-                "summary": f"asking the model (purpose={'chat' if session.profile.name == 'chat' else 'draft'})",
+                "summary": f"asking the model (purpose={'chat' if session.profile.scaffold == 'chat' else 'draft'})",
             })
             think_reply = await self._think(session, pending_user_text, last_step=is_last)
             pending_user_text = ""
@@ -1402,7 +1402,7 @@ class SessionRunner:
                 if await self._reground(session, forced=True):
                     think_reply = await self._think(session, "", last_step=is_last)
             if think_reply is None:  # provider unavailable / timeout -- honest floor
-                if session.profile.name == "chat":
+                if session.profile.scaffold == "chat":
                     # A chat turn ends as `completed` rather than `blocked`:
                     # nothing should retry a sentence somebody said out loud.
                     # But it must still SAY why. It used to return here with
@@ -1947,13 +1947,17 @@ class SessionRunner:
             turns = self._route_history.setdefault(self._conversation(session), [])
             turns.append(used_groups)
             del turns[:-sticky]
-        would = routing_mod.tools_for(session.route, groups,
-                                      offered_tools(session.profile.tools) + (routing_mod.TOOL_MORE,))
+        # Only the agent's own tools are routed: the crew, delegation and
+        # wait built-ins `_think` adds after `_route_offer` are offered
+        # whatever the route, so using one is never a miss.
+        routable = offered_tools(session.profile.tools)
+        would = routing_mod.tools_for(session.route, groups, routable + (routing_mod.TOOL_MORE,))
         self._telemetry.event(
             f"routing.{self._routing}", trace_id=session.trace or session.task_id, span_id=uuid.uuid4().hex,
             ts=_epoch(self._clock) or None,
             attrs={"offered": list(session.route), "used": used, "used_groups": list(used_groups),
-                   "missed": [t for t in used if t not in would], "more": list(session.route_more),
+                   "missed": [t for t in used if t in routable and t not in would],
+                   "more": list(session.route_more),
                    "conversational": session.route_conversational,
                    "tools_offered": len(would), "channel": session.channel or ""})
 
@@ -1999,7 +2003,10 @@ class SessionRunner:
         # Per-turn material goes to the latest user turn, so the system
         # prefix stays byte-identical from turn to turn (stage 4 item 4).
         messages = scaffolds.with_turn_note(messages, scaffolds.when_line(_epoch(self._clock)))
-        is_chat = session.profile.name == "chat"
+        # A chat turn by its scaffold, not its name: a future agent on the
+        # chat scaffold under another name is a chat turn too (wave A
+        # review, 2026-10-27). Today chat and voice_chat both are.
+        is_chat = session.profile.scaffold == "chat"
         req = Message.new(
             topics.COGNITION_THINK, source=self._bus.source,
             payload={
