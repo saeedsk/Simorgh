@@ -151,6 +151,12 @@ class Config:
     # live -- so a restart does not leave the TV grey until the page
     # notices. Off, only the page asks, or a person does.
     dash_cameras_live: bool = True
+    # `[interface.a2a]` (stage 18 item 10): Sim's agents served over A2A on
+    # the dashboard's listener, to paired devices only (`a2a.py`). Off by
+    # default: it lets a program elsewhere start an agent in this house.
+    # `expose` is every agent the card lists and the server will run.
+    a2a_enabled: bool = False
+    a2a_expose: tuple[str, ...] = ("research",)
 
     def resolved_history_path(self) -> Path | None:
         return self.history_path.expanduser() if self.history_path is not None else None
@@ -199,4 +205,12 @@ class Config:
             dash_watchlist=tuple(str(s).strip().upper() for s in (data.get("dash_watchlist") or ()) if str(s).strip()),
             dash_majors=tuple(str(s).strip().upper() for s in (data.get("dash_majors") or ()) if str(s).strip()),
             dash_cameras_live=bool(data.get("dash_cameras_live", default.dash_cameras_live)),
+            a2a_enabled=bool(_a2a(data).get("enabled", default.a2a_enabled)),
+            a2a_expose=tuple(str(a).strip() for a in _a2a(data).get("expose", default.a2a_expose) if str(a).strip()),
         )
+
+
+def _a2a(data: dict) -> dict:
+    """`[interface.a2a]`, a table of its own inside `[interface]`."""
+    table = data.get("a2a")
+    return table if isinstance(table, dict) else {}

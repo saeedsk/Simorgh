@@ -73,6 +73,7 @@ from simorgh.contracts.envelope import Message
 from simorgh.contracts.protocols import Context, Health
 
 from . import activity as activity_mod
+from . import crewview as crewview_mod
 from . import panel as panel_mod
 from . import render as render_mod
 from . import tui
@@ -182,12 +183,16 @@ class Service:
         # stage 13 item 3); undeclared until 2026-09-29, when the full tier's
         # manifest test caught it.
         topics.VOICE_ROOM_SPEECH,
+        # Crews (stage 18 items 5 and 10): the tree, `crew`, the A2A server.
+        topics.CREW_SPAWNED, topics.CREW_MESSAGE, topics.CREW_REPORT, topics.CREW_CANCEL,
     )
     produces: tuple[str, ...] = (
         topics.PERCEPT_TEXT_RECEIVED, topics.SYSTEM_PAUSE,
         topics.SYSTEM_RESUME, topics.SYSTEM_STOP, topics.UI_PROMPT_ANSWERED,
         topics.BENCHMARK_RUN_REQUEST, topics.BENCHMARK_HISTORY_REQUEST, topics.BENCHMARK_SUITES_REQUEST,
         topics.BENCHMARK_LOAD_REQUEST, topics.BENCHMARK_STOP_REQUEST,
+        # `crew cancel`; the A2A server's spawn, answers and cancels (stage 18).
+        topics.CREW_CANCEL, topics.CREW_SPAWN, topics.CREW_MESSAGE,
     )
 
     def __init__(self, config: Config | None = None, *, run_repl: bool = True,
@@ -212,6 +217,13 @@ class Service:
         # What every task actually is, so a narration line can name the
         # topic instead of an id (`activity.py`).
         self._book = activity_mod.TaskBook()
+        # Every crew seen on the bus (stage 18 item 5): members drawn under
+        # the task that spawned them, in the transcript and the live rows.
+        self._crews = crewview_mod.CrewBook()
+        #: The member whose branch was printed last, so a `⎿` progress
+        #: line is never drawn under a sibling's branch.
+        self._crew_branch_owner: str = ""
+        self._crew_last_note: dict[str, str] = {}
         self._seed_task = None
         self._posture_seed_task = None
         # For the bottom panel's status row (`panel.py`): whether the
@@ -302,6 +314,8 @@ class Service:
         self._ha_relay = None
         self._telegram = None
         self._whatsapp = None
+        #: The A2A server (`a2a.py`), when `[interface.a2a] enabled`.
+        self._a2a = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -370,6 +384,11 @@ class Service:
             await ctx.bus.subscribe(topics.TASK_FAILED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_BLOCKED, self._on_task_event),
             await ctx.bus.subscribe(topics.TASK_CLEARED, self._on_task_cleared),
+            # Crews (stage 18 item 5): the tree, the live rows, `crew`.
+            await ctx.bus.subscribe(topics.CREW_SPAWNED, self._on_crew_event),
+            await ctx.bus.subscribe(topics.CREW_MESSAGE, self._on_crew_event),
+            await ctx.bus.subscribe(topics.CREW_REPORT, self._on_crew_event),
+            await ctx.bus.subscribe(topics.CREW_CANCEL, self._on_crew_event),
         ]
         self._live.start()
         if self._run_repl:
@@ -526,6 +545,16 @@ class Service:
             ctx.logger.warning("whatsapp.not_listening", reason=self._whatsapp.why_not())
         if self._http is not None and self.config.remote_commands:
             self._http.register_route("POST", "/api/command", self._command_route, rate=(30, 60.0))
+        if self._http is not None and self.config.a2a_enabled:
+            # Sim's agents over A2A (stage 18 item 10), on this listener and
+            # its paired devices. Off unless `[interface.a2a] enabled`.
+            from .a2a import A2AServer
+
+            self._a2a = A2AServer(ctx.bus, expose=self.config.a2a_expose,
+                                  clock=getattr(ctx.clock, "now", None), logger=ctx.logger)
+            await self._a2a.start()
+            self._http.serve_a2a(self._a2a)
+            ctx.logger.info("interface.a2a_serving", expose=list(self._a2a.exposed))
         ctx.logger.info("interface.started", session_id=self.session_id)
 
     async def _command_route(self, _query: dict, body: bytes, _headers: dict) -> tuple[int, bytes, str]:
@@ -698,6 +727,9 @@ class Service:
             self._repl_thread.join(timeout=1.0)
             self._repl_thread = None
             self._save_readline_history()
+        if self._a2a is not None:
+            await self._a2a.stop()
+            self._a2a = None
         if self._http is not None:
             await self._http.stop()
             self._http = None
@@ -928,7 +960,7 @@ class Service:
         nothing running; what just finished, until the next line."""
         unicode = render_mod.unicode_mode(self.config.unicode) != "off"
         rows = panel_mod.live_rows(self._book, now=time.monotonic(), footer_text=self._footer,
-                                   last_done=self._last_done, unicode=unicode)
+                                   last_done=self._last_done, unicode=unicode, crews=self._crews)
         return panel_mod.flatten(self._streaming_rows() + rows)
 
     async def _await_boot(self) -> None:
@@ -1175,6 +1207,53 @@ class Service:
             return
         self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
         self._tree_owner = record.task_id
+
+    async def _on_crew_event(self, message: Message) -> None:
+        """A crew member, drawn under the task that spawned it (stage 18
+        item 5): a branch when it starts, its progress hanging from it
+        behind a `⎿`, and the branch again with its outcome when it
+        reports or is cancelled. Steps and cost are joined from the
+        member's own `task.step` and breathe in the live rows.
+
+        A `⎿` belongs to the branch above it, so when a different member
+        speaks its branch is drawn again first -- the same rule
+        `_reopen_tree_if_needed` keeps for whole trees."""
+        found = self._crews.on_event(message.type, message.payload, ts=getattr(message, "ts", None))
+        if found is None or not self.config.narrate:
+            return
+        crew, member = found
+        if member is None:
+            return
+        root = self._book.tasks.get(crew.crew_id)
+        if not self._narrating(crew.crew_id, origin=root.origin if root is not None else None):
+            return
+        unicode = render_mod.unicode_mode(self.config.unicode) != "off"
+        depth = next((d for m, d in crew.walk() if m.handle == member.handle), 1)
+        if self._tree_owner != crew.crew_id:
+            self._crew_branch_owner = ""
+        if root is not None:
+            self._reopen_tree_if_needed(root, unicode=unicode)
+        elif self._tree_owner != crew.crew_id:
+            # A root this session never saw created (a crew carried over a
+            # restart): named by the crew itself, never as `? · ?`.
+            self._out(render_mod.style(crewview_mod.crew_head(crew, unicode=unicode), "cyan", enabled=self._color))
+            self._tree_owner = crew.crew_id
+        kind = message.payload.get("kind", "") if message.type == crewview_mod.MESSAGE else ""
+        if message.type == crewview_mod.MESSAGE and kind not in ("progress", "milestone", "question", "note"):
+            return  # steering, answers and the report-as-message stay in `crew <id>`
+        if message.type != crewview_mod.MESSAGE or self._crew_branch_owner != member.handle:
+            colour = {"done": "green", "failed": "red", "cancelled": "yellow", "blocked": "yellow"}.get(
+                member.status, "cyan")
+            self._out(render_mod.style(crewview_mod.member_line(member, depth=depth, unicode=unicode),
+                                       colour, enabled=self._color))
+            self._crew_branch_owner = member.handle
+            self._crew_last_note.pop(member.handle, None)
+        if message.type == crewview_mod.SPAWNED:
+            return
+        note = crewview_mod.member_note(member, depth=depth, unicode=unicode)
+        if note and self._crew_last_note.get(member.handle) != note:
+            self._out(render_mod.style(note, "dim", enabled=self._color))
+            self._crew_last_note[member.handle] = note
 
     def _narrate_autonomous(self, message: Message, record, took: float | None = None) -> None:
         """Work this REPL did not start -- a spoken turn, Sim's own
@@ -1877,6 +1956,7 @@ class Service:
             if not in_flight:
                 took = self._book.step_took(task_id, now=now)
             head = str(p.get("summary", "")).partition("\n\n--- a/")[0]
+            self._crews.on_step(task_id, p)
             self._book.on_step(
                 task_id, now=now, phase=p.get("phase", ""), verb=verb_for(p.get("phase", ""), p.get("tool")),
                 in_flight=in_flight, tool=str(p.get("tool") or ""), detail=head,

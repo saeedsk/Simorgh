@@ -1,0 +1,52 @@
+{
+  "$id": "https://simorgh.local/schema/crew.spawn.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Start a crew from outside any session: one member, the agent named, acting as `requester`. Producer: interface (the A2A server, stage 18 item 10). Consumer: orchestration (item 2), which answers with the member's handle and the crew it roots, or an error reply.",
+  "properties": {
+    "agent": {
+      "type": "string"
+    },
+    "background": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "brief": {
+      "type": "string"
+    },
+    "context_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "device": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "report": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requester": {
+      "type": "string"
+    },
+    "requester_channel": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent",
+    "brief",
+    "requester",
+    "requester_channel"
+  ],
+  "title": "crew.spawn",
+  "type": "object"
+}

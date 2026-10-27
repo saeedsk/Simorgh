@@ -29,6 +29,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
     ("tasks", "[all|work|wake <id>|clear]", "see the backlog (all of it), advance the next item, wake a waiting one, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
+    ("crew", "[<id>|cancel <handle>]", "agent crews: who works under whom, what they said, and stopping one"),
     ("forget", "[kind] [minutes|Nd] [words]", "forget what Sim remembered in the last minutes (default 2), optionally only records with those words; kind is episodic (the default), semantic, facts, procedural or all "
      "-- a wrong FACT is only reachable by naming it, which is why `forget facts` exists"),
     ("improve", "[path] <description>", "change something, tested before it lands"),
@@ -96,13 +97,16 @@ SPLASH_COMMANDS = 8
 #: hint) but has no line of its own.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
-    ("Work", ("tasks", "cancel", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
+    ("Work", ("tasks", "cancel", "crew", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
     ("Voice, screen and cameras", ("voice", "room", "followup", "mute", "unmute", "pronounce", "tv", "next", "cameras", "ring")),
     ("Control", ("auto", "approvals", "schedule", "mcp", "pair", "devices", "skills", "pause", "resume")),
     ("Session", ("help", "exit", "restart")),
 )
 SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
+    "crew": (("", "every crew: its members and how many are running, newest first"),
+             ("<id>", "one crew as a tree -- each member's status, steps, cost and last word -- and its messages"),
+             ("cancel <handle> [reason]", "stop one member and everything it started")),
     "tasks": (("", "the backlog: the twenty most recent, with status and origin"),
               ("all", "every task, not just the recent ones"),
               ("work", "advance the next item now"),

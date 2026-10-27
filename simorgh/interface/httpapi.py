@@ -178,6 +178,14 @@ _UNAUTHORIZED = json.dumps({
                         "the token is the SIM_API_TOKEN secret"}}).encode("utf-8")
 
 
+#: The A2A endpoint's refusal (`HttpApi.serve_a2a`): it wants a paired
+#: device, which the shared token is not.
+_A2A_UNPAIRED = json.dumps({
+    "error": {"code": "unauthorized",
+              "detail": "A2A needs a paired device's token (`pair` on Sim's console) as "
+                        "`Authorization: Bearer <token>`; the shared token names nobody"}}).encode("utf-8")
+
+
 #: A handler answers `(status, body, content_type)`. It receives the
 #: parsed query, the (already length-capped) request body, and the
 #: request headers -- everything a route can legitimately need, and
@@ -349,6 +357,8 @@ class HttpApi:
         self.go2rtc_port = 1984
         self._pending_chats: dict[str, asyncio.Future] = {}
         self._turn_sub = None
+        #: The A2A server (`a2a.py`), once `serve_a2a` is called.
+        self._a2a = None
         self._register_builtin_routes()
 
     # -- routing -----------------------------------------------------------------------------
@@ -1161,10 +1171,112 @@ class HttpApi:
             return 200, await self._streams_json(), "application/json"
 
         self.register_route("GET", "/api/streams", _streams)
+
+        async def _crews(query, _body, _headers):
+            return 200, await self._crews_json(query), "application/json"
+
+        # The dashboard's crew panel (stage 18 item 5): every `crew:<id>`
+        # stream folded the way `crew <id>` folds it, so the page and the
+        # console never disagree about who is running.
+        self.register_route("GET", "/api/crews", _crews)
         # 30 chats a minute is far above any human at a keyboard and far
         # below what it takes to keep the single in-flight turn occupied.
         self.register_route("POST", "/api/chat", self._chat_route,
                             max_body=_MAX_BODY_BYTES, rate=(30, 60.0))
+
+    # -- A2A (stage 18 item 10) ----------------------------------------------------------------
+
+    def serve_a2a(self, server) -> None:
+        """Serve `server` (`a2a.A2AServer`) on this listener: the Agent
+        Card at `/.well-known/agent-card.json` and JSON-RPC at `/a2a`.
+        Called only when `[interface.a2a] enabled`; until then neither
+        path exists and both answer 404.
+
+        Both need a PAIRED device holding `chat` -- not the legacy shared
+        token, and not the no-token loopback pass: the crew's requester
+        is the device's person, and a caller who is nobody cannot be one.
+        """
+        from .a2a import CARD_PATH, RPC_PATH
+
+        self._a2a = server
+
+        async def _card(query, _body, headers):
+            if self._a2a_caller(headers, query) is None:
+                return 401, _A2A_UNPAIRED, "application/json"
+            host = headers.get("host", "").strip() or f"{self._host}:{self.port}"
+            return 200, json.dumps(server.card(f"http://{host}{RPC_PATH}")).encode("utf-8"), "application/json"
+
+        self.register_route("GET", CARD_PATH, _card)
+        self._raw_prefixes.append((RPC_PATH, self._a2a_rpc))
+
+    def _a2a_caller(self, headers: dict[str, str], query: dict | None = None):
+        """The paired device asking, or None. A device without `chat` is
+        refused like no device: starting an agent is a conversation."""
+        who = self.caller(headers, query)
+        if who is None or who == "legacy" or not self.may(who, "chat"):
+            return None
+        return who
+
+    async def _a2a_rpc(self, reader, writer, method: str, split, headers: dict, token: str, prefix: str) -> None:
+        """POST /a2a: one JSON-RPC request. `message/stream` and
+        `tasks/resubscribe` answer as server-sent events on this
+        connection, for as long as the task runs; everything else is one
+        JSON body."""
+        from .a2a import MAX_BODY_BYTES, PARSE_ERROR, RPC_PATH, SPAWN_RATE
+
+        if split.path != RPC_PATH:
+            await self._try_respond(writer, 404, b"not found", "text/plain; charset=utf-8")
+            return
+        caller = self._a2a_caller(headers, {"token": [token]} if token else {})
+        if caller is None:
+            await self._try_respond(writer, 401, _A2A_UNPAIRED, "application/json",
+                                    extra_headers=('WWW-Authenticate: Bearer realm="simorgh"',))
+            return
+        if method != "POST":
+            await self._try_respond(writer, 405, b"method not allowed", "text/plain; charset=utf-8")
+            return
+        if not self._origin_allowed(headers):
+            await self._try_respond(writer, 403, b'{"error":"cross-origin request rejected"}', "application/json")
+            return
+        try:
+            length = int(headers.get("content-length", "0"))
+        except ValueError:
+            length = -1
+        if length < 0 or length > MAX_BODY_BYTES:
+            await self._try_respond(writer, 413, b'{"error":"message too large"}', "application/json")
+            return
+        try:
+            body = await asyncio.wait_for(reader.readexactly(length), timeout=30.0) if length else b""
+            request = json.loads(body.decode("utf-8"))
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = {"jsonrpc": "2.0", "id": None, "error": {"code": PARSE_ERROR, "message": "not JSON"}}
+            await self._try_respond(writer, 200, json.dumps(payload).encode("utf-8"), "application/json")
+            return
+        server = self._a2a
+        # A raw route skips the route table's rate limit, so the two
+        # methods that can start a crew get the bound `/api/chat` has.
+        # Reading a task (`tasks/get`, the polling fallback) is not counted.
+        if isinstance(request, dict) and request.get("method") in ("message/send", "message/stream"):
+            limit, window = SPAWN_RATE
+            if self._rate_limited(Route(method="POST", path=f"{RPC_PATH}#message", handler=None, rate=SPAWN_RATE)):
+                refused = json.dumps({"error": {
+                    "code": "rate_limited",
+                    "detail": f"more than {limit} A2A messages in {window:.0f}s"}}).encode("utf-8")
+                await self._try_respond(writer, 429, refused, "application/json")
+                return
+        if isinstance(request, dict) and request.get("method") in ("message/stream", "tasks/resubscribe"):
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n"
+                         b"Connection: close\r\n\r\n")
+            await writer.drain()
+
+            async def _emit(response: dict) -> None:
+                writer.write(b"data: " + json.dumps(response, default=str).encode("utf-8") + b"\n\n")
+                await writer.drain()
+
+            await server.stream(request, caller, _emit)
+            return
+        response = await server.call(request, caller)
+        await self._try_respond(writer, 200, json.dumps(response, default=str).encode("utf-8"), "application/json")
 
     def _authorized(self, headers: dict[str, str], query: dict | None = None) -> bool:
         """No token configured means no gate -- the local, single-viewer
@@ -2024,6 +2136,35 @@ class HttpApi:
             for e in events
         ]}
         return json.dumps(body, default=str).encode("utf-8")
+
+    async def _crews_json(self, query: dict) -> bytes:
+        """`GET /api/crews[?id=<crew_id>][&limit=N]`: the newest crews as
+        trees, or one crew. Each is folded from its own `crew:<id>`
+        stream (`crewview.fold`); a crew is a few dozen events, so the
+        newest `limit` (default 5, at most 20) are read in full."""
+        from . import crewview
+
+        if self._ledger is None:
+            return json.dumps({"crews": [], "error": {"code": "ledger_unavailable"}}).encode("utf-8")
+        wanted = (self._q1(query, "id", "") or "").strip()
+        try:
+            limit = max(1, min(20, int(self._q1(query, "limit", None) or 5)))
+        except ValueError:
+            limit = 5
+        try:
+            names = [n for n in await self._ledger.streams(crewview.STREAM_PREFIX)
+                     if n.startswith(crewview.STREAM_PREFIX)]
+            if wanted:
+                names = [n for n in names if crewview.crew_id_of_stream(n) == wanted]
+            crews = []
+            for name in names:
+                events = await self._read_tail(name, self._logs_max_limit)
+                crews.append(crewview.fold(crewview.crew_id_of_stream(name), events))
+        except Exception as exc:  # noqa: BLE001 -- a bad read is data for the page, not a crash
+            return json.dumps({"crews": [], "error": {"code": "crews_unavailable", "detail": str(exc)}}).encode("utf-8")
+        crews.sort(key=lambda c: c.updated_at or 0.0, reverse=True)
+        return json.dumps({"total": len(crews), "crews": [c.to_dict(messages=20) for c in crews[:limit]]},
+                          default=str).encode("utf-8")
 
     async def _streams_json(self) -> bytes:
         if self._ledger is None:
