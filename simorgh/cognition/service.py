@@ -609,7 +609,7 @@ class Service:
         if native_calls and payload.get("expected") == "tool_calls":
             # A native provider answered with typed calls (stage 2 item 9):
             # those are the calls, whatever marker-looking text came with them.
-            parsed = dataclasses.replace(parsed, kind="tool_calls", tool_calls=tuple(
+            parsed = dataclasses.replace(parsed, kind="tool_calls", rescued=False, tool_calls=tuple(
                 {"tool": c["tool"], "args": c.get("args") or {}, "id": c.get("id", ""),
                  **({"error": c["error"]} if c.get("error") else {})} for c in native_calls))
         await self._append_call_record(purpose, response, floor, compacted)
