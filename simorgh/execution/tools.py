@@ -76,6 +76,7 @@ from .notify import NotifyTool
 from .remote import RunRemoteTool
 from .container import RunContainerTool
 from .render import BrowsePageTool, RenderPageTool
+from .a2a import a2a_tools
 
 # A PDF's bytes are mostly fonts and images, so the cap that bounds how
 # much TEXT a fetch may return is the wrong ceiling for one. What
@@ -3458,6 +3459,9 @@ def builtin_tools(config: Config, *, secrets=None) -> list:
         FindPackageTool(config), InstallPackageTool(config), RunScriptTool(config),
         BrowsePageTool(config), RunContainerTool(config), NotifyTool(config),
         PolicyAdoptTool(config),
+        # Remote A2A agents (a2a.py): the proposal tool always, `a2a_call`
+        # only when a person has configured an agent.
+        *a2a_tools(config, secrets=secrets),
         # The six product domains (knowledge, pim, security, home, energy,
         # media) used to be spliced in here. Since stage 9 item 1 they
         # are `simorgh/domains/` and arrive through `extra_tools`, so the

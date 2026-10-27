@@ -111,6 +111,8 @@ MARKER_ARG_KEY: dict[str, str] = {
     # (`_parse_mcp_proposal_text`), so it's still single-argument at the
     # marker layer -- see the tool's own docstring.
     "propose_mcp_server": "proposal",
+    # The same shape: one text block `execution/a2a.py::parse_proposal` reads.
+    "propose_a2a_agent": "proposal",
 }
 
 #: Tools that take no arguments at all. A stray empty-string argument

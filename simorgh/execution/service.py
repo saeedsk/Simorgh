@@ -1096,6 +1096,20 @@ class Service:
                         "source": "execution",
                     },
                 ))
+            if tool.name == "propose_a2a_agent" and result.ok:
+                # The same notice for a proposed remote agent (a2a.py).
+                await self._ctx.bus.publish(Message.new(
+                    topics.UI_NOTICE, source="execution",
+                    payload={
+                        "level": "info",
+                        "text": (
+                            f"Sim proposed an A2A agent: {result.metadata.get('name', '')} "
+                            f"({result.metadata.get('proposal_id', '')}) -- {result.metadata.get('reason', '')} "
+                            "Review with `a2a`."
+                        ),
+                        "source": "execution",
+                    },
+                ))
 
     async def _finish(self, action_id: str) -> None:
         await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id}))

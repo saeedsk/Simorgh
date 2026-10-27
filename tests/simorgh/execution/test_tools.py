@@ -815,7 +815,7 @@ class TestBuiltinTools(unittest.TestCase):
             "cam_setup", "cam_list", "cam_state", "cam_snapshot", "cam_stream", "cam_webrtc", "cam_light", "cam_ir", "cam_siren",
             "cam_ptz", "cam_recordings", "cam_watch", "camera_describe", "look_at_image",
             "ring_setup", "ring_list", "ring_snapshot", "ring_events", "ring_light", "ring_siren", "ring_watch", "ring_live",
-            "propose_mcp_server", "run_shell", "sim_command", "console_tail", "remember_place", "overheard", "overheard_note",
+            "propose_mcp_server", "propose_a2a_agent", "run_shell", "sim_command", "console_tail", "remember_place", "overheard", "overheard_note",
         })
 
 
