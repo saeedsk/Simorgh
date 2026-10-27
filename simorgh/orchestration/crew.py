@@ -190,8 +190,17 @@ class Crew:
         #: server): its root is the remote caller, who can still answer a
         #: question after the spawn returned.
         self.external = False
-        #: A background crew's notice has gone to the person who asked.
-        self.delivered = False
+        #: Background members whose report has gone, in a notice, to the
+        #: person who asked: per member, so a second background request
+        #: under the same root (a Telegram chat's session lives across
+        #: turns) gets its own notice and does not repeat the first.
+        self.delivered: set[str] = set()
+        #: A crew under a chat turn or started from outside the house
+        #: (`crew.spawn`): every member, at every depth, is a reader. A
+        #: research member it starts may start helpers of its own, but
+        #: never a writer and never a remote agent -- the root could not
+        #: have, and a grandchild has no more authority than its root.
+        self.read_only = False
         #: the root's last `await_agents`, so a restarted root re-enters it.
         self.root_await: dict | None = None
         #: One per parent, so a member waiting on its own children never
@@ -344,6 +353,9 @@ class Crew:
             raise CrewRefused(f"the crew already has {len(counted)} members; "
                               f"{self.max_members} is the cap")
         parse_report_policy(report_policy)  # ValueError for the caller to say
+        if self.read_only and (writer or str(agent).startswith("a2a:")):
+            raise CrewRefused(f"this crew works for a chat turn or a caller from outside the house and is "
+                              f"read-only: {agent} may not join it")
         up = self.members.get(parent)
         while writer and up is not None:
             if up.writer:

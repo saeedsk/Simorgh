@@ -2345,6 +2345,10 @@ class SessionRunner:
         if crew is None:
             crew = self._new_crew(crew_id)
             self._crews[crew_id] = crew
+            # A chat turn's crew is read-only all the way down (stage 18
+            # "Who may spawn"): its research member may not start a writer
+            # or a remote agent the chat turn itself could not.
+            crew.read_only = session.profile.scaffold == "chat"
         session.crew_id = crew_id
         return crew
 
@@ -2538,6 +2542,13 @@ class SessionRunner:
                 return False, ("spawn: refused -- a spoken turn starts work only in the background: "
                                "spawn with background true, tell the person you are on it, and the report "
                                "reaches them when it is ready")
+            if (background and session.channel not in _NOTICE_CHANNELS
+                    and session.speaker.strip().lower() in ("", "unknown")):
+                # Its report goes to the person who asked (Initiative's
+                # reminder); with nobody named it would go to the household
+                # -- the room, or the owner's phone -- which is somebody else.
+                return False, ("spawn: refused -- I cannot tell who is asking, so background work would have "
+                               "nobody to bring its report back to; answer now from what you know instead")
         elif session.profile.scaffold not in CREW_SCAFFOLDS:
             return False, f"spawn: refused -- a {session.profile.scaffold} session does not start crews"
         elif background:
@@ -2919,6 +2930,9 @@ class SessionRunner:
         args: dict = {"agent": name, "message": text, "data": data}
         try:
             while True:
+                # The crew's dollars and wall-clock bound a remote member too:
+                # it takes no think steps, so `_crew_tick` never runs for it.
+                await crew.enforce()
                 if self._crew_cancelled(child):
                     await self._remote_cancel(child, name, remote["task_id"])
                     return Outcome("failed", reason=CANCELLED_REASON)
@@ -3042,13 +3056,23 @@ class SessionRunner:
         And when the conversation it was asked in is still going (its last
         turn under `BACKGROUND_WINDOW_S` ago), the result joins it, so "what
         did you find?" is answered from what came back."""
-        if crew.delivered or crew.external or crew.root in self._open:
+        if crew.external or crew.root in self._open:
             return
-        members = [m for m in crew.children(crew.root) if m.background]
-        if not members or any(m.report is None or not is_terminal(m.status) for m in members):
-            return
-        crew.delivered = True
-        person, channel = members[0].requester, members[0].requester_channel
+        # Per person who asked: a root that lives across turns (a Telegram
+        # chat's session) can hold background work for more than one
+        # person, and each hears only their own. Members already delivered
+        # are not said twice; a later request gets its own notice.
+        groups: dict[tuple[str, str], list] = {}
+        for m in crew.children(crew.root):
+            if m.background and m.handle not in crew.delivered:
+                groups.setdefault((m.requester, m.requester_channel), []).append(m)
+        for (person, channel), members in groups.items():
+            if any(m.report is None or not is_terminal(m.status) for m in members):
+                continue
+            crew.delivered.update(m.handle for m in members)
+            await self._deliver_to(crew, person, channel, members)
+
+    async def _deliver_to(self, crew: Crew, person: str, channel: str, members: list) -> None:
         if channel == "a2a":
             return
         text = render_background(members)
@@ -3114,6 +3138,7 @@ class SessionRunner:
         crew_id = f"crew-{uuid.uuid4().hex[:12]}"
         crew = self._new_crew(crew_id)
         crew.external = True
+        crew.read_only = True  # nothing a member starts may write or reach another house
         self._crews[crew_id] = crew
         text = self._brief_text("(a request from outside the house; the job below is the whole brief)", job,
                                 crew=True)
@@ -3141,6 +3166,11 @@ class SessionRunner:
         to = str(payload.get("to") or "")
         if crew is None:
             return False
+        if not crew.external:
+            # A crew under a session is talked to by that session, in
+            # process; a message from outside naming it would be somebody
+            # speaking as its parent.
+            return True
         member = crew.members.get(to)
         sender = str(payload.get("from") or "")
         if member is None or is_terminal(member.status) or sender != member.parent:
