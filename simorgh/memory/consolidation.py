@@ -121,6 +121,10 @@ class ConsolidationReport:
     refused: list[str] = field(default_factory=list)
     #: The facts extracted this cycle (stage 5 item 3).
     facts: list = field(default_factory=list)
+    #: Live facts given entity ids by the backfill this pass (stage 15).
+    linked: int = 0
+    #: `(merged id, surviving id)` for each pair the model said was one.
+    merged: list = field(default_factory=list)
 
 
 async def run_consolidation(
@@ -182,8 +186,64 @@ async def run_consolidation(
 
         stored_facts = await extract_facts(engine, bus=bus, source=source, window=window,
                                            refs=[i.ref for i in episodic_items], timeout=cognition_timeout)
+    # Stage 15 item 1: the facts written before entities get their ids
+    # (idempotent, so a no-op once done), and the names resolution found
+    # close but not certain are put to the model, which is the only place
+    # one is consulted about identity.
+    linked = await engine.link_facts()
+    merged = await review_uncertain(engine, bus=bus, source=source, timeout=cognition_timeout)
     return ConsolidationReport(contradictions=flagged, pruned=pruned, distilled=distilled,
-                               refused=refused, facts=stored_facts)
+                               refused=refused, facts=stored_facts, linked=linked, merged=merged)
+
+
+SAME_INSTRUCTION = (
+    "Two names were used in one household's conversations. Say whether they name the same person, "
+    "place or thing. Reply with exactly YES or NO and nothing else. If you are not sure, reply NO."
+)
+#: How many close pairs one pass may ask about.
+MAX_SAME_QUESTIONS = 5
+
+
+async def review_uncertain(engine: MemoryEngine, *, bus: Bus, source: str, timeout: float) -> list[tuple[str, str]]:
+    """Ask about the pairs resolution flagged as close but not certain;
+    merge on a plain YES from a real provider. Returns `(merged, into)`.
+
+    Anything else -- a floor reply, no Cognition, a hedge -- leaves both
+    entities as they are: a missed merge costs a hop, a wrong one files
+    one person's facts under another's name."""
+    if not engine._config.entities:  # noqa: SLF001
+        return []
+    index = await engine._entities_synced()  # noqa: SLF001
+    merged: list[tuple[str, str]] = []
+    from .entities import normalise
+
+    answered: set[str] = set()
+    for text, candidate in sorted(index.uncertain)[:MAX_SAME_QUESTIONS]:
+        index.uncertain.discard((text, candidate))
+        if text in answered:
+            continue   # one name merges once: a second yes would chain two other entities together
+        mine = index.alias.get(normalise(text))
+        theirs = index.get(candidate)
+        if not mine or theirs is None or index.canonical(mine) == theirs.id:
+            continue
+        request = Message.new(topics.COGNITION_THINK, source=source, payload={
+            "purpose": "consolidate",
+            "messages": [{"role": "system", "content": SAME_INSTRUCTION},
+                         {"role": "user", "content": f"First: {text}\nSecond: {theirs.name}"}],
+            "budget": {"max_tokens": 5, "max_cost_usd": 0.01},
+            "require_real_provider": False,
+        })
+        try:
+            reply = await bus.request(request, timeout=timeout)
+        except Exception:  # noqa: BLE001 -- no answer is not a yes
+            continue
+        if reply.payload.get("ok") is False or reply.payload.get("floor", True):
+            continue
+        if str(reply.payload.get("text") or "").strip().strip(".!").upper() == "YES":
+            answered.add(text)
+            old = index.canonical(mine)
+            merged.append((old, await engine.merge_entities(old, theirs.id, reason="model: same")))
+    return merged
 
 
 EXTRACT_INSTRUCTION = (
@@ -280,4 +340,5 @@ async def extract_facts(engine: MemoryEngine, *, bus: Bus, source: str, window: 
 
 
 __all__ = ["DISTILL_INSTRUCTION", "DISTILL_PREFIX", "EXTRACT_INSTRUCTION", "MAX_FACTS", "NOTHING", "untraceable",
-           "ConsolidationReport", "extract_facts", "parse_facts", "run_consolidation"]
+           "ConsolidationReport", "MAX_SAME_QUESTIONS", "SAME_INSTRUCTION", "extract_facts", "parse_facts",
+           "review_uncertain", "run_consolidation"]

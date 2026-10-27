@@ -245,9 +245,20 @@ class MemoryEngine:
 
         index = await self._facts_synced()
         now = self._clock.now()
+        scope = (person_scope or EVERYONE).strip() or EVERYONE
+        subject_id = object_id = ""
+        if self._config.entities:
+            # The strings are still the record; the ids say what they name.
+            # The fact's person is the speaker a kinship word belongs to.
+            speaker = "" if scope == EVERYONE else scope
+            subject_id = await self.entity_for(subject, speaker=speaker, person_scope=scope,
+                                               source_refs=source_refs)
+            object_id = await self.entity_for(str(object), speaker=speaker, person_scope=scope,
+                                              source_refs=source_refs, value=True)
         fact = Fact(id=uuid.uuid4().hex[:12], subject=subject.strip(), predicate=predicate.strip(),
-                    object=str(object).strip(), person_scope=(person_scope or EVERYONE).strip() or EVERYONE,
-                    valid_from=now, confidence=confidence, source_refs=tuple(source_refs))
+                    object=str(object).strip(), person_scope=scope,
+                    valid_from=now, confidence=confidence, source_refs=tuple(source_refs),
+                    subject_id=subject_id, object_id=object_id)
         previous_id = index.by_key.get(fact.key)
         await self._ledger.append(FACT_STREAM, Event(
             stream=FACT_STREAM, type=STORED, ts=now, trace_id="", causation_id=None,
@@ -268,6 +279,189 @@ class MemoryEngine:
 
         index = await self._facts_synced()
         return [(fact, index.previous(fact)) for fact in matching(index.live_facts(person=person), query, limit=limit)]
+
+    # -- entities (stage 15 item 1) --------------------------------------------------
+
+    #: Who the People registry knows, for resolution. Memory cannot import
+    #: the subsystem that keeps the registry, so it starts from the
+    #: household roster in `contracts` and a caller (or a test) may set
+    #: something richer here: anything with `name`, `identities` and,
+    #: optionally, `relations`.
+    people = None
+
+    def _people(self):
+        if self.people is not None:
+            return self.people
+        from simorgh.contracts.people import household_people
+
+        return household_people()
+
+    async def _entities_synced(self):
+        """The entity index, caught up with `memory:entities`."""
+        from .entities import ENTITY_STREAM, EntityIndex
+
+        index = getattr(self, "_entities", None)
+        if index is None:
+            index = self._entities = EntityIndex()
+        for event in await self._ledger.read(ENTITY_STREAM, from_seq=index.cursor + 1):
+            index.cursor = event.seq
+            index.apply(event)
+        return index
+
+    async def _entity_event(self, type_: str, payload: dict, key: str) -> None:
+        from .entities import ENTITY_STREAM
+
+        await self._ledger.append(ENTITY_STREAM, Event(
+            stream=ENTITY_STREAM, type=type_, ts=self._clock.now(), trace_id="", causation_id=None,
+            idempotency_key=f"{ENTITY_STREAM}:{key}", payload=payload))
+        await self._entities_synced()
+
+    async def entity_for(self, text: str, *, speaker: str = "", person_scope: str = "*", source_refs=(),
+                         value: bool = False) -> str:
+        """The entity `text` names, created when nothing does; "" for a
+        kinship word nobody's record explains, and -- with `value` -- for an
+        object that is a value rather than a thing ("0912...", "March 6th")."""
+        from .entities import CREATED, guess_type, name_like, normalise, person_named, slug
+
+        text = " ".join((text or "").split())
+        if not text:
+            return ""
+        index = await self._entities_synced()
+        people = self._people()
+        rule, entity_id = index.resolve_how(text, speaker=speaker, people=people)
+        if rule == "kin" and entity_id is None:
+            return ""   # "my wife" with no record of who that is: never an entity named "wife"
+        if entity_id is None:
+            if value and not name_like(text):
+                return ""
+            base = f"{guess_type(text)}:{slug(text)}"
+            if base.endswith(":"):
+                return ""
+            entity_id, n = base, 2
+            while entity_id in index.by_id or entity_id in index.merged_into:
+                entity_id, n = f"{base}-{n}", n + 1
+            await self._entity_event(CREATED, {
+                "id": entity_id, "type": guess_type(text), "name": text, "aliases": [text],
+                "person_scope": person_scope, "source_refs": list(source_refs)}, f"{entity_id}:created")
+            return entity_id
+        if index.get(entity_id) is None:
+            # A person the registry knows, named here for the first time.
+            person = person_named(people, entity_id.partition(":")[2].replace("-", " "))
+            name = str(getattr(person, "name", "") or text) if person is not None else text
+            aliases = [name] + ([text] if normalise(text) != normalise(name) and rule != "kin" else [])
+            await self._entity_event(CREATED, {
+                "id": entity_id, "type": "person", "name": name, "aliases": aliases,
+                "person_scope": "*", "source_refs": list(source_refs)}, f"{entity_id}:created")
+        elif rule == "fuzzy" and normalise(text) not in index.alias:
+            # Learnt, so the next mention is an exact alias.
+            await self.add_alias(entity_id, text)
+        return entity_id
+
+    async def add_alias(self, entity_id: str, alias: str) -> None:
+        """Another name for an entity ("Soo" for Soodeh)."""
+        from .entities import ALIAS_ADDED, normalise
+
+        index = await self._entities_synced()
+        entity_id = index.canonical(entity_id)
+        if index.get(entity_id) is None or not normalise(alias):
+            return
+        await self._entity_event(ALIAS_ADDED, {"id": entity_id, "alias": alias.strip()},
+                                 f"{entity_id}:alias:{normalise(alias)}")
+
+    async def merge_entities(self, old: str, into: str, *, reason: str = "") -> str:
+        """`old` becomes another name for `into`; returns the surviving id.
+        An event, never an edit: facts keep the ids they recorded and
+        resolution maps them to the survivor."""
+        from .entities import MERGED
+
+        index = await self._entities_synced()
+        old, into = index.canonical(old), index.canonical(into)
+        if old == into or index.get(old) is None or index.get(into) is None:
+            return into
+        await self._entity_event(MERGED, {"id": old, "into": into, "reason": reason}, f"{old}:merged:{into}")
+        return into
+
+    async def link_facts(self) -> int:
+        """The one-off backfill: give every live fact written before
+        entities its subject and object ids, as `fact.linked` events.
+        Idempotent -- a linked fact is skipped -- so running it every sleep
+        tick costs one pass over the live facts and writes nothing new."""
+        from .facts import EVERYONE, FACT_STREAM, LINKED
+
+        if not self._config.entities:
+            return 0
+        index = await self._facts_synced()
+        linked = 0
+        for fact in [index.by_id[i] for i in list(index.by_key.values())]:
+            if fact.subject_id:
+                continue
+            speaker = "" if fact.person_scope == EVERYONE else fact.person_scope
+            subject_id = await self.entity_for(fact.subject, speaker=speaker, person_scope=fact.person_scope,
+                                               source_refs=fact.source_refs)
+            object_id = await self.entity_for(fact.object, speaker=speaker, person_scope=fact.person_scope,
+                                              source_refs=fact.source_refs, value=True)
+            if not subject_id and not object_id:
+                continue
+            await self._ledger.append(FACT_STREAM, Event(
+                stream=FACT_STREAM, type=LINKED, ts=self._clock.now(), trace_id="", causation_id=None,
+                idempotency_key=f"{FACT_STREAM}:{fact.id}:linked",
+                payload={"id": fact.id, "subject_id": subject_id, "object_id": object_id}))
+            linked += 1
+        await self._facts_synced()
+        return linked
+
+    async def query_entities(self, query: str, *, speaker: str = "") -> list[str]:
+        """The entities a query mentions, in the order it mentions them:
+        every run of one to three words that resolves (lookup only, nothing
+        is created by asking)."""
+        import re
+
+        from .recall import _STOPWORDS
+
+        index = await self._entities_synced()
+        people = self._people()
+        words = re.findall(r"[\w'’]+", query or "")
+        found: list[str] = []
+        for size in (3, 2, 1):
+            for start in range(len(words) - size + 1):
+                gram = words[start:start + size]
+                if all(w.lower() in _STOPWORDS for w in gram):
+                    continue
+                entity_id = index.resolve(" ".join(gram), speaker=speaker, people=people)
+                if entity_id and index.get(entity_id) is not None and entity_id not in found:
+                    found.append(entity_id)
+        return found
+
+    def fact_ends(self, fact, index) -> tuple[str, str]:
+        """`(subject entity, object entity)` of a fact, canonical; a fact
+        not yet linked is resolved from its strings, lookup only."""
+        people = self._people()
+        speaker = "" if fact.person_scope == "*" else fact.person_scope
+        subject = index.canonical(fact.subject_id) if fact.subject_id else (
+            index.resolve(fact.subject, speaker=speaker, people=people) or "")
+        object_ = index.canonical(fact.object_id) if fact.object_id else ""
+        if not object_:
+            from .entities import name_like
+
+            if name_like(fact.object):
+                object_ = index.resolve(fact.object, speaker=speaker, people=people) or ""
+        return subject, object_
+
+    async def entity_facts(self, query: str, *, person: str = "") -> list:
+        """The live facts about an entity the query names, under any of its
+        names: `(fact, what it replaced)`. Only facts `person` may see."""
+        if not self._config.entities:
+            return []
+        wanted = set(await self.query_entities(query, speaker=person))
+        if not wanted:
+            return []
+        facts = await self._facts_synced()
+        entities = await self._entities_synced()
+        out = []
+        for fact in facts.live_facts(person=person):
+            if wanted & set(self.fact_ends(fact, entities)) - {""}:
+                out.append((fact, facts.previous(fact)))
+        return out
 
     async def warm(self, kinds=KINDS) -> int:
         """Build the recall index before anything asks a question of it.

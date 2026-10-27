@@ -201,6 +201,12 @@ class Service:
                     pairs.append((fact, index.previous(fact)))
                 if len(pairs) >= _DIGEST_FACTS:
                     break
+        if self._config.entities:
+            # Stage 15 item 1: the facts about whatever the query names,
+            # under any of its names -- "Soodeh" finds what was said of "Soo".
+            seen = {fact.id for fact, _was in pairs}
+            pairs += [pair for pair in await self.engine.entity_facts(payload.get("query", ""), person=person)
+                      if pair[0].id not in seen][:_DIGEST_FACTS]
         for fact, was in pairs:
             entry = {"id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
                      "person_scope": fact.person_scope, "confidence": fact.confidence,

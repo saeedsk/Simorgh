@@ -86,6 +86,12 @@ class Config:
     #: later, the Claude CLI got 6.9 s, and the floor "consolidated"
     #: nothing. Nobody waits on this work, so it may take its time.
     consolidate_timeout_s: float = 120.0
+    #: The entity layer (stage 15): facts record which entities their
+    #: subject and object name (`entities.py`), the sleep tick links the
+    #: facts written before, and recall finds a fact under any name of what
+    #: it is about. Off until the stage's memory eval (item 4) shows no
+    #: regression against recall without it; then the default becomes true.
+    entities: bool = False
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":

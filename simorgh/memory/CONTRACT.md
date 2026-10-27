@@ -59,6 +59,7 @@ a fact whose source is gone asserts something nothing can check.
 | `simorgh/memory/config.py` | `[memory]` dataclass |
 | `simorgh/memory/consolidation.py` | `run_consolidation`: contradictions, prune, guarded distillation via `cognition.think` |
 | `simorgh/memory/embed.py` | hashing-trick embedding (256 buckets), dense and sparse cosine |
+| `simorgh/memory/entities.py` | `Entity`, `EntityIndex` (the fold of `memory:entities`), resolution string -> entity id (stage 15) |
 | `simorgh/memory/embedders.py` | pluggable embedders (hashing, local sentence-transformers, OpenAI/Voyage/Gemini) and provider choice |
 | `simorgh/memory/recall.py` | incremental per-kind recall index over the Ledger, tombstone and penalty folds |
 | `simorgh/memory/service.py` | the bus subsystem: handlers, first consolidation after boot, metrics tick |
@@ -77,7 +78,7 @@ Authority: `Service.consumes` in `service.py:24-29` (pinned by `tests/simorgh/te
 | `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/memory/service.py | every 30th tick publishes record counts as `system.metrics` |
 | `turn.completed` | `messages/task.py::TurnCompleted` | simorgh/memory/service.py | for a chat turn: feeds the conversation window and stores an episodic record tagged with session and `person:<name>` |
 
-Requests it makes: `cognition.think` (`purpose="consolidate"`, 30 s timeout) from `consolidation.py:137`; a missing, failed or `floor:true` reply means no distillation this cycle.
+Requests it makes: `cognition.think` (`purpose="consolidate"`, `consolidate_timeout_s`) from `consolidation.py` -- the distillation, the fact extraction and (stage 15, `entities = true`) `review_uncertain`'s YES/NO question about a close name pair, at most `MAX_SAME_QUESTIONS` (5) a pass; a missing, failed or `floor:true` reply means none of these this cycle.
 
 ## Produces
 
@@ -101,7 +102,8 @@ Requests it makes: `cognition.think` (`purpose="consolidate"`, 30 s timeout) fro
 | `memory:{kind}` (`episodic`, `semantic`, `procedural`) | simorgh/memory/store.py:35 | none directly (others go through `memory.retrieve`); tools/bench_recall.py | forever (no `memory:` entry in DEFAULT_RETENTION) |
 | `memory:tombstones` | simorgh/memory/store.py:31 | - | forever |
 | `memory:contradictions` | simorgh/memory/store.py:32 | - | forever |
-| `memory:facts` | simorgh/memory/store.py `store_fact` (stage 5 item 3) | `facts.FactIndex`; `memory.retrieve.reply.facts` | forever; `fact.stored{id, subject, predicate, object, person_scope, valid_from, confidence, source_refs}` and `fact.superseded{id, valid_to, superseded_by}`; never rewritten |
+| `memory:facts` | simorgh/memory/store.py `store_fact` (stage 5 item 3) | `facts.FactIndex`; `memory.retrieve.reply.facts` | forever; `fact.stored{id, subject, predicate, object, person_scope, valid_from, confidence, source_refs, subject_id?, object_id?}` (the ids only with `[memory] entities = true`), `fact.superseded{id, valid_to, superseded_by}` and `fact.linked{id, subject_id, object_id}` (stage 15: the sleep tick's one-off backfill of facts written before entities); never rewritten |
+| `memory:entities` | simorgh/memory/entities.py `ENTITY_STREAM` (stage 15 item 1; covered by the `memory:` prefix in `contracts/streamnames.py`) | `entities.EntityIndex` | forever; `entity.created{id, type, name, aliases, person_scope, source_refs}`, `entity.alias_added{id, alias}`, `entity.merged{id, into, reason}` (the survivor; every old id keeps resolving to it), `entity.summary{id, summary, person_scope, fact_ids}`; never rewritten. Written only with `[memory] entities = true` |
 | `memory:vectors` | simorgh/memory/store.py `write_vector` (stage 5 item 1) | `recall.py` at sync | forever; `vector.stored{ref, provider, v}`, `v` the float32 vector in base64; one per record per embedder, written only for a dense embedder |
 
 Not streams: `working:{session_id}:{i}` is the ref of a window item (never persisted; the window resets with the process); `contradiction:{ref_a}:{ref_b}` is the idempotency key of a contradiction event; `person:{name}` is a record tag. Long content (over 3,500 chars) goes to a Ledger blob with a preview inline (`store.py:138-173`).
@@ -119,6 +121,7 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 | `embedder` | `'auto'` (local sentence-transformers when installed, else hashing; since 2026-09-19; tests get hashing via `SIMORGH_NO_LOCAL_EMBEDDER`) | yes |
 | `recency_weight` | `0.1` | yes |
 | `consolidate_after_start_s` | `120.0` | yes |
+| `entities` | `false` (stage 15; becomes `true` once the memory eval, stage 15 item 4, shows no regression) | yes -- facts record `subject_id`/`object_id`, the sleep tick links old facts and asks about close name pairs, and `memory.retrieve` adds the facts about every entity the query names |
 | `consolidate_timeout_s` | `120.0` | yes -- consolidation's wait on Cognition, which IS the deadline the providers share (each gets `remaining / (still to try + 1)`). At 30 s over four providers each got ~8 s: Gemini's answer arrived after it was abandoned and the floor "consolidated" nothing (live, 2026-09-22) |
 
 `default_k` is read only as a fallback when a `memory.retrieve` payload omits `k`, and the schema makes `k` required, so it never takes effect; `kernel/configcheck.py:66-67` lists it in `KNOWN_DEAD_FIELDS`. The keep-per-kind counts (2,000 / 2,000 / 500) are a constructor argument (`service.py:19`), not config.
@@ -126,6 +129,7 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 ## Public Python surface
 
 - `simorgh.memory.Service` (name `memory`, `VERSION = "0.1.0"`): constructed by `kernel/registry.py:130` with no arguments; `Service(config=..., keep_per_kind=...)` in tests.
+- `simorgh.memory.entities` (stage 15): `Entity`, `EntityIndex`, `ENTITY_STREAM` and the event names, `normalise`, `kinship_word`, `name_like`; `MemoryEngine.entity_for`, `add_alias`, `merge_entities`, `link_facts`, `query_entities`, `entity_facts`, and the settable `MemoryEngine.people`. Nothing outside memory imports them yet; stage 15 item 4's eval will.
 - `simorgh.memory.config.Config`: imported by `kernel/configcheck.py:220`.
 - `simorgh.memory.store.MemoryEngine`, `stream_for`: imported by `tools/bench_recall.py` (dev tool only).
 - Nothing in `simorgh/contracts` is memory-owned; the conversation key the window is fed under is `contracts/settings.py::conversation_key`, shared with Orchestration.
@@ -151,6 +155,8 @@ Consolidation records what somebody says they care about with the predicate `int
 - Consolidation never stores a distillation from a floor or failed reply, never stores `NOTHING`, and drops a distillation that names anything `untraceable` in its window.
 - Two records whose shared first tag is only provenance (`consolidation`, `distilled`) are never flagged as contradicting (`api.py::NOT_A_SUBJECT`).
 - A consolidation pass runs `consolidate_after_start_s` after start (not only on the 6-hourly sleep tick).
+- Entities (stage 15, with `entities = true`): resolution is, in order, an exact alias; the People registry (`contracts.people.household_people()` unless `MemoryEngine.people` is set); a fuzzy match at edit distance <= 1 for names of five or more characters, accepted only when exactly one entity is that close; otherwise a new entity. A model is asked about identity only on the sleep tick, only for the ambiguous pairs, and only a plain YES from a real provider merges. A kinship word ("my wife") resolves through the speaker's People `relations` and never becomes an entity. Asking (`query_entities`) never creates one. A value object (digits, more than four words, over 40 chars) gets no entity.
+- A merge never rewrites a fact: facts keep the ids they recorded and `EntityIndex.canonical` maps every old id to the survivor.
 - No entry in `contracts/topics.py` SUBSCRIBE_ONLY_BY, PUBLISH_ONLY_BY or PUBLISH_PAYLOAD_CONSTRAINTS names memory.
 
 ## Contract tests
@@ -165,6 +171,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/memory/test_long_content.py` -- long content survives via a blob, with the truncation notice on partial recovery.
 - `tests/simorgh/memory/test_recall_scaling.py` -- the index does no repeated reads or embeddings and returns the identical ranking.
 - `tests/simorgh/memory/test_first_consolidation.py` -- a pass runs shortly after start, not only on the sleep tick.
+- `tests/simorgh/memory/test_entities.py` -- each resolution rule, a merge leaving old ids resolvable, the Soo/Soodeh case, the backfill, and the sleep tick's model check (stage 15 item 1).
 - `tests/simorgh/memory/test_embedders.py` -- provider choice, the hashing fallback, and that no progress bar can reach the screen (`ProgressBarsStayOffTheScreenTestCase`).
 
 ## Known issues (2026-09-18 evaluation)
