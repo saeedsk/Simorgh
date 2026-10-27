@@ -8,6 +8,7 @@ from . import (  # noqa: F401 -- side effect: registration
     action,
     benchmark,
     cognition,
+    crew,
     curiosity,
     growth,
     guardian,

@@ -1,0 +1,30 @@
+{
+  "$id": "https://simorgh.local/schema/crew.cancel.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Stop a member; the crew budget running out cancels every member with reason 'crew budget'.",
+  "properties": {
+    "cascade": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "crew_id": {
+      "type": "string"
+    },
+    "handle": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "crew_id",
+    "handle",
+    "reason"
+  ],
+  "title": "crew.cancel",
+  "type": "object"
+}

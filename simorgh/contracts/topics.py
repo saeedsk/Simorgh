@@ -22,6 +22,9 @@ DOMAINS: tuple[str, ...] = (
     # `learn.*`, `reflect.*` and `curiosity.*` stay as they are: the
     # merge changed the owner, not the wire.
     "growth",
+    # `crew.*` is agents started by other agents talking to each other
+    # (stage 18): owner orchestration, read by interface for the tree.
+    "crew",
 )
 
 SUBSYSTEMS: tuple[str, ...] = (
@@ -347,6 +350,16 @@ GUARDIAN_POSTURE_REPLY = "guardian.posture.reply"
 GUARDIAN_STANDING_REQUEST = "guardian.standing.request"
 GUARDIAN_STANDING_REPLY = "guardian.standing.reply"
 RESEARCH_FINDING_RECORDED = "research.finding.recorded"
+
+# --- crew (stage 18: agent crews) -------------------------------------------
+# One crew is the tree of agents under one root session, recorded on the
+# ledger stream `crew:<crew_id>`. Shapes in `messages/crew.py`; the A2A
+# mapping of the same shapes in `a2a.py`. Messages carry conclusions and
+# refs, never transcripts.
+CREW_SPAWNED = "crew.spawned"      # a member started: who, under whom, with what budget
+CREW_MESSAGE = "crew.message"      # progress | milestone | question | answer | steer | note | report
+CREW_REPORT = "crew.report"        # a member's final typed Report
+CREW_CANCEL = "crew.cancel"        # stop a member (and, by default, its descendants)
 
 # --- voice (docs/plans/voice-design.md) -------------------------------------
 # Commands from the CLI, and what the pipeline announces as it goes.
