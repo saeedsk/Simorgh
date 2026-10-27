@@ -484,9 +484,21 @@ class Service:
                     raise ValueError(f"I do not know anybody called {name!r}")
                 detail = (f"{person.name}: {tool} is {answer}" if answer
                           else f"{person.name}: {tool} follows their role ({person.role}) again")
+            elif action == "set_relation":
+                # Who a person's kin are (stage 15): `name`'s `relation` is
+                # `other`, or "" to forget it. Memory resolves "my son" by it.
+                relation = str(payload.get("relation") or "").strip()
+                other = str(payload.get("other") or "").strip()
+                if not name or not relation:
+                    raise ValueError("set_relation needs a name and a relation (son, wife, ...)")
+                person = self._people.set_relation(name, relation, other)
+                if person is None:
+                    raise ValueError(f"I do not know anybody called {name!r}")
+                detail = (f"{person.name}'s {relation.lower()} is {person.relation(relation)}" if other
+                          else f"{person.name}: no {relation.lower()} recorded")
             else:
                 raise ValueError(f"{action!r} is not link, unlink, set_role, grant, revoke, "
-                                 "add_interest, remove_interest or set_tool")
+                                 "add_interest, remove_interest, set_tool or set_relation")
         except Exception as exc:  # noqa: BLE001 -- a bad ask is a reply, never a crash
             await self._ctx.bus.reply(message, type=topics.WORLD_PEOPLE_UPDATE_REPLY,
                                       payload=error_reply_payload("refused", str(exc)))
