@@ -2634,7 +2634,12 @@ class SessionRunner:
         # the retry budget bounds it instead.
         session.budget.steps_used = max(0, session.budget.steps_used - 1)
         what = f"nudge {nudge.kind}" + (f" (tier {nudge.tier})" if nudge.tier else "")
-        step = Step(step_no, "act", f"{what}: {nudge.problem or nudge.content}", tool=nudge.tool or None,
+        # No `tool` on the step: the call it answered never ran, and the
+        # step log is what the honesty checks read (`claims._tools_used`,
+        # `stophook.claimed_to_commit`, the procedure a completed task
+        # records) -- a held-back git_commit must not read as a commit.
+        # The summary names the call.
+        step = Step(step_no, "act", f"{what}: {nudge.problem or nudge.content}",
                     nudge=nudge.kind, tier=nudge.tier)
         session.record(step)
         await self._record_step(session, step)

@@ -77,6 +77,13 @@ class LooksLikeCall(unittest.TestCase):
     def test_a_tool_not_offered_does_not_count(self):
         self.assertFalse(g.looks_like_call("teleport(now)", OFFERED))
 
+    def test_fenced_json_that_names_no_offered_tool_is_an_answer(self):
+        # A chat answer that is itself JSON ("give me Ira as JSON") has a
+        # `name` key and is still an answer, not a call (ADR-013).
+        self.assertFalse(g.looks_like_call('```json\n{"name": "Ira", "age": 5}\n```', OFFERED))
+        self.assertFalse(g.looks_like_call('```json\n{"tool": "a hammer"}\n```', OFFERED))
+        self.assertTrue(g.looks_like_call('```json\n{"tool": "run_tests", "args": {}}\n```', OFFERED))
+
 
 class ErrorBudgetTest(unittest.TestCase):
     def test_retries_exhaust_after_the_limit_and_a_clean_proposal_resets(self):
@@ -350,6 +357,36 @@ class InTheSession(unittest.TestCase):
             self.assertEqual(outcome.kind, "completed", outcome.reason)
             self.assertEqual(len(cognition.calls), 2)
             self.assertEqual([p["nudge"] for p in await _steps(h) if p.get("nudge")], ["retry"])
+
+    @run
+    async def test_a_chat_answer_in_json_is_never_nudged(self):
+        async with Harness() as h:
+            chat = replace(profiles.CHAT, verify=False)
+            session = Session(task_id="t-g", kind="chat", mode="execute", profile=chat,
+                              budget=Budget(max_steps=chat.max_steps, max_revisions=0))
+            outcome, cognition, _, _ = await _session(
+                h, script=[{"text": 'Here it is:\n```json\n{"name": "Ira", "age": 5}\n```'}], session=session)
+            self.assertEqual(outcome.kind, "completed", outcome.reason)
+            self.assertEqual(len(cognition.calls), 1)
+
+    @run
+    async def test_a_nudged_call_is_not_a_step_that_ran_the_tool(self):
+        # The step log is what the honesty checks read: a git_commit that
+        # was held back by its prerequisite must not read as a commit.
+        from simorgh.orchestration import claims, stophook
+
+        async with Harness() as h:
+            profile = replace(profiles.PATCH, verify=False, max_revisions=0, max_steps=8)
+            commit = {"tool_calls": [{"tool": "git_commit", "args": {"path": "a.py", "message": "m"}}]}
+            session = Session(task_id="t-g", kind="patch", mode="execute", profile=profile, subject="a.py",
+                              budget=Budget(max_steps=8, max_revisions=0))
+            await _session(h, script=[commit, _TELEPORT, {"text": "Done."}], session=session)
+            nudged = [s for s in session.steps if s.nudge]
+            self.assertEqual([s.nudge for s in nudged], ["prerequisite", "unknown_tool"])
+            self.assertTrue(all(s.tool is None for s in nudged))
+            self.assertIn("git_commit", nudged[0].summary)
+            self.assertEqual(claims._tools_used(session.steps), set())
+            self.assertTrue(stophook.claimed_to_commit("The change is committed.", session))
 
     @run
     async def test_a_premature_finish_escalates_then_blocks(self):

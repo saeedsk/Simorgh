@@ -231,18 +231,22 @@ _FENCED = re.compile(r"```(?:json)?\s*\n?(\{.*?\})\s*```", re.S)
 def looks_like_call(text: str, offered: Iterable[str]) -> bool:
     """Whether a text reply is a tool call that failed to come through
     (ADR-013's line): an offered tool's name followed by `(`, `{` or
-    `[`, or a fenced JSON object with a `tool` or `name` key. Prose
-    that merely mentions a tool is an answer."""
+    `[`, or a fenced JSON object whose `tool` or `name` key names an
+    offered tool. Prose that merely mentions a tool is an answer, and so
+    is JSON that is the answer itself (`{"name": "Ira", "age": 5}`):
+    rescue would accept neither as a call either."""
+    offered = tuple(n for n in offered if n)
     body = _THINK.sub("", text or "")
     for name in offered:
-        if name and re.search(rf"(?<![\w.]){re.escape(name)}[({{\[]", body):
+        if re.search(rf"(?<![\w.]){re.escape(name)}[({{\[]", body):
             return True
     for block in _FENCED.findall(body):
         try:
             obj = json.loads(block)
         except ValueError:
             continue
-        if isinstance(obj, dict) and ("tool" in obj or "name" in obj):
+        if isinstance(obj, dict) and any(obj.get(k) in offered for k in ("tool", "name")
+                                         if isinstance(obj.get(k), str)):
             return True
     return False
 
