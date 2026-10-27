@@ -38,6 +38,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario` |
 | `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `timing.py`, `voicecache.py`, `run.py`, `scenarios/` |
+| `simorgh/evals/memory/` | the memory suite (stage 15 items 4, 5, 5b): `corpus.py`, `score.py`, `native.py`, `meter.py`, `sidecar.py`, `graphiti_side.py`, `cognee_side.py`, `suite.py` |
 
 ## Suites
 
@@ -48,6 +49,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `tooluse` | BFCL cases from `simorgh/benchmark` | real | dollars |
 | `research` | GAIA cases from `simorgh/benchmark` | real | dollars |
 | `code` | the SWE-bench Verified slice | real | dollars, Docker |
+| `memory` | the memory suite's free systems (`native`, `native_graph`), one case per question; the sidecars only through `python -m simorgh.evals memory` | none | free, under a second |
 
 A paid suite refuses to start without `--paid`. `household` is the one
 the bless runs: no model, no network, no money, and it measures the
@@ -111,6 +113,21 @@ First scores, 2026-09-20: **tooluse (BFCL parallel) 5/5**, **research (GAIA leve
 
 Which voices those are is a **measurement**, kept in `tools/house_voices.py`. The first hand-picked set had `af_heart` and `af_bella` at 0.77 against each other -- two personas the embedder could not tell apart, which would have read as Sim misidentifying people in every scenario. The measured set (`af_river`, `bm_lewis`, `bf_isabella`, `am_puck`, `af_nicole`) has a worst pair of 0.24, and each persona identifies itself at 0.89-0.95 with a profile coherence of 0.86-0.92.
 
+## The memory suite (`memory/`, stage 15)
+
+One synthetic household month (`corpus.episodes()`: 150 episodes, seeded, the five invented personas of `house/people.py` plus the people a household deals with; never a real conversation) and 46 questions in six categories: `alias`, `multi_hop`, `temporal_now`, `temporal_before`, `privacy`, `negative`. Each system is fed the month, then asked every question, and a question is scored **deterministically on its facts block** (`score.check`): every `expect` group on one line; a `stale` value never on a current line (a `[past] ` line is what a current fact replaced); no line holding every string of a `forbid` group (the private value, or the asked entity with somebody else's value). Strings compare casefolded with only letters and digits kept.
+
+| System | What | Cost |
+|---|---|---|
+| `native` | a real `memory.Service` on an in-memory Ledger and Bus, hashing embedder, a clock that walks the month; episodes via `store`, facts via `store_fact` at their own time; asked the way Orchestration asks (one `memory.retrieve` for the query, one with `person:<asker>`), the block is the union of both replies' `facts` | free, under a second |
+| `native_graph` | the same with `[memory] entities = true`, `graph_hops = 2` (stage 15 items 1-3). Skipped, saying so, while `memory.config.Config` does not know those keys | free |
+| `graphiti` | `graphiti_side.py`: `add_episode` per episode into FalkorDBLite in a temporary directory; `search(question, group_ids=[household, person_<asker>])`; an invalidated edge is a `[past] ` line | paid, `--cap-usd` |
+| `cognee` | `cognee_side.py`: `add` + `cognify` per episode, SQLite + LanceDB + its embedded graph store (read back and reported; one needing a server is refused) in a temporary directory; `search(GRAPH_COMPLETION, only_context=True)` over the household and the asker's dataset | paid, `--cap-usd` |
+
+The native systems are handed each episode's facts as a perfect extractor would write them, because the floor provider extracts nothing; the sidecars extract from the text. So the native numbers measure recall only and the sidecars' include extraction -- every report prints this (`suite.FAIRNESS`). Privacy maps to a per-person `group_id` (Graphiti) or dataset (Cognee), the closest each has to `person_scope`, and the report's `notes` say so.
+
+Sidecar rules (`sidecar.py`): the package is imported only under `try/except ImportError` and, when absent, every case is `skipped` with the reason and the pip line -- never failed; telemetry is forced off in the environment before the import (`GRAPHITI_TELEMETRY_ENABLED=false`, `TELEMETRY_DISABLED=1`); the model is the Together model Sim uses (`cognition/providers/together.py`), over the OpenAI-compatible endpoint, key from `TOGETHER_API_KEY`, embeddings from `SIMORGH_EVALS_EMBED_MODEL` (default `intfloat/multilingual-e5-large-instruct`); it runs only with `--paid` and a `--cap-usd` above zero. The cap (`meter.Meter`) is checked before every call and charged from the response's `usage`: Graphiti gets a metered `AsyncOpenAI` (`MeteredClient`), Cognee's `litellm.acompletion`/`aembedding` are wrapped for the run and restored after, with `litellm.max_budget` as a second stop. A sidecar that reaches its cap stops; its remaining cases are skipped, saying so. Per episode it records calls, tokens, dollars and seconds (`ingestion` in the report), and per question the recall latency (`recall_ms` p50/p95). Neither package is a dependency of anything: `pip install 'graphiti-core[falkordblite]'` (Python 3.12+) or `pip install cognee`, in an environment of their own. Nothing in `simorgh/memory` or the Kernel imports a sidecar (pinned by a test).
+
 ## Public Python surface
 
 - `simorgh.evals.run(suite, *, repeats=1, isolate=None) -> Report`
@@ -118,6 +135,7 @@ Which voices those are is a **measurement**, kept in `tools/house_voices.py`. Th
 - `simorgh.evals.api`: `Case`, `Outcome`, `Report`, `bootstrap_ci`, `outcomes_from`, `PASSED`/`FAILED`/`SKIPPED`
 - `simorgh.evals.suites`: `SUITES`, `PAID`, `find`
 - `simorgh.evals.scenario`: `run`, `SCRIPT`, `main` -- `tools/recall_scenario.py` is a shim onto it
+- `simorgh.evals.memory`: `run`, `main`, `SYSTEMS`, `FREE`, `QUESTIONS`, `CATEGORIES`, `episodes`; `memory.suite.run_system`, `dry_run`, `table`, `outcomes`; `memory.meter.Meter`, `MeteredClient`, `CapReached`
 - Read by `simloader.py::run_evals` (the bless gate) and `tools/recall_scenario.py`. Nothing else imports it.
 
 ## Command line
@@ -128,9 +146,12 @@ python -m simorgh.evals run household --json --record ~/.simorgh/loader
 python -m simorgh.evals run trials --paid                # real money
 python -m simorgh.evals list
 python -m simorgh.evals scenario --verbose               # per-probe context
+python -m simorgh.evals memory --systems native,native_graph                 # free
+python -m simorgh.evals memory --systems native,native_graph,graphiti,cognee --dry-run   # matrix + estimated cost
+python -m simorgh.evals memory --systems native,graphiti,cognee --paid --cap-usd 2      # real money, hard cap
 ```
 
-Exit code 0 only when every counted case passed.
+Exit code 0 only when every counted case passed -- except `memory`, a measurement rather than a gate (native is expected to miss aliases and hops): 0 when any system ran.
 
 ## Record
 
@@ -168,6 +189,7 @@ interesting question about an eval is what it did last week.
 
 - `tests/simorgh/evals/test_evals.py` -- the arithmetic and the wiring: skipped cases out of the denominator, a suite that could not start, per-level reporting, a stable interval, the JSON round trip, the record, the table, a dead repeat.
 - `tests/simorgh/evals/test_scenario.py` -- the household scenario against the real booted system: 3 of 3 probes (integration mark).
+- `tests/simorgh/evals/test_memory_suite.py` -- the memory suite: the corpus answers its own questions, the check's rules, native on the real Memory (temporal, privacy and negative all pass), `native_graph` skipped until its keys exist, both sidecars through fake modules (skipped by name when absent, telemetry off, per-group search, cost counted, the cap stops ingestion, Cognee's meter restored and a server graph store refused), the dry run and the command line.
 
 ## Known issues
 
