@@ -28,8 +28,8 @@ from tests.simorgh.helpers import FakeClock
 
 @dataclass(frozen=True)
 class _Person:
-    """A People record with the `relations` field `contracts.people.Person`
-    does not have yet."""
+    """A People record: resolution reads `name`, `identities` and
+    `relations` (`contracts.people.Person` has all three)."""
 
     name: str
     identities: tuple = ()

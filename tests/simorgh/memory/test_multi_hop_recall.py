@@ -64,6 +64,11 @@ class TheWalkTestCase(unittest.TestCase):
     def test_an_excluded_fact_is_not_returned_but_is_still_the_bridge(self):
         self.assertEqual(self.walk(exclude={"f1"}), [("f3", 2), ("f2", 2)])
 
+    def test_via_names_the_entity_each_fact_was_reached_through(self):
+        via: dict = {}
+        self.walk(via=via)
+        self.assertEqual(via, {"f1": "boiler", "f3": "reza", "f2": "reza"})
+
 
 class _ServiceCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -111,6 +116,7 @@ class TheBoilerTestCase(_ServiceCase):
         self.assertIn(("the boiler", "Reza"), lines)
         self.assertIn(("Reza", "0912 345 6789"), lines)
         self.assertEqual(lines[("Reza", "0912 345 6789")], 2)
+        self.assertEqual([f.get("via") for f in facts if f["object"] == "0912 345 6789"], ["Reza"])
         self.assertIsNone(lines[("the boiler", "Reza")], "found by its words: not a hop, not marked")
 
     async def test_soo_is_found_by_a_question_about_soodeh_over_the_bus(self):

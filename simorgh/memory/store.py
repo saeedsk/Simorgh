@@ -558,10 +558,12 @@ class MemoryEngine:
         return out
 
     async def graph_facts(self, query: str, *, person: str = "", hops: int = 2, limit: int = 12,
-                          exclude=()) -> list:
+                          exclude=(), via: dict | None = None) -> list:
         """Multi-hop recall (stage 15 item 2): `(fact, what it replaced,
         hop)` for the facts reached from the entities the query names; see
-        `recall.hop_facts`. Only live facts `person` may see are walked."""
+        `recall.hop_facts`. Only live facts `person` may see are walked.
+        `via`, when given, is filled with fact id -> the NAME of the entity
+        it was reached through."""
         from .recall import hop_facts
 
         if not self._config.entities or hops <= 0:
@@ -571,8 +573,14 @@ class MemoryEngine:
             return []
         facts = await self._facts_synced()
         entities = await self._entities_synced()
+        bridges: dict[str, str] = {}
         reached = hop_facts(facts.live_facts(person=person), start=start, hops=hops, limit=limit,
-                            exclude=exclude, ends=lambda fact: self.fact_ends(fact, entities))
+                            exclude=exclude, ends=lambda fact: self.fact_ends(fact, entities), via=bridges)
+        if via is not None:
+            for fact_id, entity_id in bridges.items():
+                entity = entities.get(entity_id)
+                if entity is not None and entity.name:
+                    via[fact_id] = entity.name
         return [(fact, facts.previous(fact), hop) for fact, hop in reached]
 
     async def warm(self, kinds=KINDS) -> int:
