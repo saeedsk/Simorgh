@@ -183,6 +183,24 @@ So a crew member can be a remote A2A agent, and a Sim agent can be served to a r
 
 11. **Interop proof.** *No lock; after items 9-10.* One Sim calls another Sim's `research` agent over A2A (two sandboxes, `tools/trial.py`), and Sim calls one third-party A2A sample agent. Write the latency, the failure shapes, and the data each one sent into the stage 18 findings.
 
+12. **Claude Code as a crew member.** *Locks `execution`, `orchestration`, `guardian` (one rule), `agents/`; after item 2.*
+
+    The creator, 2026-10-27: "allow Sim to spawn Claude Code and ask Claude Code to implement some feature for it". Sim already *thinks* through the Claude Code CLI as a last-resort provider (`cognition/providers`). This item is different: Claude Code as an autonomous **coding worker** that Sim briefs, watches and judges.
+
+    - **How it runs.** It uses the **Claude Agent SDK** (`claude-agent-sdk`, Python, under `try/except ImportError`), driving the installed `claude` CLI (2.1.311 on this laptop). The CLI's headless `claude -p --output-format stream-json` is the fallback. `spawn{agent:"claude_code", brief, budget}` creates a crew member whose session is a Claude Code run in **its own task worktree** (existing `worktree_open`), never in the live checkout.
+    - **Guardian sees every call.** This is the non-negotiable part. A `PreToolUse` hook (an Agent SDK hook, or the CLI `--settings` hooks in the fallback) sends each Claude Code tool call (Bash, Edit, Write, WebFetch, …) to Guardian as an `action.proposed` with the requester inherited from the crew. It allows the call only on `action.approved`, and denies it with Guardian's reason otherwise. With no hook path available, the member refuses to start. Claude Code's own permission mode is set to the most restrictive that still lets the hook decide, and network tools are denied unless the brief's agent definition allows them.
+    - **Protected paths.** Claude Code may not edit `simorgh/guardian/`, `simorgh/execution/`, `simorgh/contracts/`, `simorgh/kernel/`, `simloader.py`, `sim.sh` or `docs/SOUL.md` (CLAUDE.md rule 5: Sim's own tasks never edit them). There are two locks on this. Guardian's ProtectedRule denies the edit through the hook. And **`worktree_land` refuses a diff that touches any protected path.** Today `execution/worktree.py` has no protected-path check at landing, which is a gap whatever this item does, and is fixed here with a test.
+    - **Reporting.** Stream events become `crew.message{kind:"progress"}`, so the parent can `check_agents` or `await_agents`. Claude Code's final result becomes the typed `Report`: `artifacts` are the worktree diff, a blob ref, and the commits. The parent, or Verification, judges it. **Landing goes through the existing gate**: rebase, the whole-suite verdict from `simloader.unit_verdict`, then fast-forward. Claude Code never pushes or lands by itself.
+    - **Budget.** It runs under the crew budget: a hard cap on turns (`max_turns`, with the SDK's cost reported per run), a wall-clock cap, and `[crew.claude_code] max_usd_per_run` (default 2.00) and `max_runs_per_day` (default 3). It uses the creator's Claude subscription or API key, so every run is counted and shown (the 2026-09-11 lesson: silent use of the Claude quota). It is **off by default** (`[crew.claude_code] enabled = false`). The first run of each day asks the creator, through Guardian's `needs_human`, in every posture.
+    - **The brief.** It is built from the agent file `agents/claude_code.md`: the feature request, the acceptance test, the files in scope, "run `python tools/modtest.py <module>`", and "do not touch protected paths". The repo's `CLAUDE.md` already gives Claude Code the module-lock and contract rules.
+
+    Acceptance:
+    - tests with a fake Agent SDK: every tool call reaches Guardian, and a denied call never runs;
+    - a protected-path diff is refused at landing, both through Claude Code and through an ordinary patch task;
+    - with no hook path, the member refuses to start;
+    - budget caps end the run as `partial`;
+    - one live trial in a repo copy (`tools/trial.py`): Sim asks Claude Code for a small feature in a non-protected module, Claude Code implements it with a test, the landing gate passes, and the findings record the cost and every Guardian decision.
+
 ## What this must never do
 
 - Let a member act outside Guardian, or with more authority than the person who asked. Children inherit the requester; they never escalate.
