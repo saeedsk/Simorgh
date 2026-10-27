@@ -201,6 +201,18 @@ class Service:
                     pairs.append((fact, index.previous(fact)))
                 if len(pairs) >= _DIGEST_FACTS:
                     break
+        hop_of: dict[str, int] = {}
+        if self._config.entities and self._config.graph_hops > 0:
+            # Stage 15: the facts about whatever the query names, under any
+            # of its names ("Soodeh" finds what was said of "Soo"), and one
+            # hop further ("whoever fixed the boiler" -> Reza -> his number).
+            # After everything above, never instead of it, and each marked
+            # with its hop; `graph_hops = 0` leaves the block as it was.
+            for fact, was, hop in await self.engine.graph_facts(
+                    payload.get("query", ""), person=person, hops=self._config.graph_hops,
+                    limit=self._config.graph_max_facts, exclude={fact.id for fact, _was in pairs}):
+                pairs.append((fact, was))
+                hop_of[fact.id] = hop
         for fact, was in pairs:
             entry = {"id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
                      "person_scope": fact.person_scope, "confidence": fact.confidence,
@@ -209,7 +221,18 @@ class Service:
                 # What it replaced, so a reply can say "March 6th (was March
                 # 4th)" rather than leaving the old value to resurface.
                 entry["was"], entry["was_until"] = was.object, float(was.valid_to or 0.0)
+            if fact.id in hop_of:
+                entry["hop"] = hop_of[fact.id]
             facts.append(entry)
+        if self._config.entities and self._config.graph_hops > 0:
+            # Stage 15 item 3: one line per entity the query names, from the
+            # summary the sleep tick wrote. In the facts block because that
+            # is what Orchestration renders; `summary: true` and `entity` say
+            # it is not a fact, and the predicate reads as one line there.
+            for entity, summary in await self.engine.entity_summaries(payload.get("query", ""), person=person):
+                facts.append({"id": f"{entity.id}#summary", "subject": entity.name, "predicate": "in short:",
+                              "object": summary, "person_scope": "*", "confidence": 1.0,
+                              "summary": True, "entity": entity.id})
         items, truncated = await self.engine.retrieve(
             query=payload.get("query", ""), kinds=payload.get("kinds", []),
             k=payload.get("k", self._config.default_k), filters=payload.get("filters"),
@@ -363,6 +386,17 @@ class Service:
             # model had nothing to say" and "the model invented".
             self._ctx.logger.warning("memory.distillation_refused",
                                      invented=", ".join(report.refused[:10]), count=len(report.refused))
+        from .consolidation import SummaryReport
+
+        summaries = getattr(report, "summaries", None)
+        if isinstance(summaries, SummaryReport) and (summaries.written or summaries.skipped or summaries.refused):
+            # Skipped is not failed: no real provider answered, so nothing
+            # was written and the next pass asks again.
+            self._ctx.logger.info("memory.entity_summaries", written=len(summaries.written),
+                                  skipped=summaries.skipped, refused=len(summaries.refused))
+            for entity_id, invented in summaries.refused.items():
+                self._ctx.logger.warning("memory.entity_summary_refused", entity=entity_id,
+                                         invented=", ".join(invented[:10]))
         await self._ctx.bus.publish(Message.new(
             topics.MEMORY_CONSOLIDATED, source=self._ctx.source,
             payload={"window": window or 0.0, "distilled": 1 if report.distilled else 0,

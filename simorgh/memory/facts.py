@@ -28,6 +28,10 @@ from dataclasses import dataclass, field, replace
 FACT_STREAM = "memory:facts"
 STORED = "fact.stored"
 SUPERSEDED = "fact.superseded"
+#: The entity ids of a fact stored before entities existed (stage 15 item
+#: 1): `{id, subject_id, object_id}`, written once by the sleep tick's
+#: backfill. The fact itself is not rewritten; this is another event.
+LINKED = "fact.linked"
 
 #: `person_scope` for something true of the household rather than of one
 #: person. A fact scoped to a person is never recalled for another.
@@ -48,6 +52,11 @@ class Fact:
     superseded_by: str = ""            # the fact that replaced it
     confidence: float = 1.0
     source_refs: tuple[str, ...] = ()
+    #: The entities the subject and object strings name (stage 15 item 1),
+    #: "" when unresolved or written before entities. The strings stay the
+    #: record; these are an index into `memory:entities`.
+    subject_id: str = ""
+    object_id: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -69,7 +78,11 @@ class Fact:
         return {"id": self.id, "subject": self.subject, "predicate": self.predicate, "object": self.object,
                 "person_scope": self.person_scope, "valid_from": self.valid_from, "valid_to": self.valid_to,
                 "superseded_by": self.superseded_by, "confidence": self.confidence,
-                "source_refs": list(self.source_refs)}
+                "source_refs": list(self.source_refs),
+                # Only when set, so a fact written with entities off is the
+                # same event it was before they existed.
+                **({"subject_id": self.subject_id} if self.subject_id else {}),
+                **({"object_id": self.object_id} if self.object_id else {})}
 
 
 def from_dict(data: dict) -> Fact:
@@ -80,6 +93,7 @@ def from_dict(data: dict) -> Fact:
         valid_to=(None if data.get("valid_to") in (None, "") else float(data["valid_to"])),
         superseded_by=str(data.get("superseded_by") or ""), confidence=float(data.get("confidence") or 1.0),
         source_refs=tuple(str(r) for r in (data.get("source_refs") or ())),
+        subject_id=str(data.get("subject_id") or ""), object_id=str(data.get("object_id") or ""),
     )
 
 
@@ -89,6 +103,9 @@ class FactIndex:
 
     by_id: dict[str, Fact] = field(default_factory=dict)
     by_key: dict[tuple[str, str, str], str] = field(default_factory=dict)   # key -> the live fact's id
+    #: Ids with a `fact.linked` event, so the backfill links each fact once
+    #: even when its subject resolved to nothing.
+    linked: set[str] = field(default_factory=set)
     cursor: int = 0
 
     def apply(self, event) -> None:
@@ -109,6 +126,12 @@ class FactIndex:
             self.by_id[old.id] = ended
             if self.by_key.get(old.key) == old.id:
                 del self.by_key[old.key]
+        elif event.type == LINKED:
+            fact = self.by_id.get(str(payload.get("id") or ""))
+            if fact is not None:
+                self.linked.add(fact.id)
+                self.by_id[fact.id] = replace(fact, subject_id=str(payload.get("subject_id") or fact.subject_id),
+                                              object_id=str(payload.get("object_id") or fact.object_id))
 
     def live_facts(self, *, person: str = "") -> list[Fact]:
         """Every fact that holds, for `person` and for everyone."""
@@ -157,4 +180,4 @@ def _words(text: str) -> list[str]:
     return re.findall(r"[a-z0-9؀-ۿ]+", (text or "").lower())
 
 
-__all__ = ["EVERYONE", "FACT_STREAM", "Fact", "FactIndex", "STORED", "SUPERSEDED", "from_dict", "matching"]
+__all__ = ["EVERYONE", "FACT_STREAM", "Fact", "FactIndex", "LINKED", "STORED", "SUPERSEDED", "from_dict", "matching"]

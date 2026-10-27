@@ -86,6 +86,19 @@ class Config:
     #: later, the Claude CLI got 6.9 s, and the floor "consolidated"
     #: nothing. Nobody waits on this work, so it may take its time.
     consolidate_timeout_s: float = 120.0
+    #: The entity layer (stage 15): facts record which entities their
+    #: subject and object name (`entities.py`), the sleep tick links the
+    #: facts written before, and recall finds a fact under any name of what
+    #: it is about. Off until the stage's memory eval (item 4) shows no
+    #: regression against recall without it; then the default becomes true.
+    entities: bool = False
+    #: Multi-hop recall (stage 15 item 2), with `entities` on: how far from
+    #: an entity the query names recall walks the facts (1: the facts
+    #: about it; 2: also the facts about what those reach), and how many
+    #: facts the walk may add to the block in all, hop 1 first. 0 hops
+    #: turns the walk off and leaves the block exactly as it was.
+    graph_hops: int = 2
+    graph_max_facts: int = 12
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":
