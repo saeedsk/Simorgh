@@ -31,7 +31,10 @@ can drive the tool with a transport of its own against a fake server.
 One call:
 - fetch the Agent Card (cached per agent for `CARD_TTL_S`); a card behind
   a bearer (another Sim's is: only a paired device may read it) is asked
-  for again once with the configured secret;
+  for again once with the configured secret -- only when the 401/403's
+  `WWW-Authenticate` challenge names `Bearer`, or the agent's table says
+  `auth_scheme = "bearer"`; any other card answers `unconfigured` naming
+  the scheme it asked for, and the secret is never sent to it;
 - agree the A2A version: the card's JSON-RPC interfaces name what it
   speaks, this client speaks `CLIENT_VERSIONS` and says which in the
   `A2A-Version` header of every request; a card offering none of them
@@ -92,6 +95,9 @@ class A2aAgentConfig:
     url: str
     # A key name in secrets.toml, never the value. Empty: no credential.
     auth_secret: str = ""
+    # The scheme the agent's card itself sits behind, when its 401 does not
+    # say (no `WWW-Authenticate`). Only `bearer` sends the secret for it.
+    auth_scheme: str = ""
     # Data classes this agent may receive. `*` allows any.
     allowed_data: tuple[str, ...] = ("public",)
     timeout_s: float = 30.0
@@ -105,6 +111,7 @@ class A2aAgentConfig:
             allowed = [allowed]
         return cls(
             name=str(name), url=str(data["url"]), auth_secret=str(data.get("auth_secret", "") or ""),
+            auth_scheme=str(data.get("auth_scheme", "") or "").strip().lower(),
             allowed_data=tuple(str(item).strip().lower() for item in allowed if str(item).strip()),
             timeout_s=float(data.get("timeout_s", 30.0)),
             poll_interval_s=float(data.get("poll_interval_s", 2.0)),
@@ -138,11 +145,26 @@ class A2aError(Exception):
 
 class CardUnauthorized(A2aError):
     """The Agent Card answered 401 or 403: it is behind the agent's own
-    credential. A transport raises it from `card()`; the tool asks once
-    more with the configured secret."""
+    credential. A transport raises it from `card()` with the response's
+    `WWW-Authenticate` header as `challenge` ("" when it sent none); the
+    tool asks once more with the configured secret only when that names
+    `Bearer` or the agent's table declares `auth_scheme = "bearer"`."""
 
-    def __init__(self, message: str = "the agent card needs a credential") -> None:
+    def __init__(self, message: str = "the agent card needs a credential", *, challenge: str = "") -> None:
         super().__init__(message, error_kind="unconfigured")
+        self.challenge = str(challenge or "").strip()
+
+    @property
+    def scheme(self) -> str:
+        """The challenge's auth scheme, lower case (`bearer`, `basic`, ...)."""
+        return challenge_scheme(self.challenge)
+
+
+def challenge_scheme(header: str) -> str:
+    """A `WWW-Authenticate` value's first auth scheme, lower case: `Bearer
+    realm="x"` is `bearer`; nothing is ""."""
+    head = str(header or "").strip().split(",", 1)[0].split()
+    return head[0].lower() if head else ""
 
 
 # -- the Agent Card ---------------------------------------------------------
@@ -379,9 +401,11 @@ class SdkTransport:
                 else:
                     card = await resolver.get_agent_card()
             except Exception as exc:
-                # The SDK's `A2AClientHTTPError` carries the status.
+                # The SDK's `A2AClientHTTPError` carries the status; the
+                # httpx error it wraps carries the response's challenge.
                 if getattr(exc, "status_code", None) in (401, 403):
-                    raise CardUnauthorized(f"the agent card answered {exc.status_code}") from exc
+                    raise CardUnauthorized(f"the agent card answered {exc.status_code}",
+                                           challenge=_challenge_of(exc)) from exc
                 raise
             return dict(_dump(card))
 
@@ -415,6 +439,20 @@ class SdkTransport:
         if self._http is not None:
             with contextlib.suppress(Exception):
                 await self._http.aclose()
+
+
+def _challenge_of(exc: BaseException) -> str:
+    """The `WWW-Authenticate` header of the HTTP response behind an SDK
+    error, from the error or the httpx error it was raised from; ""."""
+    seen = 0
+    while exc is not None and seen < 4:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            with contextlib.suppress(Exception):
+                return str(headers.get("www-authenticate") or "")
+        exc, seen = exc.__cause__ or exc.__context__, seen + 1
+    return ""
 
 
 def sdk_transport(agent: A2aAgentConfig) -> SdkTransport:
@@ -533,10 +571,17 @@ class A2aCallTool:
             return cached[1]
         try:
             card = await transport.card()
-        except CardUnauthorized:
+        except CardUnauthorized as exc:
             # Asked again once, with the configured credential, of the
             # origin a person configured: a card behind a bearer (another
-            # Sim's is) is still that agent's card.
+            # Sim's is) is still that agent's card. Only behind a bearer:
+            # a card that asked for Basic, or for nothing it said, is not
+            # sent a secret meant as a bearer token.
+            if exc.scheme != "bearer" and agent.auth_scheme != "bearer":
+                asked = f"asks for {exc.challenge!r}" if exc.challenge else "names no scheme"
+                raise A2aError(f"the agent card is behind a credential and {asked}; Sim sends its secret only "
+                               f"as a bearer: if {agent.name} takes one, set auth_scheme = \"bearer\" in its "
+                               "table", error_kind="unconfigured") from None
             if not secret:
                 raise A2aError(f"the agent's card needs a credential and no secret is set: put "
                                f"{agent.auth_secret or '<a key name>'} in secrets.toml and name it as this "
@@ -767,6 +812,6 @@ def a2a_tools(config, *, secrets=None) -> list:
 __all__ = [
     "A2A_CALLS_STREAM", "A2A_PROPOSALS_STREAM", "A2aAgentConfig", "A2aCallTool", "A2aError", "CLIENT_VERSIONS",
     "CardUnauthorized", "ProposeA2aAgentTool", "SDK_MISSING", "SdkTransport", "VERSION_HEADER",
-    "a2a_agents_from_mapping", "a2a_tools", "auth_headers", "card_url", "card_versions", "check_card",
-    "negotiate_version",
+    "a2a_agents_from_mapping", "a2a_tools", "auth_headers", "card_url", "card_versions", "challenge_scheme",
+    "check_card", "negotiate_version",
 ]

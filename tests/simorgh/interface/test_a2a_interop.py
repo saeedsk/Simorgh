@@ -144,7 +144,9 @@ def _call(i: int, tool: str, **args) -> dict:
 
 
 # ---------------------------------------------------------------- the plain transport
-async def _http(url: str, *, method: str = "GET", body: bytes = b"", headers: Mapping[str, str] | None = None):
+async def _http(url: str, *, method: str = "GET", body: bytes = b"", headers: Mapping[str, str] | None = None,
+                into: dict | None = None):
+    """One request; the response's headers go into `into`, lower-cased."""
     parsed = urlparse(url)
     reader, writer = await asyncio.open_connection(parsed.hostname, parsed.port)
     lines = [f"{method} {parsed.path or '/'} HTTP/1.1", f"Host: {parsed.netloc}", "Connection: close",
@@ -153,8 +155,10 @@ async def _http(url: str, *, method: str = "GET", body: bytes = b"", headers: Ma
     writer.write(("\r\n".join(lines) + "\r\n\r\n").encode() + body)
     await writer.drain()
     status = int((await reader.readline()).split()[1])
-    while (await reader.readline()).strip():
-        pass
+    while line := (await reader.readline()).strip():
+        if into is not None and b":" in line:
+            key, value = line.decode("latin-1").split(":", 1)
+            into[key.strip().lower()] = value.strip()
     return status, reader, writer
 
 
@@ -171,13 +175,14 @@ class PlainTransport:
 
     async def card(self, headers: Mapping[str, str] | None = None) -> dict:
         PlainTransport.log.append(("card", dict(headers or {})))
-        status, reader, writer = await _http(client_a2a.card_url(self._agent.url), headers=headers)
+        said: dict = {}
+        status, reader, writer = await _http(client_a2a.card_url(self._agent.url), headers=headers, into=said)
         try:
             body = await reader.read()
         finally:
             writer.close()
         if status in (401, 403):
-            raise CardUnauthorized(f"the agent card answered {status}")
+            raise CardUnauthorized(f"the agent card answered {status}", challenge=said.get("www-authenticate", ""))
         if status != 200:
             raise ConnectionError(f"card: HTTP {status}")
         return json.loads(body)
