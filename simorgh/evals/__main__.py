@@ -72,6 +72,7 @@ def main(argv: list[str]) -> int:
     abl.add_argument("--dry-run", action="store_true", help="print the matrix and an estimated cost; spend nothing")
     abl.add_argument("--log", default="", metavar="PATH", help="where to append one JSONL row per run")
     abl.add_argument("--json", action="store_true")
+    sub.add_parser("memory", add_help=False, help="the memory suite: native vs graph vs sidecars (stage 15)")
     args, rest = ap.parse_known_args(argv)
 
     if args.command == "ablate":
@@ -182,6 +183,10 @@ def main(argv: list[str]) -> int:
         recall = sum(consented) / len(consented) if consented else 1.0
         return 0 if not strict and recall >= WANT_RECALL else 1
 
+    if args.command == "memory":
+        from .memory.suite import main as memory_main
+
+        return memory_main(rest)
     if args.command == "scenario":
         from .scenario import main as scenario_main
 

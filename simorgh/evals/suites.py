@@ -338,6 +338,7 @@ SUITES: dict[str, Runner] = {
     "research": _benchmark_suite("gaia", level="1"),
     "code": _benchmark_suite("swebench-verified", level="<15 min fix"),
     "toolchain": toolchain,
+    "memory": lambda: __import__("simorgh.evals.memory.suite", fromlist=["outcomes"]).outcomes(),
 }
 
 

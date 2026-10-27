@@ -39,6 +39,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario \| house \| arcs \| ablate` |
 | `simorgh/evals/ablation.py` | the stage-14 guardrail ablation runner: presets, the matrix, the cap, the table |
 | `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `timing.py`, `voicecache.py`, `run.py`, `scenarios/` |
+| `simorgh/evals/memory/` | the memory suite (stage 15 items 4, 5, 5b): `corpus.py`, `score.py`, `native.py`, `meter.py`, `sidecar.py`, `graphiti_side.py`, `cognee_side.py`, `suite.py` |
 
 ## Suites
 
@@ -50,6 +51,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `research` | GAIA cases from `simorgh/benchmark` | real | dollars |
 | `code` | the SWE-bench Verified slice | real | dollars, Docker |
 | `toolchain` | the `toolchain/` house scenarios (stage 14), one case per scenario, level = category | real | dollars; every case skipped without `--paid` |
+| `memory` | the memory suite's free systems (`native`, `native_graph`), one case per question; the sidecars only through `python -m simorgh.evals memory` | none | free, under a second |
 
 A paid suite refuses to start without `--paid`. `household` is the one
 the bless runs: no model, no network, no money, and it measures the
@@ -140,6 +142,20 @@ Which voices those are is a **measurement**, kept in `tools/house_voices.py`. Th
 - **Output.** One row per (model, preset): passed/counted, rate, a **Wilson** 95% interval (`ablation.wilson`; the bootstrap collapses to zero width on 5/5), skipped count, mean steps, dollars; then the skip reasons and failures. One JSONL row per run is appended to `.simorgh_evals/ablation.jsonl` at the repo root (gitignored; `--log PATH` elsewhere): `{ts, suite, model, preset, scenario, repeat, status, why, steps, cost_usd, seconds}`. `--json` prints the rows instead of the table. Exit 0 once the matrix ran: a failed chain is the measurement.
 - **`--dry-run`** prints the matrix, each preset's switches, and an estimate per model from the shipped prices (`EST_STEPS_PER_RUN` x `EST_INPUT_TOKENS_PER_STEP` / `EST_OUTPUT_TOKENS_PER_STEP`); it needs no key and no `--paid` and starts nothing. It also names the presets that cannot change the chosen scenarios (`ablation.inert_presets`): every `toolchain/` scenario is a chat turn, and the chat profile already runs with `verify = false` and `max_revisions = 0`, so on that pack `no_verify` and `no_revisions` can only equal `sim`.
 - **Never in the live Sim.** `tests/simorgh/evals/test_ablation.py` asserts that a shipped `config.toml` / `simorgh.toml` at the repo root (none exists today) sets neither `[orchestration] ablate` nor `[cognition] ablate`, that `sim.sh` and `simloader.py` mention neither, and that only `simorgh/evals/` reads `SIMORGH_HOUSE_CONFIG`.
+## The memory suite (`memory/`, stage 15)
+
+One synthetic household month (`corpus.episodes()`: 150 episodes, seeded, the five invented personas of `house/people.py` plus the people a household deals with; never a real conversation) and 46 questions in six categories: `alias`, `multi_hop`, `temporal_now`, `temporal_before`, `privacy`, `negative`. Each system is fed the month, then asked every question, and a question is scored **deterministically on its facts block** (`score.check`): every `expect` group on one line; a `stale` value never on a current line (a `[past] ` line is what a current fact replaced); no line holding every string of a `forbid` group (the private value, or the asked entity with somebody else's value). Strings compare casefolded with only letters and digits kept.
+
+| System | What | Cost |
+|---|---|---|
+| `native` | a real `memory.Service` on an in-memory Ledger and Bus, hashing embedder, a clock that walks the month; episodes via `store`, facts via `store_fact` at their own time; asked the way Orchestration asks (one `memory.retrieve` for the query, one with `person:<asker>`), the block is the union of both replies' `facts` | free, under a second |
+| `native_graph` | the same with `[memory] entities = true`, `graph_hops = 2` (stage 15 items 1-3). Skipped, saying so, while `memory.config.Config` does not know those keys | free |
+| `graphiti` | `graphiti_side.py`: `add_episode` per episode into FalkorDBLite in a temporary directory; `search(question, group_ids=[household, person_<asker>])`; an invalidated edge is a `[past] ` line | paid, `--cap-usd` |
+| `cognee` | `cognee_side.py`: `add` + `cognify` per episode, SQLite + LanceDB + its embedded graph store (read back and reported; one needing a server is refused) in a temporary directory; `search(GRAPH_COMPLETION, only_context=True)` over the household and the asker's dataset | paid, `--cap-usd` |
+
+The native systems are handed each episode's facts as a perfect extractor would write them, because the floor provider extracts nothing; the sidecars extract from the text. So the native numbers measure recall only and the sidecars' include extraction -- every report prints this (`suite.FAIRNESS`). Privacy maps to a per-person `group_id` (Graphiti) or dataset (Cognee), the closest each has to `person_scope`, and the report's `notes` say so.
+
+Sidecar rules (`sidecar.py`): the package is imported only under `try/except ImportError` and, when absent, every case is `skipped` with the reason and the pip line -- never failed; telemetry is forced off in the environment before the import (`GRAPHITI_TELEMETRY_ENABLED=false`, `TELEMETRY_DISABLED=1`); the model is the Together model Sim uses (`cognition/providers/together.py`), over the OpenAI-compatible endpoint, key from `TOGETHER_API_KEY`, embeddings from `SIMORGH_EVALS_EMBED_MODEL` (default `intfloat/multilingual-e5-large-instruct`); it runs only with `--paid` and a finite `--cap-usd` above zero (`nan`, `inf`, zero and below are refused by the command line, skip the sidecar, and stop `Meter.check`). The cap (`meter.Meter`) is checked before every call against the dollars charged so far plus a reserve (the sidecar's per-call token estimate) for each call still in flight, since both libraries fan calls out concurrently, and is charged from the response's `usage`; a response with no usage is charged the estimate and counted (`ingestion.unmetered_calls`): Graphiti gets a metered `AsyncOpenAI` (`MeteredClient`), Cognee's `litellm.acompletion`/`aembedding` are wrapped for the run and restored after, with `litellm.max_budget` as a second stop. A sidecar that reaches its cap stops; its remaining cases are skipped, saying so. Per episode it records calls, tokens, dollars and seconds (`ingestion` in the report), and per question the recall latency (`recall_ms` p50/p95). Neither package is a dependency of anything: `pip install 'graphiti-core[falkordblite]'` (Python 3.12+) or `pip install cognee`, in an environment of their own. Nothing in `simorgh/memory` or the Kernel imports a sidecar (pinned by a test).
 
 ## Public Python surface
 
@@ -152,6 +168,7 @@ Which voices those are is a **measurement**, kept in `tools/house_voices.py`. Th
 - `simorgh.evals.house.run.per_scenario`, `HOUSE_CONFIG_ENV`, `house_config`, `ledger_facts`, `run_summary`, `with_run_summary`; `simorgh.evals.house.scenarios.by_prefix`, `scenarios.toolchain` (`SCENARIOS`, `CATEGORIES`, `READS`, `category`)
 - `simorgh.evals.ablation`: `PRESETS`, `SUITE_PREFIXES`, `PER_RUN_CAP_USD`, `Model`, `Run`, `RunResult`, `Cell`, `parse_models`, `parse_presets`, `scenarios_for`, `preset_config`, `child_env`, `matrix`, `run_matrix`, `judge`, `wilson`, `cells`, `table`, `dry_run`, `estimate_usd`, `inert_presets`, `DEFAULT_LOG`
 - `simorgh.evals.scenario`: `run`, `SCRIPT`, `main` -- `tools/recall_scenario.py` is a shim onto it
+- `simorgh.evals.memory`: `run`, `main`, `SYSTEMS`, `FREE`, `QUESTIONS`, `CATEGORIES`, `episodes`; `memory.suite.run_system`, `dry_run`, `table`, `outcomes`; `memory.meter.Meter`, `MeteredClient`, `CapReached`
 - Read by `simloader.py::run_evals` (the bless gate) and `tools/recall_scenario.py`. Nothing else imports it.
 
 ## Command line
@@ -169,6 +186,12 @@ python -m simorgh.evals ablate --suite toolchain --models together:<m> --paid --
 ```
 
 Exit code 0 only when every counted case passed (`ablate`: 0 once the matrix ran, 2 on a refusal).
+python -m simorgh.evals memory --systems native,native_graph                 # free
+python -m simorgh.evals memory --systems native,native_graph,graphiti,cognee --dry-run   # matrix + estimated cost
+python -m simorgh.evals memory --systems native,graphiti,cognee --paid --cap-usd 2      # real money, hard cap
+```
+
+Exit code 0 only when every counted case passed -- except `memory`, a measurement rather than a gate (native is expected to miss aliases and hops): 0 when any system ran.
 
 ## Record
 
@@ -209,6 +232,7 @@ interesting question about an eval is what it did last week.
 - `tests/simorgh/evals/house/test_tool_chain_expectations.py` -- each stage-14 expectation passing and failing against a hand-built record.
 - `tests/simorgh/evals/test_ablation.py` -- the presets equal the plan's table, the child's config and its deep merge, paid/cap refusals, the cap stopping the matrix, skips vs failures, the JSONL rows, Wilson, `--dry-run` with no key, a floor run all skipped with exit 0, and the never-in-the-live-Sim checks.
 - `tests/simorgh/evals/house/test_the_toolchain_pack.py` -- the pack's shape, every device/service/tool it names exists, the floor run skips all without booting, `per_scenario`, the suite, `play` arming a fault and an answer, and (integration) a fault firing once in a real sandbox, the media tools reaching the house, and a "no" keeping the door locked.
+- `tests/simorgh/evals/test_memory_suite.py` -- the memory suite: the corpus answers its own questions, the check's rules, native on the real Memory (temporal, privacy and negative all pass), `native_graph` skipped until its keys exist, both sidecars through fake modules (skipped by name when absent, telemetry off, per-group search, cost counted, the cap stops ingestion, a non-finite cap, a response without usage and concurrent calls in flight all still stop at the cap, Cognee's meter restored and a server graph store refused), the dry run and the command line.
 
 ## Known issues
 
