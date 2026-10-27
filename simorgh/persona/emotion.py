@@ -22,6 +22,13 @@ _HIGH_AROUSAL_WORDS = {"urgent", "now", "asap", "emergency", "wow", "amazing", "
 
 _NEGATORS = {"not", "no", "never", "don't", "dont", "n't"}
 
+
+def _is_negator(token: str) -> bool:
+    """A negator is a listed negation word, or any contraction ending in
+    "n't" (isn't, wasn't, couldn't, ...) -- the tokenizer splits those,
+    so the bare "n't" suffix has to count on its own too."""
+    return token in _NEGATORS or token.endswith("n't") or token.endswith("n't".replace("'", ""))
+
 _REACTIONS = {
     ("positive", "high"): "That's exciting!",
     ("positive", "moderate"): "That sounds nice.",
@@ -46,7 +53,7 @@ def react(text: str, *, lexicon_weight: float = 0.15, exclamation_arousal: float
     valence_delta = 0.0
     arousal_delta = lexicon_weight * sum(1 for t in tokens if t in _HIGH_AROUSAL_WORDS)
     for i, token in enumerate(tokens):
-        negated = i > 0 and tokens[i - 1] in _NEGATORS
+        negated = i > 0 and _is_negator(tokens[i - 1])
         if token in _POSITIVE_WORDS:
             valence_delta += -lexicon_weight if negated else lexicon_weight
         elif token in _NEGATIVE_WORDS:
