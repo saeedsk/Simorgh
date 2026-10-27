@@ -33,6 +33,11 @@ MemoryRetrieveReply = define(t.MEMORY_RETRIEVE_REPLY, [
         F("id", Str), F("subject", Str), F("predicate", Str), F("object", Str),
         F("person_scope", Str), F("confidence", Float), O("valid_from", Float),
         O("was", Str), O("was_until", Float), O("source_refs", List(Str)),
+        # Stage 15. `hop` (1 or 2): reached through the entity graph rather
+        # than by the query's words, and `via` the name of the entity it
+        # was reached through. `summary: true` marks an entity's summary
+        # line (not a fact), and `entity` is that entity's id.
+        O("hop", Int), O("via", Str), O("summary", Bool), O("entity", Str),
     ))),
 ])
 MemoryStore = define(t.MEMORY_STORE, [

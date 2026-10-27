@@ -231,6 +231,14 @@ class Config:
     #: The conversational class must beat the best tool group by this
     #: much before a turn is offered only the core group (item 6).
     route_none_margin: float = 0.15
+    # The facts block of a turn's prompt (`context.py::_fact_lines`, stage
+    # 15). `memory_fact_lines`: facts Memory found by the query's words (8,
+    # what it always showed, so a reply without graph facts renders byte for
+    # byte as before). `memory_graph_lines`: on top of those, the facts it
+    # reached through the entity graph -- each marked "(via <entity>)" --
+    # and entity summaries, one line each, summaries first. 0 hides them.
+    memory_fact_lines: int = 8
+    memory_graph_lines: int = 8
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -256,7 +264,8 @@ class Config:
                                 f"(known: {', '.join(ROUTING_MODES)})")
                 mode = "off"
             kwargs["tool_routing"] = mode
-        for key, low in (("route_top_k", 1), ("route_sticky_turns", 0)):
+        for key, low in (("route_top_k", 1), ("route_sticky_turns", 0), ("memory_fact_lines", 0),
+                         ("memory_graph_lines", 0)):
             if key in kwargs:
                 try:
                     kwargs[key] = max(low, int(kwargs[key]))

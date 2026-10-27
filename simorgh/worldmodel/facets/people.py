@@ -15,7 +15,10 @@ rather than as a new person.
 Stage 10 adds the two things a companion needs to know and may not
 guess: what a person said yes to (`grant`/`revoke`) and what they care
 about (`add_interest`/`remove_interest`). Both arrive only through a
-confirmed `world.people.update`; the store never infers either.
+confirmed `world.people.update`; the store never infers either. Stage 15
+adds a person's kin by name (`set_relation`: Saeed's "son" is Aran), on
+the same path and for the same reason; Memory reads it through the
+`people` query to resolve "my son" for whoever is speaking.
 
 Preferences (stage 6 item 4, 2026-09-22) are the one thing a sentence
 MAY write, because they are only ever read by the model: "call me
@@ -184,6 +187,16 @@ class PeopleFacet:
         if not (answer or "").strip():
             return self._change(name, lambda p: p.without_tool(tool))
         return self._change(name, lambda p: p.with_tool(tool, answer))
+
+    def set_relation(self, name: str, relation: str, other: str) -> Person | None:
+        """`name`'s `relation` ("son") is `other` ("Aran"); `other` ""
+        forgets it (stage 15). Only ever from a confirmed
+        `world.people.update` -- Memory reads it to resolve "my son", so a
+        sentence that could set it could point one person's "wife" at
+        anybody. `ValueError` for an empty or over-long word or name."""
+        if not " ".join((other or "").split()):
+            return self._change(name, lambda p: p.without_relation(relation))
+        return self._change(name, lambda p: p.with_relation(relation, other))
 
     def consented(self, name: str, permission: str) -> bool:
         """Whether the named person granted `permission`. The role gate is

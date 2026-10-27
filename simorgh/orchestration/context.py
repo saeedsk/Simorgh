@@ -136,19 +136,54 @@ def _core_lines(blocks: list[dict]) -> str:
     return "\n".join(out)
 
 
-def _fact_lines(facts: list[dict]) -> str:
-    """The facts as lines: the current value, and what it replaced."""
+#: `[orchestration] memory_fact_lines` / `memory_graph_lines`: how many
+#: facts found by the query's words, and how many reached through the
+#: entity graph (stage 15: hop facts and entity summaries), the block shows.
+#: 8 plain lines is what it always showed, so a reply with no hop or
+#: summary facts renders exactly as before.
+FACT_LINES = 8
+GRAPH_LINES = 8
+
+
+def _fact_line(fact: dict) -> str:
+    line = " ".join(str(fact.get(part) or "") for part in ("subject", "predicate", "object")).strip()
+    if not line:
+        return ""
+    who = str(fact.get("person_scope") or "*")
+    if who and who != "*":
+        line = f"{who}: {line}"
+    if fact.get("was"):
+        line += f" (was {fact['was']}, until you were told otherwise)"
+    return line
+
+
+def _fact_lines(facts: list[dict], *, max_facts: int = FACT_LINES, max_graph: int = GRAPH_LINES) -> str:
+    """The facts as lines: the current value, and what it replaced.
+
+    Facts found by the query's words first, as they always were. Then,
+    under their own cap, what Memory reached through the entity graph
+    (stage 15): each entity's summary as a line of its own ("About Reza:
+    ..."), and each hop fact marked with what it was reached through
+    ("(via Aran)") -- "my son" said by Saeed names nobody in the fact
+    itself, and the mark is how the model knows the fact is about him.
+    A hop fact Memory did not name a bridge for says "(linked)"."""
+    plain = [f for f in facts if not f.get("hop") and not f.get("summary")]
     lines = []
-    for fact in facts[:8]:
-        line = " ".join(str(fact.get(part) or "") for part in ("subject", "predicate", "object")).strip()
-        if not line:
+    for fact in plain[:max(0, max_facts)]:
+        line = _fact_line(fact)
+        if line:
+            lines.append(f"- {line}")
+    graph = [f for f in facts if f.get("summary")] + [f for f in facts if f.get("hop") and not f.get("summary")]
+    for fact in graph[:max(0, max_graph)]:
+        if fact.get("summary"):
+            about, text = str(fact.get("subject") or "").strip(), " ".join(str(fact.get("object") or "").split())
+            if text:
+                lines.append(f"- About {about}: {text}" if about else f"- {text}")
             continue
-        who = str(fact.get("person_scope") or "*")
-        if who and who != "*":
-            line = f"{who}: {line}"
-        if fact.get("was"):
-            line += f" (was {fact['was']}, until you were told otherwise)"
-        lines.append(f"- {line}")
+        line = _fact_line(fact)
+        if line:
+            via = " ".join(str(fact.get("via") or "").split())
+            lines.append(f"- {line} ({f'via {via}' if via else 'linked'})")
     return "\n".join(lines)
 
 
@@ -204,10 +239,13 @@ def _why_not(error: dict) -> str:
 
 
 class Assembler:
-    def __init__(self, bus, *, clock=None, timeout_s: float = DEFAULT_TIMEOUT_S, ledger=None) -> None:
+    def __init__(self, bus, *, clock=None, timeout_s: float = DEFAULT_TIMEOUT_S, ledger=None,
+                 fact_lines: tuple[int, int] = (FACT_LINES, GRAPH_LINES)) -> None:
         self._bus = bus
         self._clock = clock
         self._timeout_s = timeout_s
+        # `[orchestration] memory_fact_lines, memory_graph_lines` (stage 15).
+        self._fact_caps = (max(0, int(fact_lines[0])), max(0, int(fact_lines[1])))
         # Recalls started at the percept, waiting for the session that will
         # want them: (session, query, kinds, k, filters) -> task.
         self._prefetched: dict[tuple, asyncio.Future] = {}
@@ -465,7 +503,7 @@ class Assembler:
         if person is not None:
             known = {f.get("id") for f in fact_payloads}
             fact_payloads += [f for f in (person.payload.get("facts") or []) if f.get("id") not in known]
-        facts = _fact_lines(fact_payloads)
+        facts = _fact_lines(fact_payloads, max_facts=self._fact_caps[0], max_graph=self._fact_caps[1])
         if matched is None and recent is None and person is None:
             return "", why, ""
         matched_items = list(matched.payload.get("items", [])) if matched is not None else []

@@ -2,7 +2,7 @@
   "$id": "https://simorgh.local/schema/world.people.update.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Change who a person is as far as Sim is concerned (stage 6 item 4), what they said yes to and what they care about (stage 10). A write: tier 3 on the way in, so a person confirms it.",
+  "description": "Change who a person is as far as Sim is concerned (stage 6 item 4), what they said yes to and what they care about (stage 10), and who their kin are (stage 15). A write: tier 3 on the way in, so a person confirms it.",
   "properties": {
     "action": {
       "enum": [
@@ -13,7 +13,8 @@
         "revoke",
         "add_interest",
         "remove_interest",
-        "set_tool"
+        "set_tool",
+        "set_relation"
       ],
       "type": "string"
     },
@@ -41,7 +42,19 @@
         "null"
       ]
     },
+    "other": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "permission": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relation": {
       "type": [
         "string",
         "null"

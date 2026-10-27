@@ -26,6 +26,15 @@ action at tier 3, confirmed by a person, or the onboarding step. A
 sentence in a turn never is. `interests` is what they care about, as a
 few short topics, so a thing worth sharing can find its person.
 
+Stage 15 adds `relations`: who a person's kin are, by name --
+`{"son": "Aran", "wife": "Soodeh"}` on Saeed's record -- so "my son",
+said by Saeed, is Aran and not a new somebody called "son". Like a
+permission it is written only through a confirmed `world.people.update`
+(`set_relation`), never inferred from a sentence, and a fresh install
+knows none: the creator asked that the family's relations be learnt, not
+assumed (`household.py`). Memory reads it to resolve a kinship word
+relative to whoever is speaking (`memory/entities.py::relation_of`).
+
 A face Sim cannot place stays `unknown` and gets nothing: no family
 facts, no household roster, no tier above reading, and -- whatever a
 record says -- no check-in. That is the default, not a fallback.
@@ -73,6 +82,9 @@ TOOL_ANSWERS: tuple[str, ...] = ("allow", "ask", "deny")
 
 #: An interest is a short topic, not a paragraph.
 INTEREST_MAX_CHARS = 60
+#: A relation word ("son", "step mother") and the name it points at are
+#: each a few words at most; anything longer is not a relation.
+RELATION_MAX_CHARS = 40
 
 
 @dataclass(frozen=True)
@@ -87,6 +99,7 @@ class Person:
     permissions: tuple[str, ...] = ()       # of PERMISSIONS; granted by a person, never inferred
     interests: tuple[str, ...] = ()         # short topics, normalised
     tools: dict = field(default_factory=dict)  # tool name -> one of TOOL_ANSWERS
+    relations: dict = field(default_factory=dict)  # "son" -> "Aran"; set by a person, never inferred
 
     @property
     def namespace(self) -> str:
@@ -150,11 +163,32 @@ class Person:
         topic = normalise_interest(topic)
         return replace(self, interests=tuple(t for t in self.interests if t != topic))
 
+    # -- who their kin are (stage 15) ---------------------------------------------------
+    def relation(self, word: str) -> str:
+        """The name `word` ("son") means for this person, or ""."""
+        return str(self.relations.get(normalise_relation(word), ""))
+
+    def with_relation(self, word: str, name: str) -> "Person":
+        """`word` is `name` for this person: `with_relation("son", "Aran")`.
+        Raises `ValueError` for an empty or over-long word or name, so a
+        sentence pasted into the field is refused rather than stored."""
+        word, name = normalise_relation(word), " ".join((name or "").split())
+        if not word:
+            raise ValueError(f"which relation? a word such as son, wife or mother, at most {RELATION_MAX_CHARS} "
+                             "characters")
+        if not name or len(name) > RELATION_MAX_CHARS:
+            raise ValueError(f"who is their {word}? a name of at most {RELATION_MAX_CHARS} characters")
+        return replace(self, relations={**self.relations, word: name})
+
+    def without_relation(self, word: str) -> "Person":
+        word = normalise_relation(word)
+        return replace(self, relations={k: v for k, v in self.relations.items() if k != word})
+
     def to_dict(self) -> dict:
         return {"person_id": self.person_id, "name": self.name, "role": self.role,
                 "identities": list(self.identities), "preferences": dict(self.preferences),
                 "permissions": list(self.permissions), "interests": list(self.interests),
-                "tools": dict(self.tools)}
+                "tools": dict(self.tools), "relations": dict(self.relations)}
 
 
 def from_dict(data: dict) -> Person:
@@ -173,6 +207,11 @@ def from_dict(data: dict) -> Person:
         # A file from before the matrix has none: the role decides, as it did.
         tools={str(k).strip(): str(v).strip().lower() for k, v in dict(data.get("tools") or {}).items()
                if str(k).strip() and str(v).strip().lower() in TOOL_ANSWERS},
+        # A file from before stage 15 has none: nobody's kin is known, so
+        # "my son" resolves to nothing rather than to a guess.
+        relations={w: n for w, n in ((normalise_relation(k), " ".join(str(v or "").split()))
+                                     for k, v in dict(data.get("relations") or {}).items())
+                   if w and n and len(n) <= RELATION_MAX_CHARS},
     )
 
 
@@ -195,6 +234,19 @@ def normalise_interest(topic: str) -> str:
     not one at all."""
     flat = " ".join((topic or "").replace("\n", " ").split()).strip().lower()
     return flat[:INTEREST_MAX_CHARS].rstrip()
+
+
+def normalise_relation(word: str) -> str:
+    """`  My Son ` -> `son`: casefolded, one space between words, without
+    "my"/"our" in front, bounded. One spelling per relation, because
+    memory looks the speaker's word up by exactly this key. "" for
+    anything too long to be a relation."""
+    flat = " ".join((word or "").split()).strip(" .,;:!?").casefold()
+    for owner in ("my ", "our "):
+        if flat.startswith(owner):
+            flat = flat[len(owner):]
+            break
+    return flat if len(flat) <= RELATION_MAX_CHARS else ""
 
 
 # -- the gates -------------------------------------------------------------------------
@@ -251,6 +303,6 @@ def household_people() -> tuple[Person, ...]:
     return tuple(out)
 
 
-__all__ = ["CHECK_IN_ROLES", "INTEREST_MAX_CHARS", "INTEREST_SHARE_ROLES", "KINDS", "PERMISSIONS", "Person", "TOOL_ANSWERS",
-           "ROLES", "from_dict", "household_people", "may_check_in", "may_share_interest", "normalise_identity",
-           "normalise_interest"]
+__all__ = ["CHECK_IN_ROLES", "INTEREST_MAX_CHARS", "INTEREST_SHARE_ROLES", "KINDS", "PERMISSIONS", "Person",
+           "RELATION_MAX_CHARS", "TOOL_ANSWERS", "ROLES", "from_dict", "household_people", "may_check_in",
+           "may_share_interest", "normalise_identity", "normalise_interest", "normalise_relation"]

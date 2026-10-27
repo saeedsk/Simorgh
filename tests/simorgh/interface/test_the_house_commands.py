@@ -200,6 +200,15 @@ class WhoSimKnows(unittest.TestCase):
         self.assertEqual(out["payload"], {"action": "add_interest", "name": "Aran",
                                           "interest": "lego robotics"})
 
+    def test_a_relation_goes_through_the_tier_three_tool(self):
+        # Stage 15: "my son" resolves by it, so it is a change, not a note.
+        out = self._people("relation Saeed Son Aran")
+        self.assertEqual(out["tool"], "people")
+        self.assertEqual(out["payload"], {"action": "set_relation", "name": "Saeed", "relation": "son",
+                                          "other": "Aran"})
+        self.assertEqual(self._people("relation Saeed son")["payload"]["other"], "", "no other forgets it")
+        self.assertIn("usage", self._people("relation Saeed")["text"])
+
     def test_a_grant_without_a_permission_lists_the_permissions(self):
         text = self._people("grant Mara")["text"]
         self.assertIn("wellbeing_checkins", text)
@@ -219,6 +228,13 @@ class NobodyIsShownAsABlank(unittest.TestCase):
         text = peopleview.one({"person": {"name": "Otto", "role": "child"}})
         self.assertIn("said yes to: nothing", text)
         self.assertIn("cares about: nothing recorded", text)
+
+    def test_kin_are_shown_when_known(self):
+        from simorgh.interface import peopleview
+
+        text = peopleview.one({"person": {"name": "Saeed", "role": "owner", "relations": {"son": "Aran"}}})
+        self.assertIn("kin: son Aran", text)
+        self.assertNotIn("kin:", peopleview.one({"person": {"name": "Otto", "role": "child"}}))
 
     def test_a_permission_is_explained_in_a_persons_words(self):
         from simorgh.interface import peopleview

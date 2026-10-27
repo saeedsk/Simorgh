@@ -24,6 +24,8 @@ TEMPLATES: dict[Purpose, str] = {
     Purpose.REGROUND: "[floor] no real reviewer available -- assuming the plan is still valid",
     Purpose.CONSOLIDATE: "[floor] no real reviewer available -- consolidation skipped this cycle",
     Purpose.ENSEMBLE: "[floor] no real reviewer available -- nothing to record",
+    Purpose.MEMORY_SUMMARY: "[floor] no real reviewer available -- no summary written this cycle",
+    Purpose.MEMORY_RECONCILE: "[floor] no real reviewer available -- keeping the exact-key rule this cycle",
 }
 
 

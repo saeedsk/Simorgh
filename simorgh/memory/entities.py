@@ -289,8 +289,9 @@ def person_named(people, key: str):
 
 def relation_of(people, speaker: str, word: str) -> str:
     """Who `word` ("wife") is for `speaker`, from their People record's
-    `relations` mapping; "" when the record does not say. `getattr`,
-    because `contracts.people.Person` has no `relations` field yet."""
+    `relations` mapping (`contracts.people.Person.relations`, set through
+    `world.people.update{set_relation}`); "" when the record does not say.
+    `getattr`, because a caller may hand in any record with a `name`."""
     me = person_named(people, normalise(speaker)) if speaker else None
     relations = getattr(me, "relations", None) or {}
     for key, name in dict(relations).items():

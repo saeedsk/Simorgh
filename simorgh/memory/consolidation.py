@@ -268,10 +268,10 @@ async def summarise_entities(engine: MemoryEngine, *, bus: Bus, source: str, tim
     for entity, its_facts, ids in due[:MAX_SUMMARIES]:
         window = "\n".join(f"- {fact.sentence()}" for fact in its_facts)
         request = Message.new(topics.COGNITION_THINK, source=source, payload={
-            # `memory.summary` is the purpose the stage 15 plan names; the
-            # contracts enum does not have it yet, so this rides on
-            # `consolidate`'s budget, as the other sleep-tick calls do.
-            "purpose": "consolidate",
+            # Its own purpose and budget row (`cognition/config.py`), capped
+            # over a rolling day: past the cap Cognition refuses and this
+            # entity waits for the next pass (`skipped`), never a guess.
+            "purpose": "memory.summary",
             "messages": [{"role": "system", "content": SUMMARY_INSTRUCTION},
                          {"role": "user", "content": f"About: {entity.name}\nFacts:\n{window}"}],
             "budget": {"max_tokens": 200, "max_cost_usd": 0.02},
@@ -549,10 +549,10 @@ async def reconcile_fact(engine: MemoryEngine, entry: dict, *, bus: Bus, source:
     tally["asked"] = tally.get("asked", 0) + 1
     known = "\n".join(f"- [{fact.id}] {fact.subject} {fact.predicate} {fact.object}" for fact in candidates)
     request = Message.new(topics.COGNITION_THINK, source=source, payload={
-        # `memory.reconcile` is the purpose the stage 15 plan names; the
-        # contracts enum does not have it yet, so this rides on
-        # `consolidate`'s budget, as the other sleep-tick calls do.
-        "purpose": "consolidate",
+        # Its own purpose and budget row (`cognition/config.py`), capped
+        # over a rolling day: past the cap Cognition refuses, and a refusal
+        # falls back to the exact-key rule below like any other non-answer.
+        "purpose": "memory.reconcile",
         "messages": [{"role": "system", "content": RECONCILE_INSTRUCTION},
                      {"role": "user", "content": f"NEW: {subject} {predicate} {object_}\nKNOWN:\n{known}"}],
         "budget": {"max_tokens": 300, "max_cost_usd": 0.02},

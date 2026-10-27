@@ -100,7 +100,9 @@
         "research",
         "decompose",
         "reground",
-        "consolidate"
+        "consolidate",
+        "memory.summary",
+        "memory.reconcile"
       ],
       "type": "string"
     },

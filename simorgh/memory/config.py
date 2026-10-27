@@ -107,6 +107,13 @@ class Config:
     #: `core_block_chars`.
     core_blocks: bool = False
     core_block_chars: int = 600
+    #: With `entities` on, how often (seconds) Memory asks World Model who
+    #: the people are (`world.env.query{what: "people"}`), so a kinship
+    #: word resolves through the speaker's `Person.relations` ("my son",
+    #: said by Saeed, is Aran). Asked once at start and then on this beat;
+    #: until an answer arrives the household roster in `contracts` stands
+    #: in, which knows nobody's relations. 0: never ask.
+    people_refresh_s: float = 300.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":

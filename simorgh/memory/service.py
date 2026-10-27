@@ -22,6 +22,10 @@ _DIGEST_FACTS = 8
 #: `_theirs` treats only untagged turns -- typed ones -- as shared).
 UNPLACED_VOICE_TAG = "person:unknown"
 
+#: How long Memory waits for World Model's People store. Nobody waits on
+#: the answer -- it runs in the background -- so this only bounds a task.
+_PEOPLE_TIMEOUT_S = 5.0
+
 from .consolidation import run_consolidation
 from .store import MemoryEngine
 
@@ -50,6 +54,7 @@ class Service:
         self._tick_seconds = 0
         self._first_consolidation: asyncio.Task | None = None
         self._warm: asyncio.Task | None = None
+        self._people_task: asyncio.Task | None = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -79,6 +84,9 @@ class Service:
         # noticeable moment and start() must not hold the Kernel up for
         # it. A recall that arrives first simply waits on the same work.
         self._warm = asyncio.create_task(self._warm_index(), name="memory-index-warm")
+        if self._config.entities and self._config.people_refresh_s > 0:
+            # Who the people are, for "my son" (stage 15); see `learn_people`.
+            self._learn_people_soon()
         if self._config.consolidate_after_start_s > 0:
             self._first_consolidation = asyncio.create_task(
                 self._consolidate_after_start(), name="memory-first-consolidation")
@@ -99,6 +107,13 @@ class Service:
             self._ctx.logger.warning("memory.index_warm_failed", error=repr(exc))
 
     async def stop(self) -> None:
+        if self._people_task is not None:
+            self._people_task.cancel()
+            try:
+                await self._people_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            self._people_task = None
         if self._warm is not None:
             self._warm.cancel()
             try:
@@ -211,6 +226,7 @@ class Service:
                 if len(pairs) >= _DIGEST_FACTS:
                     break
         hop_of: dict[str, int] = {}
+        via: dict[str, str] = {}
         if self._config.entities and self._config.graph_hops > 0:
             # Stage 15: the facts about whatever the query names, under any
             # of its names ("Soodeh" finds what was said of "Soo"), and one
@@ -219,7 +235,7 @@ class Service:
             # with its hop; `graph_hops = 0` leaves the block as it was.
             for fact, was, hop in await self.engine.graph_facts(
                     payload.get("query", ""), person=person, hops=self._config.graph_hops,
-                    limit=self._config.graph_max_facts, exclude={fact.id for fact, _was in pairs}):
+                    limit=self._config.graph_max_facts, exclude={fact.id for fact, _was in pairs}, via=via):
                 pairs.append((fact, was))
                 hop_of[fact.id] = hop
         for fact, was in pairs:
@@ -232,6 +248,8 @@ class Service:
                 entry["was"], entry["was_until"] = was.object, float(was.valid_to or 0.0)
             if fact.id in hop_of:
                 entry["hop"] = hop_of[fact.id]
+                if via.get(fact.id):
+                    entry["via"] = via[fact.id]
             facts.append(entry)
         if self._config.entities and self._config.graph_hops > 0:
             # Stage 15 item 3: one line per entity the query names, from the
@@ -396,6 +414,9 @@ class Service:
         # every 30s, matching Cognition's own tick throttle, not every
         # second tick (a stream read per kind is cheap but not free).
         self._tick_seconds += 1
+        every = int(self._config.people_refresh_s or 0)
+        if self._config.entities and every > 0 and self._tick_seconds % every == 0:
+            self._learn_people_soon()
         if self._tick_seconds % 30 != 0:
             return
         counts = await self.engine.counts()
@@ -403,6 +424,39 @@ class Service:
             topics.SYSTEM_METRICS, source=self._ctx.source,
             payload={"subsystem": "memory", "counters": {}, "gauges": {"records": counts}},
         ))
+
+    def _learn_people_soon(self) -> None:
+        """Ask who the people are, in the background; one ask at a time."""
+        if self._people_task is not None and not self._people_task.done():
+            return
+        self._people_task = asyncio.create_task(self.learn_people(), name="memory-learn-people")
+
+    async def learn_people(self) -> bool:
+        """Who the people are, from World Model's People store, for entity
+        resolution (stage 15): their names, voices and `relations`.
+
+        Over the bus, because Memory may not import the subsystem that
+        keeps the store. Whatever goes wrong -- no World Model, a timeout,
+        an error reply, an empty list -- the records Memory already has
+        stay: forgetting the family because one ask failed would turn
+        "my son" back into nobody. True when the records were replaced."""
+        from simorgh.contracts.people import from_dict
+
+        try:
+            reply = await self._ctx.bus.request(Message.new(
+                topics.WORLD_ENV_QUERY, source=self._ctx.source, payload={"what": "people", "args": {}}),
+                timeout=_PEOPLE_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 -- see above: keep what we had
+            return False
+        body = (reply.payload if reply is not None else None) or {}
+        rows = body.get("people") if body.get("ok") is not False else None
+        people = tuple(p for p in (from_dict(r) for r in (rows or ()) if isinstance(r, dict)) if p.name)
+        if not people:
+            return False
+        self.engine.people = people
+        return True
 
     async def _on_sleep(self, message: Message) -> None:
         await self._consolidate(window=message.payload.get("window_seconds"))

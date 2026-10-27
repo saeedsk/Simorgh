@@ -452,7 +452,7 @@ def fused(dense: list[float], lexical: dict[int, float]) -> list[float]:
     return out
 
 
-def hop_facts(facts, *, start, ends, hops: int = 2, limit: int = 12, exclude=()) -> list:
+def hop_facts(facts, *, start, ends, hops: int = 2, limit: int = 12, exclude=(), via: dict | None = None) -> list:
     """Multi-hop recall over the facts (stage 15 item 2): `[(fact, hop)]`.
 
     Hop 1 is every fact whose subject or object is an entity in `start`
@@ -469,6 +469,12 @@ def hop_facts(facts, *, start, ends, hops: int = 2, limit: int = 12, exclude=())
     it is still walked: the boiler fact matched by its words is exactly
     the bridge to Reza's number. At most `limit` facts are added, hop 1
     before hop 2, newest first within a hop, so the order is stable.
+
+    `via`, when given, is filled with fact id -> the entity id each
+    returned fact was reached through: the named entity it touches at
+    hop 1, the bridge entity at hop 2 (Reza, for his number). A reader
+    can then say "(via Reza)" rather than leave the model to guess why a
+    fact about somebody else is in the block.
     """
     if hops <= 0 or limit <= 0 or not start:
         return []
@@ -477,13 +483,16 @@ def hop_facts(facts, *, start, ends, hops: int = 2, limit: int = 12, exclude=())
     ordered = sorted(facts, key=lambda f: (-f.valid_from, f.id))
     ended = [(fact, *ends(fact)) for fact in ordered]
     hop1 = [(fact, s, o) for fact, s, o in ended if s in start or o in start]
-    out = [(fact, 1) for fact, _s, _o in hop1 if fact.id not in excluded]
+    out = [(fact, 1, s if s in start else o) for fact, s, o in hop1 if fact.id not in excluded]
     if hops >= 2:
         reached = {end for _f, s, o in hop1 for end in (s, o) if end and end not in start}
         walked = {fact.id for fact, _s, _o in hop1}
-        out += [(fact, 2) for fact, s, o in ended
+        out += [(fact, 2, s if s in reached else o) for fact, s, o in ended
                 if fact.id not in walked and fact.id not in excluded and (s in reached or o in reached)]
-    return out[:limit]
+    out = out[:limit]
+    if via is not None:
+        via.update((fact.id, bridge) for fact, _hop, bridge in out)
+    return [(fact, hop) for fact, hop, _bridge in out]
 
 
 #: Dense vectors, persisted once each (stage 5 item 1): `vector.stored`

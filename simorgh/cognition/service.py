@@ -21,7 +21,7 @@ from simorgh.contracts.registry import error_reply_payload
 
 from .api import capabilities_of, Budget, BudgetExceeded, ContextTooLarge, NoRealProvider, Paused, Purpose
 from .assembler import PromptAssembler
-from .budget import RollingWindowBudget
+from .budget import PurposeWindow, RollingWindowBudget
 from .compaction import Compactor
 from .config import Config
 from .parser import OutputParser, accept_native_calls
@@ -292,6 +292,19 @@ class Service:
         self._paused = False
         self._no_real_provider_since: float | None = None
         self._tick_seconds = 0
+        #: A purpose's own rolling window (`Budget.window_max_usd/_calls`),
+        #: built at its first call; only purposes that set one have it.
+        self._purpose_windows: dict[str, PurposeWindow] = {}
+
+    def _purpose_window(self, purpose: str) -> PurposeWindow | None:
+        budget = self._config.purposes.get(purpose)
+        if budget is None or (budget.window_max_usd is None and budget.window_max_calls is None):
+            return None
+        window = self._purpose_windows.get(purpose)
+        if window is None:
+            window = self._purpose_windows[purpose] = PurposeWindow(purpose, budget, self._ctx.ledger,
+                                                                    clock=self._ctx.clock)
+        return window
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -527,6 +540,16 @@ class Service:
             await self._error_reply(message, "paused", "cognition is paused", retryable=True)
             return
 
+        # A purpose with its own rolling cap (stage 15: the sleep tick's
+        # `memory.*` calls) is refused once it has spent it, before any
+        # provider is dialled -- what is left of the provider's day is chat's.
+        window = self._purpose_window(purpose.value)
+        if window is not None:
+            why = await window.exhausted()
+            if why:
+                await self._error_reply(message, "budget_exceeded", why, retryable=True)
+                return
+
         try:
             assembled = await self._assembler.assemble(
                 purpose=purpose.value, messages=payload["messages"],
@@ -651,6 +674,8 @@ class Service:
                 {"tool": c["tool"], "args": c.get("args") or {}, "id": c.get("id", ""),
                  **({"error": c["error"]} if c.get("error") else {})} for c in native_calls))
         await self._append_call_record(purpose, response, floor, compacted)
+        if window is not None:
+            window.record(response.cost_usd or 0.0, floor=floor)
         # Not for a call that carried pictures: only one provider can see,
         # so a camera event always "changes" the provider and then changes
         # it back on the next chat turn. The creator's screen, 2026-09-16:

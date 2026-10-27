@@ -9,7 +9,12 @@ from ..registry import define
 from .. import topics as t
 
 CognitionThink = define(t.COGNITION_THINK, [
-    F("purpose", Enum("chat", "draft", "plan", "review", "research", "decompose", "reground", "consolidate")),
+    # `memory.summary` and `memory.reconcile` (stage 15): the sleep tick's
+    # entity summaries and Mem0-style fact decisions, each with its own
+    # budget row in `cognition/config.py` so a night of them cannot spend
+    # what chat is owed. They rode on `consolidate` until then.
+    F("purpose", Enum("chat", "draft", "plan", "review", "research", "decompose", "reground", "consolidate",
+                      "memory.summary", "memory.reconcile")),
     F("messages", List(Obj(F("role", Str), F("content", Str)))),
     F("budget", Obj(F("max_tokens", Int), F("max_cost_usd", Float))),
     F("require_real_provider", Bool),

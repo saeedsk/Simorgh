@@ -34,6 +34,16 @@ DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
     "reground": Budget(8_000, 512, 0.02, require_real=False),
     "consolidate": Budget(16_000, 2_000, 0.1),
     "ensemble": Budget(24_000, 2_000, 0.5, require_real=True),
+    # The sleep tick's background calls (stage 15): an entity summary and a
+    # Mem0-style fact decision are each a few hundred tokens, but there can
+    # be many in a night. Each purpose is capped over a rolling day as well
+    # as per call -- a tenth of the default $2 provider day and a few hundred
+    # calls -- so a night of them leaves the rest of the day to chat. Past
+    # the cap a call is refused (`budget_exceeded`) and memory skips it.
+    "memory.summary": Budget(4_000, 300, 0.02, max_seconds=60.0,
+                             window_max_usd=0.10, window_max_calls=200),
+    "memory.reconcile": Budget(4_000, 400, 0.02, max_seconds=60.0,
+                               window_max_usd=0.10, window_max_calls=300),
 }
 
 
