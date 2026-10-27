@@ -19,7 +19,7 @@ never writes `~/.mem0`.
 Privacy: `user_id` is Mem0's per-person scope, and maps cleanly. A
 private episode is added under `person_<speaker>`, the rest under
 `household`, and a question searches the household plus the asker's own
-(two searches, merged by score). The report says so.
+(two searches, merged by score, the best `LIMIT` kept). The report says so.
 
 Model calls: Mem0 builds its own `openai.OpenAI` clients, one in its LLM
 (`memory.llm.client`) and one in its embedder
@@ -49,7 +49,8 @@ HOME_ENV = "MEM0_DIR"
 #: Mem0's OpenAI LLM sends everything to OpenRouter when this is set.
 OPENROUTER_ENV = "OPENROUTER_API_KEY"
 COLLECTION = "simorgh_memory_eval"
-#: Memories per search, per user_id.
+#: Memories per question, across both user_ids: Graphiti's `num_results`
+#: and Cognee's `top_k`, so no system's block is longer by construction.
 LIMIT = 10
 
 
@@ -91,16 +92,22 @@ class Mem0Side(Sidecar):
             "history_db_path": os.path.join(self._tmp.name, "history.db"),
             "version": "v1.1",
         }
-        memory = self._lib.Memory.from_config(config)
-        # The meter on both clients Mem0 built, before anything calls them.
-        for owner in ("llm", "embedding_model"):
-            part = getattr(memory, owner, None)
-            if getattr(part, "client", None) is None:
-                raise RuntimeError(f"mem0's Memory has no {owner}.client to meter; refusing to run unmetered")
-            part.client = MeteredClient(part.client, self.meter)
-        if getattr(memory, "graph", None) is not None or getattr(memory, "enable_graph", False):
-            raise RuntimeError("mem0 has a graph store configured, which needs Neo4j; refusing")
-        self.memory = memory
+        try:
+            memory = self._lib.Memory.from_config(config)
+            self.memory = memory       # so close() releases its stores even on a refusal
+            # The meter on both clients Mem0 built, before anything calls them.
+            for owner in ("llm", "embedding_model"):
+                part = getattr(memory, owner, None)
+                if getattr(part, "client", None) is None:
+                    raise RuntimeError(f"mem0's Memory has no {owner}.client to meter; refusing to run unmetered")
+                part.client = MeteredClient(part.client, self.meter)
+            if getattr(memory, "graph", None) is not None or getattr(memory, "enable_graph", False):
+                raise RuntimeError("mem0 has a graph store configured, which needs Neo4j; refusing")
+        except BaseException:
+            # run_system does not close a system that failed to open: put the
+            # OpenRouter key back and remove the directory here.
+            await self.close()
+            raise
         self.notes["store"] = "Qdrant local mode + SQLite history, temporary directory; no graph store"
         self.notes["privacy"] = ("user_id per person (private episodes under person_<speaker>, the rest under "
                                  "household), Mem0's own per-person scope")
@@ -110,9 +117,12 @@ class Mem0Side(Sidecar):
             if getattr(self, "_openrouter", None) is not None:
                 os.environ[OPENROUTER_ENV] = self._openrouter
             memory = getattr(self, "memory", None)
-            client = getattr(getattr(memory, "vector_store", None), "client", None)
-            if client is not None and hasattr(client, "close"):
-                client.close()         # Qdrant local holds a lock on its directory
+            # Qdrant local holds a lock on its directory: the store and the
+            # one Mem0 opens under MEM0_DIR for its own migrations.
+            for store in ("vector_store", "_telemetry_vector_store"):
+                client = getattr(getattr(memory, store, None), "client", None)
+                if client is not None and hasattr(client, "close"):
+                    client.close()
         finally:
             tmp = getattr(self, "_tmp", None)
             if tmp is not None:
@@ -129,7 +139,7 @@ class Mem0Side(Sidecar):
         for user_id in groups_for(question.asker):
             found.extend(results(self.memory.search(question.text, user_id=user_id, limit=LIMIT)))
         found.sort(key=lambda m: -float(m.get("score") or 0.0))
-        return memory_lines(found)
+        return memory_lines(found)[:LIMIT]
 
 
 def results(reply) -> list[dict]:

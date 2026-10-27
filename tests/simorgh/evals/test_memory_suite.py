@@ -492,7 +492,7 @@ class AnEmbeddingWithoutUsage(unittest.TestCase):
         self.assertEqual((meter.tokens_in, meter.tokens_out), (8 + 2_500, 400))
 
 
-def _fake_mem0_modules(store: dict, *, seams: bool = True) -> dict[str, types.ModuleType]:
+def _fake_mem0_modules(store: dict, *, seams: bool = True, filler: int = 0) -> dict[str, types.ModuleType]:
     """Just enough of mem0 to drive the sidecar: a Memory that, like the
     real one, owns a sync OpenAI client in its LLM and in its embedder."""
 
@@ -533,6 +533,10 @@ def _fake_mem0_modules(store: dict, *, seams: bool = True) -> dict[str, types.Mo
         def search(self, query, *, user_id, limit=100):
             self.embedding_model.client.embeddings.create(model="e", input=[query])
             store.setdefault("searches", []).append((query, user_id))
+            if filler:
+                # A full page from each user_id, as a real store gives once it is fed.
+                return {"results": [{"memory": f"{user_id} note {i}", "score": 0.5 - i / 100}
+                                    for i in range(min(filler, limit))]}
             if user_id == "household":
                 return {"results": [{"memory": "Nellie swimming lessons are on Tuesdays", "score": 0.4},
                                     {"memory": "wifi password is copper-meadow-17", "score": 0.9}]}
@@ -611,6 +615,36 @@ class Mem0Sidecar(unittest.TestCase):
             result = asyncio.run(run_system(self._side(), episodes()[:3]))
         self.assertIn("unmetered", result.skipped)
         self.assertNotIn("added", store)
+
+    def test_a_question_gets_no_more_memories_than_graphiti_or_cognee(self):
+        from simorgh.evals.memory.mem0_side import LIMIT
+
+        side = self._side()
+
+        async def ask():
+            await side.open()
+            try:
+                return await side.context(QUESTIONS[0])
+            finally:
+                await side.close()
+
+        with mock.patch.dict(sys.modules, _fake_mem0_modules({}, filler=50)):
+            self.assertEqual(side.skip_reason(), "")
+            lines = asyncio.run(ask())
+        # Two user_ids, ten each, cut to Graphiti's num_results / Cognee's top_k.
+        self.assertEqual(LIMIT, 10)
+        self.assertEqual(len(lines), LIMIT)
+        self.assertEqual(lines[0], "household note 0")
+
+    def test_a_refused_memory_leaves_no_directory_and_the_openrouter_key_back(self):
+        store: dict = {}
+        os.environ["OPENROUTER_API_KEY"] = "or-key"
+        with mock.patch.dict(sys.modules, _fake_mem0_modules(store, seams=False)):
+            result = asyncio.run(run_system(self._side(), episodes()[:3]))
+        self.assertIn("unmetered", result.skipped)
+        self.assertEqual(os.environ["OPENROUTER_API_KEY"], "or-key")
+        self.assertFalse(os.path.exists(os.path.dirname(store["config"]["history_db_path"])))
+        self.assertTrue(store.get("closed"))
 
     def test_an_openrouter_key_is_set_aside_for_the_run(self):
         store: dict = {}
