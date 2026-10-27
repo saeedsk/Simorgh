@@ -103,7 +103,10 @@ class FakeCrewRuntime:
 
 
 class ProjectsOnCrewsCase(unittest.IsolatedAsyncioTestCase):
-    config = Config(project_crews=True, project_crew_spawn_timeout_s=0.5)
+    # The spawn reply is an in-process round trip; 0.5 s was a budget a
+    # loaded machine could spend before the fake answered (only
+    # NobodyAnswers wants it to run out).
+    config = Config(project_crews=True, project_crew_spawn_timeout_s=5.0)
 
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -218,7 +221,7 @@ class ThreeIndependentNodes(ProjectsOnCrewsCase):
 
 
 class TheCap(ProjectsOnCrewsCase):
-    config = Config(project_crews=True, project_crew_concurrency=2, project_crew_spawn_timeout_s=0.5)
+    config = Config(project_crews=True, project_crew_concurrency=2, project_crew_spawn_timeout_s=5.0)
 
     async def test_no_more_than_the_cap_run_at_once(self):
         # The first two meet, so the peak reaches the cap however slow the
@@ -365,7 +368,7 @@ class TheQueuesHoldsApply(ProjectsOnCrewsCase):
 class AHumanTaskDoesNotPreemptACrewNode(ProjectsOnCrewsCase):
     # A project weighs as much as a human by default, so only a deployment
     # that lowers it reaches the preemption at all.
-    config = Config(project_crews=True, project_crew_spawn_timeout_s=0.5,
+    config = Config(project_crews=True, project_crew_spawn_timeout_s=5.0,
                     priority_weights={"human": 3, "project": 1, "benchmark": 2, "reflection": 2,
                                       "assistant": 2, "curiosity": 1, "research": 1})
 
