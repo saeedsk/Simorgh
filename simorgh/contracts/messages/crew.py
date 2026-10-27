@@ -118,6 +118,24 @@ CrewCancel = define(t.CREW_CANCEL, [
 ], doc="Stop a member; the crew budget running out cancels every member with reason 'crew budget'.")
 
 
+CrewSpawn = define(t.CREW_SPAWN, [
+    F("agent", Str),
+    F("brief", Str),
+    F("requester", Str),                # the person the crew acts for; "" when the caller names nobody
+    F("requester_channel", Str),        # e.g. "a2a"
+    O("device", Str),                   # the paired device that asked
+    O("report", Str),                   # report policy for the member; parse_report_policy() reads it
+    O("background", Bool),
+    O("context_id", Str),               # the caller's own context, when it sent one
+], doc="Start a crew from outside any session: one member, the agent named, acting as `requester`. "
+       "Producer: interface (the A2A server, stage 18 item 10). Consumer: orchestration (item 2), "
+       "which answers with the member's handle and the crew it roots, or an error reply.")
+CrewSpawnReply = define(t.CREW_SPAWN_REPLY, [
+    F("crew_id", Str),
+    F("handle", Str),
+])
+
+
 # --- pure shapes ------------------------------------------------------------------
 
 
@@ -265,7 +283,8 @@ def is_terminal(status: str) -> bool:
 
 
 __all__ = [
-    "BOARD", "BOARD_VALUE_MAX", "CrewCancel", "CrewMessage", "CrewReport", "CrewSpawned",
+    "BOARD", "BOARD_VALUE_MAX", "CrewCancel", "CrewMessage", "CrewReport", "CrewSpawn", "CrewSpawnReply",
+    "CrewSpawned",
     "FINDINGS_MAX", "Finding", "ISOLATION", "MEMBER_STATUS", "MEMBER_STATUS_CHANGED", "MESSAGE_KIND",
     "Member", "MemberBudget", "REPORT_POLICIES", "REPORT_STATUS", "Report", "STREAM_EVENTS",
     "SUMMARY_MAX", "TERMINAL_STATUS", "is_terminal", "parse_report_policy",

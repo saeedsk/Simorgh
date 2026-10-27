@@ -69,10 +69,10 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     # Stage 18 item 1 declares these; orchestration (item 2) publishes and
     # interface (item 5) consumes them, built on parallel branches. The
     # merge of those branches removes these four lines.
-    T.CREW_SPAWNED: "stage 18 item 2/5 in flight",
-    T.CREW_MESSAGE: "stage 18 item 2/5 in flight",
-    T.CREW_REPORT: "stage 18 item 2/5 in flight",
-    T.CREW_CANCEL: "stage 18 item 2/5 in flight",
+    # Interface reads them (stage 18 items 5, 10); orchestration publishes them in item 2.
+    T.CREW_SPAWNED: "stage 18 item 2 in flight: orchestration is the producer",
+    T.CREW_REPORT: "stage 18 item 2 in flight: orchestration is the producer",
+    T.CREW_SPAWN: "stage 18 item 2 in flight: interface's A2A server asks, orchestration answers",
 }
 
 _REF = re.compile(r"\btopics\.([A-Z_][A-Z0-9_]*)\b")

@@ -29,6 +29,8 @@ Interface owns every typed or remote surface a person uses: the terminal REPL/TU
 | `simorgh/interface/render.py` | Console styling, width-aware lines, status and domain panels |
 | `simorgh/interface/live_status.py` | Redraw-in-place status line |
 | `simorgh/interface/activity.py` | Task book and activity feed built from task events |
+| `simorgh/interface/crewview.py` | Crews, visible (stage 18 item 5): `Crew`/`CrewBook` fold the four `crew.*` topics, or a `crew:<id>` stream (`fold`), into members with status, last word, steps and cost; `member_line`, `member_note`, `crew_tree`, `message_lines`, `live_member_rows` draw them in the ⏺/⎿ shape, fitted to `render.terminal_width()`. Pure |
+| `simorgh/interface/a2a.py` | Sim's agents served over A2A v0.3.0 (stage 18 item 10): `A2AServer` (`message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`), `agent_card`/`agent_skill` from `agents/*.md`; shapes from `contracts/a2a.py` |
 | `simorgh/interface/vitals.py` | Local projection of mood and metrics for the footer |
 | `simorgh/interface/voiceview.py` | Rendering of `voice ...` replies |
 | `simorgh/interface/roomnames.py` | The rooms as last seen, for Tab after `room`/`mute`/`unmute` |
@@ -65,7 +67,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:111-131`, pinned by `t
 | `voice.room.speech` | `messages/voice.py::VoiceRoomSpeech` | httpapi.py `_on_room_speech` | A room satellite's reply piece (stage 13 item 3, 2026-09-26): its ref is listed for `ROOM_SPEECH_TTL_S` (120 s) and served at `GET /api/room/speech?ref=` **without a token** -- the board's media player cannot send one. Only a listed, unexpired ref is served; any other ref is a 404 that never reads the ledger. Producer: Voice (`voice/satellite.py` via the service) |
 | `ui.dash.state`, `ui.dash.key` | `messages/ui.py` | httpapi.py:683-684 | Dashboard state and remote keys for the page |
 | `percept.text.received` | `messages/percept.py::PerceptTextReceived` | httpapi.py:695-698 | Dashboard activity feed. Subscribed in a loop when HTTP starts; declared in `Service.consumes` since 618191e |
-| `crew.spawned`, `crew.message`, `crew.report`, `crew.cancel` | `messages/crew.py` | not yet (stage 18 item 5) | Declared 2026-10-27 (stage 18 item 1); the crew tree in the TUI, the `crew` command and the dashboard's crew panel will read them. Producer: orchestration |
+| `crew.spawned`, `crew.message`, `crew.report`, `crew.cancel` | `messages/crew.py` | service.py `_on_crew_event` (all four); a2a.py `A2AServer.start` (`crew.message`, `crew.report`, `crew.cancel`, only when `[interface.a2a] enabled`) | The crew tree in the transcript and the live rows (stage 18 item 5); an A2A task's status and artifact updates (item 10). The `crew` command and `/api/crews` read the same events from the `crew:<id>` streams. Producer: orchestration (item 2) |
 
 Replies received by request/reply: `task.list.reply`, `task.create.reply`, `system.status.reply`, `guardian.posture.reply`, `benchmark.*.reply`, `voice.*.reply`, `world.env.query.reply`, `curiosity.interest.list.reply`.
 
@@ -89,6 +91,9 @@ Replies received by request/reply: `task.list.reply`, `task.create.reply`, `syst
 | `voice.status|control|speak|listen|voices|devices|models|bench.request` | `messages/voice.py` | dispatch.py | `voice ...` commands. `voice calibrate [name] [aloud] [short] [en|fa] [room=..] [distance=..]` and `voice calibrate status|stop|keep|accept|skip|apply [name]` send `voice.control.request{action: "calibrate", value: "<verb> [options]", name?}` (its own action since 2026-09-22) |
 | `curiosity.interest.add`, `curiosity.interest.list.request` | `messages/curiosity.py` | dispatch.py:366-368 | `interest` command |
 | `world.env.query` | `messages/world.py::WorldEnvQuery` | dispatch.py:664, 1652 | `status` and tool listing |
+| `crew.cancel` | `messages/crew.py::CrewCancel` | dispatch.py `_crew_command`; a2a.py `_cancel` | `crew cancel <handle> [reason]` and A2A `tasks/cancel`; always `cascade: true` |
+| `crew.spawn` (request) | `messages/crew.py::CrewSpawn` | a2a.py `_spawn` | An inbound A2A message: `{agent, brief, requester: <device's person>, requester_channel: "a2a", device, report: "progress", background: true, context_id?}`; the reply `{crew_id, handle}` names the member, whose handle is the A2A task id. Orchestration answers it (stage 18 item 2, not built yet) |
+| `crew.message` | `messages/crew.py::CrewMessage` | a2a.py `_to_member` | A follow-up on an open A2A task: `kind: answer` (with `reply_to` the question's `seq`) when the member asked, else `note`; `from` is the crew's root, `seq` 0 for Orchestration to number |
 
 ## Ledger streams
 
@@ -103,6 +108,7 @@ Replies received by request/reply: `task.list.reply`, `task.create.reply`, `syst
 | `config:effective` | dispatch.py:71 (read for `config`) | kernel writes it | forever |
 | `metrics:history` | config.py `history_stream`; httpapi `/api/history` (read) | kernel writes it | 7d |
 | any stream | httpapi `/api/logs`, `/api/streams` (read, token-gated) | - | per stream |
+| `crew:<crew_id>` | dispatch.py `_crews` (`crew`, `crew <id>`, `crew cancel`); httpapi `/api/crews` (read, token-gated) | orchestration writes it | per stream |
 
 The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `connector:`, `hearing:`, `im:*` and `task:{client_session_id}` rows were style classes, prompt text, secret names and validation strings, not streams. Files: camera stills and HLS under `workspace/cameras` (read only), the readline history under `data_dir/cli_history`, and `~/.simorgh/skills` (written by `skills install`).
 
@@ -153,6 +159,8 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 | `dash_watchlist` | `()` | yes |
 | `dash_majors` | `()` | yes |
 | `dash_cameras_live` | `True` | yes |
+| `[interface.a2a] enabled` (`a2a_enabled`) | `False` | yes -- serve A2A on the dashboard's listener |
+| `[interface.a2a] expose` (`a2a_expose`) | `["research"]` | yes -- the agents the card lists and the server runs |
 
 - `POST /api/pair` takes an optional `person` and answers with `person` (2026-09-27): a phone says whose it is at pairing, kept when it names a household member (`devices.household_member`) and the terminal's `pair ... for X` named nobody. `DeviceBook` re-reads its file when it changed on disk (`_fresh`), so `devices assign` from another process or a hand edit takes effect without a restart instead of being overwritten by the next `last_seen` save. The iOS app asks "Who's using this phone?" when pairing and shows the owner in Settings.
 
@@ -162,7 +170,9 @@ The generated `class:*`, `budget:`, `caldav:`, `imap:`, `cli:`, `interface:`, `c
 
 - `simorgh.interface.service.Service` (`service.py:108`): the Subsystem, built by the Kernel. Constructor flags `run_repl`, `http_enabled`, `wait_for_boot` let tests run it headless.
 - `simorgh.interface.api`: `Command`, `parse`, `VitalsCache`, `VitalsSnapshot`, used by the Kernel CLI and tests. `dispatch.dispatch`, `dispatch.Outcome` and `httpapi.HttpApi` are imported by tests; nothing in another package imports this one except the Kernel (the module-boundary test forbids it).
-- `HttpApi.register_route(method, path, handler, auth=True, max_body, rate)` is the only way to add a route; `auth=False` is reviewed per route.
+- `HttpApi.register_route(method, path, handler, auth=True, max_body, rate)` is the only way to add a route; `auth=False` is reviewed per route. `HttpApi.serve_a2a(server)` adds the A2A pair (`GET /.well-known/agent-card.json`, `POST /a2a`), called only when `[interface.a2a] enabled`.
+- `GET /api/crews[?id=<crew_id>][&limit=N]` (stage 18 item 5): `{total, crews: [{crew_id, members, counts, cost_usd, active, started_at, updated_at, tree: [{handle, agent, parent, depth, status, topic, last, last_kind, steps, cost_usd, report_policy, summary}], messages}]}`, newest first, `limit` default 5, at most 20. The dashboard's crew panel reads it.
+- A2A (stage 18 item 10): `GET /.well-known/agent-card.json` and `POST /a2a` (JSON-RPC 2.0; `message/stream` and `tasks/resubscribe` answer as `text/event-stream`). Both need a PAIRED device with `chat`: no token, a wrong token, the legacy shared token and the loopback no-token pass are all 401 and nothing runs. The card lists only `expose` agents that have an `agents/<name>.md`; a message picks one by `metadata.agent` (or `skill`), default the first, and any other is refused (`-32602`). An A2A task's id is the member's handle and its `contextId` the crew; another device's task is `TaskNotFound`. File parts are refused (`-32005`); push notifications answer `-32003`.
 - `GET /api/status` and `config.Config.from_mapping` (`http_host`, `http_port`) are also read from outside the process: `simorgh status` (kernel/statusread.py) finds the running instance there, sending `SIM_API_TOKEN` as a bearer token so a gated server answers with the full snapshot, not only `_PUBLIC_STATUS_KEYS`. A reply must stay a JSON object with a `state` key, or the CLI falls back to the ledger. Changing the route, the port keys or that shape changes `simorgh status`.
 - Types from `simorgh.contracts`: `topics`, `envelope.Message/Event`, `protocols.Context/Health`, `registry.error_reply_payload`, `settings.config_path` (for `mcp approve`), `settings.VOICE_SAFE_KEYS` (`tui.py:181`, which completes `voice set <key>` from it, so a key added there becomes completable here with no change on this side -- `stt_partial_every_ms` and `aec` were added 2026-09-23), `channels` (channel names), stream-name validation.
 - Module-level mutable state: none beyond constants. Per-instance state that matters: `Service._pending_turns` and `_pending_prompts` (futures keyed by session and prompt id), `TelegramChannel._sessions/_chats` and the WhatsApp equivalents (in memory only, lost on restart), `HttpApi` rate-limit deques and the single in-flight chat.
@@ -273,6 +283,9 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/interface/test_telegram_channel.py` -- Telegram: allow-list, one session per chat, replies routed back.
 - `tests/simorgh/interface/test_whatsapp_channel.py` -- WhatsApp: signature gate, allow-list, replies routed back.
 - `tests/simorgh/interface/test_command_table.py` -- one command table feeds the parser, completion and the splash.
+- `tests/simorgh/interface/test_crew_tree.py` -- the crew fold; members under their parents in the transcript and the live rows; the terminal grammar (`tui_is_sane`) with a six-member crew; every line within the terminal.
+- `tests/simorgh/interface/test_crew_command.py` -- `crew`, `crew <id>`, `crew cancel` read the `crew:<id>` streams; `/api/crews` and the dashboard panel.
+- `tests/simorgh/interface/test_a2a_server.py` -- A2A over a real socket with a raw JSON-RPC client and a fake crew runtime: the card, send, stream, input-required round trip, get, cancel, the paired-caller gate.
 
 ## Known issues (2026-09-18 evaluation)
 
@@ -317,3 +330,4 @@ Lock it first (`python tools/modlock.py claim interface --by <you> --task "..."`
 
 - Consumes `session.delta` (stage 3 item 3): the newest reply being written shows as up to four lines above the prompt (`_streaming_rows`), cleared by `reset` and by `turn.completed`; the transcript still gets the finished answer whole.
 - `approvals` / `approvals revoke <n>|all` (2026-09-22) send `guardian.standing.request` and render the reply; a pending approval prompt now also accepts `always` / `a` when Guardian offers it.
+- Crews (stage 18 items 5 and 10, 2026-10-27). The transcript draws a crew member under the task that spawned it: a `⏺` branch when it starts and again with its outcome, its progress, milestones and questions hanging from it behind a `⎿` (redrawn first when a sibling spoke last, so a corner is never under the wrong branch). The live rows show a running root's unfinished members under it (at most 6), and members are not counted as running tasks of their own. `crew` lists crews newest first, `crew <id>` (a prefix is enough) draws one with its messages, `crew cancel <handle> [reason]` publishes a cascading `crew.cancel`. `[interface.a2a]` serves the agents in `expose` over A2A to paired devices, off by default; an inbound message becomes `crew.spawn` with the device's person as requester. Until orchestration answers `crew.spawn` (item 2), an enabled server says "nothing answered the spawn" and runs nothing.

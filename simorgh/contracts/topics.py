@@ -360,6 +360,10 @@ CREW_SPAWNED = "crew.spawned"      # a member started: who, under whom, with wha
 CREW_MESSAGE = "crew.message"      # progress | milestone | question | answer | steer | note | report
 CREW_REPORT = "crew.report"        # a member's final typed Report
 CREW_CANCEL = "crew.cancel"        # stop a member (and, by default, its descendants)
+# Start a crew from outside any session (stage 18 item 10: an A2A caller,
+# through Interface). Inside a session `spawn` is a built-in tool, not this.
+CREW_SPAWN = "crew.spawn"
+CREW_SPAWN_REPLY = "crew.spawn.reply"
 
 # --- voice (docs/plans/voice-design.md) -------------------------------------
 # Commands from the CLI, and what the pipeline announces as it goes.

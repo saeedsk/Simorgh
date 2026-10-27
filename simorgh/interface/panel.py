@@ -330,7 +330,7 @@ def done_row(last_done, *, unicode: bool = True) -> list[tuple[str, str]] | None
 
 
 def live_rows(book: TaskBook, *, now: float, footer_text: str = "", last_done=None,
-              unicode: bool = True) -> list[list[tuple[str, str]]]:
+              unicode: bool = True, crews=None) -> list[list[tuple[str, str]]]:
     """Everything that sits between the transcript and the prompt: for
     each running task the call in flight (in place) and its breathing
     line; else the redirected one-liner ("Thinking… [4s]"); else what
@@ -345,9 +345,19 @@ def live_rows(book: TaskBook, *, now: float, footer_text: str = "", last_done=No
     place"."""
     rows: list[list[tuple[str, str]]] = []
     running = book.running()
+    if crews is not None:
+        # A crew member is drawn under the task that spawned it (stage 18
+        # item 5), not as a running task of its own: six members of one
+        # crew would otherwise push everything else out of the three rows.
+        running = [r for r in running if not crews.is_member(r.task_id)]
     for record in running[:MAX_RUNNING_ROWS]:
         rows.extend(inflight_rows(record, now=now, unicode=unicode))
         rows.append(running_row(record, now=now, unicode=unicode))
+        crew = crews.crews.get(record.task_id) if crews is not None else None
+        if crew is not None:
+            from .crewview import live_member_rows
+
+            rows.extend(live_member_rows(crew, unicode=unicode))
     if len(running) > MAX_RUNNING_ROWS:
         rows.append([("class:sim.footer", f"  … and {len(running) - MAX_RUNNING_ROWS} more running")])
     if not running:

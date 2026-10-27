@@ -196,6 +196,83 @@ async def _cancel(bus: BusClient, task_id: str, *, session_id: str) -> Outcome:
     }, render_ok=f"asked {task_id} to stop; it ends after its current step")
 
 
+#: How many crews `crew` lists, newest first.
+_CREW_LIST_MAX = 20
+
+
+async def _crews(ledger: LedgerClient) -> list:
+    """Every crew on the ledger, folded (`crewview.fold`), newest first."""
+    from . import crewview
+
+    names = await ledger.streams(crewview.STREAM_PREFIX)
+    crews = []
+    for stream in names:
+        if not stream.startswith(crewview.STREAM_PREFIX):
+            continue
+        crews.append(crewview.fold(crewview.crew_id_of_stream(stream), await ledger.read(stream)))
+    crews.sort(key=lambda c: c.updated_at or 0.0, reverse=True)
+    return crews
+
+
+async def _crew_command(args: str, *, bus: BusClient, ledger: LedgerClient, session_id: str) -> Outcome:
+    """`crew`, `crew <id>`, `crew cancel <handle> [reason]` (stage 18 item 5).
+
+    Read from the `crew:<id>` streams, not from what this REPL happened to
+    see go past: a crew started before this session, or by the phone, is
+    still a crew. The cancel is `crew.cancel` with `cascade`, so a member's
+    own helpers stop with it -- Orchestration owns the stopping, this only
+    asks, and says so."""
+    from . import crewview
+
+    unicode = render_mod.unicode_mode() != "off"
+    words = args.split()
+    try:
+        crews = await _crews(ledger)
+    except Exception as exc:  # noqa: BLE001 -- a bad read is a rendered error, never a crash
+        return Outcome(f"error: could not read the crews ({exc})")
+    if not words:
+        if not crews:
+            return Outcome("no crews yet -- an agent that spawns helpers starts one")
+        shown = crews[:_CREW_LIST_MAX]
+        more = f"\n  … and {len(crews) - len(shown)} older" if len(crews) > len(shown) else ""
+        return Outcome("\n".join(crewview.crew_list(shown, unicode=unicode)) + more
+                       + "\n  `crew <id>` shows one as a tree")
+    if words[0] == "cancel":
+        if len(words) < 2:
+            return Outcome("usage: crew cancel <handle> [reason]")
+        wanted = words[1]
+        hits = [(c, h) for c in crews for h in c.members if h == wanted or h.startswith(wanted)]
+        exact = [(c, h) for c, h in hits if h == wanted]
+        hits = exact or hits
+        if not hits:
+            return Outcome(f"no crew member {wanted!r} -- `crew` lists the crews, `crew <id>` their members")
+        if len(hits) > 1:
+            return Outcome(f"{wanted!r} names {len(hits)} members; give more of the handle")
+        crew, handle = hits[0]
+        member = crew.members[handle]
+        if member.status in crewview.FINISHED:
+            return Outcome(f"{handle} is already {member.status} -- nothing to stop")
+        reason = " ".join(words[2:]) or f"cancelled by cli:{session_id}"
+        under = len([h for h in crew.descendants(handle) if crew.members[h].status not in crewview.FINISHED])
+        return await _publish(bus, topics.CREW_CANCEL, {
+            "crew_id": crew.crew_id, "handle": handle, "reason": reason, "cascade": True,
+        }, render_ok=f"asked {member.agent} {handle[:8]} to stop"
+                     + (f", and the {under} member{'s' if under != 1 else ''} under it" if under else "")
+                     + "; each ends after its current step")
+    wanted = words[0]
+    found = [c for c in crews if c.crew_id == wanted] or [c for c in crews if c.crew_id.startswith(wanted)]
+    if not found:
+        return Outcome(f"no crew {wanted!r} -- `crew` lists them")
+    if len(found) > 1:
+        return Outcome(f"{wanted!r} names {len(found)} crews; give more of the id")
+    crew = found[0]
+    lines = crewview.crew_tree(crew, unicode=unicode)
+    messages = crewview.message_lines(crew, unicode=unicode)
+    if messages:
+        lines += ["", f"messages (newest {len(messages)} of {len(crew.messages)}):"] + messages
+    return Outcome("\n".join(lines))
+
+
 async def run_shell(command: str, *, timeout: float) -> str:
     if not command:
         return "usage: !<shell command>"
@@ -394,6 +471,9 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
             asked["kinds"] = kinds
         return await _run_tool(bus=bus, ledger=ledger, tool="memory_forget", session_id=session_id, timeout=30.0,
                                raw=json.dumps(asked))
+    if name == "crew":
+        return await _crew_command(args, bus=bus, ledger=ledger, session_id=session_id)
+
     if name == "cancel":
         # Until 2026-09-08 there was no way to stop anything. A task that
         # had stopped being useful ran to its step budget while holding

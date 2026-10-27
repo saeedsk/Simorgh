@@ -277,6 +277,30 @@
       </style>
     </section>
     <section>
+      <h2>Crews — agents working together</h2>
+      <div class="panel" id="crew-panel">
+        <div id="crew-none" class="crew-none">no crews yet — an agent that spawns helpers starts one</div>
+        <div id="crew-list"></div>
+      </div>
+      <style>
+        .crew-none { color: var(--text-dim); }
+        .crew { margin-bottom: 12px; }
+        .crew-head { font-weight: 600; margin-bottom: 4px; }
+        .crew-head .who { font-weight: 400; color: var(--text-dim); margin-left: 8px; }
+        .crew-tree { list-style: none; margin: 0; padding: 0;
+                     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+        .crew-tree li { padding: 2px 0; white-space: pre-wrap; }
+        .crew-tree .st { display: inline-block; min-width: 6.5em; }
+        .crew-tree .st-running, .crew-tree .st-starting { color: var(--accent); }
+        .crew-tree .st-waiting { color: var(--degraded); }
+        .crew-tree .st-done { color: var(--ok); }
+        .crew-tree .st-failed { color: var(--down); }
+        .crew-tree .st-blocked, .crew-tree .st-cancelled { color: var(--neutral); }
+        .crew-tree .last { color: var(--text-dim); display: block; }
+        .crew-tree .who { color: var(--text-dim); margin-left: 6px; }
+      </style>
+    </section>
+    <section>
       <h2>Subsystems</h2>
       <div id="layers"></div>
     </section>
@@ -1007,6 +1031,37 @@
   }
   pollActivity();
   setInterval(pollActivity, ACTIVITY_POLL_MS);
+
+  // -- crews (stage 18 item 5): `/api/crews` folds each `crew:<id>` -----
+  // stream the way the console's `crew <id>` does, so both say the same.
+  const CREW_POLL_MS = 3000;
+  async function pollCrews() {
+    try {
+      const res = await apiFetch("/api/crews?limit=5");
+      if (!res.ok) return;
+      const data = await res.json();
+      const crews = data.crews || [];
+      document.getElementById("crew-none").style.display = crews.length ? "none" : "";
+      document.getElementById("crew-list").innerHTML = crews.map(c => {
+        const counts = Object.entries(c.counts || {}).map(([k, v]) => v + " " + k).join(" · ");
+        const cost = c.cost_usd ? " · $" + Number(c.cost_usd).toFixed(2) : "";
+        const rows = (c.tree || []).map(m => {
+          const pad = "  ".repeat(Math.max(0, (m.depth || 1) - 1));
+          const steps = m.steps ? " · " + m.steps + " step" + (m.steps === 1 ? "" : "s") : "";
+          const mcost = m.cost_usd ? " · $" + Number(m.cost_usd).toFixed(3) : "";
+          const last = m.last ? '<span class="last">' + escA(pad + "  ⎿ " + m.last) + '</span>' : "";
+          return '<li>' + escA(pad) + '⏺ <span class="st st-' + escA(m.status) + '">' + escA(m.status) + '</span>'
+            + escA(m.agent + " · " + m.topic + steps + mcost) + ' <span class="who">' + escA(String(m.handle).slice(0, 8))
+            + '</span>' + last + '</li>';
+        }).join("");
+        return '<div class="crew"><div class="crew-head">crew ' + escA(String(c.crew_id).slice(0, 12))
+          + '<span class="who">' + escA((c.members || 0) + " members" + (counts ? " · " + counts : "") + cost)
+          + '</span></div><ol class="crew-tree">' + rows + '</ol></div>';
+      }).join("");
+    } catch (_) { /* transient; the conn banner covers outages */ }
+  }
+  pollCrews();
+  setInterval(pollCrews, CREW_POLL_MS);
 })();
 </script>
 </body>
