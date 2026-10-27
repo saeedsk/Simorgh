@@ -30,6 +30,10 @@ class Purpose(str, enum.Enum):
     REGROUND = "reground"
     CONSOLIDATE = "consolidate"
     ENSEMBLE = "ensemble"
+    # The sleep tick's entity summaries and fact decisions (stage 15): their
+    # own rows, so a night of them is capped apart from chat.
+    MEMORY_SUMMARY = "memory.summary"
+    MEMORY_RECONCILE = "memory.reconcile"
 
 
 class ProviderUnavailable(Exception):
@@ -87,13 +91,26 @@ class BudgetExceeded(Exception):
 
 @dataclass(frozen=True)
 class Budget:
-    """One purpose's per-request spend ceiling, from `[cognition.purposes.<p>]`."""
+    """One purpose's per-request spend ceiling, from `[cognition.purposes.<p>]`,
+    and optionally a rolling ceiling over all of that purpose's calls.
+
+    The per-request fields bound one call. A provider's own window
+    (`ProviderConfig.max_spend_usd`) is shared by every purpose, so a
+    background purpose that makes many small calls could spend the day's
+    allowance before anybody speaks. `window_max_usd` / `window_max_calls`
+    (None: no bound) cap the purpose itself over `window_seconds`, counted
+    from `cognition:calls` (real calls only; the floor costs nothing), and a
+    call past either is refused as `budget_exceeded` before any provider is
+    dialled (stage 15: `memory.summary`, `memory.reconcile`)."""
 
     max_tokens_in: int
     max_tokens_out: int
     max_cost_usd: float
     require_real: bool = False
     max_seconds: float = 180.0
+    window_max_usd: float | None = None
+    window_max_calls: int | None = None
+    window_seconds: float = 86_400.0
 
 
 @dataclass(frozen=True)

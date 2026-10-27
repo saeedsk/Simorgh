@@ -120,4 +120,65 @@ class RollingWindowBudget:
         )
 
 
-__all__ = ["RollingWindowBudget", "SPEND_KIND", "stream_for"]
+#: Where every think is recorded (`service.py::_append_call_record`); the
+#: purpose windows below are a fold of it.
+CALLS_STREAM = "cognition:calls"
+
+
+class PurposeWindow:
+    """One purpose's rolling spend and call count (`Budget.window_max_usd`,
+    `window_max_calls`), so a background purpose cannot spend what the
+    shared provider window owes chat (stage 15).
+
+    Same shape as `RollingWindowBudget`: `cognition:calls` is read once,
+    at first use, and `record` appends to the cache after that, so the
+    count survives a restart. Only real calls count -- a floor answer
+    costs nothing and asks nobody."""
+
+    def __init__(self, purpose: str, budget, ledger: Ledger, *, clock: Clock) -> None:
+        self._purpose = purpose
+        self._budget = budget
+        self._ledger = ledger
+        self._clock = clock
+        self._cache: list[tuple[float, float]] | None = None
+
+    @property
+    def bounded(self) -> bool:
+        return self._budget.window_max_usd is not None or self._budget.window_max_calls is not None
+
+    async def _window(self) -> list[tuple[float, float]]:
+        if self._cache is None:
+            try:
+                events = await self._ledger.read(CALLS_STREAM)
+            except Exception:  # noqa: BLE001 -- an unreadable record starts the window empty, as a fresh install does
+                events = []
+            self._cache = [(e.ts, float(e.payload.get("cost_usd", 0.0) or 0.0)) for e in events
+                           if e.payload.get("purpose") == self._purpose and not e.payload.get("floor")]
+        cutoff = self._clock.now() - self._budget.window_seconds
+        if self._cache and self._cache[0][0] < cutoff:
+            self._cache = [c for c in self._cache if c[0] >= cutoff]
+        return self._cache
+
+    async def exhausted(self) -> str:
+        """Why the next call would be over the purpose's window, or ""."""
+        if not self.bounded:
+            return ""
+        recent = await self._window()
+        spend, calls = sum(cost for _, cost in recent), len(recent)
+        hours = self._budget.window_seconds / 3600
+        if self._budget.window_max_calls is not None and calls >= self._budget.window_max_calls:
+            return f"{self._purpose} made {calls} calls in the last {hours:g} h (cap {self._budget.window_max_calls})"
+        if self._budget.window_max_usd is not None and spend >= self._budget.window_max_usd:
+            return (f"{self._purpose} spent ${spend:.4f} in the last {hours:g} h "
+                    f"(cap ${self._budget.window_max_usd:.2f})")
+        return ""
+
+    def record(self, cost_usd: float, *, floor: bool) -> None:
+        """Count one finished call; the ledger event itself is the
+        service's `think.completed`."""
+        if floor or self._cache is None:
+            return       # an unread cache picks the call up from the stream on first use
+        self._cache.append((self._clock.now(), float(cost_usd or 0.0)))
+
+
+__all__ = ["CALLS_STREAM", "PurposeWindow", "RollingWindowBudget", "SPEND_KIND", "stream_for"]

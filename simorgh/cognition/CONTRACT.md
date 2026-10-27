@@ -13,7 +13,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `simorgh/cognition/__init__.py` | exports `Service` |
 | `simorgh/cognition/api.py` | `Purpose`, `Budget`, `BudgetStatus`, prompt/compaction/parse result types, errors |
 | `simorgh/cognition/assembler.py` | `PromptAssembler`: protected blocks via `persona.voice` and `self.summary` requests (no user profile since 2026-09-22) |
-| `simorgh/cognition/budget.py` | `RollingWindowBudget` per provider on `cognition:budget:<provider>` |
+| `simorgh/cognition/budget.py` | `RollingWindowBudget` per provider on `cognition:budget:<provider>`; `PurposeWindow`, a purpose's own rolling cap folded from `cognition:calls` (stage 15) |
 | `simorgh/cognition/compaction.py` | five-layer `Compactor`; layer-5 summaries to `cognition:summaries:<session>` |
 | `simorgh/cognition/config.py` | `[cognition]` dataclasses, default providers and purpose budgets |
 | `simorgh/cognition/parser.py` | `OutputParser`: tool markers, edit blocks, verdicts, non-answers |
@@ -34,7 +34,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 
 | Topic | Schema | Where | Does |
 |---|---|---|---|
-| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/cognition/service.py:222 | assemble, compact, route, parse; reply `cognition.think.reply` (or an error reply) |
+| `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/cognition/service.py:222 | assemble, compact, route, parse; reply `cognition.think.reply` (or an error reply). `purpose` gains `memory.summary` and `memory.reconcile` (2026-10-27, stage 15; Memory's sleep tick): a purpose whose budget row sets a rolling window is refused `budget_exceeded` (retryable) past it, before any provider is dialled |
 | `cognition.compact.request` | `messages/cognition.py::CognitionCompactRequest` | simorgh/cognition/service.py:223 | compact the given messages to `target_tokens`; reply `cognition.compact.reply` |
 | `system.state.changed` | `messages/system.py::SystemStateChanged` | simorgh/cognition/service.py:224 | `paused`/`stopping` makes new thinks reply `paused` |
 | `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/cognition/service.py:225 | every 30th tick, publish provider status and metrics |
@@ -61,7 +61,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
 | `cognition:budget:<provider>` | simorgh/cognition/budget.py:25 (`stream_for`); one event per billed call | read back once at start by the budget itself | `cognition:budget:` 3d, but per-id handling means an active stream is never truncated (ledger/CONTRACT.md) |
-| `cognition:calls` | simorgh/cognition/service.py:552; one `think.completed` per think | nothing | forever (no retention entry, no snapshot) |
+| `cognition:calls` | simorgh/cognition/service.py:552; one `think.completed` per think | `budget.PurposeWindow` (once, at a windowed purpose's first call; stage 15) | forever (no retention entry, no snapshot) |
 | `cognition:summaries:<session_id>` | simorgh/cognition/compaction.py:343; layer-5 summaries | nothing | 30d |
 
 ## Config
@@ -72,7 +72,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 |---|---|---|
 | `provider_order` | `('together', 'gemini', 'claude_code_cli', 'floor')` | yes |
 | `providers` | `field(default_factory=lambda: {'together': ProviderConfig(ma` | yes |
-| `purposes` | `field(default_factory=lambda: dict(DEFAULT_PURPOSE_BUDGETS))` | partly: `max_tokens_in/out` and `max_cost_usd` are read; `max_seconds` and `require_real` are not (see Known issues) |
+| `purposes` | `field(default_factory=lambda: dict(DEFAULT_PURPOSE_BUDGETS))` | partly: `max_tokens_in/out` and `max_cost_usd` are read; `max_seconds` and `require_real` are not (see Known issues). Since 2026-10-27 (stage 15) a row may also set `window_max_usd`, `window_max_calls` (None: no bound) and `window_seconds` (86400): a cap over ALL of that purpose's real calls in the rolling window, counted from `cognition:calls` (`budget.PurposeWindow`; survives a restart), read in `Service._on_think`. Rows `memory.summary` (4000 in, 300 out, $0.02 a call, 60 s, $0.10 and 200 calls a day) and `memory.reconcile` (4000, 400, $0.02, 60 s, $0.10 and 300 calls a day) are the only ones that set it; chat and the rest keep only the provider's window. TOML: `[cognition.purposes."memory.summary"]` |
 | `routes` | `field(default_factory=dict)` | yes |
 | `tool_result_max_tokens` | `2000` | yes |
 | `snip_trigger_fraction` | `0.9` | yes |
@@ -122,6 +122,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/cognition/test_service.py` -- the Service over a real bus and ledger: think and compact replies, error codes, paused, provider status, notices.
 - `tests/simorgh/cognition/test_router.py` -- ordered failover, budgets, cooldowns, one deadline per call, floor and `require_real_provider`.
 - `tests/simorgh/cognition/test_routes.py` -- per-purpose routes and the strong tier.
+- `tests/simorgh/cognition/test_memory_purposes_have_their_own_budget.py` -- `memory.summary` and `memory.reconcile` are on the wire, have a floor line and a budget row with a window; a purpose past its window is refused `budget_exceeded` without dialling, while chat and the other memory purpose still answer; the window slides and survives a restart (stage 15).
 - `tests/simorgh/cognition/test_token_split.py` -- the per-block split on the `cognition.provider_call` span, marker and native dialects (stage 17 item 1).
 - `tests/simorgh/cognition/test_budget.py` -- rolling-window accounting replayed from the ledger; per-provider isolation.
 - `tests/simorgh/cognition/test_budget_reads_its_stream_once.py` -- the budget stream is read once, then kept in memory (C13).
@@ -144,7 +145,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - V6 (low): every think makes a 2 s-timeout bus round trip to Persona (and to the World Model for the self summary) in `assembler.py`. Open; stage 4 item 4 replaces them with injected readers.
 - B2 (medium): Cognition's `Message.new` sites mint fresh trace ids. Open; stage 1 item 2.
 
-Found while writing this contract (not in the catalogue): `_on_think` builds its `Budget` (`service.py:288-295`) without the purpose's `max_seconds`, so `[cognition.purposes.chat] max_seconds = 90` never applies and every think runs against the 180 s dataclass default (`api.py:96`), although `voice/config.py:213` is tuned to the 90 s value. `cognition:calls` is appended on every think, read by nothing, and never compacted.
+Found while writing this contract (not in the catalogue): `_on_think` builds its `Budget` (`service.py:288-295`) without the purpose's `max_seconds`, so `[cognition.purposes.chat] max_seconds = 90` never applies and every think runs against the 180 s dataclass default (`api.py:96`), although `voice/config.py:213` is tuned to the 90 s value. `cognition:calls` is appended on every think and never compacted; since 2026-10-27 `PurposeWindow` reads it once per windowed purpose.
 
 ## Planned changes (roadmap)
 
