@@ -103,6 +103,9 @@ class FactIndex:
 
     by_id: dict[str, Fact] = field(default_factory=dict)
     by_key: dict[tuple[str, str, str], str] = field(default_factory=dict)   # key -> the live fact's id
+    #: Ids with a `fact.linked` event, so the backfill links each fact once
+    #: even when its subject resolved to nothing.
+    linked: set[str] = field(default_factory=set)
     cursor: int = 0
 
     def apply(self, event) -> None:
@@ -126,6 +129,7 @@ class FactIndex:
         elif event.type == LINKED:
             fact = self.by_id.get(str(payload.get("id") or ""))
             if fact is not None:
+                self.linked.add(fact.id)
                 self.by_id[fact.id] = replace(fact, subject_id=str(payload.get("subject_id") or fact.subject_id),
                                               object_id=str(payload.get("object_id") or fact.object_id))
 

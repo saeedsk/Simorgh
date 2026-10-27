@@ -253,8 +253,11 @@ async def summarise_entities(engine: MemoryEngine, *, bus: Bus, source: str, tim
         if entity is None or entity.id != entity_id:
             continue
         ids = frozenset(f.id for f in about[entity_id])
-        if ids <= entities.summarised.get(entity_id, (frozenset(), ""))[0]:
-            continue    # nothing new since the last summary
+        if ids == entities.summarised.get(entity_id, (frozenset(), ""))[0]:
+            # Nothing changed since the last summary. Any change asks again:
+            # a new fact, and also one corrected or forgotten, whose summary
+            # recall has stopped showing (`MemoryEngine.entity_summaries`).
+            continue
         due.append((entity, sorted(about[entity_id], key=lambda f: (f.valid_from, f.id)), ids))
     for entity, its_facts, ids in due[:MAX_SUMMARIES]:
         window = "\n".join(f"- {fact.sentence()}" for fact in its_facts)

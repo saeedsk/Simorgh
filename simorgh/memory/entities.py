@@ -23,9 +23,11 @@ under another's name, which is worse than a missed one, so a pair that is
 close but not certain is only noted (`EntityIndex.uncertain`) for the
 sleep tick to ask about, never merged here.
 
-Kinship words ("my wife", "his son") are never an entity. They resolve
-through the speaker's People record when that record says who the word
-means, and to nothing otherwise.
+Kinship words ("my wife", "his son") are never an entity, and neither is
+a phrase built on one ("my wife's sister"). The speaker's own ("my wife",
+"our son", a bare "son") resolve through the speaker's People record when
+that record says who the word means; anybody else's ("his son", "your
+wife") and everything else resolve to nothing.
 """
 
 from __future__ import annotations
@@ -83,6 +85,25 @@ def kinship_word(text: str) -> str:
             break
     flat = _POSSESSIVE.sub("", flat.strip(" .,;:!?"))
     return flat if flat in KINSHIP else ""
+
+
+def speakers_own(text: str) -> bool:
+    """Whether a kinship word is the speaker's relation: "my son", "our
+    son" or a bare "son". "his son" and "her son" are somebody else's, and
+    "your wife" is the listener's; the speaker's record says nothing about
+    whose, so those resolve to nothing rather than to the speaker's son."""
+    flat = " ".join((text or "").casefold().split())
+    return not any(flat.startswith(owner) for owner in _KIN_OWNERS if owner not in ("my ", "our "))
+
+
+def relational(text: str) -> bool:
+    """Whether `text` names somebody through a relation to whoever is
+    speaking or being spoken of: "my wife's sister", "his son's teacher".
+    Not a kinship word itself, but just as speaker-relative, so it is never
+    an entity either -- "my wife's sister" is a different person for every
+    speaker."""
+    words = [_POSSESSIVE.sub("", w.strip(" .,;:!?\"'()")) for w in (text or "").casefold().split()]
+    return any(words[i] + " " in _KIN_OWNERS and words[i + 1] in KINSHIP for i in range(len(words) - 1))
 
 
 def edit_distance_at_most_one(a: str, b: str) -> bool:
@@ -230,8 +251,8 @@ class EntityIndex:
             return "alias", self.canonical(self.alias[key])
         # 2. the People registry (and, for a kinship word, the speaker's record)
         kin = kinship_word(text)
-        if kin:
-            name = relation_of(people, speaker, kin)
+        if kin or relational(text):
+            name = relation_of(people, speaker, kin) if kin and speakers_own(text) else ""
             if not name:
                 return "kin", None
             return "kin", self.resolve(name, people=people) or person_id(name)
@@ -298,4 +319,4 @@ def guess_type(text: str) -> str:
 
 __all__ = ["ALIAS_ADDED", "CREATED", "ENTITY_STREAM", "Entity", "EntityIndex", "FUZZY_MIN_CHARS", "KINSHIP", "MERGED",
            "SUMMARY", "TYPES", "edit_distance_at_most_one", "guess_type", "kinship_word", "name_like", "normalise",
-           "person_id", "person_named", "relation_of", "slug"]
+           "person_id", "person_named", "relation_of", "relational", "slug", "speakers_own"]

@@ -384,8 +384,11 @@ class MemoryEngine:
     async def link_facts(self) -> int:
         """The one-off backfill: give every live fact written before
         entities its subject and object ids, as `fact.linked` events.
-        Idempotent -- a linked fact is skipped -- so running it every sleep
-        tick costs one pass over the live facts and writes nothing new."""
+        Idempotent -- a fact that has a `fact.linked` event, or was written
+        with either id, is skipped -- so running it every sleep tick costs
+        one pass over the live facts and writes and counts nothing new. A
+        fact whose subject resolves to nothing ("my wife", with no record
+        of who that is) is linked by its object alone, once."""
         from .facts import EVERYONE, FACT_STREAM, LINKED
 
         if not self._config.entities:
@@ -393,7 +396,7 @@ class MemoryEngine:
         index = await self._facts_synced()
         linked = 0
         for fact in [index.by_id[i] for i in list(index.by_key.values())]:
-            if fact.subject_id:
+            if fact.subject_id or fact.object_id or fact.id in index.linked:
                 continue
             speaker = "" if fact.person_scope == EVERYONE else fact.person_scope
             subject_id = await self.entity_for(fact.subject, speaker=speaker, person_scope=fact.person_scope,
@@ -416,6 +419,7 @@ class MemoryEngine:
         is created by asking)."""
         import re
 
+        from .entities import kinship_word
         from .recall import _STOPWORDS
 
         index = await self._entities_synced()
@@ -426,6 +430,10 @@ class MemoryEngine:
             for start in range(len(words) - size + 1):
                 gram = words[start:start + size]
                 if all(w.lower() in _STOPWORDS for w in gram):
+                    continue
+                if start and kinship_word(gram[0]) and kinship_word(f"{words[start - 1]} {gram[0]}"):
+                    # "son" inside "his son" is not the speaker's son: the
+                    # gram that carries the owner word decides it.
                     continue
                 entity_id = index.resolve(" ".join(gram), speaker=speaker, people=people)
                 if entity_id and index.get(entity_id) is not None and entity_id not in found:
@@ -459,12 +467,17 @@ class MemoryEngine:
         if not self._config.entities:
             return []
         index = await self._entities_synced()
+        # A summary speaks only while every fact it was written from still
+        # holds: one written before a fact was corrected or forgotten would
+        # hand the old value back under the entity's name. The next sleep
+        # tick writes a fresh one from what is left.
+        live = set((await self._facts_synced()).by_key.values())
         wanted = {"*", person.strip().lower()} if person else {"*"}
         out = []
         for entity_id in await self.query_entities(query, speaker=person):
             entity = index.get(entity_id)
-            scope = index.summarised.get(entity.id, (frozenset(), "*"))[1].strip().lower() if entity else ""
-            if entity is not None and entity.summary and scope in wanted:
+            fact_ids, scope = index.summarised.get(entity.id, (frozenset(), "*")) if entity else (frozenset(), "")
+            if entity is not None and entity.summary and scope.strip().lower() in wanted and fact_ids <= live:
                 out.append((entity, entity.summary))
         return out
 

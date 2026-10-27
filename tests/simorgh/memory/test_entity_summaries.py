@@ -93,6 +93,23 @@ class SummariesTestCase(unittest.IsolatedAsyncioTestCase):
         report = await self._pass(self._honest)
         self.assertIn("person:reza", report.summaries.written)
 
+    async def test_a_forgotten_fact_takes_its_summary_out_of_recall(self):
+        """The summary carried Reza's number; once the number is forgotten
+        the summary must not hand it back, and the next pass rewrites it
+        from what is left."""
+        await self._pass(self._honest)
+        await self.engine.forget_window(since=0.0, kinds=("facts",), containing="0912", reason="test")
+        self.assertEqual(await self.engine.entity_summaries("can you call Reza?"), [])
+        report = await self._pass(lambda prompt: "Reza fixed the boiler.")
+        self.assertIn("person:reza", report.summaries.written)
+        self.assertEqual([s for _e, s in await self.engine.entity_summaries("can you call Reza?")],
+                         ["Reza fixed the boiler."])
+
+    async def test_a_corrected_fact_takes_its_summary_out_of_recall(self):
+        await self._pass(self._honest)
+        await self.engine.store_fact(subject="Reza", predicate="phone number", object="0935 111 2222")
+        self.assertEqual(await self.engine.entity_summaries("can you call Reza?"), [])
+
     async def test_a_private_fact_never_reaches_a_summary(self):
         await self.engine.store_fact(subject="Reza", predicate="owes", object="Saeed a favour", person_scope="Saeed")
         await self._pass(self._honest)
