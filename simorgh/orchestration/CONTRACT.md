@@ -108,6 +108,9 @@ Also written: blobs (`ledger.put_blob`) for the verify subject (`session.py:1905
 | `needs_human_timeout_s` | `600.0` | NO (declared, never read) |
 | `worktrees` | `True` | yes |
 | `metrics_interval_s` | `3.0` | yes |
+| `ablate` | `()` | yes (stage 14; eval sandbox only) |
+
+`ablate` switches guardrails off for the stage 14 ablation matrix (docs/plan/stage-14-toolchain-evals-and-ablation.md). Known names (`config.ABLATABLE`): `scaffold` -- `task_rules` is `scaffolds.bare_rules`: the task, who is speaking, the turn's language and the tool list, no workflow text; `verify` -- every profile runs as `verify = false` (`profiles.ablated`); `revisions` -- every profile runs as `max_revisions = 0`; `recovery` -- a failed `action.result`, a malformed native call, a Guardian denial of a tool the session was never offered, a marker mid-sentence or a marker for a tool that does not exist ends the session `failed` with reason `no recovery: <what>` (`session.NO_RECOVERY_REASON`) instead of going back to the model. A Guardian denial of an offered tool is unchanged: Guardian is not ablatable. Unknown names are dropped into `Config.problems`, which `Service.start` logs as `orchestration.config_ignored`; they never fail the boot. The default `()` leaves every prompt and behaviour byte-identical (`tests/simorgh/orchestration/test_ablation_switches.py`). `sim.sh` never sets it.
 
 There is no `lease_seconds` key: a task's lease is `[planning] lease_seconds`, carried on each `task.available` and read by `worker.py` from the payload. The unread copy here was removed on 2026-09-19, so writing it is now reported by `kernel/configcheck.py` as a section that changed nothing (`test_config.py`).
 

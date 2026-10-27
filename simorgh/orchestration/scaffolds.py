@@ -725,11 +725,20 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
            speaker_doubt: str = "", speaker_score: str = "",
            room: str = "", offered: tuple[str, ...] | None = None, speaker_before: str = "",
            skills: str = "", now: float = 0.0, device: str = "", speaker_say_as: str = "",
-           heard_language: str = "") -> str:
+           heard_language: str = "", workflow: bool = True) -> str:
     """The `task_rules` text for `profile`: its workflow, then a one-line
     note per tool it is actually allowed to call. Tools with no note are
     still listed by name -- a new tool must never silently vanish from
-    the prompt just because this table has not caught up."""
+    the prompt just because this table has not caught up.
+
+    `workflow=False` is `[orchestration] ablate = ["scaffold"]` (stage
+    14): see `bare_rules`."""
+    if not workflow:
+        return bare_rules(profile, task=task, channel=channel, speaker=speaker,
+                          speaker_relation=speaker_relation, speaker_doubt=speaker_doubt,
+                          speaker_score=speaker_score, room=room, offered=offered,
+                          speaker_before=speaker_before, now=now, speaker_say_as=speaker_say_as,
+                          heard_language=heard_language)
     body = scaffold_body(profile)
     if body and ("run_shell" in profile.tools or "install_package" in profile.tools):
         # Gated on run_shell alone until 2026-09-09, so the chat profile
@@ -830,4 +839,44 @@ def render(profile: Profile, *, subject: str | None = None, task: str | None = N
     return f"{body}\n\n{tools}" if body else tools
 
 
-__all__ = ["render", "when_line"]
+def bare_rules(profile: Profile, *, task: str | None = None, channel: str = "", speaker: str = "",
+               speaker_relation: str = "", speaker_doubt: str = "", speaker_score: str = "", room: str = "",
+               offered: tuple[str, ...] | None = None, speaker_before: str = "", now: float = 0.0,
+               speaker_say_as: str = "", heard_language: str = "") -> str:
+    """`task_rules` with the workflow text switched off (`[orchestration]
+    ablate = ["scaffold"]`, stage 14), to measure what that text is worth
+    to a given model.
+
+    Kept: the task itself, who is speaking (`who_is_here` on a voice
+    turn, `own_phone_note` on a phone), the turn's language, and the tool
+    list with the one-marker-per-message rule -- what a model needs to
+    call a tool at all. Dropped: the agent's body, the brevity, voice and
+    speaking-style blocks, the skill catalog, the unavailable-tool note
+    and every other piece of advice. Guardian still decides every call,
+    so nothing here is a safety line."""
+    parts: list[str] = []
+    stamp = when_line(now)
+    if stamp:
+        parts.append(stamp)
+    if task:
+        parts.append(f"Your task: {' '.join(task.split())}")
+    if channel == "voice":
+        parts.append(who_is_here(speaker, speaker_relation, room, speaker_before, doubt=speaker_doubt,
+                                 score=speaker_score, say_as=speaker_say_as))
+    if channel == "api" and speaker:
+        parts.append(own_phone_note(speaker))
+    said_in = language_line(heard_language)
+    if said_in:
+        parts.append(said_in)
+    offered = offered_tools(profile.tools) if offered is None else tuple(offered)
+    lines = [f"- {name}: {_TOOL_NOTES[name]}" if name in _TOOL_NOTES else f"- {name}" for name in offered]
+    if lines:
+        parts.append(
+            "One tool call per message: write a single marker line, and wait for its result "
+            "before asking for the next. Anything after the first marker is ignored.\n\n"
+            "Tools available to you this session:\n" + "\n".join(lines)
+        )
+    return "\n\n".join(parts)
+
+
+__all__ = ["bare_rules", "render", "when_line"]
