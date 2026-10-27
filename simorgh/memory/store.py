@@ -450,18 +450,26 @@ class MemoryEngine:
     async def entity_facts(self, query: str, *, person: str = "") -> list:
         """The live facts about an entity the query names, under any of its
         names: `(fact, what it replaced)`. Only facts `person` may see."""
-        if not self._config.entities:
+        return [(fact, was) for fact, was, _hop in
+                await self.graph_facts(query, person=person, hops=1, limit=10_000)]
+
+    async def graph_facts(self, query: str, *, person: str = "", hops: int = 2, limit: int = 12,
+                          exclude=()) -> list:
+        """Multi-hop recall (stage 15 item 2): `(fact, what it replaced,
+        hop)` for the facts reached from the entities the query names; see
+        `recall.hop_facts`. Only live facts `person` may see are walked."""
+        from .recall import hop_facts
+
+        if not self._config.entities or hops <= 0:
             return []
-        wanted = set(await self.query_entities(query, speaker=person))
-        if not wanted:
+        start = await self.query_entities(query, speaker=person)
+        if not start:
             return []
         facts = await self._facts_synced()
         entities = await self._entities_synced()
-        out = []
-        for fact in facts.live_facts(person=person):
-            if wanted & set(self.fact_ends(fact, entities)) - {""}:
-                out.append((fact, facts.previous(fact)))
-        return out
+        reached = hop_facts(facts.live_facts(person=person), start=start, hops=hops, limit=limit,
+                            exclude=exclude, ends=lambda fact: self.fact_ends(fact, entities))
+        return [(fact, facts.previous(fact), hop) for fact, hop in reached]
 
     async def warm(self, kinds=KINDS) -> int:
         """Build the recall index before anything asks a question of it.

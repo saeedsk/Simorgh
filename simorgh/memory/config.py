@@ -92,6 +92,13 @@ class Config:
     #: it is about. Off until the stage's memory eval (item 4) shows no
     #: regression against recall without it; then the default becomes true.
     entities: bool = False
+    #: Multi-hop recall (stage 15 item 2), with `entities` on: how far from
+    #: an entity the query names recall walks the facts (1: the facts
+    #: about it; 2: also the facts about what those reach), and how many
+    #: facts the walk may add to the block in all, hop 1 first. 0 hops
+    #: turns the walk off and leaves the block exactly as it was.
+    graph_hops: int = 2
+    graph_max_facts: int = 12
 
     @classmethod
     def from_mapping(cls, raw: Mapping) -> "Config":

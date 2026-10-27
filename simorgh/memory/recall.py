@@ -452,6 +452,40 @@ def fused(dense: list[float], lexical: dict[int, float]) -> list[float]:
     return out
 
 
+def hop_facts(facts, *, start, ends, hops: int = 2, limit: int = 12, exclude=()) -> list:
+    """Multi-hop recall over the facts (stage 15 item 2): `[(fact, hop)]`.
+
+    Hop 1 is every fact whose subject or object is an entity in `start`
+    (the entities the query named). Hop 2 is every fact touching the
+    entity at the other end of a hop-1 fact. "Who fixed the boiler, and
+    what's their number?" is `boiler -> fixed by -> Reza` at hop 1 and
+    `Reza -> phone -> ...` at hop 2.
+
+    `facts` must already be only what the asking person may see: a hop
+    walks nothing else, so a fact private to somebody else can neither be
+    returned nor be the bridge to one that is not (`person_scope`).
+
+    A fact in `exclude` (already in the block) is not returned again, but
+    it is still walked: the boiler fact matched by its words is exactly
+    the bridge to Reza's number. At most `limit` facts are added, hop 1
+    before hop 2, newest first within a hop, so the order is stable.
+    """
+    if hops <= 0 or limit <= 0 or not start:
+        return []
+    start = set(start)
+    excluded = set(exclude)
+    ordered = sorted(facts, key=lambda f: (-f.valid_from, f.id))
+    ended = [(fact, *ends(fact)) for fact in ordered]
+    hop1 = [(fact, s, o) for fact, s, o in ended if s in start or o in start]
+    out = [(fact, 1) for fact, _s, _o in hop1 if fact.id not in excluded]
+    if hops >= 2:
+        reached = {end for _f, s, o in hop1 for end in (s, o) if end and end not in start}
+        walked = {fact.id for fact, _s, _o in hop1}
+        out += [(fact, 2) for fact, s, o in ended
+                if fact.id not in walked and fact.id not in excluded and (s in reached or o in reached)]
+    return out[:limit]
+
+
 #: Dense vectors, persisted once each (stage 5 item 1): `vector.stored`
 #: events `{ref, provider, v}` with `v` the float32 vector in base64 --
 #: 384 dimensions is 2 KB, inside the Ledger's inline limit.
@@ -478,4 +512,5 @@ def decode_vector(text: str):
     return array("d", floats)
 
 
-__all__ = ["KindIndex", "RRF_K", "Record", "RecallIndex", "RefSet", "VECTOR_STREAM", "decode_vector", "encode_vector", "fused"]
+__all__ = ["KindIndex", "RRF_K", "Record", "RecallIndex", "RefSet", "VECTOR_STREAM", "decode_vector", "encode_vector", "fused",
+           "hop_facts"]

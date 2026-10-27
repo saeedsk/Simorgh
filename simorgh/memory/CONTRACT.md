@@ -84,7 +84,7 @@ Requests it makes: `cognition.think` (`purpose="consolidate"`, `consolidate_time
 
 | Topic | Schema | Where | When |
 |---|---|---|---|
-| `memory.retrieve.reply` | `messages/memory.py::MemoryRetrieveReply` | simorgh/memory/service.py | reply to every `memory.retrieve`: items with `score`, `confidence_now`, `confidence`, plus `truncated` |
+| `memory.retrieve.reply` | `messages/memory.py::MemoryRetrieveReply` | simorgh/memory/service.py | reply to every `memory.retrieve`: items with `score`, `confidence_now`, `confidence`, plus `truncated`; `facts` when any hold (each may carry `was`/`was_until`, and -- stage 15, `entities = true`, `graph_hops > 0` -- `hop: 1 | 2` on a fact the entity walk added) |
 | `memory.forget.reply` | `messages/memory.py::MemoryForgetReply` | simorgh/memory/service.py | reply to every `memory.forget`: count and refs forgotten |
 | `memory.stored` | `messages/memory.py::MemoryStored` | simorgh/memory/service.py | after each durable store (not for `working`) |
 | `memory.consolidated` | `messages/memory.py::MemoryConsolidated` | simorgh/memory/service.py | after every consolidation pass (distilled 0/1, pruned, refused counts) |
@@ -92,6 +92,8 @@ Requests it makes: `cognition.think` (`purpose="consolidate"`, `consolidate_time
 | `memory.forgotten` | `messages/memory.py::MemoryForgotten` | simorgh/memory/service.py | after a `memory.forget` that removed anything, and after a pass that pruned (with `refs: []`) |
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/memory/service.py | every 30 s: `gauges.records` per kind |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/memory/consolidation.py | request, once per pass, when the window has episodic records |
+
+`hop` (stage 15) is not declared in `contracts/messages/memory.py::MemoryRetrieveReply`; the `facts` objects admit additional properties, so it validates, and declaring it is a `contracts` change. Orchestration (`orchestration/context.py::_fact_lines`) renders the first 8 facts and does not read `hop`.
 
 `memory.stored`, `memory.consolidated`, `memory.contradiction.flagged` and `memory.forgotten` have no subscriber; they are on the allow-list in `tests/simorgh/contracts/test_topics_have_both_sides.py` as announcements for the Ledger and dashboard.
 
@@ -122,6 +124,8 @@ Not streams: `working:{session_id}:{i}` is the ref of a window item (never persi
 | `recency_weight` | `0.1` | yes |
 | `consolidate_after_start_s` | `120.0` | yes |
 | `entities` | `false` (stage 15; becomes `true` once the memory eval, stage 15 item 4, shows no regression) | yes -- facts record `subject_id`/`object_id`, the sleep tick links old facts and asks about close name pairs, and `memory.retrieve` adds the facts about every entity the query names |
+| `graph_hops` | `2` | yes, with `entities = true` (stage 15 item 2): how far recall walks from the entities a query names; `0` turns the walk off and the facts block is byte for byte what it was without entities |
+| `graph_max_facts` | `12` | yes: the most facts the walk may add to one reply, hop 1 first |
 | `consolidate_timeout_s` | `120.0` | yes -- consolidation's wait on Cognition, which IS the deadline the providers share (each gets `remaining / (still to try + 1)`). At 30 s over four providers each got ~8 s: Gemini's answer arrived after it was abandoned and the floor "consolidated" nothing (live, 2026-09-22) |
 
 `default_k` is read only as a fallback when a `memory.retrieve` payload omits `k`, and the schema makes `k` required, so it never takes effect; `kernel/configcheck.py:66-67` lists it in `KNOWN_DEAD_FIELDS`. The keep-per-kind counts (2,000 / 2,000 / 500) are a constructor argument (`service.py:19`), not config.
@@ -156,6 +160,7 @@ Consolidation records what somebody says they care about with the predicate `int
 - Two records whose shared first tag is only provenance (`consolidation`, `distilled`) are never flagged as contradicting (`api.py::NOT_A_SUBJECT`).
 - A consolidation pass runs `consolidate_after_start_s` after start (not only on the 6-hourly sleep tick).
 - Entities (stage 15, with `entities = true`): resolution is, in order, an exact alias; the People registry (`contracts.people.household_people()` unless `MemoryEngine.people` is set); a fuzzy match at edit distance <= 1 for names of five or more characters, accepted only when exactly one entity is that close; otherwise a new entity. A model is asked about identity only on the sleep tick, only for the ambiguous pairs, and only a plain YES from a real provider merges. A kinship word ("my wife") resolves through the speaker's People `relations` and never becomes an entity. Asking (`query_entities`) never creates one. A value object (digits, more than four words, over 40 chars) gets no entity.
+- Multi-hop recall (`recall.hop_facts`, stage 15 item 2): hop 1 is every live fact whose subject or object is an entity the query names; hop 2 every live fact touching the entity at the other end of a hop-1 fact. Only the facts the asking person may see are walked, so a fact private to somebody else is neither returned nor a bridge to one that is not (pinned by `test_multi_hop_recall.py::HopsNeverCrossPersonScopeTestCase`). The walk adds after the matched facts and the digest, never instead of them, skips what is already in the block, and marks each fact it added with `hop`.
 - A merge never rewrites a fact: facts keep the ids they recorded and `EntityIndex.canonical` maps every old id to the survivor.
 - No entry in `contracts/topics.py` SUBSCRIBE_ONLY_BY, PUBLISH_ONLY_BY or PUBLISH_PAYLOAD_CONSTRAINTS names memory.
 
@@ -172,6 +177,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/memory/test_recall_scaling.py` -- the index does no repeated reads or embeddings and returns the identical ranking.
 - `tests/simorgh/memory/test_first_consolidation.py` -- a pass runs shortly after start, not only on the sleep tick.
 - `tests/simorgh/memory/test_entities.py` -- each resolution rule, a merge leaving old ids resolvable, the Soo/Soodeh case, the backfill, and the sleep tick's model check (stage 15 item 1).
+- `tests/simorgh/memory/test_multi_hop_recall.py` -- the boiler -> Reza -> phone join, `graph_hops = 0` reproducing the block byte for byte, the cap, and hops never crossing `person_scope` (stage 15 item 2).
 - `tests/simorgh/memory/test_embedders.py` -- provider choice, the hashing fallback, and that no progress bar can reach the screen (`ProgressBarsStayOffTheScreenTestCase`).
 
 ## Known issues (2026-09-18 evaluation)

@@ -201,12 +201,18 @@ class Service:
                     pairs.append((fact, index.previous(fact)))
                 if len(pairs) >= _DIGEST_FACTS:
                     break
-        if self._config.entities:
-            # Stage 15 item 1: the facts about whatever the query names,
-            # under any of its names -- "Soodeh" finds what was said of "Soo".
-            seen = {fact.id for fact, _was in pairs}
-            pairs += [pair for pair in await self.engine.entity_facts(payload.get("query", ""), person=person)
-                      if pair[0].id not in seen][:_DIGEST_FACTS]
+        hop_of: dict[str, int] = {}
+        if self._config.entities and self._config.graph_hops > 0:
+            # Stage 15: the facts about whatever the query names, under any
+            # of its names ("Soodeh" finds what was said of "Soo"), and one
+            # hop further ("whoever fixed the boiler" -> Reza -> his number).
+            # After everything above, never instead of it, and each marked
+            # with its hop; `graph_hops = 0` leaves the block as it was.
+            for fact, was, hop in await self.engine.graph_facts(
+                    payload.get("query", ""), person=person, hops=self._config.graph_hops,
+                    limit=self._config.graph_max_facts, exclude={fact.id for fact, _was in pairs}):
+                pairs.append((fact, was))
+                hop_of[fact.id] = hop
         for fact, was in pairs:
             entry = {"id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
                      "person_scope": fact.person_scope, "confidence": fact.confidence,
@@ -215,6 +221,8 @@ class Service:
                 # What it replaced, so a reply can say "March 6th (was March
                 # 4th)" rather than leaving the old value to resurface.
                 entry["was"], entry["was_until"] = was.object, float(was.valid_to or 0.0)
+            if fact.id in hop_of:
+                entry["hop"] = hop_of[fact.id]
             facts.append(entry)
         items, truncated = await self.engine.retrieve(
             query=payload.get("query", ""), kinds=payload.get("kinds", []),
