@@ -32,7 +32,7 @@ from types import SimpleNamespace
 from .corpus import Episode, Question
 from .meter import MeteredClient
 from .score import PAST
-from .sidecar import DEFAULT_EMBED_DIMENSIONS, Sidecar, groups_for
+from .sidecar import Sidecar, groups_for
 
 TELEMETRY_ENV = "GRAPHITI_TELEMETRY_ENABLED"
 
@@ -80,7 +80,7 @@ class GraphitiSide(Sidecar):
             embedder=lib.OpenAIEmbedder(
                 config=lib.OpenAIEmbedderConfig(api_key=s.api_key, base_url=s.base_url,
                                                 embedding_model=s.embed_model,
-                                                embedding_dim=DEFAULT_EMBED_DIMENSIONS),
+                                                embedding_dim=s.embed_dimensions),
                 client=client),
             cross_encoder=lib.OpenAIRerankerClient(config=llm_config, client=client),
         )

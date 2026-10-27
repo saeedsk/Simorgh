@@ -32,8 +32,13 @@ from .meter import Meter
 #: The Together model Sim uses for embeddings in the sidecars. Overridable,
 #: because which embedding models are serverless on Together changes.
 EMBED_MODEL_ENV = "SIMORGH_EVALS_EMBED_MODEL"
-DEFAULT_EMBED_MODEL = "intfloat/multilingual-e5-large-instruct"
-DEFAULT_EMBED_DIMENSIONS = 1024
+#: `BAAI/bge-base-en-v1.5` was the only embedding model Together served per
+#: token on 2026-10-27 (`/v1/models`, type "embedding"); the earlier
+#: default, multilingual-e5-large-instruct, needs a dedicated endpoint and
+#: failed the first paid run with HTTP 400. English-only, 512 tokens.
+DEFAULT_EMBED_MODEL = "BAAI/bge-base-en-v1.5"
+DEFAULT_EMBED_DIMENSIONS = 768
+EMBED_DIMENSIONS_ENV = "SIMORGH_EVALS_EMBED_DIMENSIONS"
 KEY_ENV = "TOGETHER_API_KEY"
 
 
@@ -47,6 +52,7 @@ class Settings:
     embed_model: str
     price_in: float
     price_out: float
+    embed_dimensions: int = DEFAULT_EMBED_DIMENSIONS
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -55,7 +61,8 @@ class Settings:
         return cls(api_key=os.environ.get(KEY_ENV, ""), model=together.DEFAULT_MODEL,
                    base_url=together.DEFAULT_BASE_URL,
                    embed_model=os.environ.get(EMBED_MODEL_ENV, "") or DEFAULT_EMBED_MODEL,
-                   price_in=together.PRICE_IN, price_out=together.PRICE_OUT)
+                   price_in=together.PRICE_IN, price_out=together.PRICE_OUT,
+                   embed_dimensions=int(os.environ.get(EMBED_DIMENSIONS_ENV, "") or DEFAULT_EMBED_DIMENSIONS))
 
 
 @dataclass
@@ -149,5 +156,5 @@ def groups_for(asker: str) -> list[str]:
     return ["household", f"person_{asker}"]
 
 
-__all__ = ["DEFAULT_EMBED_DIMENSIONS", "DEFAULT_EMBED_MODEL", "EMBED_MODEL_ENV", "Ingestion", "KEY_ENV",
+__all__ = ["DEFAULT_EMBED_DIMENSIONS", "DEFAULT_EMBED_MODEL", "EMBED_DIMENSIONS_ENV", "EMBED_MODEL_ENV", "Ingestion", "KEY_ENV",
            "Settings", "Sidecar", "groups_for"]

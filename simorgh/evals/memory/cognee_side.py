@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 from .corpus import Episode, Question
 from .meter import metered
-from .sidecar import DEFAULT_EMBED_DIMENSIONS, Sidecar, groups_for
+from .sidecar import Sidecar, groups_for
 
 TELEMETRY_ENV = "TELEMETRY_DISABLED"
 
@@ -81,7 +81,7 @@ class CogneeSide(Sidecar):
                                "llm_endpoint": s.base_url, "llm_api_key": s.api_key})
         config.set_embedding_config({"embedding_provider": "custom", "embedding_model": f"openai/{s.embed_model}",
                                      "embedding_endpoint": s.base_url, "embedding_api_key": s.api_key,
-                                     "embedding_dimensions": DEFAULT_EMBED_DIMENSIONS})
+                                     "embedding_dimensions": s.embed_dimensions})
         store = graph_store()
         if store and store not in LOCAL_GRAPH_STORES:
             raise RuntimeError(f"cognee's graph store is {store!r}, which needs a server; refusing")
@@ -90,6 +90,11 @@ class CogneeSide(Sidecar):
                                  "household); Cognee has no per-fact person scope")
         # The meter on the two functions every Cognee model call goes through.
         litellm = lib.litellm
+        # Cognee sends `dimensions` with every embedding; LiteLLM refuses it
+        # for an "openai/" model unless told to drop what a provider does not
+        # take (the first paid run died on UnsupportedParamsError).
+        self._saved_drop = getattr(litellm, "drop_params", False)
+        litellm.drop_params = True
         self._saved = {name: getattr(litellm, name) for name in ("acompletion", "aembedding") if hasattr(litellm, name)}
         for name, fn in self._saved.items():
             setattr(litellm, name, metered(fn, self.meter))
@@ -104,6 +109,8 @@ class CogneeSide(Sidecar):
                 setattr(litellm, name, fn)
             if litellm is not None and hasattr(self, "_saved_budget"):
                 litellm.max_budget = self._saved_budget
+            if litellm is not None and hasattr(self, "_saved_drop"):
+                litellm.drop_params = self._saved_drop
         finally:
             tmp = getattr(self, "_tmp", None)
             if tmp is not None:
