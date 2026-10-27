@@ -41,10 +41,13 @@ class Service:
         topics.SYSTEM_TICK_SECOND,
         # Subscribed in code, missing from this manifest until 2026-09-19 (evaluation V4):
         topics.MEMORY_FORGET,
+        # Stage 15 item 8: `memory_core_edit`'s edit of a core block.
+        topics.MEMORY_CORE_EDIT,
     )
     produces: tuple[str, ...] = (
         topics.MEMORY_RETRIEVE_REPLY, topics.MEMORY_STORED, topics.MEMORY_CONTRADICTION_FLAGGED,
         topics.MEMORY_CONSOLIDATED, topics.MEMORY_FORGOTTEN, topics.SYSTEM_METRICS,
+        topics.MEMORY_CORE_EDIT_REPLY,
     )
 
     def __init__(self, *, config: Config | None = None, keep_per_kind: dict[str, int] | None = None) -> None:
@@ -76,6 +79,7 @@ class Service:
         self._sub_retrieve = await ctx.bus.subscribe(topics.MEMORY_RETRIEVE, self._on_retrieve)
         self._sub_store = await ctx.bus.subscribe(topics.MEMORY_STORE, self._on_store)
         self._sub_forget = await ctx.bus.subscribe(topics.MEMORY_FORGET, self._on_forget)
+        self._sub_core_edit = await ctx.bus.subscribe(topics.MEMORY_CORE_EDIT, self._on_core_edit)
         self._sub_sleep = await ctx.bus.subscribe(topics.SYSTEM_TICK_SLEEP, self._on_sleep)
         self._sub_turn = await ctx.bus.subscribe(topics.TURN_COMPLETED, self._on_turn_completed)
         self._sub_tick = await ctx.bus.subscribe(topics.SYSTEM_TICK_SECOND, self._on_tick)
@@ -128,7 +132,8 @@ class Service:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001 -- shutdown must not raise from a background pass
                 pass
             self._first_consolidation = None
-        for sub in (self._sub_retrieve, self._sub_store, self._sub_forget, self._sub_sleep, self._sub_turn, self._sub_tick):
+        for sub in (self._sub_retrieve, self._sub_store, self._sub_forget, self._sub_core_edit, self._sub_sleep,
+                    self._sub_turn, self._sub_tick):
             await sub.unsubscribe()
 
     async def _consolidate_after_start(self) -> None:
@@ -204,9 +209,6 @@ class Service:
 
     async def _on_retrieve(self, message: Message) -> None:
         payload = message.payload
-        if "core_edit" in payload:
-            await self._on_core_edit(message)
-            return
         person = ""
         for tag in (payload.get("filters") or {}).get("tags") or ():
             if str(tag).startswith("person:"):
@@ -295,23 +297,30 @@ class Service:
         return {"core": [{"block": block, "label": label, "text": text} for block, label, text in blocks]}
 
     async def _on_core_edit(self, message: Message) -> None:
-        """`memory_core_edit`'s request: a `memory.retrieve` carrying
-        `core_edit{block, old, new, requester, source_ref, action_id}`,
-        answered on `memory.retrieve.reply` with no items and
-        `core_edit{ok, block, text, error}`. It rides on retrieve because
-        the catalogue has no core topic yet and retrieve is the one memory
-        request with a reply; `memory.core.edit` is a `contracts` change
-        (memory/CONTRACT.md, planned changes)."""
-        edit = message.payload.get("core_edit") or {}
+        """`memory.core.edit{block, old?, new?, requester, requester_channel?,
+        source_ref?, action_id?}` -> `memory.core.edit.reply{edited, block,
+        text, reason}` (`edit_core`'s `ok`/`error` under the reply's names):
+        `memory_core_edit`'s edit of one core block. Only
+        Execution may publish the request (`topics.PUBLISH_ONLY_BY`), and
+        Guardian has already checked the block against the requester
+        (`guardian/corememory.py`); `edit_core` checks it again.
+
+        Until 2026-10-27 the edit rode on `memory.retrieve` as an
+        undeclared `core_edit` key. Nothing kept those requests -- a
+        request is answered and gone, and the `memory:core` events never
+        carried the key -- so there is no old shape left to read."""
+        edit = message.payload
         if not self._config.core_blocks:
             result = {"ok": False, "block": "", "text": "", "error": "core memory blocks are off ([memory] core_blocks)"}
         else:
             result = await self.engine.edit_core(
                 block=str(edit.get("block") or ""), old=str(edit.get("old") or ""), new=str(edit.get("new") or ""),
-                requester=str(edit.get("requester") or ""), source_ref=str(edit.get("source_ref") or ""),
-                action_id=str(edit.get("action_id") or ""))
-        await self._ctx.bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY,
-                                  payload={"items": [], "truncated": False, "core_edit": result})
+                requester=str(edit.get("requester") or ""),
+                requester_channel=str(edit.get("requester_channel") or ""),
+                source_ref=str(edit.get("source_ref") or ""), action_id=str(edit.get("action_id") or ""))
+        await self._ctx.bus.reply(message, type=topics.MEMORY_CORE_EDIT_REPLY, payload={
+            "edited": bool(result["ok"]), "block": result["block"], "text": result["text"],
+            "reason": result["error"]})
 
     async def _on_store(self, message: Message) -> None:
         payload = message.payload

@@ -10,6 +10,12 @@
         "null"
       ]
     },
+    "core_for": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "filters": {
       "additionalProperties": true,
       "properties": {

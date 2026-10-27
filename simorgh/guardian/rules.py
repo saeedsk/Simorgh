@@ -994,6 +994,7 @@ class ReversibilityRule:
 
 
 from .tiers import PersonRule, PresenceRule, TierRule  # noqa: E402 -- the tier rules, beside the rest of the pipeline
+from .corememory import CoreMemoryRule  # noqa: E402 -- per-tool argument rule, needs `tiers.role_of`
 
 DEFAULT_PIPELINE: tuple = (
     PausedRule(),
@@ -1009,6 +1010,9 @@ DEFAULT_PIPELINE: tuple = (
     ImmunityRule(),
     BudgetRule(),
     HumanOnlyRule(),
+    # Whose core memory block a `memory_core_edit` names, against who
+    # asked (stage 15 item 8): a denial, before any escalation is offered.
+    CoreMemoryRule(),
     # Who is asking, then how far the action reaches (stage 6 item 5),
     # before the ordinary physical and reversibility rules.
     PersonRule(),

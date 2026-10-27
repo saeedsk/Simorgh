@@ -67,12 +67,17 @@ class _CoreCase(unittest.IsolatedAsyncioTestCase):
             "query": "", "kinds": ["episodic"], "k": 6, **extra}), timeout=5.0)
         return dict(reply.payload)
 
-    async def edit(self, block: str, old: str, new: str, *, requester: str, turn: str = "turn-1") -> dict:
-        reply = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
-            "query": "", "kinds": [], "k": 0,
-            "core_edit": {"block": block, "old": old, "new": new, "requester": requester,
-                          "source_ref": turn, "action_id": "a-1"}}), timeout=5.0)
-        return dict(reply.payload["core_edit"])
+    async def edit(self, block: str, old: str, new: str, *, requester: str, turn: str = "turn-1",
+                   channel: str = "") -> dict:
+        """One `memory.core.edit`, its reply read back as `edit_core`'s
+        `{ok, block, text, error}`."""
+        reply = await self.bus.request(Message.new(topics.MEMORY_CORE_EDIT, source="execution", payload={
+            "block": block, "old": old, "new": new, "requester": requester, "requester_channel": channel,
+            "source_ref": turn, "action_id": "a-1"}), timeout=5.0)
+        self.assertEqual(reply.type, topics.MEMORY_CORE_EDIT_REPLY)
+        payload = reply.payload
+        return {"ok": payload["edited"], "block": payload["block"], "text": payload["text"],
+                "error": payload["reason"]}
 
 
 class OffByDefaultTestCase(_CoreCase):
@@ -142,6 +147,41 @@ class BlocksTestCase(_CoreCase):
         result = await self.edit("household", "", "the door code is 1234", requester="unknown")
         self.assertFalse(result["ok"])
         self.assertEqual(await self.ledger.read(CORE_STREAM), [])
+
+    async def test_a_person_edits_their_own_block_and_the_households(self):
+        for requester in ("Soodeh", "Ira"):
+            self.assertTrue((await self.edit("me", "", f"{requester} note", requester=requester, channel="voice"))["ok"])
+            self.assertTrue((await self.edit(requester, f"{requester} note", f"{requester} notes",
+                                             requester=requester, channel="voice"))["ok"])
+            self.assertTrue((await self.edit("household", "", f"from {requester}", requester=requester,
+                                             channel="voice"))["ok"])
+
+    async def test_an_outside_channel_edits_nothing(self):
+        """The A2A server acts for a device's person; core memory is not theirs to write."""
+        for block in ("household", "me"):
+            result = await self.edit(block, "", "the door code is 1234", requester="Saeed", channel="a2a")
+            self.assertFalse(result["ok"])
+            self.assertIn("outside", result["error"])
+        self.assertEqual(await self.ledger.read(CORE_STREAM), [])
+
+    async def test_nobody_named_off_the_console_edits_nothing(self):
+        """"" is the owner's only on the console; on a voice it is a voice nobody placed."""
+        for channel in ("voice", "initiative", "planning"):
+            result = await self.edit("household", "", "x", requester="", channel=channel)
+            self.assertFalse(result["ok"], channel)
+        self.assertEqual(await self.ledger.read(CORE_STREAM), [])
+
+    async def test_the_old_retrieve_key_edits_nothing(self):
+        """Until 2026-10-27 the edit rode on `memory.retrieve` as `core_edit`.
+        Nothing persisted that shape, so it is not read: a retrieve carrying
+        it is an ordinary recall, and only Execution may publish the edit."""
+        reply = await self.bus.request(Message.new(topics.MEMORY_RETRIEVE, source="test", payload={
+            "query": "", "kinds": [], "k": 0,
+            "core_edit": {"block": "household", "old": "", "new": "x", "requester": "Saeed"}}), timeout=5.0)
+        self.assertNotIn("core_edit", reply.payload)
+        self.assertEqual(await self.ledger.read(CORE_STREAM), [])
+        self.assertFalse(topics.may_publish("orchestration", topics.MEMORY_CORE_EDIT))
+        self.assertTrue(topics.may_publish("execution", topics.MEMORY_CORE_EDIT))
 
     async def test_a_block_over_the_limit_is_refused_whole(self):
         await self.edit("household", "", "bins go out Tuesday", requester="Saeed")
@@ -215,6 +255,8 @@ class ReplaceRulesTestCase(unittest.TestCase):
         self.assertEqual(block_for("Soodeh", "Ira"), "")
         self.assertEqual(requester_name("", PEOPLE), "Saeed")
         self.assertEqual(requester_name("unknown", PEOPLE), "")
+        self.assertEqual(requester_name("", PEOPLE, channel="voice"), "")
+        self.assertEqual(requester_name("Saeed", PEOPLE, channel="a2a"), "")
 
 
 if __name__ == "__main__":

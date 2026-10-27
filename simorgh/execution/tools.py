@@ -2336,11 +2336,12 @@ class RememberTool:
                           metadata={"kind": "semantic", "chars": len(fact), "tags": tags})
 
 
-async def _proposal_requester(ctx: ToolContext) -> str | None:
-    """Who asked for this call, from Guardian's own record of the proposal
-    (`action:<id>`, its `received` event): "" for the console, the
-    speaker's name for a spoken turn. None when the record cannot be read
-    -- unknown, which is never the same as nobody."""
+async def _proposal_requester(ctx: ToolContext) -> tuple[str, str] | None:
+    """Who asked for this call and over which channel, from Guardian's own
+    record of the proposal (`action:<id>`, its `received` event): `("", "")`
+    for the console, the speaker's name and `voice` for a spoken turn. None
+    when the record cannot be read -- unknown, which is never the same as
+    nobody."""
     ledger = getattr(ctx, "ledger", None)
     if ledger is None or not getattr(ctx, "action_id", ""):
         return None
@@ -2351,8 +2352,27 @@ async def _proposal_requester(ctx: ToolContext) -> str | None:
     for event in events:
         if event.type == "received":
             proposal = (event.payload or {}).get("proposal") or {}
-            return str(proposal.get("requester") or "")
+            return str(proposal.get("requester") or ""), str(proposal.get("requester_channel") or "")
     return None
+
+
+def _core_edit_refusal(block: str, requester: str, channel: str) -> str:
+    """Why `requester` on `channel` may not edit `block`, or "" -- the same
+    reading as Guardian's `CoreMemoryRule` and Memory's `edit_core`, from
+    `contracts/coreblocks.py`. The console's own block is left to Memory,
+    which knows the owner's name."""
+    from simorgh.contracts.channels import is_console
+    from simorgh.contracts.coreblocks import block_for, is_household, is_outside, is_unplaced
+
+    if is_outside(channel):
+        return f"core memory is not edited from outside the house ({channel})"
+    if not requester.strip():
+        return "" if is_console(channel) else "nobody I can place asked, so no core block is theirs to edit"
+    if is_unplaced(requester):
+        return "a voice I cannot place may not edit core memory"
+    if is_household(block) or block_for(block, requester):
+        return ""
+    return f"{block!r} is not yours to edit: {requester} may edit only `household` or their own block"
 
 
 class MemoryCoreEditTool:
@@ -2393,27 +2413,36 @@ class MemoryCoreEditTool:
         bus = getattr(ctx, "bus", None)
         if bus is None:
             return ToolResult.unconfigured("refused: no bus to reach memory")
-        requester = await _proposal_requester(ctx)
-        if requester is None:
+        who = await _proposal_requester(ctx)
+        if who is None:
             return ToolResult.refused("refused: Guardian's record of who asked could not be read, "
                                       "so whose block this is cannot be known")
+        requester, channel = who
+        # Guardian's `CoreMemoryRule` already refused anything below; asked
+        # again here, before the bus, so a gate that let one through (a rule
+        # dropped from a custom pipeline) still writes nothing.
+        refusal = _core_edit_refusal(block, requester, channel)
+        if refusal:
+            return ToolResult.refused(f"refused: {refusal}")
         from simorgh.contracts.envelope import Message as _Message
 
         try:
-            reply = await bus.request(_Message.new(topics.MEMORY_RETRIEVE, source="execution", payload={
-                "query": "", "kinds": [], "k": 0,
-                "core_edit": {"block": block, "old": str(args.get("old") or ""), "new": str(args.get("new") or ""),
-                              "requester": requester, "source_ref": str(getattr(ctx, "task_id", "") or ""),
-                              "action_id": str(getattr(ctx, "action_id", "") or "")}}),
+            reply = await bus.request(_Message.new(topics.MEMORY_CORE_EDIT, source="execution", payload={
+                "block": block, "old": str(args.get("old") or ""), "new": str(args.get("new") or ""),
+                "requester": requester, "requester_channel": channel,
+                "source_ref": str(getattr(ctx, "task_id", "") or ""),
+                "action_id": str(getattr(ctx, "action_id", "") or "")}),
                 timeout=10.0)
         except Exception as exc:  # noqa: BLE001
             return ToolResult.transient(f"refused: memory did not answer ({exc.__class__.__name__}: {exc})")
-        result = (reply.payload or {}).get("core_edit")
-        if not isinstance(result, dict):
-            # A Memory that answered as a plain recall has no core blocks to edit.
-            return ToolResult.unconfigured("refused: memory has no core blocks here")
-        if not result.get("ok"):
-            return ToolResult.refused(f"refused: {result.get('error') or 'memory did not take the edit'}")
+        result = reply.payload or {}
+        if "edited" not in result:
+            # The reply's error shape (`{ok: false, error: {code, detail}}`):
+            # Memory failed to answer, so nothing was written.
+            detail = (result.get("error") or {}).get("detail", "") if isinstance(result.get("error"), dict) else ""
+            return ToolResult.transient(f"refused: memory could not take the edit ({detail or 'no answer'})")
+        if not result.get("edited"):
+            return ToolResult.refused(f"refused: {result.get('reason') or 'memory did not take the edit'}")
         target, text = str(result.get("block") or ""), str(result.get("text") or "")
         return ToolResult(ok=True, output=f"{target} now reads:\n{text}" if text else f"{target} is now empty",
                           side_effects=(f"core block {target} edited",),
