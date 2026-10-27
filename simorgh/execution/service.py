@@ -50,7 +50,7 @@ from .selfaction import SelfActions
 from .mcp import McpClient, McpServerConfig, McpToolProxy, McpTransportError, mcp_single_arg_key
 from .mcp_sdk import make_client as make_mcp_client
 from .vision import CameraVision
-from .tools import RunTestsTool, SkillTool, builtin_tools, meta_tools
+from .tools import RunTestsTool, SkillTool, builtin_tools, memory_tools, meta_tools
 from .worktree import WorktreeManager, worktree_tools
 from .claudecode import HOOK_PREFIX as CLAUDE_CODE_HOOK_PREFIX
 from .verifier import ApprovalVerifier
@@ -292,6 +292,9 @@ class Service:
         )
         # `tool_more` (stage 17): about what a turn is offered, not the world.
         system_tools += meta_tools(self._config)
+        # `memory_core_edit` (stage 15 item 8): a chat session offers it only
+        # while Memory has core blocks on; registered always, so it is known.
+        system_tools += memory_tools(self._config)
         # External adapters (external.py) load last so a hand-built tool of
         # the same name is never shadowed by an optional package's.
         external = load_external_tools(self._config.external_tools, logger=ctx.logger)
