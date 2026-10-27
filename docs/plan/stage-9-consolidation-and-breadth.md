@@ -37,6 +37,24 @@ Done 2026-09-19 (item 9): `docs/adding-capability.md` -- a new capability arrive
 Started 2026-09-20 (item 11): `stage9/the-house-does-an-ordinary-thing` -- an owner asks for the kitchen light, the lamp is on, and then it goes back off through the same path. The first breadth scenario that could exist, because the fake house was only wired into the sandbox that day; before it, a tool that quietly refused and a tool that worked produced the same green. Verified by unwiring the house and watching it go red. Grown 2026-09-20: `stage9/a-lamp-is-not-a-decision` and `stage9/a-siren-is-a-decision` -- the same generic `homeassistant.turn_*` service, parting company at the gate. They exist because the creator typed `home off family room` and was asked to approve turning a lamp off: the shorthand commands use the generic service precisely because it works on anything, which left the policy unable to tell a lamp from a lock. Cautious is not free -- a gate that fires on lamps is a gate people learn to click through, and then the gate on the front door does not work either -- so the suite now pins BOTH directions, with `nobody_was_asked()` as the half that had no expectation at all. Falsified by unresolving the generic domain: 1/3. The rest of the item (the TV, a reminder, mail, a camera snapshot) grows the same way, one integration at a time. Grown 2026-09-21 (`793687d`): the first scenarios that TYPE -- `stage9/the-console-answers` (the commands a person uses all day) and `stage9/a-mistyped-command-is-answered-kindly` (usage, not a stack trace) -- because every house bug the creator found on 2026-09-20 he found by typing, and none of the pack's 51 direct-address beats typed anything.
 
 11. **The household end-to-end suite** in `simorgh/evals/household/` grows with every integration; "more general" is its coverage number (evaluation section 11).
+12. **The official MCP SDK behind the guarded adapter.** *Lock `execution`, `docs`; after stage 14 lands. Execution is Guardian-protected, so a human-run agent does this, never Sim's own task.*
+
+    **Why.** `execution/mcp.py` is a hand-rolled client of about 230 lines. It speaks stdio JSON-RPC and tools only. That rules out every server that speaks Streamable HTTP or SSE, or needs OAuth, which is most hosted ones by 2026. It also ignores resources, prompts, progress and cancellation, and every revision of the MCP spec becomes Sim's job to follow. Its docstring rejected the SDK for being third-party and not installed. But the boundary test already allows a third-party import guarded by `ImportError` (`tests/simorgh/test_module_boundaries.py::test_third_party_allowed_only_when_guarded`). And the creator's rule is "reuse open source; the only constraint is that Guardian sees every call".
+
+    **What.** A new `execution/mcp_sdk.py` imports the official `mcp` package (modelcontextprotocol/python-sdk) inside `try/except ImportError`. It runs `ClientSession` over `stdio_client` and `streamablehttp_client`, plus `sse_client` for older servers. It feeds the same `McpToolProxy`, so every call is still `action.proposed` → Guardian `SchemaRule`/`GrantRule` → `action.approved` → verifier → dispatch, with no special case.
+    - Config: an entry in `[execution] mcp_servers` gains an optional `transport = "stdio" | "http" | "sse"`, a `url`, and `headers` taken from `secrets.toml` by key name (never inline).
+    - Fallback: with the SDK absent, stdio servers keep working through the hand-rolled client, and an `http`/`sse` entry is refused by name ("needs `pip install mcp`") in `health()` and in the console's `mcp` command. It is never silently skipped.
+    - Guardian: `GrantRule`'s allow-list grows to URL hosts for remote servers, and `mcp approve` stays the only way a server becomes active.
+    - Optional dependency: `mcp` goes under the `[project.optional-dependencies]` extras, not the core.
+    - Out of scope: resources and prompts. They are a follow-up once a configured server needs them.
+
+    **Acceptance.**
+    - Unit tests with the SDK's in-memory transport, skipped when the SDK is absent: a stdio and an HTTP server are both listed and called through Guardian, and a denied call never reaches the server.
+    - The existing hand-rolled tests stay green with the SDK uninstalled.
+    - One real server is configured and used by Sim live, recorded in `docs/findings/`.
+    - `python tools/modtest.py execution` and `--tier core` are green.
+    - `execution/CONTRACT.md` and `docs/adding-capability.md` are updated.
+    - Once the SDK path has run live for two weeks, delete the hand-rolled client, or keep it only as the no-SDK stdio fallback.
 
 ## Measurements after
 
