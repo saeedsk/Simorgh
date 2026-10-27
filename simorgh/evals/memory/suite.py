@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import time
 from dataclasses import dataclass, field
 
@@ -153,6 +154,7 @@ async def run_system(system, month: list[Episode], questions=QUESTIONS) -> Syste
 
         run.ingestion = Ingestion(rows=rows, stopped=stopped).summary()
         run.ingestion["total_usd"] = round(meter.usd, 4)
+        run.ingestion["unmetered_calls"] = meter.unmetered
     if latencies:
         ordered = sorted(latencies)
         run.recall_ms = {"p50": round(ordered[len(ordered) // 2] * 1000, 1),
@@ -214,7 +216,10 @@ def table(runs: list[SystemRun]) -> str:
             i = r.ingestion
             extra.append(f"ingestion {i['episodes']} episodes, {i['calls_per_episode']} calls and "
                          f"${i['usd_per_episode']:.4f} per episode, p50 {i['seconds_per_episode_p50']} s, "
-                         f"total ${i['total_usd']:.4f}" + (f" -- {i['stopped']}" if i['stopped'] else ""))
+                         f"total ${i['total_usd']:.4f}"
+                         + (f", {i['unmetered_calls']} calls without usage charged the estimate"
+                            if i.get("unmetered_calls") else "")
+                         + (f" -- {i['stopped']}" if i['stopped'] else ""))
         extra.extend(f"{k}: {v}" for k, v in r.notes.items())
         if extra:
             lines.append(f"  {r.name}: " + "; ".join(extra))
@@ -264,8 +269,8 @@ def main(argv: list[str]) -> int:
             print(f"note: {plan['fairness']}")
         return 0
     paid_systems = [s for s in systems if s not in FREE]
-    if args.paid and paid_systems and args.cap_usd <= 0:
-        print("--paid needs --cap-usd above zero: a sidecar never runs without a hard cap", flush=True)
+    if args.paid and paid_systems and not (math.isfinite(args.cap_usd) and args.cap_usd > 0):
+        print("--paid needs a finite --cap-usd above zero: a sidecar never runs without a hard cap", flush=True)
         return 2
     runs = asyncio.run(run(systems, paid=args.paid, cap_usd=args.cap_usd, total_episodes=args.episodes))
     if args.record:

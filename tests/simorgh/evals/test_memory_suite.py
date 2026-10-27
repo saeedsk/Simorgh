@@ -24,7 +24,7 @@ from unittest import mock
 from simorgh.evals.api import SKIPPED
 from simorgh.evals.memory import corpus
 from simorgh.evals.memory.corpus import CATEGORIES, QUESTIONS, Question, episodes
-from simorgh.evals.memory.meter import CapReached, Meter, MeteredClient
+from simorgh.evals.memory.meter import CapReached, Meter, MeteredClient, metered
 from simorgh.evals.memory.native import GRAPH_KEYS, Native, NativeGraph, block_lines
 from simorgh.evals.memory.score import PAST, check, norm
 from simorgh.evals.memory.sidecar import Settings
@@ -139,6 +139,56 @@ class TheMeter(unittest.TestCase):
         with self.assertRaises(CapReached):
             asyncio.run(metered.chat.completions.create(model="m"))
         self.assertEqual(len(calls), 2, "the call past the cap was never made")
+
+    def test_a_cap_that_is_not_a_finite_positive_number_stops_the_first_call(self):
+        # `nan` compares false with everything, so `usd >= nan` never stopped.
+        for cap in (float("nan"), float("inf"), 0.0, -1.0):
+            with self.subTest(cap=cap), self.assertRaises(CapReached):
+                Meter(cap_usd=cap, price_in=1.0, price_out=1.0).check()
+
+    def test_a_response_without_usage_is_charged_the_estimate(self):
+        meter = Meter(cap_usd=0.01, price_in=1.0, price_out=1.0, reserve_in=4_000, reserve_out=1_000)
+        create = metered(lambda **kw: SimpleNamespace(), meter)
+        made = 0
+        with self.assertRaises(CapReached):
+            for _ in range(100):
+                create()
+                made += 1
+        self.assertEqual(made, 2, "5,000 tokens a call at $1/M reaches a $0.01 cap on the second")
+        self.assertEqual(meter.unmetered, 2)
+
+    def test_calls_in_flight_count_against_the_cap(self):
+        # A library that gathers twenty calls at once must not start all
+        # twenty on a cap that pays for two.
+        meter = Meter(cap_usd=2.0, price_in=1_000_000.0, price_out=0.0, reserve_in=1)
+        started = []
+
+        async def create(**kw):
+            started.append(kw)
+            await asyncio.sleep(0.01)
+            return _usage(1)
+
+        call = metered(create, meter)
+
+        async def burst():
+            return await asyncio.gather(*[call() for _ in range(20)], return_exceptions=True)
+
+        results = asyncio.run(burst())
+        self.assertEqual(len(started), 2)
+        self.assertEqual(sum(isinstance(r, CapReached) for r in results), 18)
+        self.assertEqual((meter.inflight, meter.usd), (0, 2.0))
+
+    def test_a_sidecar_with_a_nan_cap_is_skipped_and_the_command_line_refuses_it(self):
+        from simorgh.evals.memory.graphiti_side import GraphitiSide
+
+        store: dict = {}
+        with mock.patch.dict(sys.modules, _fake_graphiti_modules(store)), mock.patch.dict(os.environ, {}):
+            side = GraphitiSide(paid=True, cap_usd=float("nan"), settings=_SETTINGS)
+            result = asyncio.run(run_system(side, episodes()[:3]))
+        self.assertIn("cap", result.skipped)
+        self.assertNotIn("episodes", store)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["--systems", "graphiti", "--paid", "--cap-usd", "nan"]), 2)
 
 
 def _fake_graphiti_modules(store: dict) -> dict[str, types.ModuleType]:

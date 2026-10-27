@@ -5,9 +5,15 @@ cap cannot live in Cognition's budget. It lives at the one place every
 call passes: the client object (Graphiti takes an `AsyncOpenAI` it is
 handed) or the module function (Cognee calls `litellm.acompletion` and
 `litellm.aembedding` by attribute). `Meter.check()` runs before each call
-and raises `CapReached` once the dollars counted so far reach the cap;
-`charge` reads the response's `usage` afterwards. So the overshoot is at
-most one call -- the one already in flight when the cap was crossed.
+and raises `CapReached` once the dollars counted so far, plus a reserve
+for every call still in flight, reach the cap; `charge` reads the
+response's `usage` afterwards. Both libraries fan calls out concurrently
+(Graphiti through a semaphore of up to 20), so without the reserve every
+call already started when the cap was crossed would land on top of it;
+with it, the overshoot is only what the in-flight calls cost beyond their
+estimate. A response that carries no `usage` is charged the estimate,
+never nothing, and counted in `unmetered`. A cap that is not a finite
+positive number stops the first call.
 
 Embedding tokens are charged at the chat input price: dearer than any
 embedding model, so the count can only over-state the bill.
@@ -17,6 +23,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import math
 from dataclasses import dataclass
 
 
@@ -29,25 +36,43 @@ class Meter:
     cap_usd: float
     price_in: float                    # dollars per million input tokens
     price_out: float                   # dollars per million output tokens
+    #: What one call is assumed to cost: reserved while it is in flight,
+    #: and charged when its response says nothing about usage.
+    reserve_in: int = 0
+    reserve_out: int = 0
     calls: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
+    inflight: int = 0
+    unmetered: int = 0                 # responses with no usage, charged the reserve
 
     @property
     def usd(self) -> float:
         return (self.tokens_in * self.price_in + self.tokens_out * self.price_out) / 1_000_000
 
+    @property
+    def reserve_usd(self) -> float:
+        return (self.reserve_in * self.price_in + self.reserve_out * self.price_out) / 1_000_000
+
     def check(self) -> None:
-        if self.usd >= self.cap_usd:
-            raise CapReached(f"spent ${self.usd:.4f} of a ${self.cap_usd:.2f} cap after {self.calls} calls")
+        if not (math.isfinite(self.cap_usd) and self.cap_usd > 0):
+            raise CapReached(f"the cap is {self.cap_usd!r}; a sidecar needs a finite cap above zero")
+        committed = self.usd + self.inflight * self.reserve_usd
+        if committed >= self.cap_usd:
+            raise CapReached(f"spent ${self.usd:.4f} (+{self.inflight} calls in flight) of a "
+                             f"${self.cap_usd:.2f} cap after {self.calls} calls")
 
     def charge(self, response) -> None:
         self.calls += 1
         usage = _get(response, "usage")
-        if usage is None:
-            return
-        self.tokens_in += int(_get(usage, "prompt_tokens") or _get(usage, "input_tokens") or 0)
-        self.tokens_out += int(_get(usage, "completion_tokens") or _get(usage, "output_tokens") or 0)
+        tokens_in = int(_get(usage, "prompt_tokens") or _get(usage, "input_tokens") or 0)
+        tokens_out = int(_get(usage, "completion_tokens") or _get(usage, "output_tokens") or 0)
+        if not (tokens_in or tokens_out):
+            # Nothing said is not nothing spent: a cap fed zeros never stops.
+            self.unmetered += 1
+            tokens_in, tokens_out = self.reserve_in, self.reserve_out
+        self.tokens_in += tokens_in
+        self.tokens_out += tokens_out
 
     def snapshot(self) -> tuple[int, int, int, float]:
         return self.calls, self.tokens_in, self.tokens_out, self.usd
@@ -67,7 +92,11 @@ def metered(fn, meter: Meter):
         @functools.wraps(fn)
         async def _async(*args, **kwargs):
             meter.check()
-            response = await fn(*args, **kwargs)
+            meter.inflight += 1
+            try:
+                response = await fn(*args, **kwargs)
+            finally:
+                meter.inflight -= 1
             meter.charge(response)
             return response
         return _async
@@ -75,13 +104,22 @@ def metered(fn, meter: Meter):
     @functools.wraps(fn)
     def _sync(*args, **kwargs):
         meter.check()
-        response = fn(*args, **kwargs)
+        meter.inflight += 1
+        try:
+            response = fn(*args, **kwargs)
+        except BaseException:
+            meter.inflight -= 1
+            raise
         if inspect.isawaitable(response):
             async def _later():
-                result = await response
+                try:
+                    result = await response
+                finally:
+                    meter.inflight -= 1
                 meter.charge(result)
                 return result
             return _later()
+        meter.inflight -= 1
         meter.charge(response)
         return response
     return _sync

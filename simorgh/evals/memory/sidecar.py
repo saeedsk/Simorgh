@@ -22,6 +22,7 @@ both:
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 
@@ -95,7 +96,8 @@ class Sidecar:
     def __init__(self, *, paid: bool, cap_usd: float, settings: Settings | None = None) -> None:
         self.paid = paid
         self.settings = settings or Settings.from_env()
-        self.meter = Meter(cap_usd=cap_usd, price_in=self.settings.price_in, price_out=self.settings.price_out)
+        self.meter = Meter(cap_usd=cap_usd, price_in=self.settings.price_in, price_out=self.settings.price_out,
+                           reserve_in=self.tokens_in_per_call, reserve_out=self.tokens_out_per_call)
         #: Facts about this run the report must state (which graph store,
         #: how privacy was mapped).
         self.notes: dict[str, str] = {}
@@ -114,6 +116,9 @@ class Sidecar:
             self._lib = lib
         if not self.paid:
             return f"{self.name} calls a real model; pass --paid (and --cap-usd) to run it"
+        cap = self.meter.cap_usd
+        if not (math.isfinite(cap) and cap > 0):
+            return f"{self.name} needs a finite --cap-usd above zero (got {cap!r}); it never runs uncapped"
         if not self.settings.api_key:
             return f"{self.name}: no {KEY_ENV} in the environment"
         return ""
