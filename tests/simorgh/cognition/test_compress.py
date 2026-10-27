@@ -136,6 +136,25 @@ class TheCompressor(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(has_farsi(text))
         self.assertEqual(messages[3]["content"], RESULT)   # the caller's list is not mutated
 
+    async def test_orchestrations_trailing_instructions_go_out_exactly(self):
+        # The shape `orchestration/session.py` appends after a marker result.
+        dropped = ("Your reply also contained 2 further tool markers, which were NOT run: "
+                   "one tool call per message. Ask for the next one now if you still need it.")
+        rule = ("If the task is now finished, reply with your final answer in plain text, "
+                "with no tool marker. Otherwise take the next step.")
+        text = f"Result of web_fetch:\n{PROSE}\n\n{dropped}\n\n{rule}"
+        with _FakeModule() as fake:
+            compressor = Compressor(timeout_s=5.0)
+            try:
+                out, stats = await compressor.compress_messages([{"role": "user", "content": text}])
+            finally:
+                compressor.close()
+        self.assertEqual(stats.outcome, "compressed")
+        self.assertTrue(out[0]["content"].endswith(f"\n\n{dropped}\n\n{rule}"), out[0]["content"][-400:])
+        for sent in fake.calls:
+            self.assertNotIn("tool marker", sent)
+            self.assertNotIn("NOT run", sent)
+
     async def test_a_typed_tool_message_is_a_result_too(self):
         with _FakeModule():
             compressor = Compressor(timeout_s=5.0)
@@ -227,6 +246,14 @@ class TheConfig(unittest.TestCase):
         cfg = CognitionConfig.from_mapping({"compress_tool_results": "yes"})
         self.assertFalse(cfg.compress_tool_results)
         self.assertEqual(len(cfg.problems), 1)
+
+    def test_bad_numbers_are_problems_and_defaults_not_a_failed_boot(self):
+        for raw in ({"compress_rate": "half"}, {"compress_rate": 0}, {"compress_rate": 1.5},
+                    {"compress_min_chars": "4k"}, {"compress_min_chars": -1}, {"compress_min_chars": True}):
+            cfg = CognitionConfig.from_mapping({"compress_tool_results": True, **raw})
+            self.assertEqual(len(cfg.problems), 1, raw)
+            self.assertEqual((cfg.compress_min_chars, cfg.compress_rate), (4_000, 0.5), raw)
+            Compressor(rate=cfg.compress_rate, min_chars=cfg.compress_min_chars).close()
 
 
 class TheServiceSends(unittest.IsolatedAsyncioTestCase):

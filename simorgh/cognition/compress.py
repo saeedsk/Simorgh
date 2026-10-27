@@ -19,7 +19,9 @@ What it never touches:
   (``` or ~~~, an unclosed fence to the end), indented code, a body that
   is a JSON document, and any paragraph with Arabic-script letters
   (Farsi: LLMLingua's classifier was not trained on it, and Sim reads
-  Farsi back aloud). Digits are kept (`force_reserve_digit`).
+  Farsi back aloud). Digits are kept (`force_reserve_digit`);
+- the trailing instruction paragraphs Orchestration appends to a
+  marker-dialect result ("If the task is now finished, ...").
 
 It never blocks or fails a turn: the work runs in its own worker thread
 and is waited for at most `timeout_s`; on a timeout, an error, or a
@@ -56,6 +58,16 @@ TIMEOUT_S = 1.5
 
 #: A prose run shorter than this is left as it is: not worth a model call.
 MIN_RUN_CHARS = 200
+
+#: A marker-dialect result (a user turn "Result of <tool>:") ends with
+#: Orchestration's own instructions -- "If the task is now finished, reply
+#: ... with no tool marker. Otherwise take the next step.", and sometimes
+#: "Your reply also contained N further tool markers, which were NOT run"
+#: (`orchestration/session.py`). Up to this many trailing paragraphs, each
+#: no longer than `TAIL_PARAGRAPH_CHARS`, go out exactly: a dropped "no"
+#: would turn an instruction around.
+TAIL_PARAGRAPHS = 2
+TAIL_PARAGRAPH_CHARS = 400
 
 _FENCE = re.compile(r"(?ms)^[ \t]*(```|~~~)[^\n]*\n.*?(?:^[ \t]*\1[ \t]*$|\Z)")
 # A blank-line paragraph break, or a "Result(s) of <tool>:" header line.
@@ -97,6 +109,23 @@ def _is_json(text: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def instruction_tail(text: str) -> int:
+    """Where the trailing instruction paragraphs of a marker-dialect
+    result begin (`len(text)` when there are none): the last
+    `TAIL_PARAGRAPHS` blank-line paragraphs, each at most
+    `TAIL_PARAGRAPH_CHARS` long, counted from the end."""
+    cut = len(text.rstrip())
+    start = len(text)
+    for _ in range(TAIL_PARAGRAPHS):
+        at = max(text.rfind("\n\n", 0, cut), -1)
+        paragraph = text[at + 2 if at >= 0 else 0:cut]
+        if at < 0 or not paragraph.strip() or len(paragraph.strip()) > TAIL_PARAGRAPH_CHARS:
+            break
+        start = at
+        cut = len(text[:at].rstrip())
+    return start
 
 
 def segments(text: str) -> list[tuple[str, bool]]:
@@ -200,9 +229,13 @@ class Compressor:
                         model_name=MODEL, use_llmlingua2=True, device_map="cpu")
             return self._model
 
-    def _compress_text(self, model, text: str) -> tuple[str, int, int]:
+    def _compress_text(self, model, text: str, *, keep_tail: bool = False) -> tuple[str, int, int]:
         out: list[str] = []
         chars_in = chars_out = 0
+        tail = ""
+        if keep_tail:
+            at = instruction_tail(text)
+            text, tail = text[:at], text[at:]
         for piece, ok in segments(text):
             if not ok:
                 out.append(piece)
@@ -215,6 +248,7 @@ class Compressor:
             chars_in += len(piece)
             chars_out += len(short)
             out.append(short)
+        out.append(tail)
         return "".join(out), chars_in, chars_out
 
     def _run(self, messages: list[dict], targets: list[int]) -> tuple[dict[int, str], int, int]:
@@ -222,7 +256,8 @@ class Compressor:
         new: dict[int, str] = {}
         chars_in = chars_out = 0
         for i in targets:
-            text, cin, cout = self._compress_text(model, messages[i]["content"])
+            text, cin, cout = self._compress_text(
+                model, messages[i]["content"], keep_tail=messages[i].get("role", "user") == "user")
             chars_in += cin
             chars_out += cout
             if cout < cin:
@@ -259,4 +294,5 @@ class Compressor:
         return out, Stats("compressed", len(targets), chars_in, chars_out, ms)
 
 
-__all__ = ["Compressor", "MODEL", "MIN_RUN_CHARS", "Stats", "TIMEOUT_S", "has_farsi", "segments"]
+__all__ = ["Compressor", "MODEL", "MIN_RUN_CHARS", "Stats", "TIMEOUT_S", "has_farsi", "instruction_tail", "segments",
+           "TAIL_PARAGRAPHS", "TAIL_PARAGRAPH_CHARS"]

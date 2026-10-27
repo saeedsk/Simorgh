@@ -224,6 +224,18 @@ class Config:
         if "compress_tool_results" in raw and not isinstance(raw["compress_tool_results"], bool):
             problems.append(f"compress_tool_results is {raw['compress_tool_results']!r}, not true/false -- off")
             kwargs["compress_tool_results"] = False
+        # A bad number would raise in `Compressor(...)` at start, a failed
+        # boot; it is a problem and the default instead.
+        if "compress_min_chars" in raw:
+            value = raw["compress_min_chars"]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                problems.append(f"compress_min_chars is {value!r}, not a whole number >= 0 -- {cls().compress_min_chars}")
+                kwargs.pop("compress_min_chars")
+        if "compress_rate" in raw:
+            value = raw["compress_rate"]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 1:
+                problems.append(f"compress_rate is {value!r}, not a number in (0, 1] -- {cls().compress_rate}")
+                kwargs.pop("compress_rate")
         if "ablate" in raw:
             value = raw["ablate"]
             if isinstance(value, (list, tuple)):
