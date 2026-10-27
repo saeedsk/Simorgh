@@ -74,6 +74,15 @@ class TestReservedTopology(unittest.TestCase):
         self.assertTrue(may_publish("planning", topics.PLAN_PROPOSED))
         self.assertFalse(may_publish("orchestration", topics.PLAN_PROPOSED))
 
+    def test_only_execution_may_edit_a_core_block(self):
+        # The edit names its requester, read by the tool from Guardian's
+        # record; any other publisher could write a block in somebody's name.
+        self.assertTrue(may_publish("execution", topics.MEMORY_CORE_EDIT))
+        self.assertTrue(may_publish("execution@w2", topics.MEMORY_CORE_EDIT))
+        for source in ("orchestration", "interface", "memory", "test"):
+            self.assertFalse(may_publish(source, topics.MEMORY_CORE_EDIT), source)
+        self.assertTrue(may_publish("memory", topics.MEMORY_CORE_EDIT_REPLY))
+
     def test_source_instance_suffix_is_ignored_for_identity(self):
         self.assertEqual(topics.source_name("orchestration@w3"), "orchestration")
 
