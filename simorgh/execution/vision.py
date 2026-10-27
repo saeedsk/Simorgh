@@ -192,9 +192,16 @@ class CameraDescribeTool:
     # read-only. Guardian trusts this label, so it has to be the true one.
     read_only = False
     reversibility = "reversible"
-    description = ("What a camera can see right now, in words. `camera` is its name -- a Reolink camera on the "
-                   "NVR or a Ring one. Takes a couple of stills and describes them; needs a vision model "
-                   "([cognition.providers.ollama] vision_model).")
+    # The distinguishing facts lead each of the three looking tools' texts
+    # (stage 17 selection stress, 2026-10-27): this one takes NEW stills
+    # from a live camera, `look_at_image` reads a file that already exists.
+    # Asked to look at a saved picture under workspace/cameras/, the full
+    # scaffold reached for a camera instead -- nothing here said which
+    # tool a file on disk belongs to.
+    description = ("What a live camera can see right now, in words. `camera` is its name -- a Reolink camera on "
+                   "the NVR or a Ring one. Takes a couple of new stills and describes them; needs a vision model "
+                   "([cognition.providers.ollama] vision_model). For a picture already saved as a file, use "
+                   "look_at_image on its path instead.")
     args_schema = {"type": "object", "required": ["camera"],
                    "properties": {"camera": {"type": "string"}, "stills": {"type": "integer"}}}
 
@@ -272,9 +279,11 @@ class LookAtImageTool:
     name = "look_at_image"
     read_only = True
     reversibility = "read_only"
-    description = ("Look at up to four image files (png, jpg, webp, gif, bmp) under the readable folders and "
-                   "answer a question about them: `paths` and `question`. For a video, extract frames first "
-                   "(ffmpeg) and look at a few. Needs a provider that can see.")
+    description = ("Look at up to four image files that already exist on disk (png, jpg, webp, gif, bmp) under "
+                   "the readable folders -- a saved camera snapshot included -- and answer a question about them: "
+                   "`paths` and `question`. Takes no new picture; for what a camera sees now, use cam_snapshot "
+                   "or camera_describe. For a video, extract frames first (ffmpeg) and look at a few. Needs a "
+                   "provider that can see.")
     args_schema = {"type": "object", "required": ["paths", "question"],
                    "properties": {"paths": {"type": "array", "items": {"type": "string"}},
                                   "question": {"type": "string"}}}

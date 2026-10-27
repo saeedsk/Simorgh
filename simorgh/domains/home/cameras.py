@@ -463,7 +463,13 @@ class CamStateTool(_CameraTool):
 
 class CamSnapshotTool(_CameraTool):
     name = "cam_snapshot"
-    description = "A still from a camera, saved as a JPEG under workspace/cameras/; says the path."
+    # "Takes a NEW still" first: the old text began "A still from a camera,
+    # saved ... under workspace/cameras/", which a request naming a saved
+    # file in that folder matched word for word (stage 17 selection
+    # stress, 2026-10-27). A file that already exists is look_at_image's.
+    description = ("Takes a NEW still from a live camera right now, by the camera's name, and saves it as a JPEG "
+                   "under workspace/cameras/; says the path. Not for a picture that already exists: to look at "
+                   "a saved image file, use look_at_image on its path.")
     args_schema = {"type": "object", "required": ["camera"], "properties": {"camera": {"type": "string"}}}
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
