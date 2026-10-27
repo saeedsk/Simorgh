@@ -29,6 +29,7 @@ REACHES_OUTSIDE: frozenset[str] = frozenset({
     "mail_send",        # writes to somebody else, as the household
     "cam_siren", "ring_siren",          # loud, outside, at any hour
     "publish_page", "post_message",     # anything that puts words in public
+    "a2a_call",         # household data to a remote agent (stage 18 item 9)
 })
 
 #: Tier 2 by name: irreversible, but local and bounded -- the class the

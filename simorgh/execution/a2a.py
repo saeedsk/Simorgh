@@ -221,6 +221,8 @@ class _Progress:
         self.status_text = ""
         self.artifacts: dict[str, str] = {}
         self.reply = ""  # a direct Message answer, no task
+        # The stream used up `max_wait_s`: no polling after it.
+        self.out_of_time = False
 
     def fold(self, obj: Mapping[str, Any]) -> None:
         kind = obj.get("kind")
@@ -350,10 +352,19 @@ ProgressFn = Callable[[ToolContext, dict], Awaitable[None]]
 
 
 def _data_classes(value: Any) -> tuple[str, ...]:
-    if value is None or value == "" or value == []:
-        return ("public",)
-    items = value.split(",") if isinstance(value, str) else list(value)
-    return tuple(str(item).strip().lower() for item in items if str(item).strip())
+    """The classes a call says its message carries. Nothing said, or only
+    blanks, is `public`: an empty tuple would pass every agent's
+    `allowed_data` check, one that does not allow `public` included."""
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    elif value is None:
+        items = []
+    else:
+        items = [value]
+    classes = tuple(str(item).strip().lower() for item in items if str(item).strip())
+    return classes or ("public",)
 
 
 def _truthy(value: Any) -> bool:
@@ -479,14 +490,18 @@ class A2aCallTool:
                 streamed = await self._stream(agent, transport, ctx, message, progress)
             if not streamed:
                 progress.fold(await transport.send(message))
-        if not progress.done:
+        if not progress.done and not progress.out_of_time:
             await self._poll(agent, transport, ctx, progress, check_first=not message_text)
         return await self._result(agent, ctx, progress, sent=bool(message_text))
 
     async def _stream(self, agent, transport, ctx, message, progress: _Progress) -> bool:
-        """True when the stream ran (to the end or until it broke after the
-        task existed, which polling then follows); False when it broke
-        before anything arrived, so `message/send` goes instead."""
+        """True when the stream ran: to the end, until `max_wait_s` passed
+        (the task is then reported still running, with its id), or until it
+        broke after the task existed, which polling then follows. A stream
+        that breaks before anything arrived is a transient error, not a
+        `message/send`: the agent may already have the message, and
+        sending it twice is not something a retry should decide."""
+        deadline = self._monotonic() + max(0.0, agent.max_wait_s)
         try:
             async for event in transport.stream(message):
                 before = (progress.state, progress.status_text)
@@ -494,6 +509,9 @@ class A2aCallTool:
                 if event.get("kind") == "status-update" and (progress.state, progress.status_text) != before:
                     await self._emit(ctx, agent, progress)
                 if progress.done:
+                    break
+                if self._monotonic() >= deadline:
+                    progress.out_of_time = True
                     break
         except (A2aError, ToolUnconfigured):
             raise

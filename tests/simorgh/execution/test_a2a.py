@@ -679,5 +679,65 @@ class TestGuardianGatesTheCall(_ExecutionServiceTestCase):
         self.assertEqual([m for m, _h, _p in self.server.requests], ["card", "message/send"])
 
 
+
+class TestReviewFindings(_Case):
+    """Holes the stage 18 item 9 review found, each pinned."""
+
+    async def test_blank_data_classes_are_public_not_an_empty_set_that_passes_every_check(self):
+        # An agent allowed `calendar` only. `data: [" "]` used to fold to
+        # no classes at all, and no classes passed the check.
+        for data in ([" "], ["", "  "], " , ", []):
+            result = await self.tool(allowed_data=("calendar",)).run(
+                {"agent": "desk", "message": "hello", "data": data}, ctx=self.ctx())
+            self.assertEqual(result.error_kind, "refused", data)
+            self.assertIn("may not receive public", result.error)
+        self.assertEqual(self.server.requests, [])
+
+    async def test_a_data_value_that_is_not_a_list_is_a_class_not_a_crash(self):
+        result = await self.tool().run({"agent": "desk", "message": "hello", "data": True}, ctx=self.ctx())
+        self.assertEqual(result.error_kind, "refused")
+        self.assertIn("may not receive true", result.error)
+        self.assertEqual(self.server.requests, [])
+
+    async def test_a_stream_that_never_finishes_stops_at_max_wait_and_names_the_task(self):
+        class _EndlessStream(RawTransport):
+            async def stream(self, message):
+                while True:
+                    await asyncio.sleep(0)
+                    yield _status("t-7", "working", "still going")
+
+        ticks = iter(range(10_000))
+        agent = A2aAgentConfig(name="desk", url=self.server.url, poll_interval_s=1.0, max_wait_s=5.0)
+        self.server.streaming = True
+        tool = A2aCallTool((agent,), transport_factory=_EndlessStream, sleep=self._no_sleep,
+                           monotonic=lambda: float(next(ticks)))
+        result = await asyncio.wait_for(tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx()), timeout=5.0)
+        self.assertEqual(result.error_kind, "transient")
+        self.assertIn("task_id=t-7", result.error)
+        self.assertNotIn("tasks/get", self.methods(), "the stream used the whole wait; no polling after it")
+
+    async def _no_sleep(self, seconds):
+        self.slept.append(seconds)
+
+    async def test_a2a_call_is_tier_3_so_a_person_says_yes_in_every_posture(self):
+        # Irreversible alone was tier 2, the path SIMORGH_GUARDIAN_AUTO_APPROVE
+        # waves through: household data would leave with nobody asked.
+        from types import SimpleNamespace
+
+        from simorgh.contracts.tiers import tier_of
+        from simorgh.guardian.tiers import TierRule
+
+        proposal = SimpleNamespace(tool="a2a_call", reversibility="irreversible", args={"agent": "desk"},
+                                   requester="", requester_channel="cli")
+        self.assertEqual(tier_of(proposal)[0], 3)
+        ctx = SimpleNamespace(tool=None, posture=SimpleNamespace(level="trusted"),
+                              config=SimpleNamespace(mode="normal"))
+        decision = await TierRule().evaluate(proposal, ctx)
+        self.assertEqual(decision.kind, "escalate")
+        proposal.tool = "propose_a2a_agent"
+        proposal.reversibility = "reversible"
+        self.assertEqual(tier_of(proposal)[0], 1, "a proposal sends nothing")
+
+
 if __name__ == "__main__":
     unittest.main()
