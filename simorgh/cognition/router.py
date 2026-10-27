@@ -106,6 +106,10 @@ class Router:
                 return name
         return self._floor.name
 
+    def is_native(self, name: str) -> bool:
+        """Whether `name` is handed tool specs (`tool_dialect = "native"`)."""
+        return name in self._native
+
     def model_of(self, name: str) -> str:
         provider = self._by_name.get(name)
         if provider is None:
