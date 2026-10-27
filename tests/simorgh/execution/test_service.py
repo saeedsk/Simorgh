@@ -370,6 +370,16 @@ class TestMcpServerWiring(_ExecutionServiceTestCase):
     memory backend (unlike the skill tests above, whose publish is a
     later, test-triggered `learn.skill.acquired`)."""
 
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        # These pin the hand-rolled stdio path (`McpClient`), which
+        # `mcp_sdk.make_client` takes only when the SDK is absent; with
+        # the `mcp` package installed it would pick the SDK's client
+        # instead. `test_mcp_sdk.py` covers that path.
+        patcher = unittest.mock.patch("simorgh.execution.mcp_sdk.load_sdk", lambda: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def _boot(self, *, config: ExecutionConfig) -> None:
         self.service = Service(config=config)
         await self.service.start(self.ctx)
