@@ -1,9 +1,9 @@
-"""What the two sidecars share (stage 15 items 5 and 5b).
+"""What the sidecars share (stage 15 items 5, 5b and 5c).
 
 A sidecar is somebody else's memory library run against the same month
 and the same questions, so the native systems have something to be
 measured against. The rules are the plan's, and they are the same for
-both:
+each:
 
 - The package is imported only here, under `try/except ImportError`.
   Absent, the system reports every case skipped with the reason and the
@@ -96,7 +96,7 @@ class Ingestion:
 
 
 class Sidecar:
-    """The shape both sidecars fill in. `load()` is the guarded import."""
+    """The shape every sidecar fills in. `load()` is the guarded import."""
 
     name = ""
     install = ""                       # the pip line that installs it

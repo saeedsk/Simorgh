@@ -1,14 +1,17 @@
 """The memory suite: every system, the same month, the same questions (stage 15 item 4).
 
     python -m simorgh.evals memory --systems native,native_graph          # free, seconds
-    python -m simorgh.evals memory --systems native,native_graph,graphiti,cognee --dry-run
-    python -m simorgh.evals memory --systems native,graphiti,cognee --paid --cap-usd 2
+    python -m simorgh.evals memory --systems native,native_graph,graphiti,cognee,mem0 --dry-run
+    python -m simorgh.evals memory --systems native,graphiti,cognee,mem0 --paid --cap-usd 2
 
 Each system is fed the corpus (`corpus.episodes()`), then asked every
 question; a question passes when its block holds what `corpus` says it
 must and nothing it must not (`score.check`). The report is per system and
 per category, each with a 95% bootstrap interval, plus -- for a sidecar --
-what ingestion cost per episode and how long a recall took.
+what ingestion cost per episode and how long a recall took -- and, for
+every system, how many tokens of memory each answered question's block
+would put in front of the model (`injected`, chars / 4), which is how
+Mem0's "far fewer tokens" claim is checked against the native facts block.
 
 A system that cannot run reports every case `skipped` with the reason,
 never failed: `native_graph` before stage 15 items 1-3 merge, a sidecar
@@ -32,7 +35,7 @@ from .meter import CapReached
 from .score import check
 
 #: Every system the suite knows, in report order.
-SYSTEMS: tuple[str, ...] = ("native", "native_graph", "graphiti", "cognee")
+SYSTEMS: tuple[str, ...] = ("native", "native_graph", "graphiti", "cognee", "mem0")
 FREE: frozenset[str] = frozenset({"native", "native_graph"})
 
 #: Said in every report, because it decides how to read the numbers.
@@ -48,6 +51,8 @@ class SystemRun:
     skipped: str = ""                  # why the whole system did not run
     ingestion: dict = field(default_factory=dict)
     recall_ms: dict = field(default_factory=dict)
+    #: Tokens of memory per answered question's block: mean, p50, p95.
+    injected: dict = field(default_factory=dict)
     notes: dict = field(default_factory=dict)
 
     def by_category(self) -> dict[str, dict]:
@@ -62,7 +67,7 @@ class SystemRun:
     def as_dict(self) -> dict:
         return {"system": self.name, "skipped": self.skipped, "summary": self.report.as_dict(),
                 "by_category": self.by_category(), "ingestion": self.ingestion,
-                "recall_ms": self.recall_ms, "notes": self.notes}
+                "recall_ms": self.recall_ms, "injected": self.injected, "notes": self.notes}
 
 
 def make(name: str, *, paid: bool = False, cap_usd: float = 0.0):
@@ -83,6 +88,10 @@ def make(name: str, *, paid: bool = False, cap_usd: float = 0.0):
         from .cognee_side import CogneeSide
 
         return CogneeSide(paid=paid, cap_usd=cap_usd)
+    if name == "mem0":
+        from .mem0_side import Mem0Side
+
+        return Mem0Side(paid=paid, cap_usd=cap_usd)
     raise KeyError(f"no memory system {name!r}; there is {', '.join(SYSTEMS)}")
 
 
@@ -134,6 +143,7 @@ async def run_system(system, month: list[Episode], questions=QUESTIONS) -> Syste
                              "tokens_in": after[1] - before[1], "tokens_out": after[2] - before[2],
                              "usd": round(after[3] - before[3], 6), "seconds": round(time.monotonic() - t0, 3)})
         latencies: list[float] = []
+        injected: list[int] = []
         for question in questions:
             if stopped:
                 # A half-fed graph's score would be a number about the cap.
@@ -152,6 +162,7 @@ async def run_system(system, month: list[Episode], questions=QUESTIONS) -> Syste
                 continue
             seconds = time.monotonic() - t0
             latencies.append(seconds)
+            injected.append(block_tokens(lines))
             passed, reason = check(question, lines)
             report.outcomes.append(Outcome(case=_case(question, name), status=PASSED if passed else FAILED,
                                            seconds=round(seconds, 4), why=reason))
@@ -169,7 +180,18 @@ async def run_system(system, month: list[Episode], questions=QUESTIONS) -> Syste
         ordered = sorted(latencies)
         run.recall_ms = {"p50": round(ordered[len(ordered) // 2] * 1000, 1),
                          "p95": round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))] * 1000, 1)}
+    if injected:
+        ordered_tokens = sorted(injected)
+        n = len(ordered_tokens)
+        run.injected = {"mean": round(sum(ordered_tokens) / n, 1), "p50": ordered_tokens[n // 2],
+                        "p95": ordered_tokens[min(n - 1, int(n * 0.95))]}
     return run
+
+
+def block_tokens(lines: list[str]) -> int:
+    """A block's size as the model would see it: one line each, chars / 4."""
+    text = "\n".join(lines)
+    return (len(text) + 3) // 4
 
 
 async def run(systems: list[str], *, paid: bool = False, cap_usd: float = 0.0,
@@ -222,6 +244,9 @@ def table(runs: list[SystemRun]) -> str:
         extra = []
         if r.recall_ms:
             extra.append(f"recall p50 {r.recall_ms['p50']} ms, p95 {r.recall_ms['p95']} ms")
+        if r.injected:
+            extra.append(f"injected tokens per question mean {r.injected['mean']}, p50 {r.injected['p50']}, "
+                         f"p95 {r.injected['p95']}")
         if r.ingestion:
             i = r.ingestion
             extra.append(f"ingestion {i['episodes']} episodes, {i['calls_per_episode']} calls and "
@@ -297,5 +322,5 @@ def main(argv: list[str]) -> int:
     return 0 if any(not r.skipped for r in runs) else 1
 
 
-__all__ = ["FAIRNESS", "FREE", "SYSTEMS", "SystemRun", "dry_run", "main", "make", "outcomes", "run",
+__all__ = ["FAIRNESS", "FREE", "SYSTEMS", "SystemRun", "block_tokens", "dry_run", "main", "make", "outcomes", "run",
            "run_system", "table"]
