@@ -444,3 +444,30 @@ class TheCommandLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ALibraryFailure(unittest.TestCase):
+    def test_an_ingestion_error_skips_the_rest_saying_why_and_does_not_raise(self):
+        class Broken:
+            name = "broken"
+            meter = None
+
+            def skip_reason(self):
+                return ""
+
+            async def open(self):
+                pass
+
+            async def ingest(self, episode):
+                raise ModuleNotFoundError("No module named 's3fs'")
+
+            async def context(self, question):
+                raise AssertionError("never asked after a failed ingestion")
+
+            async def close(self):
+                pass
+
+        result = asyncio.run(run_system(Broken(), episodes()[:3]))
+        self.assertTrue(result.report.outcomes)
+        self.assertTrue(all(o.status == SKIPPED for o in result.report.outcomes))
+        self.assertIn("s3fs", result.report.outcomes[0].why)

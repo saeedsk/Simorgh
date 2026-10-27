@@ -122,6 +122,12 @@ async def run_system(system, month: list[Episode], questions=QUESTIONS) -> Syste
             except CapReached as exc:
                 stopped = f"cap reached during ingestion at episode {episode.index}: {exc}"
                 break
+            except Exception as exc:  # noqa: BLE001 -- a library failure skips the rest, saying why; never a crash
+                # The first paid Cognee run died on `import s3fs` inside
+                # cognee.add and took the whole command (and the report
+                # for every other system) with it (2026-10-27).
+                stopped = f"{name} failed ingesting episode {episode.index}: {exc!r}"[:300]
+                break
             if meter is not None:
                 after = meter.snapshot()
                 rows.append({"episode": episode.index, "calls": after[0] - before[0],
@@ -138,6 +144,10 @@ async def run_system(system, month: list[Episode], questions=QUESTIONS) -> Syste
                 lines = await system.context(question)
             except CapReached as exc:
                 stopped = f"cap reached while asking: {exc}"
+                report.outcomes.append(Outcome(case=_case(question, name), status=SKIPPED, why=stopped))
+                continue
+            except Exception as exc:  # noqa: BLE001 -- as for ingestion: skipped with the reason
+                stopped = f"{name} failed answering: {exc!r}"[:300]
                 report.outcomes.append(Outcome(case=_case(question, name), status=SKIPPED, why=stopped))
                 continue
             seconds = time.monotonic() - t0
