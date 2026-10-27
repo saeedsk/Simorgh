@@ -146,6 +146,9 @@ class ParsedOutput:
     edit_blocks: tuple[dict, ...] = ()
     verdict: bool | None = None
     non_answer: bool = False
+    # The calls were recovered by `rescue.py` from a reply in another
+    # syntax (stage 16 item 1); each call also carries `rescued: True`.
+    rescued: bool = False
 
 
 @runtime_checkable

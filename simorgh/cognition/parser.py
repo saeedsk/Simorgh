@@ -29,6 +29,7 @@ import ast
 import re
 
 from .api import ParsedOutput
+from .rescue import rescue_tool_calls
 
 _CODE_FENCE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL)
 _YES_NO_RE = re.compile(r"\b(YES|NO)\b", re.IGNORECASE)
@@ -512,6 +513,15 @@ class OutputParser:
             return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=calls)
         marker, payload = parse_marker(text, markers)
         if marker is None:
+            # No marker line: the model may still have asked for a tool in
+            # the syntax it was trained on (JSON, `name[ARGS]{}`, Qwen XML,
+            # Mistral `[TOOL_CALLS]`). This is also the native dialect's
+            # fallback: a native reply with no typed call is parsed here.
+            # Strict mode (`ablate = ["rescue"]`) returned above and never
+            # reaches it.
+            rescued = rescue_tool_calls(text, markers)
+            if rescued:
+                return ParsedOutput(kind="tool_calls", text=text.strip(), tool_calls=rescued, rescued=True)
             return ParsedOutput(kind="final", text=payload)
         # Multi-line-payload markers (code-bearing) keep the payload intact;
         # single-token markers use only the first line (the live-caught

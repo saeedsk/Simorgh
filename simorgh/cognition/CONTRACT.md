@@ -17,6 +17,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `simorgh/cognition/compaction.py` | five-layer `Compactor`; layer-5 summaries to `cognition:summaries:<session>` |
 | `simorgh/cognition/config.py` | `[cognition]` dataclasses, default providers and purpose budgets |
 | `simorgh/cognition/parser.py` | `OutputParser`: tool markers, edit blocks, verdicts, non-answers |
+| `simorgh/cognition/rescue.py` | `rescue_tool_calls`: tool calls written as JSON, `name[ARGS]{}`, Qwen XML or Mistral `[TOOL_CALLS]` (ported from forge, MIT); stage 16 item 1 |
 | `simorgh/cognition/providers/__init__.py` | re-exports floor, Claude Code and Gemini providers |
 | `simorgh/cognition/providers/base.py` | `FloorProvider`: offline, purpose-specific template, never raises |
 | `simorgh/cognition/providers/claude_code.py` | the Claude Code CLI as a provider (subprocess) |
@@ -82,7 +83,7 @@ Cognition is the only path to a language model: it answers `cognition.think` (an
 | `collapse_trigger_fraction` | `0.45` | yes |
 | `availability_poll_seconds` | `30.0` | yes: the period, in `system.tick.second` ticks (rounded, at least 1), of the `cognition.provider.status` + `system.metrics` broadcast (`Service._on_tick`). Wired 2026-09-19; it was a literal 30 |
 | `assembly_request_timeout` | `2.0` | yes |
-| `ablate` | `()` | yes: guardrails switched off for a sandboxed ablation run (stage 14). Known switches: `config.ABLATE_SWITCHES` = `{"rescue"}`; an unknown name (or a non-list) is reported in `problems` and ignored, never a failed boot. `sim.sh` never sets it. See "Strict parsing" below |
+| `ablate` | `()` | yes: guardrails switched off for a sandboxed ablation run (stage 14). Known switches: `config.ABLATE_SWITCHES` = `{"rescue"}` (strict parsing, and `rescue.py` never runs); an unknown name (or a non-list) is reported in `problems` and ignored, never a failed boot. `sim.sh` never sets it. See "Strict parsing" below |
 | `problems` | `()` | yes (not a key: what `from_mapping` ignored, logged at start) |
 
 Environment: `SIMORGH_COGNITION_PROVIDER_ORDER` (the test session sets it to `floor`), `SIMORGH_LLM_DAILY_MAX_CALLS` and `SIMORGH_LLM_DAILY_BUDGET_USD` (both Together and Gemini defaults), `SIMORGH_CLAUDE_CODE_MAX_CALLS`, `TOGETHER_API_KEY` (also via `ctx.secrets`), `GEMINI_API_KEY`/`GOOGLE_API_KEY`.
@@ -109,6 +110,7 @@ Environment: `SIMORGH_COGNITION_PROVIDER_ORDER` (the test session sets it to `fl
 - Every billed call, including a failed-but-billable one, is recorded on `cognition:budget:<provider>`; the window is read from the ledger once and then kept in memory.
 - A change of answering provider between text calls publishes one `ui.notice`.
 - A verdict reply with no standalone YES/NO is `non_answer=True`, never a rejection.
+- A rescued call (stage 16 item 1) names a tool offered to that think and has object arguments; prose that names a tool is never one. It is only looked for when the reply has no typed call and no marker line, and never under `ablate = ["rescue"]`.
 - No test may reach a real provider: the session sets `SIMORGH_COGNITION_PROVIDER_ORDER=floor` and providers take injectable transports.
 - The context requests made while assembling a prompt (`persona.voice`, `self.summary`, `world.env.query`) carry the think request's `trace_id` (stage 1 item 2).
 
@@ -122,6 +124,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/cognition/test_budget.py` -- rolling-window accounting replayed from the ledger; per-provider isolation.
 - `tests/simorgh/cognition/test_budget_reads_its_stream_once.py` -- the budget stream is read once, then kept in memory (C13).
 - `tests/simorgh/cognition/test_parser.py` -- markers, code-bearing markers, edit blocks, verdicts, non-answers.
+- `tests/simorgh/cognition/test_rescue.py` -- rescue parsing: one case per strategy (forge's fixtures), forge's precedence, tools not offered and prose never rescued, marker and typed native calls unchanged, skipped under `ablate = ["rescue"]`.
 - `tests/simorgh/cognition/test_ablate_rescue.py` -- `ablate = ["rescue"]`: each repair switched off, the protocol unchanged, native calls filtered, the default untouched.
 - `tests/simorgh/cognition/test_compaction.py` -- each compaction layer and the pipeline; summaries and their events.
 - `tests/simorgh/cognition/test_assembler.py` -- protected block order and graceful omission when persona or self model do not answer; a chat prompt carries nobody's preferences and asks no `world.env.query` (stage 6 item 4).
@@ -183,3 +186,8 @@ Lock it first (`python tools/modlock.py claim cognition --by <you> --task "..."`
   - **Repairs, switched off under strict** (each makes the default parser hear a call the reply did not write well-formed): case-insensitive marker match; a marker indented on its line; native tool tags (`<tool_call>` etc.) unwrapped into lines; prose after a one-line argument trimmed away (`first_line_argument`); a one-line argument cut where a second marker starts on the same line; a code-bearing payload cut at the next marker line (`cut_at_next_marker`, `payload_cut_at_marker`) or at an invented transcript turn (`_without_invented_turns`); code lifted out of a fence when an `edit_blocks` reply has no blocks (`extract_code`); a native call whose arguments were not a JSON object handed back with `error` for the model to fix.
   - **Protocol, kept under strict**: the marker is the tool's name in capitals and a colon at the start of a line (a preamble line before it is allowed, as stage 14 defines a well-formed call); a leading tone tag is removed (the voice prompt asks for one); a code-bearing marker's payload is everything after it, intact -- strict cuts nothing out of it; several one-line marker lines in a row are several calls (`dropped_markers`, as by default). Verdict scanning and the empty-reply `non_answer` are not calls and are unchanged.
   - A marker reply that is not well-formed is a plain `final` answer (its text, tone tag removed), as an unparseable reply is by default. A native typed call is kept only when it names an offered tool, carries no decoding `error`, and its arguments fit the tool's `input_schema` at the top level (required keys, declared JSON types, no extra keys when `additionalProperties` is false). When no native call is kept, the reply is its text parsed as a plain answer (`non_answer` if empty); marker lines in that text are not promoted.
+
+- Rescue parsing (stage 16 item 1, 2026-10-27): `simorgh/cognition/rescue.py` ports forge's `rescue_tool_call` (MIT, credited in the module docstring). New public names: `rescue.rescue_tool_calls(text, offered) -> tuple[dict, ...]`, `rescue.strip_think`, `rescue.THINK_TAG_RE`; `api.ParsedOutput.rescued` (bool, default false).
+  - **Where it runs**: `OutputParser._parse_markers`, when `parse_marker` finds no marker line. That is also the native dialect's fallback: `service.py` parses a native reply's text with the same parser, and a typed call, when present, still replaces whatever the text held (`rescued` is then false). An `expected` other than `tool_calls` is never rescued. Under `ablate = ["rescue"]` the strict path returns first, so rescue never runs.
+  - **What it accepts**, tried in forge's order, each only when the earlier found nothing: a JSON object `{"tool", "args"}` or `{"name", "arguments"}` (bare, fenced, in `<tool_call>...</tool_call>`, or in a sentence; `arguments` may be a JSON string holding an object); `name[ARGS]{...}`; Qwen `<function=name><parameter=k>v</parameter></function>` (values stay strings); Mistral `[TOOL_CALLS]name{...}`. `<think>`/`[THINK]` blocks are removed first. A call is kept only when its name is one of the think's `tools` (matched case-insensitively, returned as offered) and its arguments are a JSON object.
+  - **Shape on the wire**: each rescued call in `cognition.think.reply.tool_calls` is `{"tool", "args", "rescued": true}` with no `id`, so Orchestration keeps it in the text transcript, as a marker call; its `args` are the structured object, which `to_action_payload` passes through. The reply's `text` is the reply as written.
