@@ -293,6 +293,14 @@ class Session:
     #: session-local tool is answered only when it was one of them (a crew
     #: tool, stage 18). In memory only: a resumed session thinks first.
     offered: tuple = ()
+    #: Tool routing (stage 17, `routing.py`), on a chat turn with
+    #: `[orchestration] tool_routing` not off: the groups the turn was
+    #: routed to (None until its first think routes it), whether the
+    #: conversational class won, and the groups added since -- by
+    #: `tool_more`, or by a call to a tool of a group that was not offered.
+    route: tuple | None = None
+    route_conversational: bool = False
+    route_more: list = field(default_factory=list)
 
     @property
     def trace(self) -> str:

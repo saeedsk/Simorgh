@@ -1,0 +1,293 @@
+# Tool groups (stage 17 items 3 and 6,
+# docs/plan/stage-17-tool-routing-and-prompt-compression.md).
+#
+# What a chat or spoken turn is OFFERED when `[orchestration] tool_routing`
+# is "shadow" or "on" (`orchestration/routing.py`). Never what is allowed:
+# Guardian decides every call, and `tool_more` adds any group back.
+#
+# Every tool in the chat and voice_chat agents belongs to exactly one group
+# (tests/simorgh/orchestration/test_tool_routing.py pins it): a tool added to
+# an agent file needs a line here too. Tools may be named by pattern
+# (`cam_*`), matched the way an agent file's are.
+#
+# Each group: a one-line description, and 5-15 example utterances in English
+# and 5-15 in Farsi. The router compares a turn's text to the centroid of
+# these, so they should sound like what people actually say. `core = true`
+# is offered on every turn whatever the router says.
+#
+# `conversational` has no tools: when a turn is closest to it by
+# `route_none_margin`, only the core group is offered (item 6).
+#
+# Protected like the agent files (guardian/config.py protects agents/).
+
+[groups.calendar_mail]
+description = "The calendar, the mail, and reminders."
+tools = ["cal_list", "mail_search", "mail_read", "remind"]
+utterances = [
+    "what's on today",
+    "what's on my calendar tomorrow",
+    "did the plumber reply",
+    "any new emails from the school",
+    "search my mail for the invoice",
+    "check my email",
+    "remind me at 8 to call mom",
+    "remind me in 5 minutes",
+    "when is my dentist appointment",
+    "امروز چه برنامه‌ای دارم",
+    "فردا تقویمم چی داره",
+    "لوله‌کش جواب ایمیلم را داد؟",
+    "ایمیل جدید از مدرسه دارم؟",
+    "توی ایمیل‌هام دنبال فاکتور بگرد",
+    "ساعت ۸ یادم بنداز به مامان زنگ بزنم",
+    "پنج دقیقه دیگه یادم بنداز",
+    "وقت دندانپزشکی‌ام کی است",
+]
+
+[groups.cameras]
+description = "The house cameras and doorbells, and looking at an image."
+tools = ["cam_*", "ring_*", "camera_describe", "look_at_image"]
+utterances = [
+    "what does the front door camera see",
+    "show me the backyard camera",
+    "who rang the doorbell",
+    "any motion on the driveway",
+    "turn on the camera floodlight",
+    "show the cameras on the TV",
+    "look at this picture",
+    "sound the siren on the doorbell",
+    "دوربین در ورودی چی می‌بینه",
+    "دوربین حیاط پشتی را نشانم بده",
+    "کی زنگ در را زد",
+    "توی پارکینگ حرکتی بود؟",
+    "چراغ دوربین را روشن کن",
+    "دوربین‌ها را روی تلویزیون نشان بده",
+    "به این عکس نگاه کن",
+]
+
+[groups.code]
+description = "Sim's own source and history, sandboxes, scripts and packages."
+tools = ["search_code", "self_map", "git_history", "run_python_sandboxed", "run_js_sandboxed",
+         "run_script", "install_package"]
+utterances = [
+    "search the code for the persona module",
+    "what did you change in git lately",
+    "show me your git log",
+    "run this python snippet",
+    "how is your memory module built",
+    "calculate this with python",
+    "install the package for pptx",
+    "run the script",
+    "در کد دنبال ماژول پرسونا بگرد",
+    "اخیراً در گیت چه تغییری دادی",
+    "لاگ گیت را نشان بده",
+    "این کد پایتون را اجرا کن",
+    "ماژول حافظه‌ات چطور ساخته شده",
+    "با پایتون حساب کن",
+    "پکیج پایتون را نصب کن",
+]
+
+[groups.conversational]
+description = "Talk that needs no tool: greetings, thanks, asking again."
+tools = []
+utterances = [
+    "hi",
+    "hello Sim",
+    "thanks",
+    "thank you so much",
+    "say that again",
+    "what did you mean",
+    "good morning",
+    "okay",
+    "never mind",
+    "how are you",
+    "good night",
+    "sorry",
+    "سلام",
+    "مرسی",
+    "خیلی ممنون",
+    "دوباره بگو",
+    "منظورت چی بود",
+    "صبح بخیر",
+    "باشه",
+    "بی‌خیال",
+    "حالت چطوره",
+    "شب بخیر",
+    "ببخشید",
+]
+
+[groups.files]
+description = "Reading and writing files in the workspace."
+tools = ["read_file", "list_dir", "apply_source_patch", "replace_in_file"]
+utterances = [
+    "read the file notes.txt",
+    "what's in my workspace folder",
+    "list the files in the docs directory",
+    "make me a powerpoint deck",
+    "save this as a text file",
+    "fix the typo in that file",
+    "open the readme",
+    "فایل یادداشت را بخوان",
+    "در پوشه کاری من چه فایل‌هایی هست",
+    "فایل‌های پوشه اسناد را فهرست کن",
+    "برایم یک پاورپوینت بساز",
+    "این را در یک فایل متنی ذخیره کن",
+    "غلط تایپی آن فایل را درست کن",
+]
+
+[groups.home]
+description = "Lights, switches, climate and locks in the house, and its energy use."
+tools = ["home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",
+         "energy_status", "energy_report"]
+utterances = [
+    "turn the kitchen light off",
+    "switch on the living room lamps",
+    "is the front door locked",
+    "set the thermostat to 21",
+    "dim the bedroom lights",
+    "what's the temperature inside",
+    "how much electricity did we use today",
+    "what's it costing me this month",
+    "چراغ آشپزخانه را خاموش کن",
+    "لامپ‌های پذیرایی را روشن کن",
+    "چراغ‌های اتاق نشیمن را خاموش کن",
+    "در ورودی قفل است؟",
+    "دمای خانه را روی ۲۱ بگذار",
+    "نور اتاق خواب را کم کن",
+    "امروز چقدر برق مصرف کردیم",
+    "قبض برق این ماه چقدر می‌شود",
+]
+
+[groups.knowledge]
+description = "The household's own documents: policies, contracts, manuals."
+tools = ["kb_search", "kb_ask", "kb_open"]
+utterances = [
+    "what does my policy say about flood cover",
+    "find the warranty for the fridge",
+    "search my documents for the lease",
+    "what does the insurance contract say",
+    "open the tax document",
+    "is it in my documents",
+    "بیمه‌نامه‌ام درباره سیل چه می‌گوید",
+    "ضمانت‌نامه یخچال را پیدا کن",
+    "در اسنادم دنبال قرارداد اجاره بگرد",
+    "قرارداد بیمه چی میگه",
+    "مدارک مالیاتی را باز کن",
+]
+
+[groups.media]
+description = "Music, the TV, casting, and what is playing."
+tools = ["media_now", "media_control", "media_play", "music_now", "music_control", "music_play", "room_play",
+         "cast_devices", "cast_show", "cast_play", "cast_stop", "cast_volume", "dash_view", "dash_key",
+         "tv_app", "tv_key", "tv_charts"]
+utterances = [
+    "play some jazz",
+    "pause the music",
+    "turn the TV volume down",
+    "put YouTube on the family room TV",
+    "what song is this",
+    "next track",
+    "show the charts on the TV",
+    "play music in the kitchen",
+    "یک آهنگ جاز پخش کن",
+    "موسیقی را متوقف کن",
+    "صدای تلویزیون رو کم کن",
+    "یوتیوب را روی تلویزیون بیاور",
+    "این آهنگ چیه",
+    "آهنگ بعدی",
+    "در آشپزخانه موسیقی پخش کن",
+]
+
+[groups.memory]
+description = "What Sim remembers, and the way back to any other group."
+core = true
+tools = ["remember", "memory_search", "memory_forget", "tool_more"]
+utterances = [
+    "remember that my car is blue",
+    "what's my wife's birthday",
+    "forget what I told you about the trip",
+    "do you remember my favourite food",
+    "note that Ira likes chess",
+    "یادت باشه ماشینم آبی است",
+    "تولد همسرم کی است",
+    "چیزی که درباره سفر گفتم را فراموش کن",
+    "غذای مورد علاقه‌ام یادت هست",
+    "یادت باشه آیرا شطرنج دوست دارد",
+]
+
+[groups.people]
+description = "The people and rooms of the house, what was overheard, and Sim's voice."
+tools = ["people", "remember_place", "overheard", "overheard_note", "voice_setting"]
+utterances = [
+    "what did you hear",
+    "this room is the study",
+    "grant Ira interest shares",
+    "speak slower",
+    "change your voice",
+    "what were we talking about in the kitchen",
+    "who is Aran",
+    "چی شنیدی",
+    "این اتاق اتاق مطالعه است",
+    "آهسته‌تر صحبت کن",
+    "صدایت را عوض کن",
+    "در آشپزخانه درباره چی حرف می‌زدیم",
+    "آران کیه",
+]
+
+[groups.security]
+description = "The security posture of the machine and the home network."
+tools = ["sec_posture", "sec_findings", "sec_show"]
+utterances = [
+    "am I exposed",
+    "is my network secure",
+    "any security findings",
+    "show the security posture",
+    "are there open ports on my machine",
+    "show me that security finding",
+    "آیا سیستمم امن است",
+    "شبکه‌ام امن هست؟",
+    "مشکل امنیتی پیدا شده؟",
+    "وضعیت امنیتی را نشان بده",
+    "پورت باز روی کامپیوترم هست؟",
+]
+
+[groups.system]
+description = "Sim itself: its commands, console, shell, tasks and new connections."
+tools = ["sim_command", "console_tail", "run_shell", "start_task", "list_tasks", "cancel_task",
+         "propose_mcp_server", "propose_a2a_agent"]
+utterances = [
+    "restart yourself",
+    "was there an error just now",
+    "which process is using my GPU",
+    "what tasks are running",
+    "cancel that task",
+    "start a task to clean the backlog",
+    "check the console log",
+    "connect a new MCP server",
+    "خودت را ری‌استارت کن",
+    "الان خطایی بود؟",
+    "کدام پروسه از جی‌پی‌یو استفاده می‌کند",
+    "چه کارهایی در حال اجراست",
+    "آن کار را لغو کن",
+    "یک کار جدید شروع کن",
+    "لاگ کنسول را نگاه کن",
+]
+
+[groups.web]
+description = "The web: search, pages, places, listings, the news and the weather."
+tools = ["web_search", "web_fetch", "render_page", "search_listings", "geocode"]
+utterances = [
+    "search the web for the best laptop",
+    "what's the weather tomorrow",
+    "look up the news",
+    "open this link",
+    "how far is Vancouver from Seattle",
+    "find houses for sale near me",
+    "who won the game last night",
+    "در اینترنت جستجو کن",
+    "هوای فردا چطوره",
+    "اخبار امروز را پیدا کن",
+    "این لینک را باز کن",
+    "فاصله ونکوور تا سیاتل چقدر است",
+    "خانه برای فروش پیدا کن",
+    "دیشب کی برد",
+]

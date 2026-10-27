@@ -42,6 +42,10 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     # an adopted lesson into `rules/`, which Guardian asks a person about.
     "policy_adopt": ("irreversible", False),
     "list_dir": ("read_only", False),
+    # Tool routing's escape hatch (stage 17, `routing.py`): asks for a tool
+    # group the router left out. Changes nothing but what the next step
+    # is offered, and goes through Guardian like any call.
+    "tool_more": ("read_only", False),
     "search_code": ("read_only", False),
     "self_map": ("read_only", False),
     "web_fetch": ("read_only", True),

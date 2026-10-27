@@ -3436,6 +3436,47 @@ class PeopleTool:
         return ToolResult(ok=True, output=said, side_effects=(said,), metadata={"kind": "people"})
 
 
+class ToolMoreTool:
+    """Tool routing's escape hatch (stage 17 items 3 and 6,
+    docs/plan/stage-17-tool-routing-and-prompt-compression.md).
+
+    With `[orchestration] tool_routing = "on"` a chat turn is offered only
+    the tool groups the router picked; when it picked wrong, the model
+    asks for another with `tool_more{group}`, and Orchestration offers that
+    group from the next step. Orchestration checks the group name before
+    proposing and does the widening itself; this tool exists so the call
+    is proposed, gated by Guardian and recorded like any other -- the
+    plan counts misses from it -- and it changes nothing in the world."""
+
+    name = "tool_more"
+    read_only = True
+    reversibility = "read_only"
+    description = ("Ask for a tool group you were not offered this turn (home, media, cameras, "
+                   "calendar_mail, web, code, files, system, knowledge, security, people). "
+                   "Its tools are offered from your next step.")
+    args_schema = {"type": "object", "properties": {
+        "group": {"type": "string", "description": "the tool group to add, by name"}},
+        "required": ["group"]}
+
+    def __init__(self, config: Config | None = None) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        group = str((args or {}).get("group") or "").strip()
+        if not group:
+            return ToolResult(ok=False, error="name the tool group to add")
+        return ToolResult(ok=True, output=f"the {group} tools are offered from the next step",
+                          metadata={"group": group})
+
+
+def meta_tools(config: Config) -> list:
+    """Tools about the offer itself rather than the world: Orchestration
+    asks for them, and they are registered beside the worktree tools, out
+    of `builtin_tools`, so the narration verbs and the tool-count checks
+    that walk that list are not asked about a tool nobody watches run."""
+    return [ToolMoreTool(config)]
+
+
 from .policyadopt import PolicyAdoptTool  # noqa: E402 -- beside the list that registers it
 
 

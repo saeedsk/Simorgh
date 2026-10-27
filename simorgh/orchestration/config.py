@@ -196,6 +196,8 @@ class Config:
     #   steps     -- no step enforcement (stage 16): the agent's
     #                required_steps / terminal_tools / prerequisites are
     #                not checked
+    #   routing   -- tool routing (stage 17) as if `tool_routing = "off"`:
+    #                every tool in the agent file is offered
     ablate: tuple[str, ...] = ()
     # The guardrails' budgets (stage 16, orchestration/guardrails.py; the
     # plan's Definitions). Consecutive retry nudges (unknown tool, bad
@@ -208,6 +210,27 @@ class Config:
     max_tool_errors: int = 2
     max_premature_attempts: int = 3
     max_prereq_violations: int = 2
+    # Tool routing (stage 17 items 3 and 6, `routing.py`; docs/plan/
+    # stage-17-tool-routing-and-prompt-compression.md). Which tool groups
+    # (`agents/groups.toml`) a chat or spoken turn is offered:
+    #   off    -- every tool in the agent file, as before; the prompt is
+    #             byte-identical to a build without routing
+    #   shadow -- route, record what would have been offered beside what
+    #             was used (`routing.shadow` telemetry event), and still
+    #             offer everything
+    #   on     -- offer the routed groups only, in canonical order, plus
+    #             the core group (memory, `tool_more`)
+    # Routing decides what is offered, never what is allowed: Guardian
+    # still gates every call. Off until a shadow week says the miss rate
+    # is under 3% (plan, item 3).
+    tool_routing: str = "off"
+    #: The tool groups closest to the turn that are offered.
+    route_top_k: int = 3
+    #: Groups used in this many of the conversation's last turns stay offered.
+    route_sticky_turns: int = 3
+    #: The conversational class must beat the best tool group by this
+    #: much before a turn is offered only the core group (item 6).
+    route_none_margin: float = 0.15
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -224,8 +247,33 @@ class Config:
             problems += [f"ablate: unknown switch {n!r} ignored (known: {', '.join(sorted(ABLATABLE))})"
                          for n in names if n not in ABLATABLE]
             kwargs["ablate"] = tuple(dict.fromkeys(str(n) for n in names if n in ABLATABLE))
+        if "tool_routing" in kwargs:
+            mode = str(kwargs["tool_routing"]).strip().lower()
+            if mode not in ROUTING_MODES:
+                # Reported, and off: an unknown mode must neither stop a
+                # boot nor narrow what a turn is offered by accident.
+                problems.append(f"tool_routing: unknown mode {kwargs['tool_routing']!r}, using 'off' "
+                                f"(known: {', '.join(ROUTING_MODES)})")
+                mode = "off"
+            kwargs["tool_routing"] = mode
+        for key, low in (("route_top_k", 1), ("route_sticky_turns", 0)):
+            if key in kwargs:
+                try:
+                    kwargs[key] = max(low, int(kwargs[key]))
+                except (TypeError, ValueError):
+                    problems.append(f"{key}: {kwargs[key]!r} is not a whole number, using the default")
+                    del kwargs[key]
+        if "route_none_margin" in kwargs:
+            try:
+                kwargs["route_none_margin"] = float(kwargs["route_none_margin"])
+            except (TypeError, ValueError):
+                problems.append(f"route_none_margin: {kwargs['route_none_margin']!r} is not a number, using the default")
+                del kwargs["route_none_margin"]
         return cls(**kwargs, problems=tuple(problems))
 
 
 #: The guardrails `[orchestration] ablate` may switch off.
-ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps"})
+ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps", "routing"})
+#: `[orchestration] tool_routing` (stage 17); `routing.MODES`, duplicated so
+#: this module stays free of imports.
+ROUTING_MODES = ("off", "shadow", "on")

@@ -152,6 +152,7 @@ class Worker:
         attempt_limits: tuple[int, float, float] = (0, 0.0, 0.0), telemetry=None,
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
         crew_limits: tuple[int, int, float, float, int] = (8, 1, 0.5, 900.0, 0), chat_crews: bool = False,
+        tool_routing: str = "off", route_params: tuple[int, int, float] = (3, 3, 0.15),
     ) -> None:
         self._review_benchmark = review_benchmark
         self._attempt_limits = attempt_limits
@@ -201,6 +202,10 @@ class Worker:
             # crew_max_wall_s, crew_max_tokens` (stage 18).
             crew_max_members=crew_limits[0], crew_max_writers=crew_limits[1], crew_max_usd=crew_limits[2],
             crew_max_wall_s=crew_limits[3], crew_max_tokens=crew_limits[4], chat_crews=chat_crews,
+            # `[orchestration] tool_routing, route_top_k, route_sticky_turns,
+            # route_none_margin` (stage 17).
+            tool_routing=tool_routing, route_top_k=route_params[0], route_sticky_turns=route_params[1],
+            route_none_margin=route_params[2],
             **runner_kwargs,
         )
         self._subs: list = []
