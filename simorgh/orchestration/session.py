@@ -830,8 +830,11 @@ class SessionRunner:
         crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0, chat_crews: bool = False,
         tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
         route_none_margin: float = 0.15, route_groups=None, route_embed=None, route_embed_timeout_s: float = 0.3,
-        fact_lines: tuple[int, int] = (8, 8),
+        fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0,
     ) -> None:
+        #: `[orchestration] mask_after_steps` (stage 17 item 7): a tool
+        #: result this many steps old is masked at any pressure. 0 is off.
+        self._mask_after_steps = max(0, int(mask_after_steps or 0))
         #: `[orchestration] tool_routing` (stage 17, `routing.py`): off,
         #: shadow or on, for chat and spoken turns. `ablate = ["routing"]`
         #: is off whatever this says. `route_groups` and `route_embed`
@@ -1416,6 +1419,8 @@ class SessionRunner:
                 return Outcome("blocked", reason=f"needs re-planning -- {session.replan}")
             if session.messages and session.context_pressure >= pressure_mod.STUB_AT:
                 await self._relieve(session)
+            if self._mask_after_steps and session.messages:
+                await self._mask(session)
 
             step_no = session.next_step_no()
             is_last = session.budget.is_last_step
@@ -1580,7 +1585,7 @@ class SessionRunner:
                 # read-only: those run together as one step (change H).
                 batch = self._read_batch(tool_calls)
                 if len(batch) > 1:
-                    summary = await self._run_batch(session, batch, step_no)
+                    summary, ok = await self._run_batch(session, batch, step_no)
                 else:
                     if call.get("tool") in ("delegate", "task"):
                         ok, summary, detail = await self._delegate(session, call)
@@ -1660,6 +1665,8 @@ class SessionRunner:
                         "with no tool marker. Otherwise take the next step."
                     ),
                 })
+                if not ok:
+                    session.failed_results.add(pressure_mod.digest(session.messages[-1]["content"]))
                 if self._paused():
                     return await self._pause(session)
                 continue
@@ -2437,10 +2444,13 @@ class SessionRunner:
             results[i] = await self._run_one(session, call, step_no + i)
             stopped = not results[i][0]
         for i, call in enumerate(calls):
-            ok, _summary, detail = results[i]
+            ok, summary, detail = results[i]
             step = Step(step_no + i, "act", detail, tool=call.get("tool"), ok=ok, denied=was_denied(detail))
             session.record(step)
             await self._record_step(session, step)
+            if not ok:
+                # The result's content is this summary (a native `tool` turn).
+                session.failed_results.add(pressure_mod.digest(summary))
         return [results[i][1] for i in range(len(calls))]
 
     async def _run_one(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
@@ -2461,10 +2471,11 @@ class SessionRunner:
         self._route_note_use(session, str(call.get("tool") or ""))
         return await self._propose_and_await(session, call, step_no)
 
-    async def _run_batch(self, session: Session, batch: list, step_no: int) -> str:
+    async def _run_batch(self, session: Session, batch: list, step_no: int) -> tuple[str, bool]:
         """Run independent read-only calls at once. Each is proposed to
         Guardian on its own and recorded as its own step; the model gets
-        one numbered block with every result."""
+        one numbered block with every result, and whether every call in
+        it succeeded."""
         results = await asyncio.gather(*(
             self._run_one(session, call, step_no + i) for i, call in enumerate(batch)
         ))
@@ -2475,7 +2486,7 @@ class SessionRunner:
             await self._record_step(session, step)
             argument = " ".join(str((call.get("args") or {}).get("argument") or "").split())[:120]
             blocks.append(f"[{i + 1}] {str(call.get('tool') or '').upper()}: {argument}\n{summary}")
-        return "\n\n".join(blocks)
+        return "\n\n".join(blocks), all(ok for ok, _summary, _detail in results)
 
     async def _delegate(self, session: Session, call: dict) -> tuple[bool, str, str]:
         """Run a helper: a read-only research session with a fresh context and
@@ -3996,6 +4007,21 @@ class SessionRunner:
         if measured >= pressure_mod.NOTE_AT and session.profile.scaffold != "chat" and not session.budget.is_last_step:
             await self._reground(session, forced=True)
 
+    async def _mask(self, session: Session) -> None:
+        """Masking by age (stage 17 item 7, `[orchestration]
+        mask_after_steps`): every tool result that many steps old becomes
+        its stub and a gist, at any pressure (`pressure.mask_old_results`
+        says which are never masked). Without a ledger there is no way
+        back, so nothing is masked."""
+        if self._ledger is None:
+            return
+
+        async def put(data: bytes) -> str:
+            return await self._ledger.put_blob(data, content_type="text/plain")
+        session.messages, made = await pressure_mod.mask_old_results(
+            session.messages, after_steps=self._mask_after_steps, put=put, failed=session.failed_results)
+        session.set_aside.extend(made)
+
     async def _wait(self, session: Session, call: dict) -> tuple[bool, str, str]:
         """`wait 10m` or `wait until <topic>` -- stop, and come back when
         there is something to come back for (stage 7 item 5).
@@ -4506,6 +4532,7 @@ class SessionRunner:
                     content = f"{c.get('tool')}: not run -- see the note on this reply"
                 session.messages.append({"role": "tool", "tool_call_id": c["id"], "name": c.get("tool"),
                                          "content": content})
+                session.failed_results.add(pressure_mod.digest(content))
             if nudge.role != "tool" or not answered:
                 session.messages.append({"role": "user", "content": nudge.content})
             return None
