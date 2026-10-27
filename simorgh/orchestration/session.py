@@ -1947,13 +1947,17 @@ class SessionRunner:
             turns = self._route_history.setdefault(self._conversation(session), [])
             turns.append(used_groups)
             del turns[:-sticky]
-        would = routing_mod.tools_for(session.route, groups,
-                                      offered_tools(session.profile.tools) + (routing_mod.TOOL_MORE,))
+        # Only the agent's own tools are routed: the crew, delegation and
+        # wait built-ins `_think` adds after `_route_offer` are offered
+        # whatever the route, so using one is never a miss.
+        routable = offered_tools(session.profile.tools)
+        would = routing_mod.tools_for(session.route, groups, routable + (routing_mod.TOOL_MORE,))
         self._telemetry.event(
             f"routing.{self._routing}", trace_id=session.trace or session.task_id, span_id=uuid.uuid4().hex,
             ts=_epoch(self._clock) or None,
             attrs={"offered": list(session.route), "used": used, "used_groups": list(used_groups),
-                   "missed": [t for t in used if t not in would], "more": list(session.route_more),
+                   "missed": [t for t in used if t in routable and t not in would],
+                   "more": list(session.route_more),
                    "conversational": session.route_conversational,
                    "tools_offered": len(would), "channel": session.channel or ""})
 

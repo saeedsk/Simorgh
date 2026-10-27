@@ -400,6 +400,21 @@ class ShadowRecordsTheRoute(unittest.TestCase):
         self.assertIn("security", sessions[1].route)
 
     @run
+    async def test_a_crew_tool_the_route_never_hides_is_not_a_miss(self):
+        # `check_agents` is added by `_think` after the route (chat crews),
+        # so every route offers it: counting it would inflate the miss rate
+        # `python -m simorgh.telemetry routing` gates on (review, 2026-10-27).
+        telemetry = _Telemetry()
+        script = [{"tool_calls": [{"tool": "check_agents", "args": {}}]},
+                  {"tool_calls": [{"tool": "sec_posture", "args": {}}]}, {"text": "done"}]
+        async with Harness() as h:
+            await _turns(h, ["turn the kitchen light off"], script=script, telemetry=telemetry,
+                         tool_routing="shadow", chat_crews=True)
+        shadow = next(a for n, a in telemetry.events if n == "routing.shadow")
+        self.assertEqual(shadow["used"], ["check_agents", "sec_posture"])
+        self.assertEqual(shadow["missed"], ["sec_posture"])
+
+    @run
     async def test_stickiness_is_per_conversation(self):
         script = [{"tool_calls": [{"tool": "sec_posture", "args": {}}]}, {"text": "done"}]
         async with Harness() as h:
