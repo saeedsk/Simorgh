@@ -309,11 +309,22 @@ class Embedder:
     it. The price is that two threads missing the cache on the same text
     at the same moment may both pay for it; the second write is the same
     answer.
+
+    A remote failure starts a cooldown of `retry_after_s` (default 30 s):
+    until it ends every miss answers from hashing at once, uncached,
+    without calling out. Not caching a fallback means a provider that is
+    down is asked again on every miss, and one `retrieve` embeds every
+    working-memory turn -- so without the cooldown an outage that times
+    out would block recall for (turns + 1) x `timeout_s` on EVERY turn,
+    where the old cache paid it once per text.
     """
 
     def __init__(self, provider: str = "auto", *, env=None, opener=None,
                  timeout_s: float = 20.0, local_check=local_model_available,
-                 encoder=None, logger=None) -> None:
+                 encoder=None, logger=None, retry_after_s: float = 30.0,
+                 clock=None) -> None:
+        import time
+
         self._env = env if env is not None else os.environ
         self._opener = opener or urllib.request.urlopen
         self._timeout_s = timeout_s
@@ -324,6 +335,10 @@ class Embedder:
         self._cache_max = 4096
         self._cache_lock = threading.Lock()
         self._encoder_lock = threading.Lock()
+        self._retry_after_s = retry_after_s
+        self._clock = clock or time.monotonic
+        # When a failed remote provider may be asked again; 0.0 = now.
+        self._remote_down_until = 0.0
         try:
             self.provider = choose_provider(provider, self._env, local_check=local_check)
         except EmbeddingUnavailable as exc:
@@ -408,8 +423,11 @@ class Embedder:
         text = (text or "").strip()
         if not text or self.provider == HASHING or not self.ready:
             return HASHING, embed_text(text)
+        remote = self.provider != "local"
+        if remote and self._clock() < self._remote_down_until:
+            return HASHING, embed_text(text)    # cooling down; see the class docstring
         try:
-            if self.provider == "local":
+            if not remote:
                 vector = tuple(float(x) for x in self._encode_local(text))
             else:
                 vector = _REMOTE[self.provider](text, self._env, self._opener, self._timeout_s)
@@ -419,6 +437,8 @@ class Embedder:
         except Exception as exc:  # noqa: BLE001
             # Worse recall is a bad day. A memory subsystem that raises
             # is a broken system, so this can only ever degrade.
+            if remote:
+                self._remote_down_until = self._clock() + self._retry_after_s
             if self._logger is not None:
                 self._logger.warning("embedding_fell_back", provider=self.provider, error=repr(exc))
             return HASHING, embed_text(text)

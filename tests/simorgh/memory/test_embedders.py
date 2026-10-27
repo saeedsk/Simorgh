@@ -310,13 +310,30 @@ class _FlakyOpener(_Opener):
 class FallbackIsNotCachedTestCase(unittest.TestCase):
     def test_a_transient_remote_failure_is_retried_not_remembered(self):
         opener = _FlakyOpener(_openai_body(), failures=1)
-        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"}, opener=opener, **NO_LOCAL)
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"}, opener=opener,
+                            retry_after_s=0.0, **NO_LOCAL)
         self.assertEqual(embedder.embed("hello")[0], HASHING)
         self.assertNotIn("hello", embedder._cache)
         provider, vector = embedder.embed("hello")
         self.assertEqual((provider, len(vector)), ("openai", 1536))
         embedder.embed("hello")
         self.assertEqual(len(opener.calls), 2, "the recovered answer is cached as before")
+
+    def test_a_down_provider_is_not_asked_again_until_the_cooldown_ends(self):
+        # One `retrieve` embeds every working-memory turn; without a
+        # cooldown an outage costs (turns + 1) x timeout on every turn.
+        now = [100.0]
+        opener = _FlakyOpener(_openai_body(), failures=1)
+        embedder = Embedder("openai", env={"OPENAI_API_KEY": "k"}, opener=opener,
+                            retry_after_s=30.0, clock=lambda: now[0], **NO_LOCAL)
+        self.assertEqual(embedder.embed("one")[0], HASHING)
+        for text in ("two", "three", "one"):
+            self.assertEqual(embedder.embed(text)[0], HASHING)
+        self.assertEqual(len(opener.calls), 1, "a cooling-down provider was called again")
+        self.assertEqual(len(embedder._cache), 0)
+        now[0] += 30.0
+        self.assertEqual(embedder.embed("one")[0], "openai")
+        self.assertEqual(len(opener.calls), 2)
 
     def test_a_hashed_stand_in_while_a_model_loads_is_not_kept(self):
         embedder = Embedder("local", env={}, local_check=lambda: True)
