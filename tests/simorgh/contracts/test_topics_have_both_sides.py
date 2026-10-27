@@ -69,8 +69,6 @@ ALLOWED_ONE_SIDED: dict[str, str] = {
     # Stage 18 item 1 declares these. Interface reads the first two and
     # asks the third (items 5, 10); orchestration publishes and answers
     # them in item 2, whose merge removes these three lines.
-    T.CREW_SPAWNED: "stage 18 item 2 in flight: orchestration is the producer",
-    T.CREW_REPORT: "stage 18 item 2 in flight: orchestration is the producer",
     T.CREW_SPAWN: "stage 18 item 2 in flight: interface's A2A server asks, orchestration answers",
 }
 
