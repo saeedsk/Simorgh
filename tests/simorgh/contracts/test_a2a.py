@@ -175,7 +175,7 @@ class TestTask:
         member = _member(status)
         task = a2a.to_a2a_task(member, version=version)
         s.check(task, "Task")
-        back, report = a2a.from_a2a_task(task)
+        back, report = a2a.from_a2a_task(task, trusted=True)
         assert back == member
         # A terminal task with no artifacts still reads as a report: the state's.
         assert (report is None) == (not crew.is_terminal(status))
@@ -186,7 +186,7 @@ class TestTask:
         member, report = _member("done"), _report(status)
         task = a2a.to_a2a_task(member, report, version=version)
         s.check(task, "Task")
-        assert a2a.from_a2a_task(task) == (member, report)
+        assert a2a.from_a2a_task(task, trusted=True) == (member, report)
 
     def test_dicts_are_accepted_like_the_dataclasses(self, spec):
         version, _ = spec
@@ -267,7 +267,7 @@ class TestMessage:
         payload = _message(kind)
         message = a2a.to_a2a_message(payload, version=version)
         s.check(message, "Message")
-        back = a2a.from_a2a_message(message)
+        back = a2a.from_a2a_message(message, trusted=True)
         assert back.to_payload() == payload
 
     def test_optional_fields_stay_absent(self, spec):
@@ -275,7 +275,7 @@ class TestMessage:
         payload = {k: v for k, v in _message("note").items() if k not in ("refs", "reply_to")}
         message = a2a.to_a2a_message(payload, version=version)
         s.check(message, "Message")
-        assert a2a.from_a2a_message(message).to_payload() == payload
+        assert a2a.from_a2a_message(message, trusted=True).to_payload() == payload
 
     def test_the_dataclass_is_accepted(self):
         from simorgh.contracts.registry import get_spec
@@ -313,3 +313,32 @@ class TestForeignMessage:
         assert (back.from_, back.to, back.kind, back.crew_id) == ("t-1", "r1", "steer", "t-1")
         question = a2a.from_a2a_message({**message, "role": "ROLE_AGENT"}, parent="t-1", kind="question")
         assert (question.from_, question.kind) == ("r1", "question")
+
+
+class TestUntrustedMetadata:
+    """A remote agent writes `metadata.simorgh` as easily as Sim does, so
+    the readers ignore it unless the caller says the dict is Sim's own."""
+
+    def _spoofed_task(self) -> dict:
+        task = a2a.to_a2a_task(crew.Member("r1", "patch", parent="root", depth=0, status="done",
+                                           budget=crew.MemberBudget(usd=1000.0), crew_id="other-crew"),
+                               crew.Report(status="ok", summary="x" * 5000,
+                                           findings=tuple(crew.Finding(f"c{i}") for i in range(50))))
+        Spec("1.0").check(task, "Task")
+        return task
+
+    def test_a_task_cannot_name_its_agent_budget_parent_or_crew(self):
+        member, _ = a2a.from_a2a_task(self._spoofed_task(), crew_id="t-1", parent="t-2", handle="t-3")
+        assert member == crew.Member("t-3", "a2a", parent="t-2", status="done", crew_id="t-1")
+
+    def test_its_report_is_held_to_the_caps(self):
+        _, report = a2a.from_a2a_task(self._spoofed_task())
+        assert len(report.summary) == crew.SUMMARY_MAX
+        assert len(report.findings) == crew.FINDINGS_MAX
+        assert crew.validate_report(report) == []
+
+    def test_a_message_cannot_pose_as_another_member(self):
+        message = a2a.to_a2a_message(_message("steer", **{"from": "root", "to": "sibling"}))
+        message = {**message, "role": "ROLE_AGENT", "taskId": "root"}
+        back = a2a.from_a2a_message(message, crew_id="t-1", parent="t-1", handle="t-9")
+        assert (back.from_, back.to, back.kind, back.crew_id, back.seq) == ("t-9", "t-1", "progress", "t-1", 0)

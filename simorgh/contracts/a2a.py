@@ -17,6 +17,16 @@ so a round trip through either version is exact. A Task or Message from
 an agent that is not Sim has no such metadata; it is read by its A2A
 fields alone (see `from_a2a_task`).
 
+The readers trust `metadata.simorgh` only when the caller says
+`trusted=True`. Anything that came over the wire -- a remote agent's
+Task, a remote caller's Message, another Sim's -- is read untrusted,
+because the remote side writes that metadata too: trusted, it could
+name itself `patch`, give itself a budget, claim a parent, or send a
+`steer` from the root to a sibling. Untrusted, the member's agent,
+parent, depth, budget, policy and isolation are the caller's, the
+report is held to its caps, and a message's sender and recipient come
+from its role and the `handle` the caller holds for that remote member.
+
 Two wire versions, pinned by the vendored schemas in
 `tests/simorgh/contracts/fixtures/a2a/`: `1.0` (v1.0.1, the default:
 `TASK_STATE_*` and `ROLE_*` enums, parts told apart by which field is
@@ -33,8 +43,10 @@ import json
 from typing import Any
 
 from .messages.crew import (
+    FINDINGS_MAX,
     MEMBER_STATUS,
     MESSAGE_KIND,
+    REPORT_STATUS,
     SUMMARY_MAX,
     CrewMessage,
     Member,
@@ -168,6 +180,18 @@ def _clip(text: str) -> str:
     return text if len(text) <= SUMMARY_MAX else text[: SUMMARY_MAX - 1] + "…"
 
 
+def _bounded(report: Report, state_status: str) -> Report:
+    """An untrusted report held to the Report's own rules: the summary
+    cut to its cap, at most FINDINGS_MAX findings, and a status the
+    vocabulary knows (else the one the task's state implies)."""
+    return Report(
+        status=report.status if report.status in REPORT_STATUS else state_status,
+        summary=_clip(report.summary), findings=report.findings[:FINDINGS_MAX],
+        artifacts=report.artifacts, steps=report.steps, tokens=report.tokens,
+        cost_usd=report.cost_usd, wall_s=report.wall_s,
+        questions_unanswered=report.questions_unanswered)
+
+
 # --- Task <-> member + report ---------------------------------------------------
 
 
@@ -199,10 +223,15 @@ def to_a2a_task(member: Member | dict, report: Report | dict | None = None, *,
     return task
 
 
-def from_a2a_task(task: dict, *, crew_id: str = "", parent: str = "") -> tuple[Member, Report | None]:
+def from_a2a_task(task: dict, *, crew_id: str = "", parent: str = "", handle: str = "",
+                  trusted: bool = False) -> tuple[Member, Report | None]:
     """An A2A `Task` as a member and its report.
 
-    A Task Sim wrote reads back exactly. A foreign one: the agent is
+    With `trusted=True`, a Task Sim wrote reads back exactly. Otherwise
+    `metadata.simorgh` decides nothing about the member (module
+    docstring): the handle is `handle` (else the task id), the crew is
+    `crew_id` (else the contextId), and the report Sim's artifact carries
+    is held to its caps. A foreign Task: the agent is
     `a2a`, the parent is `parent`, the status comes from the state, and
     the report -- present once the task is terminal or has artifacts --
     has the state's report status, every text part of every artifact as
@@ -211,20 +240,25 @@ def from_a2a_task(task: dict, *, crew_id: str = "", parent: str = "") -> tuple[M
     """
     sim = _meta(task)
     state = (task.get("status") or {}).get("state")
+    plain = _plain_state(state)
     status = member_status(state)
     if sim.get("status") in MEMBER_STATUS and _STATE_OF[sim["status"]] == _STATE_OF[status]:
         status = sim["status"]          # e.g. `blocked` that went out as `rejected`
-    member = Member(
-        handle=str(task.get("id", "")),
-        agent=str(sim.get("agent") or "a2a"),
-        parent=str(sim.get("parent", parent)),
-        depth=int(sim.get("depth", 1) or 0),
-        status=status,
-        budget=MemberBudget.from_dict(sim.get("budget")),
-        report_policy=str(sim.get("report_policy", "end")),
-        isolation=str(sim.get("isolation", "fresh")),
-        crew_id=str(task.get("contextId") or crew_id),
-    )
+    if trusted:
+        member = Member(
+            handle=str(task.get("id", "")),
+            agent=str(sim.get("agent") or "a2a"),
+            parent=str(sim.get("parent", parent)),
+            depth=int(sim.get("depth", 1) or 0),
+            status=status,
+            budget=MemberBudget.from_dict(sim.get("budget")),
+            report_policy=str(sim.get("report_policy", "end")),
+            isolation=str(sim.get("isolation", "fresh")),
+            crew_id=str(task.get("contextId") or crew_id),
+        )
+    else:
+        member = Member(handle=str(handle or task.get("id", "")), agent="a2a", parent=parent,
+                        status=status, crew_id=str(crew_id or task.get("contextId") or ""))
     artifacts = [a for a in task.get("artifacts") or () if isinstance(a, dict)]
     ours = next((a for a in artifacts
                  if any(_read_part(p)[2] == REPORT_ARTIFACT for p in a.get("parts") or ())), None)
@@ -238,8 +272,8 @@ def from_a2a_task(task: dict, *, crew_id: str = "", parent: str = "") -> tuple[M
                 data = value
             elif kind == "file":
                 refs.append(value)
-        return member, Report.from_dict({**data, "summary": "\n".join(texts), "artifacts": refs})
-    plain = _plain_state(state)
+        report = Report.from_dict({**data, "summary": "\n".join(texts), "artifacts": refs})
+        return member, (report if trusted else _bounded(report, _REPORT_STATUS_OF.get(plain, "partial")))
     if not artifacts and plain not in _REPORT_STATUS_OF:
         return member, None
     texts, refs = [], []
@@ -293,11 +327,14 @@ def to_a2a_message(crew_message: CrewMessage | dict, *, version: str = A2A_DEFAU
     return message
 
 
-def from_a2a_message(message: dict, *, crew_id: str = "", parent: str = "",
-                     kind: str | None = None, seq: int = 0) -> CrewMessage:
+def from_a2a_message(message: dict, *, crew_id: str = "", parent: str = "", handle: str = "",
+                     kind: str | None = None, seq: int = 0, trusted: bool = False) -> CrewMessage:
     """An A2A `Message` as a `crew.message` dataclass.
 
-    One Sim wrote reads back exactly. A foreign one: role `agent` is from
+    With `trusted=True`, one Sim wrote reads back exactly. Otherwise its
+    `metadata.simorgh` is ignored (module docstring) and it reads as a
+    foreign one, in crew `crew_id` (else its contextId), its task being
+    `handle` (else its taskId): role `agent` is from
     its task to `parent`, kind `progress`; role `user` is from `parent`
     to its task, kind `steer`; `kind` overrides either (an
     `input-required` status message is a `question`). Text parts are the
@@ -314,13 +351,13 @@ def from_a2a_message(message: dict, *, crew_id: str = "", parent: str = "",
             texts.append(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
         elif k == "file":
             refs.append(value)
-    if sim.get("kind") in MESSAGE_KIND and "from" in sim and "to" in sim:
+    if trusted and sim.get("kind") in MESSAGE_KIND and "from" in sim and "to" in sim:
         sender, recipient, kind_ = str(sim["from"]), str(sim["to"]), str(sim["kind"])
         seq_ = int(sim.get("seq", seq) or 0)
         reply_to = sim.get("reply_to")
     else:
         role = str(message.get("role", "")).lower().removeprefix("role_")
-        task_id = str(message.get("taskId", ""))
+        task_id = str(handle or message.get("taskId", ""))
         agent_side = role != "user"
         sender, recipient = (task_id, parent) if agent_side else (parent, task_id)
         kind_ = "progress" if agent_side else "steer"
@@ -329,8 +366,9 @@ def from_a2a_message(message: dict, *, crew_id: str = "", parent: str = "",
         if kind not in MESSAGE_KIND:
             raise ValueError(f"message kind {kind!r} is not one of {', '.join(MESSAGE_KIND)}")
         kind_ = kind
+    crew = (message.get("contextId") or crew_id) if trusted else (crew_id or message.get("contextId"))
     return CrewMessage.from_payload({
-        "crew_id": str(message.get("contextId") or crew_id),
+        "crew_id": str(crew or ""),
         "from": sender, "to": recipient, "kind": kind_, "body": "\n".join(texts), "seq": seq_,
         **({"refs": refs} if refs else {}),
         **({"reply_to": int(reply_to)} if reply_to is not None else {}),

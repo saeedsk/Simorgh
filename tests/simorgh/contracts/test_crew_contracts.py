@@ -115,7 +115,7 @@ class TestReportPolicy:
         assert crew.parse_report_policy(text) == expected
 
     @pytest.mark.parametrize("text", ["loud", "every_steps", "every_steps:0", "every_s:-1",
-                                      "every_steps:two", "end:3"])
+                                      "every_steps:two", "end:3", "every_s:nan", "every_s:inf"])
     def test_refused(self, text):
         with pytest.raises(ValueError):
             crew.parse_report_policy(text)

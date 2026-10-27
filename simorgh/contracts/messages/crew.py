@@ -29,6 +29,7 @@ transcripts.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from ..fields import Bool, Enum, F, Float, Int, List, O, Obj, Str
 from ..registry import define
@@ -243,7 +244,8 @@ def validate_member(member: Member) -> list[str]:
 def parse_report_policy(text: str) -> tuple[str, float]:
     """`"end"` -> ("end", 0); `"every_steps:5"` -> ("every_steps", 5);
     `"every_s:30"` -> ("every_s", 30.0). ValueError for anything else,
-    including a missing or non-positive number."""
+    including a missing, non-positive or non-finite number (`every_s:nan`
+    would never fire, `every_s:inf` is `silent` under another name)."""
     name, _, arg = (text or "end").strip().partition(":")
     if name not in REPORT_POLICIES:
         raise ValueError(f"report policy {text!r} is not one of {', '.join(REPORT_POLICIES)}")
@@ -252,7 +254,7 @@ def parse_report_policy(text: str) -> tuple[str, float]:
             n = int(arg) if name == "every_steps" else float(arg)
         except ValueError:
             raise ValueError(f"report policy {text!r} needs a number after the colon") from None
-        if n <= 0:
+        if not math.isfinite(n) or n <= 0:
             raise ValueError(f"report policy {text!r} needs a positive number")
         return name, n
     if arg:
