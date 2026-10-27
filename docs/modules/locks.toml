@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.cognition]
+by = "claude-wave-a"
+task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
+since = "2026-10-27T14:37:23+00:00"
+until = "2026-10-27T22:37:23+00:00"
+
 [locks.docs]
 by = "claude-stage15"
 task = "findings: tokens, ablation, memory sidecars"
@@ -16,3 +22,27 @@ by = "claude-stage15"
 task = "stage 15 item 6: sidecar embeddings on Together's serverless model"
 since = "2026-10-27T14:16:13+00:00"
 until = "2026-10-27T18:16:13+00:00"
+
+[locks.execution]
+by = "claude-wave-a"
+task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
+since = "2026-10-27T14:37:23+00:00"
+until = "2026-10-27T22:37:23+00:00"
+
+[locks.initiative]
+by = "claude-wave-a"
+task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
+since = "2026-10-27T14:37:23+00:00"
+until = "2026-10-27T22:37:23+00:00"
+
+[locks.interface]
+by = "claude-wave-a"
+task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
+since = "2026-10-27T14:37:23+00:00"
+until = "2026-10-27T22:37:23+00:00"
+
+[locks.orchestration]
+by = "claude-wave-a"
+task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
+since = "2026-10-27T14:37:23+00:00"
+until = "2026-10-27T22:37:23+00:00"
