@@ -791,7 +791,8 @@ class Service:
         answer) still paid the full five-minute delay every time --
         dominating a project's wall-clock time far more than any amount
         of test-suite speedup could (observer, 2026-09-08)."""
-        if reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON, PREREQUISITE_REASON)):
+        if reason.startswith((CONTINUATION_REASON, VERIFICATION_REASON, UNCOMMITTED_REASON, LANDING_REASON,
+                              PREREQUISITE_REASON)):
             return self.config.continuation_delay_seconds
         return self.config.blocked_retry_delay_seconds
 
@@ -1656,6 +1657,11 @@ UNCOMMITTED_REASON = "finished with uncommitted changes"
 # `run_tests` never ran; the edit is kept, and the next attempt tests and
 # commits it (`orchestration/session.py::PREREQUISITE_REASON`).
 PREREQUISITE_REASON = "prerequisite not done"
+# The task's branch could not be put on main (rebase conflict, red gate,
+# live checkout in the way). Orchestration keeps the worktree and its
+# edits for the next attempt (`orchestration/session.py::LANDING_REASON`),
+# so it is a continuation too, not a five-minute block.
+LANDING_REASON = "landing failed"
 
 
 def _task_payload(task: Task) -> dict:
