@@ -234,7 +234,8 @@ def last_sample(path: str | Path, series: str) -> dict | None:
 def read_spans(path: str | Path, name: str, *, since: float | None = None) -> list[dict]:
     """Every span called `name` that started at or after `since`, read-only
     (`python -m simorgh.telemetry tokens`); empty when the file or its
-    table does not exist."""
+    table does not exist. Any other sqlite error (a corrupt or locked
+    file) raises: "no calls" would be a false answer to it."""
     path = Path(path)
     if not path.exists():
         return []
@@ -244,7 +245,9 @@ def read_spans(path: str | Path, name: str, *, since: float | None = None) -> li
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5.0)
     try:
         rows = conn.execute(sql + " ORDER BY start, rowid", args).fetchall()
-    except sqlite3.Error:
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
         return []
     finally:
         conn.close()

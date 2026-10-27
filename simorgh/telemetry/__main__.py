@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -42,7 +43,11 @@ def main(argv: list[str] | None = None) -> int:
     if not path.exists():
         print(f"tokens: no telemetry file at {path}", file=sys.stderr)
         return 1
-    result = report(path, since_s=since_s)
+    try:
+        result = report(path, since_s=since_s)
+    except sqlite3.Error as exc:
+        print(f"tokens: cannot read {path}: {exc}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:

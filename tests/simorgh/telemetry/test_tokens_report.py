@@ -140,6 +140,23 @@ class TheReport(_File):
         self.assertEqual([r["attrs"]["provider"] for r in rows], ["b"])
         self.assertEqual(read_spans(Path(self._tmp.name) / "absent.sqlite", "x"), [])
 
+    def test_a_file_without_the_table_reads_as_empty(self):
+        import sqlite3
+        bare = Path(self._tmp.name) / "bare.sqlite"
+        sqlite3.connect(bare).close()
+        self.assertEqual(read_spans(bare, "cognition.provider_call"), [])
+
+    def test_an_unreadable_file_is_an_error_not_an_empty_period(self):
+        # A corrupt file used to read as "no provider calls in this
+        # period": a true-sounding answer to a question it could not read.
+        bad = Path(self._tmp.name) / "bad.sqlite"
+        bad.write_bytes(b"not a database" * 512)
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            self.assertEqual(main(["tokens", "--file", str(bad)]), 1)
+        self.assertIn("cannot read", err.getvalue())
+        self.assertNotIn("no provider calls", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
