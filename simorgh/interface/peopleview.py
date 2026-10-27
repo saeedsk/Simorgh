@@ -47,6 +47,9 @@ def one(payload: dict) -> str:
             lines.append(f"    {permission}: Sim {meaning}")
     interests = list(person.get("interests") or ())
     lines.append("  cares about: " + (", ".join(interests) if interests else "nothing recorded"))
+    relations = dict(person.get("relations") or {})
+    if relations:
+        lines.append("  kin: " + ", ".join(f"{word} {name}" for word, name in sorted(relations.items())))
     identities = list(person.get("identities") or ())
     lines.append("  known as: " + (", ".join(identities) if identities else "no handle linked"))
     return "\n".join(lines)

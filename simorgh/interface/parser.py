@@ -153,6 +153,7 @@ SUBCOMMANDS: dict[str, tuple[tuple[str, str], ...]] = {
                ("revoke <name> <permission>", "withdraw it, and drop what was kept under it"),
                ("interest add|remove <name> <topic>", "what they care about, for interest shares"),
                ("role <name> <owner|adult|child|guest>", "what their role may ask for"),
+               ("relation <name> <word> [<other>]", "who their kin are (son, wife, ...): \"my son\" is that person to Sim"),
                ("link <name> <identity>", "tie a handle or a voice to a person: telegram:x, voice:y"),
                ("unlink <identity>", "that handle is nobody's again"),
                ("wrong <ref> [why]", "that unprompted message was wrong or unwanted")),

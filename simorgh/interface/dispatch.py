@@ -1394,6 +1394,7 @@ PEOPLE_VERBS: tuple[tuple[str, str, str], ...] = (
     ("revoke", "<name> <permission>", "withdraw it -- and drop what was kept under it"),
     ("interest", "add|remove <name> <topic>", "what they care about, for interest shares"),
     ("role", "<name> <owner|adult|child|guest>", "what their role may ask for"),
+    ("relation", "<name> <word> [<other>]", "who their kin are: `relation Saeed son Aran`; no other forgets it"),
     ("link", "<name> <identity>", "tie a handle or voice to a person: telegram:x, voice:y"),
     ("unlink", "<identity>", "that handle is nobody's again"),
     ("wrong", "<ref> [why]", "that unprompted message was wrong or unwanted"),
@@ -1436,6 +1437,13 @@ async def _people(args: str, *, bus: BusClient, ledger: LedgerClient, session_id
         if len(rest) != 2:
             return Outcome("usage: people role <name> <owner|adult|child|guest>")
         return await _change("set_role", {"name": rest[0], "role": rest[1].lower()})
+    if verb in ("relation", "relations", "kin"):
+        # Stage 15: Memory resolves "my son" by it, so it is a change like
+        # a link -- through the tool, and a person confirms it.
+        if len(rest) < 2:
+            return Outcome("usage: people relation <name> <son|wife|mother|...> [<other>]   (no other forgets it)")
+        return await _change("set_relation", {"name": rest[0], "relation": rest[1].lower(),
+                                              "other": " ".join(rest[2:])})
     if verb == "link":
         if len(rest) != 2:
             return Outcome("usage: people link <name> <identity>   (telegram:x, whatsapp:+1..., voice:y)")
