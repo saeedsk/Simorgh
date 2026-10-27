@@ -36,7 +36,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/guardian.py` | `guardian.*` (5) |
 | `simorgh/contracts/messages/intent.py` | `intent.goal.stated` |
 | `simorgh/contracts/messages/learn.py` | `learn.*` (8) |
-| `simorgh/contracts/messages/memory.py` | `memory.*` (9) |
+| `simorgh/contracts/messages/memory.py` | `memory.*` (11), `EMBED_MAX_TEXTS`, `EMBED_MAX_CHARS` |
 | `simorgh/contracts/messages/percept.py` | `percept.*` (4) |
 | `simorgh/contracts/messages/persona.py` | `persona.*` (4) |
 | `simorgh/contracts/messages/plan.py` | `plan.*` and `project.*` (8) |
@@ -208,6 +208,7 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - 2026-09-27: `tiers.tier_of` puts a call that only makes the house quieter at tier 0 (`QUIETS`: media_control/music_control op stop|pause|mute, room_play what=stop|pause; `ONLY_STOPS`: cast_stop), so any voice -- one too short to recognise, a guest, a child -- may stop the music. Consumers: guardian (`tiers.py::PersonRule`, `TierRule`, `PresenceRule`), orchestration (checkpointing at tier >= 2; unaffected).
 - 2026-10-27: `tiers.REACHES_OUTSIDE` gains `a2a_call` (stage 18 item 9): it sends household data to a remote agent, so it is tier 3 -- a person says yes in every posture, `SIMORGH_GUARDIAN_AUTO_APPROVE` included. Registered `irreversible` with no network flag on Guardian's side, it was tier 2, the path auto-approve waves through. Consumers: guardian (`tiers.py::TierRule`, `PersonRule`, `PresenceRule`; the service's `tier` span attribute), orchestration (checkpointing at tier >= 2; unaffected).
 - 2026-10-27: `toolargs.MARKER_ARG_KEY` gains `propose_a2a_agent: proposal` (stage 18 item 9; one text block, as `propose_mcp_server`). Consumers: orchestration (`tools.py` marker args), cognition (`parser.py`; no change needed).
+- 2026-10-27: `memory.embed{texts}` -> `memory.embed.reply{vectors, model, dimension, refused?}` (stage 17; schemas regenerated; new request/reply pair). Memory's configured embedder lent over the bus, so the tool router never loads a second model. `messages/memory.py` exports the bounds `EMBED_MAX_TEXTS` (256 texts a request) and `EMBED_MAX_CHARS` (2,000; Memory cuts each text). `vectors` is one unit vector per text in order, or `[]` with `refused` (the embedder is `hashing`, a local model is loading, a text fell back to hashing mid-batch, an empty text, too many texts); `model` is the provider name as `memory:vectors` records it. Producer of the request: orchestration (`SessionRunner._route_embed_texts`). Consumer: memory (`Service._on_embed`).
 - 2026-09-27: `memory.forget`'s `kinds` is `FORGET_KIND` -- the memory kinds plus `facts` (schema regenerated; additive). The console has sent `facts` for `forget facts|all` since 2026-09-25 and every one was refused at publish. Producer: interface (`dispatch.py` forget), execution (`memory_forget`). Consumer: memory (`store.forget_window`).
 - 2026-09-27: `settings.VOICE_SAFE_KEYS` gains `satellite_lead_in_ms` (0-2000). Consumer: voice (`SatelliteSpeaker`).
 - 2026-09-27: `settings.VOICE_SAFE_KEYS` gains `satellite_music_sensitivity` ("", Slightly/Moderately/Very sensitive). Consumer: voice (`SatelliteLink`).

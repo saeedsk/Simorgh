@@ -81,3 +81,17 @@ MemoryForget = define(t.MEMORY_FORGET, [
     O("containing", Str), O("reason", Str),
 ])
 MemoryForgetReply = define(t.MEMORY_FORGET_REPLY, [F("forgotten", Int), F("refs", List(Str)), O("since", Float)])
+# Memory's configured embedder for another subsystem (stage 17: the tool
+# router). At most `EMBED_MAX_TEXTS` texts, each cut to `EMBED_MAX_CHARS`
+# by Memory. The reply names the `model` (the provider, as `memory:vectors`
+# records it) and `dimension`, and carries one unit vector per text, in
+# order -- or none, with `refused` saying why: the embedder is `hashing`
+# (configured, or degraded to it), a local model is still loading, a text
+# fell back to hashing mid-batch (a mixed batch is not comparable), or too
+# many texts. A caller compares vectors only within one (model, dimension).
+EMBED_MAX_TEXTS = 256
+EMBED_MAX_CHARS = 2000
+MemoryEmbed = define(t.MEMORY_EMBED, [F("texts", List(Str))])
+MemoryEmbedReply = define(t.MEMORY_EMBED_REPLY, [
+    F("vectors", List(List(Float))), F("model", Str), F("dimension", Int), O("refused", Str),
+])

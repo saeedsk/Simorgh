@@ -153,6 +153,7 @@ class Worker:
         ablate: tuple[str, ...] = (), guard_limits: tuple[int, int, int, int] = (3, 2, 3, 2),
         crew_limits: tuple[int, int, float, float, int] = (8, 1, 0.5, 900.0, 0), chat_crews: bool = False,
         tool_routing: str = "off", route_params: tuple[int, int, float] = (3, 3, 0.15),
+        route_embed_timeout_s: float = 0.3,
         fact_lines: tuple[int, int] = (8, 8),
     ) -> None:
         self._review_benchmark = review_benchmark
@@ -206,7 +207,7 @@ class Worker:
             # `[orchestration] tool_routing, route_top_k, route_sticky_turns,
             # route_none_margin` (stage 17).
             tool_routing=tool_routing, route_top_k=route_params[0], route_sticky_turns=route_params[1],
-            route_none_margin=route_params[2],
+            route_none_margin=route_params[2], route_embed_timeout_s=route_embed_timeout_s,
             # `[orchestration] memory_fact_lines, memory_graph_lines` (stage 15).
             fact_lines=fact_lines,
             **runner_kwargs,
@@ -246,11 +247,16 @@ class Worker:
         ))
         self._subs.append(await self._bus.subscribe(topics.SYSTEM_STATE_CHANGED, self._on_state_changed))
         self._subs.append(await self._bus.subscribe(topics.TASK_CANCEL, self._on_cancel))
+        # Tool routing (stage 17): the groups' utterances are embedded by
+        # Memory once, in the background, so the first routed turn need not
+        # wait for them. Off: nothing is asked.
+        self._runner.warm_routing()
 
     async def stop(self) -> None:
         for s in self._subs:
             await s.unsubscribe()
         self._subs.clear()
+        await self._runner.stop_routing()
 
     def _is_cancelled(self, task_id: str) -> bool:
         return task_id in self._cancelled

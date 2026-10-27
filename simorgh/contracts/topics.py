@@ -179,6 +179,12 @@ MEMORY_FORGOTTEN = "memory.forgotten"
 #: says how much went
 MEMORY_FORGET = "memory.forget"
 MEMORY_FORGET_REPLY = "memory.forget.reply"
+#: Memory's configured embedder, for another subsystem (stage 17: the
+#: tool router embeds a turn and its groups' utterances with it, so no
+#: second model is loaded). Request/reply; refused, with no vectors, when
+#: the embedder is the hashing floor or its model is still loading.
+MEMORY_EMBED = "memory.embed"
+MEMORY_EMBED_REPLY = "memory.embed.reply"
 # --- 4.10 world / self ----------------------------------------------------
 WORLD_ENV_QUERY = "world.env.query"
 # A camera saw something: motion, a person, a vehicle, an animal
