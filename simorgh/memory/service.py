@@ -170,8 +170,10 @@ class Service:
         await self._ctx.bus.reply(message, type=topics.MEMORY_FORGET_REPLY,
                                   payload={"forgotten": len(refs), "refs": refs, "since": since})
 
-    async def _announce_fact(self, fact, superseded_id: str) -> None:
-        """A fact that now holds, and the one it replaced (stage 5 item 3)."""
+    async def _announce_fact(self, fact, superseded_id: str, *, also=()) -> None:
+        """A fact that now holds, and the one it replaced (stage 5 item 3);
+        `also`, the facts under other keys the reconcile pass ended with it
+        (stage 15 item 7)."""
         await self._ctx.bus.publish(Message.new(topics.MEMORY_FACT_STORED, source=self._ctx.bus.source, payload={
             "id": fact.id, "subject": fact.subject, "predicate": fact.predicate, "object": fact.object,
             "person_scope": fact.person_scope, "valid_from": fact.valid_from, "confidence": fact.confidence,
@@ -180,6 +182,10 @@ class Service:
             await self._ctx.bus.publish(Message.new(
                 topics.MEMORY_FACT_SUPERSEDED, source=self._ctx.bus.source,
                 payload={"id": superseded_id, "valid_to": fact.valid_from, "superseded_by": fact.id}))
+        for other_id in also:
+            await self._ctx.bus.publish(Message.new(
+                topics.MEMORY_FACT_SUPERSEDED, source=self._ctx.bus.source,
+                payload={"id": other_id, "valid_to": fact.valid_from, "superseded_by": fact.id}))
 
     async def _on_retrieve(self, message: Message) -> None:
         payload = message.payload

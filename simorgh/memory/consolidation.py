@@ -128,6 +128,10 @@ class ConsolidationReport:
     merged: list = field(default_factory=list)
     #: The entity summary pass (stage 15 item 3); None when it did not run.
     summaries: "SummaryReport | None" = None
+    #: The reconcile decisions of the fact pass (stage 15 item 7): counts of
+    #: `asked`, `fallback`, `superseded`, `noop` and `ignored` (a decision
+    #: about a fact the model was not shown). Empty with entities off.
+    reconciled: dict = field(default_factory=dict)
 
 
 async def run_consolidation(
@@ -144,6 +148,7 @@ async def run_consolidation(
     distilled = False
     refused: list[str] = []
     stored_facts: list = []
+    reconciled: dict = {}
     filters = {"since": since} if since is not None else None
     episodic_items, _ = await engine.retrieve(query="", kinds=["episodic"], k=20, filters=filters)
     if episodic_items:
@@ -188,7 +193,8 @@ async def run_consolidation(
                 distilled = True
 
         stored_facts = await extract_facts(engine, bus=bus, source=source, window=window,
-                                           refs=[i.ref for i in episodic_items], timeout=cognition_timeout)
+                                           refs=[i.ref for i in episodic_items], timeout=cognition_timeout,
+                                           tally=reconciled)
     # Stage 15 item 1: the facts written before entities get their ids
     # (idempotent, so a no-op once done), and the names resolution found
     # close but not certain are put to the model, which is the only place
@@ -198,7 +204,7 @@ async def run_consolidation(
     summaries = await summarise_entities(engine, bus=bus, source=source, timeout=cognition_timeout)
     return ConsolidationReport(contradictions=flagged, pruned=pruned, distilled=distilled,
                                refused=refused, facts=stored_facts, linked=linked, merged=merged,
-                               summaries=summaries)
+                               summaries=summaries, reconciled=reconciled)
 
 
 SUMMARY_INSTRUCTION = (
@@ -412,11 +418,16 @@ def parse_facts(text: str, window: str) -> tuple[list[dict], list[str]]:
 
 
 async def extract_facts(engine: MemoryEngine, *, bus: Bus, source: str, window: str, refs: list[str],
-                        timeout: float) -> list:
+                        timeout: float, tally: dict | None = None) -> list:
     """Read the window for facts and store them; the ones stored.
 
     Nothing here is fatal: cognition unreachable, a floor answer or
     unparseable JSON all mean "no facts this cycle", never a wrong one.
+
+    With `[memory] entities = true` each fact is first reconciled with the
+    live facts about the same subject (`reconcile_fact`, stage 15 item 7);
+    with it off, every fact is stored by today's exact-key rule and nothing
+    else is asked.
     """
     request = Message.new(topics.COGNITION_THINK, source=source, payload={
         "purpose": "consolidate",
@@ -436,13 +447,144 @@ async def extract_facts(engine: MemoryEngine, *, bus: Bus, source: str, window: 
     kept, _rejected = parse_facts(str(reply.payload.get("text") or ""), window)
     stored = []
     for entry in kept:
+        if engine._config.entities:  # noqa: SLF001
+            fact = await reconcile_fact(engine, entry, bus=bus, source=source, refs=tuple(refs[:3]),
+                                        timeout=timeout, tally=tally if tally is not None else {})
+            if fact is not None:
+                stored.append(fact)
+            continue
         stored.append(await engine.store_fact(
             subject=entry["subject"], predicate=entry["predicate"], object=entry["object"],
             person_scope=entry["person"], source_refs=tuple(refs[:3])))
     return stored
 
 
+RECONCILE_INSTRUCTION = (
+    "A household's assistant keeps facts that hold now. A NEW fact was just heard. Below it are KNOWN "
+    "facts about the same subject, each with an id. For each known fact decide one of: "
+    "ADD (it still holds beside the new fact), UPDATE (the new fact is a newer value of it, so it no "
+    "longer holds), DELETE (the new fact says it is no longer true), NOOP (it already says what the "
+    "new fact says). Reply with ONLY a JSON array, one element per known fact: "
+    '[{"id": "<id>", "decision": "ADD|UPDATE|DELETE|NOOP"}]. Use only the ids shown. If you are not '
+    "sure, say ADD."
+)
+#: How many live facts a new one is compared with (Mem0's top-k).
+RECONCILE_K = 5
+#: The typed reply: one of these per candidate.
+DECISIONS = ("ADD", "UPDATE", "DELETE", "NOOP")
+
+
+def parse_decisions(text: str, shown) -> tuple[dict[str, str] | None, int]:
+    """`({candidate id: decision}, ignored)` from a model's JSON array, or
+    `(None, ignored)` when it is not a decision at all.
+
+    Only an id in `shown` counts. The model is shown at most `RECONCILE_K`
+    facts, and a reply naming any other -- a fact about another person, a
+    private one, an id it made up -- is ignored and counted, never acted
+    on: the decision is about the candidates, and ending a fact nobody
+    showed it is a guess. A reply with no usable decision about any shown
+    fact is the same as no reply: the caller falls back to the exact key.
+    """
+    import json
+
+    match = re.search(r"\[.*\]", text or "", re.S)
+    if not match:
+        return None, 0
+    try:
+        data = json.loads(match.group(0))
+    except ValueError:
+        return None, 0
+    if not isinstance(data, list):
+        return None, 0
+    shown = set(shown)
+    decided: dict[str, str] = {}
+    ignored = 0
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        fact_id = str(entry.get("id") or "").strip()
+        decision = str(entry.get("decision") or "").strip().upper()
+        if fact_id not in shown:
+            ignored += 1
+            continue
+        if decision in DECISIONS and fact_id not in decided:
+            decided[fact_id] = decision
+    return (decided or None), ignored
+
+
+async def reconcile_fact(engine: MemoryEngine, entry: dict, *, bus: Bus, source: str, refs: tuple,
+                         timeout: float, tally: dict):
+    """Store one extracted fact after Mem0's update decision (stage 15 item
+    7); the fact stored, or None when the model said it is already held.
+
+    Today's rule supersedes a fact only when the normalised `(person_scope,
+    subject, predicate)` key matches exactly, so "Reza lives in Shiraz" and
+    then "Reza moved to Tehran" left two live facts. Here the new fact is
+    put beside the `RECONCILE_K` most similar live facts with the same scope
+    and the same subject entity (`MemoryEngine.fact_candidates`), and the
+    model decides, per candidate, ADD | UPDATE | DELETE | NOOP. UPDATE and
+    DELETE end the candidate with a `fact.superseded` naming the new fact;
+    nothing is deleted.
+
+    The decision only ever ADDS to the exact-key rule. A floor or failed
+    reply, or one that does not parse, stores the fact by that rule alone
+    -- never a guess. A NOOP skips the write, except where the key rule
+    would correct a different value: a correction wins by structure, and a
+    model's "already known" does not get to undo that.
+    """
+    from .facts import EVERYONE, Fact
+
+    subject, predicate, object_ = entry["subject"], entry["predicate"], entry["object"]
+    scope = (entry.get("person") or EVERYONE).strip() or EVERYONE
+
+    async def _store(supersedes=()):
+        return await engine.store_fact(subject=subject, predicate=predicate, object=object_,
+                                       person_scope=entry.get("person") or "", source_refs=refs,
+                                       supersedes=supersedes)
+
+    candidates = await engine.fact_candidates(subject=subject, predicate=predicate, object=object_,
+                                              person_scope=scope, k=RECONCILE_K)
+    if not candidates:
+        return await _store()
+    tally["asked"] = tally.get("asked", 0) + 1
+    known = "\n".join(f"- [{fact.id}] {fact.subject} {fact.predicate} {fact.object}" for fact in candidates)
+    request = Message.new(topics.COGNITION_THINK, source=source, payload={
+        # `memory.reconcile` is the purpose the stage 15 plan names; the
+        # contracts enum does not have it yet, so this rides on
+        # `consolidate`'s budget, as the other sleep-tick calls do.
+        "purpose": "consolidate",
+        "messages": [{"role": "system", "content": RECONCILE_INSTRUCTION},
+                     {"role": "user", "content": f"NEW: {subject} {predicate} {object_}\nKNOWN:\n{known}"}],
+        "budget": {"max_tokens": 300, "max_cost_usd": 0.02},
+        "require_real_provider": False,
+    })
+    try:
+        reply = await bus.request(request, timeout=timeout)
+    except Exception:  # noqa: BLE001 -- no cognition: today's exact-key rule, never a guess
+        reply = None
+    decided = None
+    if reply is not None and reply.payload.get("ok") is not False and not reply.payload.get("floor", True):
+        decided, ignored = parse_decisions(str(reply.payload.get("text") or ""), [f.id for f in candidates])
+        if ignored:
+            tally["ignored"] = tally.get("ignored", 0) + ignored
+    if decided is None:
+        tally["fallback"] = tally.get("fallback", 0) + 1
+        return await _store()
+    ends = tuple(fact.id for fact in candidates if decided.get(fact.id) in ("UPDATE", "DELETE"))
+    if not ends and "NOOP" in decided.values():
+        facts = await engine._facts_synced()  # noqa: SLF001
+        held = facts.by_id.get(facts.by_key.get(Fact(id="", subject=subject.strip(), predicate=predicate.strip(),
+                                                     object=object_, person_scope=scope).key, ""))
+        if held is None or " ".join(held.object.split()).lower() == " ".join(object_.split()).lower():
+            tally["noop"] = tally.get("noop", 0) + 1
+            return None
+    fact = await _store(ends)
+    tally["superseded"] = tally.get("superseded", 0) + len(ends)
+    return fact
+
+
 __all__ = ["DISTILL_INSTRUCTION", "DISTILL_PREFIX", "EXTRACT_INSTRUCTION", "MAX_FACTS", "NOTHING", "untraceable",
            "ConsolidationReport", "MAX_SAME_QUESTIONS", "MAX_SUMMARIES", "SAME_INSTRUCTION", "SUMMARY_INSTRUCTION",
            "SUMMARY_MAX_CHARS", "SummaryReport", "extract_facts", "parse_facts", "review_uncertain",
-           "run_consolidation", "summarise_entities"]
+           "run_consolidation", "summarise_entities", "DECISIONS", "RECONCILE_INSTRUCTION", "RECONCILE_K",
+           "parse_decisions", "reconcile_fact"]

@@ -234,12 +234,18 @@ class MemoryEngine:
         return index
 
     async def store_fact(self, *, subject: str, predicate: str, object: str, person_scope: str = "",
-                         confidence: float = 1.0, source_refs=()) -> "object":
+                         confidence: float = 1.0, source_refs=(), supersedes=()) -> "object":
         """Remember that something holds, replacing what held before.
 
         The correction case, by construction: a new fact for the same
         `(person, subject, predicate)` marks the old one superseded at this
         moment, so recall never has to judge which of two records is later.
+
+        `supersedes` (stage 15 item 7) names live facts under another key
+        that this one also replaces -- "Reza moved to Tehran" ending "Reza
+        lives in Shiraz" -- as the reconcile pass decided. Each is ended the
+        same way, a `fact.superseded` event; one already ended, or the key's
+        own predecessor, is not ended twice.
         """
         from .facts import EVERYONE, FACT_STREAM, STORED, SUPERSEDED, Fact
 
@@ -268,10 +274,68 @@ class MemoryEngine:
                 stream=FACT_STREAM, type=SUPERSEDED, ts=now, trace_id="", causation_id=None,
                 idempotency_key=f"{FACT_STREAM}:{previous_id}:by:{fact.id}",
                 payload={"id": previous_id, "valid_to": now, "superseded_by": fact.id}))
+        also: list[str] = []
+        for other_id in dict.fromkeys(str(i) for i in supersedes):
+            other = index.by_id.get(other_id)
+            if other is None or not other.live or other_id in (previous_id, fact.id):
+                continue
+            await self._ledger.append(FACT_STREAM, Event(
+                stream=FACT_STREAM, type=SUPERSEDED, ts=now, trace_id="", causation_id=None,
+                idempotency_key=f"{FACT_STREAM}:{other_id}:by:{fact.id}",
+                payload={"id": other_id, "valid_to": now, "superseded_by": fact.id}))
+            also.append(other_id)
         await self._facts_synced()
         if self._on_fact is not None:
-            await self._on_fact(fact, previous_id)
+            # `also` only when there is one, so a store without the
+            # reconcile pass makes the very call it always made.
+            await (self._on_fact(fact, previous_id, also=tuple(also)) if also
+                   else self._on_fact(fact, previous_id))
         return fact
+
+    async def fact_candidates(self, *, subject: str, predicate: str, object: str, person_scope: str = "",
+                              k: int = 5) -> list:
+        """The live facts a new one might update (stage 15 item 7): at most
+        `k`, best first, each with the same `person_scope` and the same
+        subject entity, ranked by the recall score -- BM25 fused with dense
+        vectors, or the hashing cosine when that is the embedder.
+
+        The scope must be the SAME, not merely visible: a household fact is
+        never put next to a private one, nor one person's next to
+        another's, so the reconcile decision can never end a fact across a
+        scope. Lookup only -- a subject no entity names yet has no
+        candidates, and nothing is created by asking. [] with entities off.
+        """
+        from .facts import EVERYONE, FACT_STREAM
+        from .recall import KindIndex, Record, fused
+
+        if not self._config.entities or k <= 0:
+            return []
+        scope = ((person_scope or EVERYONE).strip() or EVERYONE).lower()
+        entities = await self._entities_synced()
+        speaker = "" if scope == EVERYONE else scope
+        subject_id = entities.resolve(" ".join((subject or "").split()), speaker=speaker, people=self._people())
+        if not subject_id:
+            return []
+        subject_id = entities.canonical(subject_id)
+        facts = await self._facts_synced()
+        pool = [fact for fact in facts.live_facts(person=speaker)
+                if fact.person_scope.strip().lower() == scope and self.fact_ends(fact, entities)[0] == subject_id]
+        if not pool:
+            return []
+        # A throwaway index over the few facts about this one entity, so the
+        # ranking is the one `retrieve` uses rather than a second rule.
+        query = f"{subject} {predicate} {object}"
+        index = KindIndex(FACT_STREAM, hashing=self._index.hashing)
+        for fact in pool:
+            index.add(Record(ref=fact.id, ts=fact.valid_from, tags=(), confidence=fact.confidence,
+                             content=f"{fact.subject} {fact.predicate} {fact.object}", source_ref=""), self._embedder)
+        if self._index.hashing:
+            similar = index.similarities(query)
+            scores = [similar.get(i, 0.0) for i in range(len(pool))]
+        else:
+            scores = fused(index.dense_scores((*self._embedder.embed(query), query)), index.bm25(query))
+        ranked = sorted(range(len(pool)), key=lambda i: (-scores[i], -pool[i].valid_from, pool[i].id))
+        return [pool[i] for i in ranked[:k]]
 
     async def facts_for(self, query: str, *, person: str = "", limit: int = 5) -> list:
         """The live facts this query mentions: `(fact, what it replaced)`."""
