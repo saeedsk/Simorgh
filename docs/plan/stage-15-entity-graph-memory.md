@@ -99,14 +99,49 @@ python -m simorgh.evals memory --systems native,native_graph,graphiti,cognee --p
 
    It runs the same corpus through `cognee.add` then `cognee.cognify`, and answers each question with `cognee.search` in its graph-completion mode, scored by the same "does the context contain the right fact" check. Cognee has no per-person scope that maps to `person_scope`, so it uses one dataset per person for the privacy category, and the report says so. It records the same ingestion cost and time numbers. `pip install cognee` goes in an `[eval-cognee]` extra, never the core. Systems name: `cognee`.
 
-6. **The comparison.** *No lock; paid, within the creator's cap.* Run all four systems on the suite and write `docs/findings/<date>-entity-graph-vs-graphiti.md`:
+5c. **Mem0 as a third sidecar.** *Lock `evals`; after 5 and 5b, reusing their shape.* `simorgh/evals/memory/mem0_side.py`, using the `mem0ai` open-source package in local mode:
+   - an embedded vector store (its Chroma/FAISS-style local option, in a temporary directory) and SQLite history;
+   - no graph store, because Mem0 Graph needs Neo4j, which this stage refuses;
+   - the same OpenAI-compatible Together endpoint;
+   - a guarded import, telemetry forced off (`MEM0_TELEMETRY=False`), and a hard cap.
+
+   Ingest each episode with `Memory.add(messages, user_id=<person>)`, and answer with `Memory.search(question, user_id=<asker>)`. `user_id` is Mem0's per-person scope, so the privacy category maps cleanly. The sidecar also records **tokens injected per question**, to test Mem0's "80-90% fewer tokens" claim against Sim's own facts block. Systems name: `mem0`.
+
+6. **The comparison.** *No lock; paid, within the creator's cap.* Run all five systems on the suite and write `docs/findings/<date>-entity-graph-vs-graphiti.md`:
    - accuracy per category with intervals;
    - ingestion cost and time per episode;
    - recall latency p50/p95;
    - dependencies added;
+   - **tokens of memory injected per turn**, for every system;
    - a recommendation.
 
    Graphiti moves into Sim (as an optional `[memory] graph = "graphiti"` projection, rebuilt from the ledger, with LLM calls routed through Cognition) only if it beats `native_graph` by a margin outside both intervals in a category the family actually hits, and the cost per episode fits the night budget.
+
+7. **Mem0's update decision in consolidation.** *Lock `memory`; after item 1.*
+
+   **Why.** Today a new fact supersedes an old one only when the normalised `(person_scope, subject, predicate)` key matches *exactly*. So "Reza lives in Shiraz" followed by "Reza moved to Tehran" leaves two live facts. Mem0's core idea fixes this: compare each new fact with the top-k *similar* live facts and decide `ADD | UPDATE | DELETE | NOOP`.
+
+   **What.** In consolidation's fact pass, for each extracted fact:
+   - take the k = 5 most similar live facts with the same `person_scope` and the same subject entity (from item 1), by the existing BM25-plus-dense score;
+   - ask `cognition.think` (purpose `memory.reconcile`, within the budget) for one decision per candidate, as a typed reply;
+   - `UPDATE` and `DELETE` become supersession events (`valid_to`, `superseded_by`). Nothing is deleted.
+   - with the floor provider, or when the reply does not parse, fall back to today's exact-key rule, never to a guess.
+
+   **Acceptance.**
+   - the Shiraz→Tehran pair leaves one live fact and one superseded;
+   - a fact about a *different* Reza is left alone;
+   - the memory suite's "temporal now" category does not regress.
+
+8. **Letta's core memory blocks.** *Locks `memory`, `orchestration`, `execution` (a new tool); after item 7.*
+
+   **Why.** Sim already has Letta's other half: the model edits its own memory through Guardian-gated tools (`remember`, `memory_search`, `memory_forget`, `remember_place` in `agents/chat.md`), and there are working, episodic and semantic tiers and compaction. What it lacks is Letta's *core* tier: a few small, labelled blocks that are always in context and that the model itself keeps current, for example "about Soodeh: prefers Farsi, tea not coffee, works Tuesdays".
+
+   **What.**
+   - Per-person blocks and one `household` block, each at most `core_block_chars` (default 600), on a new `memory:core` stream. Each edit is an event, with the previous text kept.
+   - A tool `memory_core_edit{block, old, new}` (replace-in-block, as Letta's `core_memory_replace` does), reversible, gated by Guardian. A person may only edit their own block or `household`, which Guardian checks against `person_scope`.
+   - The asking person's block and `household` are rendered **after** the cacheable prefix, so an edit never invalidates the stage 4 prefix cache.
+
+   **Acceptance.** Run the memory suite with the blocks on and off. Keep them only if the blocks raise accuracy, or keep it level while cutting injected tokens. Block edits are visible in `memory:core` with their source turn.
 
 ## What this must never do
 
