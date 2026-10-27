@@ -164,6 +164,9 @@ class Scheduler:
         #: task id -> the `{id}:{updated_at}` generation last offered.
         #: Bounded by the dispatch limit: see `dispatch_ready`.
         self._last_offer: dict[str, str] = {}
+        #: A task this returns True for is run elsewhere and never offered:
+        #: a project's plan node on a crew (stage 18 item 4, `crews.py`).
+        self.hold = None
 
     @property
     def autonomous_paused(self) -> bool:
@@ -183,6 +186,8 @@ class Scheduler:
         self._autonomous_paused = bool(value)
 
     def _offerable(self, task: Task) -> bool:
+        if self.hold is not None and self.hold(task):
+            return False
         return not (self.autonomous_paused and task.origin in self._autonomous_origins)
 
     #: How many ready tasks are offered at once (see `dispatch_ready`).

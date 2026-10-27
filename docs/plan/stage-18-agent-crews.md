@@ -124,6 +124,8 @@ A `question` always goes to the parent whatever the policy.
 
 4. **Projects on crews.** *Lock `planning`, `orchestration`; after item 2.* A project session spawns one member per ready plan node, up to the concurrency cap, instead of one child at a time, and the stage 7 node bookkeeping reads `crew.report`. Acceptance: a three-node independent plan finishes in about the time of its longest node.
 
+   Built 2026-10-27, behind `[planning] project_crews` (off until a live trial). There is no project session: a project's children were always Planning's queue (stage 7 item 4's note), so Planning starts each ready node as a member of the crew rooted at the project (`crew.spawn{context_id: <project>, handle: <node task id>, plan_node: true}`, `planning/crews.py`), up to `project_crew_concurrency`, and turns the member's `crew.report` into the `task.completed`/`task.blocked`/`task.failed` a Worker would have reported. Orchestration now answers `crew.spawn` (`SessionRunner.spawn_detached`, which item 10's A2A server also needed); a plan node keeps its verifier and acceptance and is outside the crew's dollar and wall bounds. Measured with fake providers (`test_crew_spawn.py`): three independent nodes in 0.82 s against 2.39 s on the queue, the longest node being 0.8 s. Not done: a live trial; a member that `wait`s is retried rather than woken.
+
 5. **The tree, visible.** *Lock `interface`; parallel to items 2-4 once item 1 lands.*
    - The TUI's task tree shows crew members under their parent, with status, the last progress line, steps and cost, in the existing ⏺/⎿ shape.
    - Add a console command `crew [<id>]` (list members and messages) and `crew cancel <handle>`.

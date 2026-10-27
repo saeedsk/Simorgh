@@ -339,11 +339,17 @@ class Service:
         task.add_done_callback(self._chat_tasks.discard)
 
     async def _on_crew_spawn(self, message: Message) -> None:
-        """`crew.spawn` (stage 18 item 10's A2A server asks): one member,
-        the agent named, acting as `requester` on `requester_channel`.
-        Refused, with an error reply, when the request names no channel --
-        a crew acts for somebody through something, and Guardian weighs
-        every call as that -- or when the runner will not take it."""
+        """`crew.spawn` -> `crew.spawn.reply{crew_id, handle}`, or an error
+        reply. The member runs off the handler; this answers at once.
+
+        Two askers (stage 18). Planning's `plan_node: true` is a project's
+        ready node (item 4): it acts with a claimed task's authority, so
+        only Planning may ask for one, and it goes to the Worker already
+        holding its project's crew. Anyone else -- the A2A server (item 10)
+        -- gets one read-only member acting as `requester` on
+        `requester_channel`, refused when the request names no channel: a
+        crew acts for somebody through something, and Guardian weighs every
+        call as that."""
         from simorgh.contracts.registry import error_reply_payload
 
         from .crew import CrewRefused
@@ -352,25 +358,41 @@ class Service:
         bus = self._ctx.bus
 
         async def refuse(code: str, detail: str) -> None:
-            await bus.reply(message, type=topics.CREW_SPAWN_REPLY, payload=error_reply_payload(code, detail))
+            if message.reply_to:
+                await bus.reply(message, type=topics.CREW_SPAWN_REPLY, payload=error_reply_payload(code, detail))
 
-        if not str(p.get("requester_channel") or "").strip():
-            await refuse("refused", "requester_channel is empty: a crew must act for somebody, through some channel")
-            return
         if not self._workers:
             await refuse("unavailable", "no orchestration worker is running")
             return
-        worker = self._workers[self._next_worker % len(self._workers)]
-        self._next_worker += 1
         try:
-            crew_id, handle = await worker.spawn_crew(
-                agent=str(p.get("agent") or ""), brief=str(p.get("brief") or ""),
-                requester=str(p.get("requester") or ""), requester_channel=str(p.get("requester_channel") or ""),
-                report=str(p.get("report") or "end"), background=p.get("background", True) is not False)
-        except CrewRefused as exc:
+            if p.get("plan_node"):
+                if str(message.source or "").split("@", 1)[0] != "planning":
+                    raise ValueError("only Planning may start a plan node")
+                # A crew lives in one runner: its writer slot, member count
+                # and message order are that runner's. A node of a project
+                # already in memory goes to the Worker that holds it (with
+                # `workers` > 1, round-robin put a project's patch nodes in
+                # two crews, two writer slots).
+                context_id = str(p.get("context_id") or "")
+                worker = next((w for w in self._workers if w.holds_crew(context_id)), None)
+                if worker is None:
+                    worker = self._workers[self._next_worker % len(self._workers)]
+                    self._next_worker += 1
+                crew_id, handle = await worker.spawn_detached(p, plan_node=True)
+            else:
+                if not str(p.get("requester_channel") or "").strip():
+                    raise CrewRefused("requester_channel is empty: a crew must act for somebody, through some channel")
+                worker = self._workers[self._next_worker % len(self._workers)]
+                self._next_worker += 1
+                crew_id, handle = await worker.spawn_crew(
+                    agent=str(p.get("agent") or ""), brief=str(p.get("brief") or ""),
+                    requester=str(p.get("requester") or ""), requester_channel=str(p.get("requester_channel") or ""),
+                    report=str(p.get("report") or "end"), background=p.get("background", True) is not False)
+        except (CrewRefused, ValueError) as exc:
             await refuse("refused", str(exc))
             return
-        await bus.reply(message, type=topics.CREW_SPAWN_REPLY, payload={"crew_id": crew_id, "handle": handle})
+        if message.reply_to:
+            await bus.reply(message, type=topics.CREW_SPAWN_REPLY, payload={"crew_id": crew_id, "handle": handle})
 
     def _ours(self, message: Message) -> bool:
         """A crew.* event this subsystem published itself (a member's own

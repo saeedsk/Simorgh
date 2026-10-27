@@ -2299,6 +2299,98 @@ class SessionRunner:
         self._forget_crew(crew.crew_id)
         return outcome
 
+    async def spawn_detached(self, payload: dict, *, plan_node: bool = False,
+                             attempt_limits: tuple[int, float, float] | None = None) -> tuple[str, str]:
+        """`crew.spawn` (stage 18 items 4 and 10): start one member with no
+        parent session, under the crew `context_id` names (a new one when it
+        names none), and return `(crew_id, handle)` at once. CrewRefused or
+        ValueError with the reason.
+
+        `plan_node` is a project's plan node, sent by Planning: its handle
+        is the node's task id (so its `task:<id>` stream, `task.started`
+        and `task.step` are the node's, as when a Worker claimed it), it
+        keeps its agent's verifier and acceptance criteria, it resumes
+        from what an earlier attempt left, and it is outside the crew's
+        member, dollar and wall bounds -- the bounds a queued task never
+        had. It acts with a claimed task's authority (no requester, the
+        console channel), which is why the caller must check who sent it."""
+        from dataclasses import replace as _replace
+
+        from . import profiles as _agents
+
+        wanted = str(payload.get("agent") or "").strip().lower()
+        if wanted not in _agents.AGENTS:
+            raise ValueError(f"no agent called {wanted!r}; the agents are {', '.join(sorted(_agents.AGENTS))}")
+        brief = str(payload.get("brief") or "").strip()
+        if not brief:
+            raise ValueError("say what the member should do (`brief`)")
+        channel = str(payload.get("requester_channel") or "")
+        if not plan_node and not channel:
+            # Guardian reads "" as the owner's console (contracts CONTRACT.md).
+            raise ValueError("a crew started from outside needs a requester_channel")
+        policy = str(payload.get("report") or "end").strip()
+        crew_id = str(payload.get("context_id") or "") or f"crew-{uuid.uuid4().hex[:12]}"
+        if crew_id in self._open:
+            # A running session's own crew is its own, whoever names it.
+            raise CrewRefused(f"crew {crew_id} is a running session's")
+        crew = self._crews.get(crew_id)
+        fresh = crew is None
+        if crew is None:
+            events = []
+            if self._ledger is not None:
+                try:
+                    events = await self._ledger.read(crew_stream(crew_id))
+                except Exception:  # noqa: BLE001 -- an unreadable stream starts the crew afresh
+                    events = []
+            crew = self._new_crew(crew_id, events)
+        agent = _agents.AGENTS[wanted]
+        # Only Planning names the handle (the node's task id). Any other
+        # caller's member gets a fresh one: a chosen handle would put its
+        # steps on that task's `task:<id>` stream, under that task's origin.
+        handle = str(payload.get("handle") or "") if plan_node else ""
+        requester = "" if plan_node else str(payload.get("requester") or "")
+        who = (requester, "" if plan_node else channel)
+        strangers = [m for m in crew.members.values() if (m.requester, m.requester_channel) != who]
+        if strangers:
+            # `context_id` comes from outside (an A2A caller's contextId): it
+            # joins a crew only when every member already in it acts for the
+            # same person on the same channel. Otherwise a caller who knew a
+            # crew's id would put its member, its messages and its report
+            # into someone else's crew.
+            raise CrewRefused(f"crew {crew_id} is not this requester's")
+        if fresh:
+            self._crews[crew_id] = crew
+        running = crew.members.get(handle)
+        if running is not None and running.task is not None and not running.task.done():
+            raise CrewRefused(f"{handle} is already running in crew {crew_id}")
+        steps = int(payload.get("max_steps") or 0) or (agent.max_steps if plan_node else self._delegate_max_steps)
+        member = await crew.admit(
+            parent=crew_id, agent=agent.name, brief=brief, depth=1, budget=MemberBudget(steps=steps),
+            report_policy=policy, writer=self._writes(agent), via="project" if plan_node else "spawn",
+            background=bool(payload.get("background")), brief_ref=await self._brief_ref(brief),
+            # A node retried keeps its handle: the member before it has ended
+            # (or died with an earlier process), and this one replaces it.
+            handle=handle,
+            requester=requester, requester_channel=who[1])
+        child = self._member_session(None, member, agent)
+        if plan_node:
+            # The per-attempt limits a Worker puts on a claimed task
+            # (`[orchestration] attempt_max_*`): outside the crew's bounds is
+            # not outside every bound.
+            if attempt_limits is not None:
+                (child.budget.max_tokens, child.budget.max_usd, child.budget.max_wall_s) = attempt_limits
+            child.profile = _replace(child.profile, verify=agent.verify)
+            child.acceptance = [str(a) for a in (payload.get("acceptance") or [])]
+            child.subject = payload.get("subject") or None
+            from .resume import restore_session
+
+            try:
+                await restore_session(child, self._ledger)
+            except Exception:  # noqa: BLE001 -- a node with no stream yet starts fresh
+                pass
+        self._start_member(crew, member, child, brief, None)
+        return crew_id, member.handle
+
     @staticmethod
     def _report_status(outcome: Outcome, member) -> str:
         if member.cancel_reason:

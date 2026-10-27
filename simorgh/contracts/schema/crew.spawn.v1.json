@@ -2,8 +2,17 @@
   "$id": "https://simorgh.local/schema/crew.spawn.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Start a crew from outside any session: one member, the agent named, acting as `requester`. Producer: interface (the A2A server, stage 18 item 10). Consumer: orchestration (item 2), which answers with the member's handle and the crew it roots, or an error reply.",
+  "description": "Start a crew from outside any session: one member, the agent named, acting as `requester`. Producers: interface (the A2A server, stage 18 item 10), planning (a project's ready plan nodes, item 4). Consumer: orchestration, which answers with the member's handle and the crew it roots, or an error reply.",
   "properties": {
+    "acceptance": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "agent": {
       "type": "string"
     },
@@ -28,6 +37,24 @@
         "null"
       ]
     },
+    "handle": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "max_steps": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "plan_node": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "report": {
       "type": [
         "string",
@@ -39,6 +66,12 @@
     },
     "requester_channel": {
       "type": "string"
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

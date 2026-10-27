@@ -18,6 +18,7 @@ from simorgh.contracts.registry import error_reply_payload
 
 from . import dag, planmode, reground
 from .bridge import BusCognitionCaller
+from .crews import ProjectCrews, outcome_of
 from .config import Config
 from .decomposer import decompose, parse_plan, parse_steps
 from .intake import Intake
@@ -92,6 +93,8 @@ class Service:
         # Subscribed through a handler table, missing from this manifest until 2026-09-19:
         topics.TASK_CANCEL,
         topics.TASK_CLEAR_REQUEST,
+        # Projects on crews (stage 18 item 4): a node's member reports here.
+        topics.CREW_REPORT,
     )
     produces: tuple[str, ...] = (
         topics.SELF_ESTIMATE_REQUEST,
@@ -112,6 +115,10 @@ class Service:
         topics.UI_PROMPT,
         topics.UI_NOTICE,
         topics.SYSTEM_METRICS,
+        # Projects on crews (stage 18 item 4): a ready node starts as a crew
+        # member, and its report becomes the outcome a Worker would report.
+        topics.CREW_SPAWN,
+        topics.TASK_COMPLETED,
 )
 
     def __init__(self, config: Config | None = None) -> None:
@@ -155,6 +162,9 @@ class Service:
         # the NEXT attempt, and `attempts` -- which is persisted -- still
         # bounds the task after a restart.
         self._last_blocked_answer: dict[str, str] = {}
+        #: Projects on crews (stage 18 item 4, `crews.py`); None when
+        #: `[planning] project_crews` is off.
+        self._project_crews: ProjectCrews | None = None
 
     async def start(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -187,6 +197,15 @@ class Service:
         self._cognition = BusCognitionCaller(
             ctx.bus, ctx.clock, source=ctx.source, timeout=self.config.think_timeout_s,
         )
+        if self.config.project_crews:
+            self._project_crews = ProjectCrews(
+                self._store, ctx.bus, ctx.clock, source=ctx.source,
+                concurrency=self.config.project_crew_concurrency,
+                spawn_timeout_s=self.config.project_crew_spawn_timeout_s,
+                lease_seconds=self.config.lease_seconds, brief_for=self._node_brief,
+                may_start=self._crew_may_start, logger=ctx.logger)
+            # A node that runs on a crew is never offered on the queue.
+            self._scheduler.hold = self._project_crews.holds
 
         handlers = {
             topics.INTENT_GOAL_STATED: self._on_goal_stated,
@@ -216,6 +235,8 @@ class Service:
             topics.SYSTEM_TICK_IDLE: self._on_tick_idle,
             topics.SYSTEM_STATE_CHANGED: self._on_state_changed,
         }
+        if self._project_crews is not None:
+            handlers[topics.CREW_REPORT] = self._on_crew_report
         self._subs = [await ctx.bus.subscribe(t, h) for t, h in handlers.items()]
         ctx.logger.info("planning.started", tasks=len(self._store.index.tasks))
 
@@ -223,6 +244,8 @@ class Service:
         for sub in self._subs:
             await sub.unsubscribe()
         self._subs = []
+        if self._project_crews is not None:
+            await self._project_crews.stop()
         for task in list(self._estimating):
             task.cancel()
         self._estimating.clear()
@@ -347,6 +370,7 @@ class Service:
         # tick later notices the same still-available task.
         if self._scheduler is not None:
             await self._scheduler.dispatch_ready()
+        self._kick_crews()
 
     # -- claiming / lifecycle ---------------------------------------------------------
 
@@ -367,7 +391,16 @@ class Service:
         if p.get("accept_better"):
             better = better_ready(self._store, p["task_id"], priority_weights=self._scheduler._priority_weights,  # noqa: SLF001
                                   now=self._ctx.clock.now())
+            if better is not None and self._crew_holds(better):
+                better = None
         result = None
+        named = self._store.index.tasks.get(p["task_id"])
+        if better is None and named is not None and self._crew_holds(named):
+            # A crew runs this node (stage 18 item 4); a Worker offered it
+            # before it was held must not run it a second time.
+            await self._ctx.bus.reply(message, type=topics.TASK_CLAIM_REPLY,
+                                      payload={"granted": False, "reason": "runs_on_crew"})
+            return
         if better is not None:
             result = await self._store.claim(better.id, p["worker_id"], self.config.lease_seconds)
             if result.granted:
@@ -425,6 +458,7 @@ class Service:
             await self._store.transition(task_id, COMPLETED, note=p.get("result_summary", ""))
         await self._propagate_completion(task_id)
         await self._maybe_finish_project(task.parent_id)
+        self._kick_crews()
 
     async def _on_task_failed(self, message: Message) -> None:
         p = message.payload
@@ -438,6 +472,7 @@ class Service:
             self._mark_sibling_failure(task)
             await self._propagate_failure(task_id)
             await self._maybe_finish_project(task.parent_id)
+            self._kick_crews()
             return
         await self._retry_or_block(task, p.get("reason", ""))
 
@@ -469,6 +504,10 @@ class Service:
         running = [
             t for t in self._store.index.tasks.values()
             if t.status == IN_PROGRESS and weight.get(t.origin, 0) < mine
+            # A plan node on a crew holds no Worker, so preempting it frees
+            # nothing; and its member, cancelled, reports `cancelled`, which
+            # would end the node and its project as failed (stage 18 item 4).
+            and not self._crew_holds(t)
         ]
         if not running:
             return
@@ -1010,6 +1049,72 @@ class Service:
         self._recent_self_patches.append((subject, message.ts))
         self._recent_self_patches = self._recent_self_patches[-50:]
 
+    # -- projects on crews (stage 18 item 4, crews.py) ---------------------------------
+
+    def _crew_holds(self, task: Task) -> bool:
+        return self._project_crews is not None and self._project_crews.holds(task)
+
+    def _crew_may_start(self, task: Task) -> bool:
+        """The queue's hold, applied to a crew node: nothing starts while the
+        system is paused or stopping, and an autonomous-origin node (a plan
+        node's origin is `project`) waits out `auto off` -- the 2026-09-09
+        rule that the backlog stops when autonomy is off."""
+        s = self._scheduler
+        if s is None:
+            return True
+        return not (s.paused or (s.autonomous_paused and task.origin in s._autonomous_origins))  # noqa: SLF001
+
+    def _kick_crews(self) -> None:
+        if self._project_crews is not None:
+            self._project_crews.kick()
+
+    async def _node_brief(self, task: Task) -> tuple[str, list[str]]:
+        """A node's whole brief (its description, read back from the blob
+        when the record holds a preview) and its acceptance criteria."""
+        brief = task.description
+        if task.description_ref:
+            try:
+                brief = (await self._ctx.ledger.get_blob(task.description_ref)).decode("utf-8")
+            except Exception:  # noqa: BLE001 -- the preview beats no node
+                brief = task.description
+        acceptance = _acceptance_of(self._why_for_child(task.parent_id or "", task) if task.parent_id else task.note)
+        if acceptance:
+            brief += "\n\nDone when: " + "; ".join(acceptance)
+        return brief, acceptance
+
+    async def _on_crew_report(self, message: Message) -> None:
+        """A plan node's member filed its report: the outcome a Worker would
+        have reported for the claimed node, through the same handlers."""
+        p = message.payload
+        handle = str(p.get("handle") or "")
+        if not self._project_crews.take(handle):
+            return  # not a node this process started (a session's own crew)
+        task = await self._store.get(handle)
+        if task is None or task.status in TERMINAL_STATUSES:
+            self._kick_crews()
+            return
+        report = dict(p.get("report") or {})
+        kind, reason, summary = outcome_of(report)
+        if kind == "completed":
+            await self._ctx.bus.publish(Message.new(
+                topics.TASK_COMPLETED, source=self._ctx.source, partition_key=f"task:{handle}",
+                payload={"task_id": handle, "result_summary": summary,
+                         "artifacts": [str(a) for a in report.get("artifacts") or []], "verification_ref": None},
+            ))
+            return
+        if kind == "blocked":
+            await self._retry_or_block(task, reason, answer=summary)
+            self._kick_crews()
+            return
+        if task.status in (AVAILABLE, PENDING):
+            # Its lease ran out while the member ran: `available -> failed`
+            # is not legal, and parking it first is.
+            await self._store.transition(handle, BLOCKED, note=reason)
+        await self._ctx.bus.publish(Message.new(
+            topics.TASK_FAILED, source=self._ctx.source, partition_key=f"task:{handle}",
+            payload={"task_id": handle, "reason": reason, "terminal": True, "attempts": task.attempts + 1},
+        ))
+
     async def _maybe_finish_project(self, project_id: str | None) -> None:
         if project_id is None or project_id in self._project_completed_emitted:
             return
@@ -1071,6 +1176,9 @@ class Service:
         # ready by the two calls above is offered on the same tick.
         if self._scheduler is not None:
             await self._scheduler.dispatch_ready()
+        if self._project_crews is not None:
+            await self._project_crews.refresh_leases(durable=self._leases_durable())
+            await self._project_crews.dispatch()
         # `status` read a counter `planning.backlog` that NOTHING has
         # ever published, so it reported "backlog: 0" with three tasks
         # live -- and said so in the same breath as a chat reply that
@@ -1191,7 +1299,7 @@ class Service:
         })
 
     async def _on_work_next(self, message: Message) -> None:
-        ready = self._store.ready(limit=1)
+        ready = [t for t in self._store.ready(limit=50) if not self._crew_holds(t)][:1]
         if not ready:
             await self._ctx.bus.reply(message, type=topics.TASK_WORK_NEXT_REPLY,
                                        payload={"reason": "nothing pending"})

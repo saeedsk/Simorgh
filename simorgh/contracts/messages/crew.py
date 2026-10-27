@@ -127,10 +127,21 @@ CrewSpawn = define(t.CREW_SPAWN, [
     O("device", Str),                   # the paired device that asked
     O("report", Str),                   # report policy for the member; parse_report_policy() reads it
     O("background", Bool),
-    O("context_id", Str),               # the caller's own context, when it sent one
+    O("context_id", Str),               # the caller's own context, when it sent one; members sent with
+                                        # the same one join one crew (`crew_id` = context_id)
+    # A project's plan node (stage 18 item 4): Planning runs each ready node
+    # of a project as a member of the crew rooted at the project.
+    O("handle", Str),                   # the member's handle, chosen by the caller (the node's task id)
+    O("subject", Str),                  # the file a patch node is about
+    O("acceptance", List(Str)),         # what "done" means for the node; the verifier checks it
+    O("max_steps", Int),                # the node's step cap (0/absent: the agent's own)
+    O("plan_node", Bool),               # true: runs as the queued task would -- outside the crew's
+                                        # member/dollar/wall bounds, verified, with a claimed task's
+                                        # authority; only Planning may ask for it
 ], doc="Start a crew from outside any session: one member, the agent named, acting as `requester`. "
-       "Producer: interface (the A2A server, stage 18 item 10). Consumer: orchestration (item 2), "
-       "which answers with the member's handle and the crew it roots, or an error reply.")
+       "Producers: interface (the A2A server, stage 18 item 10), planning (a project's ready plan "
+       "nodes, item 4). Consumer: orchestration, which answers with the member's handle and the "
+       "crew it roots, or an error reply.")
 CrewSpawnReply = define(t.CREW_SPAWN_REPLY, [
     F("crew_id", Str),
     F("handle", Str),
