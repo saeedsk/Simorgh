@@ -1,0 +1,161 @@
+# Stage 18 -- Agent crews: autonomous sub-agents that run together and talk to each other
+
+Status: **in progress** (2026-10-27: plan written; build starts once stage 16's orchestration branch is merged) · Depends on: stage 7 (the `Task` built-in, waits, projects), stage 16 (guardrails in the loop), stage 14 (evals runner) · Modules touched: contracts, orchestration (owner), interface, evals; `agents/`; `docs/`
+
+## Outcome
+
+Any Sim agent, including chat and voice, can start other agents as **autonomous workers**. Several run at once. Each works on its own task with its own tools and budget, and reports back in the way the parent asked: at the end, periodically, at milestones, or when it needs a decision. Parent and children, and siblings in the same crew, exchange **typed messages** in-process over the Bus, durable on the ledger. So a crew survives a restart, every exchange is auditable, and Guardian still gates every tool call any member makes.
+
+```
+spawn{agent:"research", brief:"price of dishwasher A", report:"end"}          -> h1
+spawn{agent:"research", brief:"price of dishwasher B", report:"end"}          -> h2
+spawn{agent:"browser",  brief:"check delivery dates", report:"milestones"}    -> h3
+await_agents{handles:[h1,h2,h3], mode:"all", timeout_s:180}                    -> three typed reports
+```
+
+## What exists (stage 7) and what is missing
+
+| Exists | Missing |
+|---|---|
+| `delegate`/`task{agent, brief, isolation: fresh\|fork, budget}`, a child `Session` in-process on its own `task:<id>` stream, depth ≤ 3 (`session.py::_delegate`) | **Concurrency.** `_batchable()` excludes `delegate`, so helpers run one at a time and `max_children_concurrent` is never reached |
+| Only the report comes back, and Guardian gates the child's tools | **Non-blocking spawn.** The parent cannot keep working while children run |
+| `wait` on events; projects awaiting children by `task.completed` (stage 7 items 4-5) | **Communication.** No progress reports, no child→parent question, no parent→child steering, no sibling sharing |
+| -- | **Chat and voice cannot delegate** (`session.py:1588` offers it to `patch`/`research` only) |
+| -- | **A typed report.** The child's free text is what comes back |
+| -- | **A crew-wide budget.** Each child has a step cap, but nothing bounds the crew's dollars or wall-clock |
+
+## Definitions (shared by every item; do not rename)
+
+**Crew.** The tree of agents under one root session. It has `crew_id` (the root's task or session id) and members `{handle, agent, parent, depth, status, budget, report_policy, isolation}`. `handle` is the child's task id, and `status` is one of `starting | running | waiting | done | failed | blocked | cancelled`. The crew is recorded on the ledger stream `crew:<crew_id>`, one event per change, never edited.
+
+**Topics** (contracts; schemas in `contracts/messages/crew.py`):
+- `crew.spawned{crew_id, handle, parent, agent, brief_ref, report_policy, budget}`
+- `crew.message{crew_id, from, to, kind, body, refs, reply_to, seq}`, where `kind` is one of `progress | milestone | question | answer | steer | note | report`
+- `crew.report{crew_id, handle, report}`, the final typed report
+- `crew.cancel{crew_id, handle, reason, cascade}`
+
+Every topic has a producer and a consumer (the "both sides" contract test). The interface consumes all four for the tree view.
+
+**Report**:
+- `status`: `ok | partial | failed | blocked | cancelled`
+- `summary`: ≤ 1,200 characters
+- `findings`: up to 20 items of `{claim, evidence_ref}`
+- `artifacts`: blob or path refs
+- `steps`, `tokens`, `cost_usd`, `wall_s`
+- `questions_unanswered`
+
+Anything long is a ledger blob ref, never inline. The parent reads it with `read_ref{ref}` only if it needs to. This is the main efficiency rule: **messages carry conclusions and references, not transcripts.**
+
+**Report policy** (`report` on spawn):
+- `end` (default): only the final report;
+- `progress`: also every `report_progress` the child sends;
+- `every_steps:N`: an automatic one-line progress line every N steps;
+- `every_s:T`: the same, every T seconds of wall-clock;
+- `milestones`: only progress the child marks as a milestone;
+- `silent`: nothing until the parent asks with `check_agents`.
+
+A `question` always goes to the parent whatever the policy.
+
+**Tools** (session-local built-ins, like `delegate` and `memory_search`: they coordinate, never touch the world, so they are not proposed to Guardian; everything a member does *in* the world still is):
+
+| Tool | Who | Does |
+|---|---|---|
+| `spawn{agent, brief, isolation, budget, report, background}` | any agent allowed to (below) | starts a member and returns its handle at once |
+| `delegate` / `task` | as today | `spawn` + `await_agents{mode:"all"}`; the old shape still works |
+| `await_agents{handles, mode: all\|any\|first_ok, timeout_s}` | parent | suspends this session, without spending steps, until the condition holds or the timeout passes; returns the reports, plus any messages that arrived |
+| `check_agents{handles?}` | parent | a status table: handle, agent, status, last progress, steps, cost |
+| `send_agent{to, text, kind: steer\|note\|answer}` | parent → child; child → sibling | delivered to the recipient's inbox |
+| `cancel_agent{handle, reason}` | parent | cancels it and, by default, its descendants |
+| `read_ref{ref}` | any member | reads a blob that a report or message refers to |
+| `report_progress{text, milestone?, percent?}` | child | sent according to the parent's policy |
+| `ask_parent{question, timeout_s, default}` | child | waits for an `answer`; on timeout it proceeds with `default` and says so in its report |
+| `board_put{key, value}` / `board_get{key?}` | any member | the crew's shared blackboard, on `crew:<id>` as `board` events, last write wins, with values capped at 2,000 characters |
+
+**Inbox delivery.** Messages to a member are queued in memory (one `asyncio.Queue` per member) and appended to the ledger. They are rendered as one compact `inbox` turn at the head of the member's next think, **after** the cacheable prefix, so the prefix cache still hits. A member suspended in `await_agents` or `ask_parent` wakes on delivery. Message delivery is a direct in-process hand-off over the Bus with no polling and no model call. The target is under 50 ms from send to the recipient's queue, measured in item 7.
+
+**Concurrency and budgets.**
+- `[orchestration] crew_max_members = 8` per crew, and `max_children_concurrent = 4`, which is now real.
+- Writers: agents whose profile is not `read_only`, such as `patch`. At most `crew_max_writers = 1` at once by default, each in its own task worktree as today. Readers run in parallel.
+- A crew budget: `crew_max_usd` (default 0.50), `crew_max_wall_s` (default 900) and `crew_max_tokens`. A child's budget is carved from the parent's remaining budget at spawn. When the crew budget is exhausted, every member is cancelled with reason `crew budget`, and the root gets `partial` reports.
+- Depth is ≤ `max_depth` (3) as today.
+
+**Who may spawn.**
+- `patch`, `research`, `plan` and project sessions may spawn any agent.
+- `chat` may spawn only read-only agents (`research`, `browser`), and is offered `spawn` only when `[orchestration] chat_crews = true`.
+- `voice_chat` may spawn only with `background = true` (below).
+- A child inherits the parent's requester and `person_scope`, never more. Guardian sees the original person on every proposal.
+
+**Background crews (chat and voice).** `spawn{background:true}` returns immediately. The chat or voice turn answers at once ("I'll look into it"). When the crew's root report arrives, it is delivered to the person who asked, as a `ui.notice` in the console or phone, or spoken by Voice through the same path Initiative uses, respecting quiet hours. If the person is still in the conversation, the result also enters that conversation's working window.
+
+**Durability.** On restart, `crew:<id>` is folded. Running members resume through the existing task resume (stage 7 item 1 and `resume.py`). A parent that was in `await_agents` re-enters it with the reports already received. A member whose parent is gone finishes and files its report on the stream; nothing is lost.
+
+## Action items
+
+1. **Contracts.** *Lock `contracts`.* Add `contracts/messages/crew.py` (the four messages and `Report`), the topics in `contracts/topics.py`, the stream `crew:<id>` in `contracts/streamnames.py`, and schemas and contract tests. Add an allow-list entry only if a side is genuinely external. Update every consumer's CONTRACT.md "Consumes" table (orchestration, interface).
+
+   Acceptance: `python tools/modtest.py contracts --tier core` is green.
+
+2. **The crew runtime.** *Lock `orchestration`.* Add `simorgh/orchestration/crew.py`, a pure-ish core that is testable without a bus:
+   - `Crew` (members, tree, budget carving, writer and concurrency semaphores, cancellation cascade, the report-policy engine, and the `crew:<id>` fold);
+   - `Inbox`;
+   - `Report` building (the child's final answer parsed into a typed `Report`; when it does not parse, the summary is the first 1,200 characters and the rest is a blob ref).
+
+   Then wire it into `session.py`:
+   - the tools above;
+   - `delegate` reimplemented as spawn + await, with the old behaviour kept;
+   - `await_agents` suspending without spending steps;
+   - inbox rendering after the prefix;
+   - periodic reports on steps and seconds;
+   - `ask_parent` round trips;
+   - `_batchable` no longer the gate for children, because spawn is non-blocking by construction.
+
+   Acceptance tests:
+   - three read-only children run concurrently, with wall-clock under 0.6× of serial using fake providers with fixed delays;
+   - writer serialisation;
+   - the crew budget cancels everyone and the root gets partial reports;
+   - a cancel cascade;
+   - an `ask_parent` answer and a timeout falling back to the default;
+   - steering changes a child's next think;
+   - the inbox stays out of the cacheable prefix (byte-identical prefix before and after a message);
+   - a restart mid-crew resumes and the parent gets every report;
+   - with `delegate` used as today, the behaviour is unchanged.
+
+3. **Chat and voice crews.** *Lock `orchestration`, `agents/`; after item 2.* Add `chat_crews` and `background`, the delivery path for background reports (orchestration publishes; Interface and Voice deliver through their existing notice and speech paths, with no new delivery code in Voice unless its CONTRACT requires it), and the `agents/chat.md` and `agents/voice_chat.md` lines. Acceptance: a typed "compare A, B and C" with `chat_crews = true` answers at once, and the report arrives as a notice with all three.
+
+4. **Projects on crews.** *Lock `planning`, `orchestration`; after item 2.* A project session spawns one member per ready plan node, up to the concurrency cap, instead of one child at a time, and the stage 7 node bookkeeping reads `crew.report`. Acceptance: a three-node independent plan finishes in about the time of its longest node.
+
+5. **The tree, visible.** *Lock `interface`; parallel to items 2-4 once item 1 lands.*
+   - The TUI's task tree shows crew members under their parent, with status, the last progress line, steps and cost, in the existing ⏺/⎿ shape.
+   - Add a console command `crew [<id>]` (list members and messages) and `crew cancel <handle>`.
+   - The dashboard has a crew panel reading `crew:<id>`.
+
+   Acceptance: interface tests; `tui_is_sane` holds with a 6-member crew.
+
+6. **Crew scenarios.** *Lock `evals`.* Add `toolchain/crew-*` scenarios (`needs_model = True`):
+   - fan-out research of three items;
+   - a child that must `ask_parent` for a preference;
+   - a parent that steers a child off a dead end;
+   - cancellation when the first child finds the answer (`first_ok`);
+   - the crew budget ending a runaway;
+   - a background chat crew delivering a notice.
+
+   Add a free micro-benchmark, `python -m simorgh.evals crew-bench`, with fake providers: message latency p50/p95, spawn overhead, fan-out speedup, and memory per member.
+
+   Acceptance: the micro-benchmark runs free and records its numbers.
+
+7. **Measure and write down.** *No lock.* Run `crew-bench`, and the crew scenarios within a spend cap the creator sets. Write `docs/findings/<date>-agent-crews.md`: speedup, message latency, tokens per crew against one agent doing it alone, and failure shapes.
+
+## What this must never do
+
+- Let a member act outside Guardian, or with more authority than the person who asked. Children inherit the requester; they never escalate.
+- Run two writers on one tree at once, or let a child land on main without the existing landing gate.
+- Let a crew spend without a bound. Every crew has dollars, wall-clock and member caps, and exhaustion is a typed `partial`, never a hang.
+- Put transcripts in messages. Messages carry conclusions and refs; a parent reading a child's whole transcript is the cost this design exists to avoid.
+- Break the cacheable prefix. Inbox and progress go after it.
+- Poll. Waiting is event-driven (`await_agents`, `ask_parent`, stage 7 `wait`).
+- Speak a background result into a room during quiet hours, or to a different person than the one who asked.
+
+## Definition of done
+
+- [ ] Items 1-6 built with tests; module tiers are green; `--tier core` is green (contracts changed); every CONTRACT.md is updated.
+- [ ] `crew-bench` numbers are recorded; the scenarios run within the cap; the findings are written.
