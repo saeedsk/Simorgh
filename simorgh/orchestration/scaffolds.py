@@ -243,6 +243,10 @@ _TOOL_NOTES: dict[str, str] = {
                 "consolidation. You do NOT need it to remember a conversation: every turn is recorded "
                 "automatically, so `memory_search` can already find what was said. Use it for something "
                 "you worked out or fetched that would otherwise be one line in a transcript",
+    "memory_core_edit": "change one of your core memory blocks (the short notes on every turn): `block` is "
+                        "`household` or `me`, `old` the exact words to replace and `new` what replaces them; "
+                        "`old` empty adds a line, `new` empty removes one. Only the speaker's own block and "
+                        "the household's -- never somebody else's",
     "console_tail": "the last lines Sim printed on its own console, the only way to answer a question about its own screen or output: `<count>` or `<count> <word to filter>`, e.g. `30 error`",
     "cam_webrtc": "the low-delay camera relay (go2rtc) for the phone and dashboard: status, install, start, stop -- "
                   "not the TV; start gives each camera's viewer path behind the house token",

@@ -134,6 +134,9 @@ VOICE_CREW_TOOLS = ("spawn", "check_agents", "cancel_agent")
 #: Execution's `claude_code_task` (stage 18 item 12), named rather than
 #: imported (a subsystem may not import another): its cost is a crew's.
 CLAUDE_CODE_TOOL = "claude_code_task"
+#: Execution's core-block editor (stage 15 item 8), offered to a chat turn
+#: only while Memory returns core blocks (`Session.core_memory`).
+CORE_EDIT_TOOL = "memory_core_edit"
 #: A remote agent as a crew member (stage 18 item 9): `spawn{agent: "a2a:<name>"}`.
 A2A_PREFIX = "a2a:"
 #: Execution's `a2a:calls` stream, where `a2a_call` writes each status
@@ -2000,6 +2003,15 @@ class SessionRunner:
         if session.guards is not None and not no_tools:
             session.guards.offered = tuple(offered) + tuple(not_shown)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
+        if (offered and not no_tools and session.core_memory is not None and session.profile.scaffold == "chat"
+                and CORE_EDIT_TOOL not in offered):
+            # Core memory blocks are on (stage 15 item 8: the recall just
+            # returned `core`), so the model may keep them. Only then: with
+            # them off the tools list, like the prompt, is what it was.
+            offered = tuple(offered) + (CORE_EDIT_TOOL,)
+            session.offered = tuple(offered)
+            if session.guards is not None:
+                session.guards.offered = tuple(session.guards.offered) + (CORE_EDIT_TOOL,)
         # Per-turn material goes to the latest user turn, so the system
         # prefix stays byte-identical from turn to turn (stage 4 item 4).
         messages = scaffolds.with_turn_note(messages, scaffolds.when_line(_epoch(self._clock)))

@@ -116,6 +116,26 @@ FACTS_BLOCK_HEADER = (
 )
 
 
+#: Core memory blocks (stage 15 item 8): the notes the model keeps itself,
+#: shown on every chat turn. Per-turn, like every block here, so an edit
+#: never touches the cacheable system prefix.
+CORE_MEMORY_HEADER = (
+    "Your core memory -- short notes you keep yourself and see on every turn. When something in "
+    "them changes or is wrong, correct it with `memory_core_edit`; keep them short:\n"
+)
+
+
+def _core_lines(blocks: list[dict]) -> str:
+    """`[household]` and `[Soodeh]`, each over its text; "" when no block
+    has any text, so an empty store adds nothing."""
+    out = []
+    for block in blocks or ():
+        text = str(block.get("text") or "").strip()
+        if text:
+            out.append(f"[{block.get('label') or block.get('block') or ''}]\n{text}")
+    return "\n".join(out)
+
+
 def _fact_lines(facts: list[dict]) -> str:
     """The facts as lines: the current value, and what it replaced."""
     lines = []
@@ -235,6 +255,9 @@ class Assembler:
             # never anybody else's: how one person has seemed this week
             # is not context for another person's question.
             blocks.append({"role": "system", "content": mood})
+        core = _core_lines(session.core_memory or []) if chat else ""
+        if core:
+            blocks.append({"role": "system", "content": CORE_MEMORY_HEADER + core})
         if facts:
             blocks.append({"role": "system", "content": FACTS_BLOCK_HEADER + facts})
         if mem:
@@ -410,12 +433,15 @@ class Assembler:
                 {"query": query, "kinds": matched_kinds, "k": _MEMORY_MATCHED_K},
                 trace_id=session.trace,
             )
+        speaker = str(getattr(session, "speaker", "") or "")
         recent_call = self._request_with_reason(
             topics.MEMORY_RETRIEVE,
-            {"query": "", "kinds": ["episodic"], "k": _MEMORY_RECENT_K},
+            # A chat turn also asks for the core blocks (stage 15 item 8):
+            # the household's and the speaker's ("" is the console, the
+            # owner's). Memory answers `core` only while they are on.
+            {"query": "", "kinds": ["episodic"], "k": _MEMORY_RECENT_K, **({"core_for": speaker} if chat else {})},
             trace_id=session.trace,
         )
-        speaker = str(getattr(session, "speaker", "") or "")
         calls = [matched_call, recent_call]
         if speaker:
             # A third recall, for a spoken turn whose speaker is known: what
@@ -429,6 +455,8 @@ class Assembler:
             ))
         results = await asyncio.gather(*calls)
         (matched, why), (recent, _recent_why) = results[0], results[1]
+        core = recent.payload.get("core") if recent is not None else None
+        session.core_memory = list(core) if isinstance(core, list) else None
         person = results[2][0] if speaker else None
         # The facts the query mentions ride back with the matched recall
         # (stage 5 item 3): `memory.retrieve.reply.facts`.

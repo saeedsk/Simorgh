@@ -301,6 +301,11 @@ class Session:
     route: tuple | None = None
     route_conversational: bool = False
     route_more: list = field(default_factory=list)
+    #: Core memory blocks (stage 15 item 8) as the turn's recall returned
+    #: them, `[{block, label, text}]`; None when Memory sent none, which is
+    #: `[memory] core_blocks` off. An empty list means on with no block
+    #: written yet: the turn is still offered `memory_core_edit`.
+    core_memory: list | None = None
 
     @property
     def trace(self) -> str:

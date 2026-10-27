@@ -392,6 +392,74 @@ class MemoryEngine:
             idempotency_key=f"{ENTITY_STREAM}:{key}", payload=payload))
         await self._entities_synced()
 
+    # -- core blocks (stage 15 item 8) ---------------------------------------------------
+    async def _core_synced(self):
+        """The core-block index, caught up with `memory:core`."""
+        from .core import CORE_STREAM, CoreIndex
+
+        index = getattr(self, "_core", None)
+        if index is None:
+            index = self._core = CoreIndex()
+        for event in await self._ledger.read(CORE_STREAM, from_seq=index.cursor + 1):
+            index.cursor = event.seq
+            index.apply(event)
+        return index
+
+    async def core_blocks(self, requester: str) -> list[tuple[str, str, str]]:
+        """`(block, label, text)` for the blocks a turn of `requester`'s
+        shows: `household`, then their own. A block nobody wrote is not
+        listed, so with no blocks this is empty and the prompt is as it was."""
+        from .core import HOUSEHOLD, person_block, requester_name
+
+        index = await self._core_synced()
+        name = requester_name(requester, self._people())
+        out = []
+        if index.text(HOUSEHOLD).strip():
+            out.append((HOUSEHOLD, HOUSEHOLD, index.text(HOUSEHOLD)))
+        own = person_block(name)
+        if own and index.text(own).strip():
+            out.append((own, name, index.text(own)))
+        return out
+
+    async def edit_core(self, *, block: str, old: str, new: str, requester: str,
+                        source_ref: str = "", action_id: str = "") -> dict:
+        """One `memory_core_edit`: `{ok, block, text, error}`.
+
+        `requester` is who asked, as Guardian recorded the proposal ("" the
+        owner's console); only their own block and `household` are theirs
+        to change. The event keeps the text it replaced and the turn it
+        came from, so every edit can be read back and undone."""
+        from .core import CORE_STREAM, EDITED, apply_edit, block_for, requester_name
+
+        name = requester_name(requester, self._people())
+        if not name:
+            return {"ok": False, "block": "", "text": "",
+                    "error": "a voice nobody recognised has no core block, and may not edit the household's"}
+        target = block_for(block, name)
+        if not target:
+            return {"ok": False, "block": "", "text": "",
+                    "error": f"{block!r} is not yours to edit: {name} may edit only `household` or their own block"}
+        # One edit at a time: an edit is read, replace, append, and two at
+        # once (the bus runs up to 16 handlers per subscription; a think
+        # may make two calls) would each start from the same text, and the
+        # later event would drop the earlier edit while saying it kept it.
+        lock = getattr(self, "_core_lock", None)
+        if lock is None:
+            lock = self._core_lock = asyncio.Lock()
+        async with lock:
+            index = await self._core_synced()
+            before = index.text(target)
+            after, why = apply_edit(before, old, new, limit=self._config.core_block_chars)
+            if why:
+                return {"ok": False, "block": target, "text": before, "error": why}
+            payload = {"block": target, "text": after, "previous": before, "old": old, "new": new,
+                       "by": name, "source_ref": source_ref, "action_id": action_id}
+            await self._ledger.append(CORE_STREAM, Event(
+                stream=CORE_STREAM, type=EDITED, ts=self._clock.now(), trace_id="", causation_id=None,
+                idempotency_key=f"{CORE_STREAM}:{uuid.uuid4().hex}", payload=payload))
+            await self._core_synced()
+        return {"ok": True, "block": target, "text": after, "error": ""}
+
     async def entity_for(self, text: str, *, speaker: str = "", person_scope: str = "*", source_refs=(),
                          value: bool = False) -> str:
         """The entity `text` names, created when nothing does; "" for a

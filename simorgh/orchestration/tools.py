@@ -79,6 +79,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "cancel_task": ("reversible", False),
     "memory_forget": ("irreversible", False),
     "remember": ("reversible", False),
+    # A core block (stage 15 item 8): every edit keeps the text it replaced,
+    # so another edit undoes it. Offered only while memory has them on.
+    "memory_core_edit": ("reversible", False),
     # `voice set` over the bus: the service validates, the change is live
     # and undone by setting it back.
     "voice_setting": ("reversible", False),

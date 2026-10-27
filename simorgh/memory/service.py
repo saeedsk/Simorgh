@@ -189,6 +189,9 @@ class Service:
 
     async def _on_retrieve(self, message: Message) -> None:
         payload = message.payload
+        if "core_edit" in payload:
+            await self._on_core_edit(message)
+            return
         person = ""
         for tag in (payload.get("filters") or {}).get("tags") or ():
             if str(tag).startswith("person:"):
@@ -259,7 +262,38 @@ class Service:
             ],
             "truncated": truncated,
             **({"facts": facts} if facts else {}),
+            **(await self._core_for(payload)),
         })
+
+    async def _core_for(self, payload: dict) -> dict:
+        """`{"core": [...]}` for a recall that asks (`core_for`, the speaker,
+        "" the console) while `core_blocks` is on -- the list empty when no
+        block is written, which still says the blocks are on, so the turn
+        is offered `memory_core_edit`. Nothing at all when off or not asked:
+        the reply, and so the prompt, is what it was (stage 15 item 8)."""
+        if not self._config.core_blocks or "core_for" not in payload:
+            return {}
+        blocks = await self.engine.core_blocks(str(payload.get("core_for") or ""))
+        return {"core": [{"block": block, "label": label, "text": text} for block, label, text in blocks]}
+
+    async def _on_core_edit(self, message: Message) -> None:
+        """`memory_core_edit`'s request: a `memory.retrieve` carrying
+        `core_edit{block, old, new, requester, source_ref, action_id}`,
+        answered on `memory.retrieve.reply` with no items and
+        `core_edit{ok, block, text, error}`. It rides on retrieve because
+        the catalogue has no core topic yet and retrieve is the one memory
+        request with a reply; `memory.core.edit` is a `contracts` change
+        (memory/CONTRACT.md, planned changes)."""
+        edit = message.payload.get("core_edit") or {}
+        if not self._config.core_blocks:
+            result = {"ok": False, "block": "", "text": "", "error": "core memory blocks are off ([memory] core_blocks)"}
+        else:
+            result = await self.engine.edit_core(
+                block=str(edit.get("block") or ""), old=str(edit.get("old") or ""), new=str(edit.get("new") or ""),
+                requester=str(edit.get("requester") or ""), source_ref=str(edit.get("source_ref") or ""),
+                action_id=str(edit.get("action_id") or ""))
+        await self._ctx.bus.reply(message, type=topics.MEMORY_RETRIEVE_REPLY,
+                                  payload={"items": [], "truncated": False, "core_edit": result})
 
     async def _on_store(self, message: Message) -> None:
         payload = message.payload

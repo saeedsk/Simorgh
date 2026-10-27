@@ -2336,6 +2336,90 @@ class RememberTool:
                           metadata={"kind": "semantic", "chars": len(fact), "tags": tags})
 
 
+async def _proposal_requester(ctx: ToolContext) -> str | None:
+    """Who asked for this call, from Guardian's own record of the proposal
+    (`action:<id>`, its `received` event): "" for the console, the
+    speaker's name for a spoken turn. None when the record cannot be read
+    -- unknown, which is never the same as nobody."""
+    ledger = getattr(ctx, "ledger", None)
+    if ledger is None or not getattr(ctx, "action_id", ""):
+        return None
+    try:
+        events = await ledger.read(f"action:{ctx.action_id}")
+    except Exception:  # noqa: BLE001 -- unreadable is unknown
+        return None
+    for event in events:
+        if event.type == "received":
+            proposal = (event.payload or {}).get("proposal") or {}
+            return str(proposal.get("requester") or "")
+    return None
+
+
+class MemoryCoreEditTool:
+    """Keeping a core memory block current (stage 15 item 8, Letta's
+    `core_memory_replace`).
+
+    A core block is a short note that is in front of the model on every
+    chat turn -- "Soodeh: prefers Farsi, tea not coffee" -- rather than one
+    a recall has to happen to match. This changes one: `old` replaced by
+    `new` in `block`. Memory keeps every edit as an event with the text it
+    replaced, so it is undone by another edit: reversible.
+
+    Whose block it is comes from Guardian's record of who asked, never
+    from the arguments: a person edits their own block or `household`,
+    and Memory checks the same again before it writes."""
+
+    name = "memory_core_edit"
+    description = ("Change one of your core memory blocks -- the short notes shown to you on every turn: "
+                   "`household`, or the block of the person speaking (`me`). `old` is the exact words to "
+                   "replace and `new` what goes in their place; leave `old` empty to add a line, `new` "
+                   "empty to remove one. Keep a block to what is worth knowing before anything is asked "
+                   "(\"prefers Farsi; tea, not coffee\"); a one-off detail belongs in `remember`. A person's "
+                   "own block is theirs alone: you cannot edit anybody else's.")
+    args_schema = {"type": "object", "properties": {"block": {"type": "string"}, "old": {"type": "string"},
+                                                    "new": {"type": "string"}},
+                   "required": ["block"]}
+    read_only = False
+    #: Every edit keeps the text it replaced; another edit puts it back.
+    reversibility = "reversible"
+
+    def __init__(self, config) -> None:
+        self._config = config
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        block = str(args.get("block") or "").strip()
+        if not block:
+            return ToolResult.refused("refused: `block` is required -- `household` or `me`")
+        bus = getattr(ctx, "bus", None)
+        if bus is None:
+            return ToolResult.unconfigured("refused: no bus to reach memory")
+        requester = await _proposal_requester(ctx)
+        if requester is None:
+            return ToolResult.refused("refused: Guardian's record of who asked could not be read, "
+                                      "so whose block this is cannot be known")
+        from simorgh.contracts.envelope import Message as _Message
+
+        try:
+            reply = await bus.request(_Message.new(topics.MEMORY_RETRIEVE, source="execution", payload={
+                "query": "", "kinds": [], "k": 0,
+                "core_edit": {"block": block, "old": str(args.get("old") or ""), "new": str(args.get("new") or ""),
+                              "requester": requester, "source_ref": str(getattr(ctx, "task_id", "") or ""),
+                              "action_id": str(getattr(ctx, "action_id", "") or "")}}),
+                timeout=10.0)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult.transient(f"refused: memory did not answer ({exc.__class__.__name__}: {exc})")
+        result = (reply.payload or {}).get("core_edit")
+        if not isinstance(result, dict):
+            # A Memory that answered as a plain recall has no core blocks to edit.
+            return ToolResult.unconfigured("refused: memory has no core blocks here")
+        if not result.get("ok"):
+            return ToolResult.refused(f"refused: {result.get('error') or 'memory did not take the edit'}")
+        target, text = str(result.get("block") or ""), str(result.get("text") or "")
+        return ToolResult(ok=True, output=f"{target} now reads:\n{text}" if text else f"{target} is now empty",
+                          side_effects=(f"core block {target} edited",),
+                          metadata={"block": target, "chars": len(text)})
+
+
 class CancelTaskTool:
     """Stop tasks: one by id, every waiting task of an origin, or all but one.
 
@@ -3475,6 +3559,15 @@ def meta_tools(config: Config) -> list:
     of `builtin_tools`, so the narration verbs and the tool-count checks
     that walk that list are not asked about a tool nobody watches run."""
     return [ToolMoreTool(config)]
+
+
+def memory_tools(config: Config) -> list:
+    """`memory_core_edit` (stage 15 item 8). Registered beside the meta
+    tools rather than in `builtin_tools`: no agent file names it -- a chat
+    session adds it only while Memory returns core blocks -- and the
+    narration verbs (`interface/live_status.py`) that walk that list have
+    no entry for it yet, so it narrates as the generic "Working"."""
+    return [MemoryCoreEditTool(config)]
 
 
 from .policyadopt import PolicyAdoptTool  # noqa: E402 -- beside the list that registers it
