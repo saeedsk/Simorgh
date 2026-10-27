@@ -133,9 +133,15 @@ class MediaNowTool(_MediaTool):
 
 class MediaControlTool(_MediaTool):
     name = "media_control"
+    # What each op does, said in words (stage 17 selection stress,
+    # 2026-10-27): `off`/`on` were in the enum and nowhere in the text, and
+    # nothing said that pause keeps the place while stop ends playback.
     description = (
-        "Pause, resume, skip, stop, or set the volume on a player. Volume is 0-100. "
-        "Refuses to go loud unattended, and refuses to go loud at all during quiet hours."
+        "Control a Home Assistant media player -- a TV or a speaker in the house: pause (holds the place, "
+        "so resume carries on from it), resume, skip, stop (ends playback), off or on (switches the player "
+        "itself off or on), mute, or set the volume. Volume is 0-100. "
+        "Refuses to go loud unattended, and refuses to go loud at all during quiet hours. "
+        "Not a room satellite (room_play) or the Mac's Music app (music_control)."
     )
     read_only = False
     reversibility = "reversible"
@@ -200,9 +206,14 @@ class MediaControlTool(_MediaTool):
 
 class MediaPlayTool(_MediaTool):
     name = "media_play"
+    # "a radio stream" read as "radio", so a genre went here with a
+    # kitchen player picked for `where` (stage 17 selection stress,
+    # 2026-10-27). This tool plays what it is handed; it finds nothing.
     description = (
-        "Play something on a player: a URL, a radio stream, or a media id your media server "
-        "understands. Give `what` and `where`."
+        "Play something on a Home Assistant media player (a TV or a speaker in the house): a URL, a "
+        "stream URL, or a media id your media server understands. Give `what` and `where`. It cannot "
+        "find a radio station by genre, and a room satellite is not one of its players -- music on a "
+        "satellite's speaker is room_play."
     )
     read_only = False
     reversibility = "reversible"

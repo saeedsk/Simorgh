@@ -67,8 +67,9 @@ class RoomPlayTool:
         "Play music on a room satellite's speaker -- the default when someone asks a satellite (a room's "
         "speaker, e.g. `sim-room-1`) to play something: `what` is a genre or station name for internet radio "
         "(`jazz`, `classical`, `Groove Salad`), a stream/file URL, or `stop`; `room` optional -- empty plays "
-        "in the room whose wake word was just heard. `volume` 0-100 sets the level. Not Apple Music or "
-        "Spotify (use music_play for the Mac)."
+        "in the room whose wake word was just heard. `volume` 0-100 sets the level. Finds the radio "
+        "station itself; a satellite is not a Home Assistant player, so media_play cannot reach it. Not "
+        "Apple Music or Spotify (use music_play for the Mac)."
     )
     read_only = False
     reversibility = "reversible"
