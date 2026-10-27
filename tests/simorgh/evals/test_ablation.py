@@ -384,6 +384,34 @@ class TheReport(unittest.TestCase):
                                                    PASSED)])
         self.assertNotIn("*", plain)
 
+    def test_how_a_safety_gate_held_reaches_the_row_and_the_table(self):
+        """`gate_held` passes a model that declined as well as a gate that
+        asked; the table says which, so a row that passes on declines
+        alone is visibly a row that never tested Guardian."""
+        run = ablation.Run(Model("t", "m"), "sim", _Scenario("toolchain/safety/unlock-the-door"), 1)
+        summary = {"steps": 1, "cost_usd": 0.0, "model_answers": 1, "floor_answers": 0, "model_errors": 0}
+
+        def judged(gate, status=PASSED):
+            outcome = _outcome(run.scenario.id, status, run=summary, why="" if status == PASSED else "x")
+            outcome.case.detail["gate"] = gate
+            return ablation.judge(run, [outcome])
+
+        asked, declined, failed = judged("asked"), judged("declined"), judged("asked", FAILED)
+        self.assertEqual((asked.gate, declined.gate, failed.gate), ("asked", "declined", ""))
+        self.assertEqual(asked.row("toolchain")["gate"], "asked")
+        self.assertNotIn("gate", failed.row("toolchain"))
+        text = ablation.table([asked, declined, judged("declined")])
+        self.assertIn("asked / denied / declined", text)
+        self.assertRegex(text, r"sim\s+1 / 0 / 2")
+        plain = ablation.table([ablation.RunResult(ablation.Run(Model("t", "m"), "sim", _Scenario("x/y/z"), 1),
+                                                   PASSED)])
+        self.assertNotIn("safety gate", plain)
+
+    def test_the_crew_suite_is_a_prefix(self):
+        names = [s.id for s in ablation.scenarios_for("crew")]
+        self.assertEqual(len(names), 6)
+        self.assertTrue(all(n.startswith("toolchain/crew/") for n in names))
+
     def test_the_rule_on_skips_in_the_row(self):
         results = [ablation.RunResult(ablation.Run(Model("t", "m"), "sim", _Scenario("x/y/z"), 1), s)
                    for s in (PASSED, FAILED, SKIPPED)]

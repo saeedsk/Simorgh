@@ -5,6 +5,7 @@
     python -m simorgh.evals list
     python -m simorgh.evals scenario --verbose     # the household script, per probe
     python -m simorgh.evals ablate --suite toolchain --models floor:floor --dry-run
+    python -m simorgh.evals crew-bench             # crews with fake providers (free)
 
 A suite that costs money needs `--paid`. That is not paternalism: the
 loader runs `run household` on every bless, and a suite that quietly
@@ -73,7 +74,14 @@ def main(argv: list[str]) -> int:
     abl.add_argument("--log", default="", metavar="PATH", help="where to append one JSONL row per run")
     abl.add_argument("--json", action="store_true")
     sub.add_parser("memory", add_help=False, help="the memory suite: native vs graph vs sidecars (stage 15)")
+    sub.add_parser("crew-bench", add_help=False,
+                   help="crew micro-benchmark with fake providers: latency, overhead, speedup, memory (free)")
     args, rest = ap.parse_known_args(argv)
+
+    if args.command == "crew-bench":
+        from .crewbench import main as crew_bench_main
+
+        return crew_bench_main(rest)
 
     if args.command == "ablate":
         return _ablate(args)

@@ -36,7 +36,7 @@ Runner = Callable[[], Awaitable[list[Outcome]]]
 
 #: Suites that cost real money. `run` refuses them without `--paid`,
 #: because "I ran the evals" should never be a surprise on a bill.
-PAID: frozenset[str] = frozenset({"trials", "tooluse", "research", "code", "toolchain"})
+PAID: frozenset[str] = frozenset({"trials", "tooluse", "research", "code", "toolchain", "crew"})
 
 
 async def household() -> list[Outcome]:
@@ -312,6 +312,17 @@ async def toolchain() -> list[Outcome]:
     which is what lets a sandbox use a real provider; without it every
     scenario is skipped with its reason, never failed.
     """
+    return await _scenario_suite("toolchain", "toolchain/")
+
+
+async def crew() -> list[Outcome]:
+    """The crew scenarios alone (`toolchain/crew/`, stage 18 item 6): the
+    same cases the `toolchain` suite runs among the rest, for a paid run
+    that wants the crews without the other forty-odd chains."""
+    return await _scenario_suite("crew", "toolchain/crew/")
+
+
+async def _scenario_suite(name: str, prefix: str) -> list[Outcome]:
     import os
 
     from .house.run import per_scenario, run_pack
@@ -319,10 +330,10 @@ async def toolchain() -> list[Outcome]:
 
     if os.environ.get("SIMORGH_EVALS_PAID"):
         os.environ["SIMORGH_HOUSE_PAID"] = "1"
-    chosen = by_prefix("toolchain/")
+    chosen = by_prefix(prefix)
     if not chosen:
-        return [Outcome(case=Case(name="toolchain", kind="scenario"), status=SKIPPED,
-                        why="no toolchain/ scenarios are registered")]
+        return [Outcome(case=Case(name=name, kind="scenario"), status=SKIPPED,
+                        why=f"no {prefix} scenarios are registered")]
     return per_scenario(await run_pack(chosen), chosen)
 
 
@@ -338,6 +349,7 @@ SUITES: dict[str, Runner] = {
     "research": _benchmark_suite("gaia", level="1"),
     "code": _benchmark_suite("swebench-verified", level="<15 min fix"),
     "toolchain": toolchain,
+    "crew": crew,
     "memory": lambda: __import__("simorgh.evals.memory.suite", fromlist=["outcomes"]).outcomes(),
 }
 
@@ -356,4 +368,4 @@ async def timed(runner: Runner) -> tuple[list[Outcome], float]:
     return outcomes, time.monotonic() - started
 
 
-__all__ = ["PAID", "Runner", "SUITES", "find", "household", "timed", "toolchain", "trials"]
+__all__ = ["PAID", "Runner", "SUITES", "crew", "find", "household", "timed", "toolchain", "trials"]
