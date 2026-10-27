@@ -23,6 +23,7 @@ from .api import capabilities_of, Budget, BudgetExceeded, ContextTooLarge, NoRea
 from .assembler import PromptAssembler
 from .budget import PurposeWindow, RollingWindowBudget
 from .compaction import Compactor
+from .compress import Compressor
 from .config import Config
 from .parser import OutputParser, accept_native_calls
 from .providers.base import FloorProvider
@@ -419,6 +420,22 @@ class Service:
         # `[cognition] ablate = ["rescue"]` (stage 14): accept well-formed
         # calls only, marker and native alike (`parser.py`, "strict parsing").
         self._parser = OutputParser(strict="rescue" in self._config.ablate)
+        # Long tool results through LLMLingua-2 (stage 17 item 4), only when
+        # switched on and not ablated. Without `llmlingua` the switch is
+        # reported unavailable by name (a config problem and health detail)
+        # and every request goes out exactly as before.
+        self._compressor = None
+        self._compress_unavailable = ""
+        if self._config.compress_tool_results and "compress" not in self._config.ablate:
+            compressor = Compressor(rate=self._config.compress_rate, min_chars=self._config.compress_min_chars)
+            why = compressor.unavailable()
+            if why:
+                compressor.close()
+                self._compress_unavailable = why
+                self._config = dataclasses.replace(self._config, problems=self._config.problems + (why,))
+                ctx.logger.warning("cognition.config_ignored", detail=why)
+            else:
+                self._compressor = compressor
 
         self._sub_think = await ctx.bus.subscribe(topics.COGNITION_THINK, self._on_think)
         self._sub_compact = await ctx.bus.subscribe(topics.COGNITION_COMPACT_REQUEST, self._on_compact_request)
@@ -443,6 +460,8 @@ class Service:
                     getattr(self, "_sub_started", None), getattr(self, "_sub_tools", None)):
             if sub is not None:
                 await sub.unsubscribe()
+        if getattr(self, "_compressor", None) is not None:
+            self._compressor.close()
 
     def _note_reply(self, *, floor: bool) -> None:
         """Start the "no real provider" clock on the FIRST floor reply;
@@ -461,6 +480,8 @@ class Service:
             elapsed = self._ctx.clock.now() - self._no_real_provider_since
             if elapsed > 300:
                 return Health.degraded(f"no real provider available for {elapsed:.0f}s")
+        if getattr(self, "_compress_unavailable", ""):
+            return Health.ok(self._compress_unavailable)
         return Health.ok()
 
     # -- handlers ---------------------------------------------------------------------
@@ -550,9 +571,17 @@ class Service:
                 await self._error_reply(message, "budget_exceeded", why, retryable=True)
                 return
 
+        # Long tool results compressed (stage 17 item 4), before anything
+        # else reads the messages; off (no compressor), they are the
+        # caller's own list, untouched.
+        source_messages = payload["messages"]
+        compress_stats = None
+        if self._compressor is not None:
+            source_messages, compress_stats = await self._compressor.compress_messages(source_messages)
+
         try:
             assembled = await self._assembler.assemble(
-                purpose=purpose.value, messages=payload["messages"],
+                purpose=purpose.value, messages=source_messages,
                 task_rules=payload.get("task_rules", ""),
                 last_step=payload.get("last_step", False),
                 steps_left=payload.get("steps_left"), trace_id=message.trace_id,
@@ -569,7 +598,7 @@ class Service:
             # tool results and layers 3-4 have real per-segment structure
             # to work with, per 04 section 5's compaction pipeline.
             elastic_limit = budget.max_tokens_in - protected_tokens
-            messages = _with_turn_note(payload["messages"], assembled.turn_note)
+            messages = _with_turn_note(source_messages, assembled.turn_note)
             compacted = await self._compactor.compact(
                 messages, limit_tokens=elastic_limit,
                 allow_summarize=payload.get("allow_summarize", False),
@@ -643,6 +672,8 @@ class Service:
                 span.set("estimator", ESTIMATOR)
                 if payload.get("channel"):
                     span.set("channel", str(payload["channel"]))
+                if compress_stats is not None:
+                    span.set("compress", compress_stats.as_attr())
         except NoRealProvider as exc:
             await self._error_reply(message, "no_real_provider", str(exc), retryable=True)
             return

@@ -48,7 +48,9 @@ DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
 
 
 #: The `[cognition] ablate` switches this module owns (stage 14).
-ABLATE_SWITCHES: frozenset[str] = frozenset({"rescue"})
+#: "rescue": strict parsing (stage 14). "compress": tool-result compression
+#: (stage 17 item 4) as if `compress_tool_results = false`.
+ABLATE_SWITCHES: frozenset[str] = frozenset({"rescue", "compress"})
 
 
 @dataclass(frozen=True)
@@ -172,6 +174,15 @@ class Config:
     # only (`OutputParser(strict=True)`). Never set by `sim.sh`; empty is
     # Sim as it ships.
     ablate: tuple[str, ...] = ()
+    # Compression of long tool results with LLMLingua-2 (stage 17 item 4,
+    # `compress.py`): an experiment, off. When on, a tool result longer
+    # than `compress_min_chars` has its prose cut to about `compress_rate`
+    # of its tokens; code, JSON, Farsi and header lines are kept as they
+    # are. Needs the optional `llmlingua` package; without it the switch
+    # is reported unavailable and nothing changes.
+    compress_tool_results: bool = False
+    compress_min_chars: int = 4_000
+    compress_rate: float = 0.5
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -206,9 +217,13 @@ class Config:
             "snip_keep_last_segments", "microcompact_trigger_fraction", "collapse_keep_full_segments",
             "collapse_trigger_fraction",
             "availability_poll_seconds", "assembly_request_timeout",
+            "compress_tool_results", "compress_min_chars", "compress_rate",
         ):
             if key in raw:
                 kwargs[key] = raw[key]
+        if "compress_tool_results" in raw and not isinstance(raw["compress_tool_results"], bool):
+            problems.append(f"compress_tool_results is {raw['compress_tool_results']!r}, not true/false -- off")
+            kwargs["compress_tool_results"] = False
         if "ablate" in raw:
             value = raw["ablate"]
             if isinstance(value, (list, tuple)):

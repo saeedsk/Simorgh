@@ -47,6 +47,12 @@ def _is_result(message: dict) -> bool:
     return role == "tool" or (role == "user" and str(message.get("content") or "").startswith(_RESULT_HEADS))
 
 
+def is_result(message: dict) -> bool:
+    """A tool result: a `role: "tool"` message, or a user turn that starts
+    "Result of" / "Results of" (stage 17 item 4 compresses only these)."""
+    return _is_result(message)
+
+
 def pinned(message: dict) -> bool:
     """A message compaction never shortens (`compaction.py::_is_protected`):
     `system` messages and the `protected` turn."""
@@ -87,4 +93,4 @@ def split_messages(messages: list[dict], *, elastic_ratio: float = 1.0) -> dict[
     return out
 
 
-__all__ = ["BLOCKS", "ESTIMATOR", "estimate_tokens", "pinned", "split_messages"]
+__all__ = ["BLOCKS", "ESTIMATOR", "estimate_tokens", "is_result", "pinned", "split_messages"]
