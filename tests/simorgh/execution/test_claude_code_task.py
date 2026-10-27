@@ -100,7 +100,7 @@ def fake_sdk(script: list, *, result: ResultMessage | None = None, hooks: bool =
     sdk.ran, sdk.options, sdk.prompts = [], [], []
 
     fields = dict(cwd=None, max_turns=None, permission_mode=None, max_budget_usd=None,
-                  setting_sources=None, disallowed_tools=None, model=None)
+                  setting_sources=None, disallowed_tools=None, model=None, env=None)
     if hooks:
         fields["hooks"] = None
     sdk.ClaudeAgentOptions = dataclasses.make_dataclass(
@@ -409,6 +409,115 @@ class OffByDefaultAndBounded(_Case):
         cc = ExecutionConfig().claude_code
         self.assertEqual((cc.enabled, cc.max_usd_per_run, cc.max_runs_per_day), (False, 2.0, 3))
         self.assertGreater(ClaudeCodeTaskTool(ExecutionConfig()).timeout_s, cc.wall_s)
+
+
+class NoMoreReachThanSimsOwnTools(_Case):
+    """Review of stage 18 item 12. A hook "allow" lets Claude Code's tool
+    do whatever Guardian approved, and Guardian has no notion of "inside
+    this worktree" (ScopeRule abstains): Sim's own file tools stay in the
+    tree through `pathsafety`, and `run_shell` has `shell_refusals`.
+    Claude Code's tools had neither."""
+
+    async def _one(self, name: str, tool_input: dict, effect=None):
+        sdk = fake_sdk([("tool", name, tool_input, effect)])
+        result = await self.run_tool(self.tool(sdk, max_runs_per_day=100))
+        return sdk, result.metadata["decisions"][0]
+
+    async def assert_refused_before_guardian(self, name: str, tool_input: dict, why: str, effect=None):
+        sdk, decision = await self._one(name, tool_input, effect)
+        self.assertEqual(sdk.ran, [], f"{name} {tool_input} ran")
+        self.assertFalse(decision["allowed"])
+        self.assertIn(why, decision["why"])
+        self.assertEqual(await self.ledger.read(f"action:{decision['action_id']}"), [],
+                         "refused here, never proposed")
+
+    async def test_a_write_to_the_live_checkout_is_refused(self):
+        live = self.repo / "simorgh" / "memory" / "store.py"
+        await self.assert_refused_before_guardian(
+            "Write", {"file_path": str(live), "content": "STORE = 2\n"}, "outside this task's worktree",
+            effect=lambda cwd: live.write_text("STORE = 2\n"))
+        self.assertEqual(live.read_text(), "STORE = 1\n")
+
+    async def test_a_relative_escape_and_a_link_out_are_refused(self):
+        await self.assert_refused_before_guardian(
+            "Edit", {"file_path": "../../repo/simorgh/memory/store.py", "old_string": "1", "new_string": "2"},
+            "outside this task's worktree")
+        (self.tree / "out").symlink_to(self.repo)
+        await self.assert_refused_before_guardian(
+            "Write", {"file_path": str(self.tree / "out" / "simorgh" / "memory" / "x.py"), "content": "x"},
+            "outside this task's worktree")
+
+    async def test_reads_stay_in_the_tree_and_never_name_a_credential(self):
+        await self.assert_refused_before_guardian("Read", {"file_path": str(Path.home() / ".ssh" / "id_rsa")},
+                                                  "outside this task's worktree")
+        await self.assert_refused_before_guardian("Read", {"file_path": str(self.tree / ".env")},
+                                                  "credentials")
+        await self.assert_refused_before_guardian("Grep", {"pattern": "KEY", "path": "/etc"},
+                                                  "outside this task's worktree")
+
+    async def test_reading_a_protected_file_is_allowed(self):
+        """ProtectedRule judges edits; the read_only claim reaches it
+        through `ToolRegistry.info_for` for an unregistered tool."""
+        sdk, decision = await self._one("Read", {"file_path": str(self.tree / "simorgh" / "guardian" / "rules.py")})
+        self.assertTrue(decision["allowed"], decision["why"])
+        self.assertEqual(sdk.ran, ["Read"])
+
+    async def test_bash_gets_run_shells_refusals_and_may_not_move_main(self):
+        for command, why in (("git push origin HEAD:main", "pushes"),
+                             ("git update-ref refs/heads/main HEAD", "moves a git ref"),
+                             ("git branch -f main HEAD", "branch"),
+                             ("git -C ../.. merge stage", "merges"),
+                             (f"cd {self.repo} && git status", "live checkout"),
+                             ("cat ~/.ssh/id_ed25519", "credentials")):
+            with self.subTest(command=command):
+                await self.assert_refused_before_guardian("Bash", {"command": command}, why)
+        main = _git(self.repo, "rev-parse", "main")
+        _sdk, decision = await self._one("Bash", {"command": "git status && git log --oneline -3"})
+        self.assertTrue(decision["allowed"], decision["why"])
+        self.assertEqual(_git(self.repo, "rev-parse", "main"), main)
+
+    async def test_no_settings_file_is_loaded(self):
+        """A project `.claude/settings.json` can carry hooks that run
+        outside PreToolUse; the worktree is reused by a retry."""
+        sdk = fake_sdk([])
+        await self.run_tool(self.tool(sdk))
+        self.assertEqual(sdk.options[0].setting_sources, [])
+
+    async def test_sims_other_keys_are_blanked_for_claude_code(self):
+        from unittest import mock
+
+        env = {"TOGETHER_API_KEY": "t", "ELEVENLABS_API_KEY": "e", "ANTHROPIC_API_KEY": "a"}
+        with mock.patch.dict("os.environ", env):
+            sdk = fake_sdk([])
+            await self.run_tool(self.tool(sdk))
+        passed = sdk.options[0].env
+        self.assertEqual((passed.get("TOGETHER_API_KEY"), passed.get("ELEVENLABS_API_KEY")), ("", ""))
+        self.assertNotIn("ANTHROPIC_API_KEY", passed, "the CLI's own credential is left alone")
+        self.assertNotIn("PATH", passed)
+
+    async def test_an_unknown_requester_refuses_to_start(self):
+        sdk = fake_sdk([("tool", "Bash", {"command": "echo hi"}, None)])
+        tool = self.tool(sdk)
+        ctx = dataclasses.replace(self.ctx(), action_id="never-proposed")
+        result = await asyncio.wait_for(tool.run({"feature": "x"}, ctx=ctx), timeout=30.0)
+        self.assertEqual(result.error_kind, "refused")
+        self.assertIn("who asked", result.error)
+        self.assertEqual(sdk.options, [], "no client was made")
+
+    async def test_two_runs_at_once_do_not_pass_the_daily_cap_together(self):
+        tool = self.tool(fake_sdk([("text", "working")] * 3, delay_s=0.02), max_runs_per_day=1)
+        read = self.ledger.read
+
+        async def slow_read(stream, *a, **k):
+            # A ledger whose read yields (sqlite reads in a thread), so
+            # both calls are between their count and their `started`.
+            await asyncio.sleep(0.01)
+            return await read(stream, *a, **k)
+
+        self.ledger.read = slow_read
+        first, second = await asyncio.gather(self.run_tool(tool), self.run_tool(tool))
+        self.assertEqual(sorted([first.ok, second.ok]), [False, True])
+        self.assertEqual(sum(1 for e in await self.ledger.read(STREAM) if e.type == "started"), 1)
 
 
 class TheToolIsWired(unittest.TestCase):

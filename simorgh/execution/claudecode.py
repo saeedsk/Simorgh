@@ -28,6 +28,17 @@ timeout or a broken bus denies it with the reason. Network tools
 (WebFetch, WebSearch) are refused here before Guardian unless
 `[execution.claude_code] allow_network` is set.
 
+No more reach than Sim's own tools (`local_refusal`). Guardian judges a
+proposal's text and has no idea of "inside this worktree"; Sim's file
+tools keep to the tree themselves (`pathsafety`) and `run_shell` has
+`shell_refusals`. Claude Code's tools have neither, so the hook refuses,
+before Guardian, a file path that resolves outside the worktree or names
+a credential, and a Bash command `run_shell` would refuse, one that moves
+a git ref or branch by hand (a worktree shares main's refs), or one that
+names the live checkout. No settings file is loaded (a project
+`.claude/settings.json` can carry hooks that run outside Guardian), and
+Sim's other secret-shaped environment variables are blanked for the CLI.
+
 Budget. Off by default (`enabled = false`; the tool is not even
 registered). Each run has `max_turns`, a wall-clock cap `wall_s`, and
 `max_usd_per_run` (passed to the SDK when it takes one, and checked on the
@@ -52,6 +63,7 @@ import contextlib
 import dataclasses
 import importlib
 import inspect
+import os
 import re
 import subprocess
 import time
@@ -62,7 +74,10 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
+from simorgh.contracts.pathnames import looks_like_credential_path
 from simorgh.contracts.protocols import ToolContext, ToolResult
+
+from .shell import DEFAULT_SHELL_REFUSALS, _is_secret_env, refusal_for
 
 TOOL_NAME = "claude_code_task"
 #: Every hook proposal's tool name starts with this. Execution's
@@ -80,6 +95,23 @@ NETWORK_TOOLS = frozenset({"WebFetch", "WebSearch"})
 READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "TodoWrite", "NotebookRead", "BashOutput"})
 #: Claude Code tools that write a file, and which input key names it.
 WRITE_TOOLS = {"Edit": "file_path", "MultiEdit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
+#: The input keys a Claude Code file tool names its file or directory by.
+_PATH_KEYS = ("file_path", "notebook_path", "path")
+
+#: Bash commands refused before Guardian on top of `run_shell`'s own
+#: `shell_refusals`: git commands that move a ref or a checkout OUTSIDE
+#: this task's branch. A worktree shares its refs with the main checkout,
+#: so `git update-ref refs/heads/main HEAD` from inside it lands with no
+#: gate at all. Not a security boundary (a shell has none); the same
+#: accident guard `run_shell` is.
+CLAUDE_CODE_SHELL_REFUSALS: dict[str, str] = {
+    r"\bgit\b[^|;&]*\b(update-ref|symbolic-ref)\b": "moves a git ref by hand; only worktree_land moves main",
+    r"\bgit\b[^|;&]*\bbranch\b[^|;&]*\s(-[a-zA-Z]*[fdDmMcC][a-zA-Z]*|--force|--delete|--move|--copy)\b":
+        "forces, moves or deletes a branch; commit on this task's branch only",
+    r"\bgit\b[^|;&]*\bworktree\b": "manages worktrees; this task already has its own",
+    r"\bgit\b[^|;&]*(--git-dir|--work-tree)\b": "points git at another repository or tree",
+    r"(^|[;&|]\s*)git\s+-C\s": "runs git in another directory; stay in this task's worktree",
+}
 
 _BRIEF_BLOCK = re.compile(r"```brief\n(.*?)\n```", re.S)
 
@@ -156,6 +188,9 @@ def proposal_for(tool: str, tool_input: Mapping[str, Any]) -> tuple[dict, str, l
             content = str(data.get("new_string") or "")
         return {"path": path, "content": content[:20000]}, "reversible", [path] if path else []
     if tool in READ_TOOLS:
+        # Guardian's ProtectedRule lets a read_only proposal read a
+        # protected file; where a read may reach (this worktree, no
+        # credential) is `local_refusal`'s.
         path = str(data.get("file_path") or data.get("path") or data.get("notebook_path") or "")
         args = {"path": path} if path else {}
         if data.get("pattern"):
@@ -166,6 +201,69 @@ def proposal_for(tool: str, tool_input: Mapping[str, Any]) -> tuple[dict, str, l
     # Anything else (a sub-agent, an MCP tool): its input as text, and the
     # strictest class.
     return {"input": str(data)[:4000]}, "irreversible", []
+
+
+def _inside(root: Path, raw: str) -> Path | None:
+    """`raw` resolved (links followed) against `root`, when it stays
+    inside `root`; else None."""
+    try:
+        base = Path(root).resolve()
+        target = Path(raw)
+        target = (target if target.is_absolute() else base / target).resolve()
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return target if target == base or base in target.parents else None
+
+
+def local_refusal(tool: str, tool_input: Mapping[str, Any], *, root: Path, repo_root: Path | None,
+                  shell_refusals: Mapping[str, str] | None, allow_network: bool) -> str:
+    """Why this Claude Code call is refused before it reaches Guardian,
+    or "". Execution's own tools carry these limits themselves
+    (`pathsafety`: paths stay in the tree and never name a credential;
+    `run_shell`: `shell_refusals`); Claude Code's tools do not, and a
+    hook "allow" lets them do whatever Guardian approved, so the same
+    limits are applied here. Guardian has no notion of "inside the
+    worktree" (its ScopeRule abstains), so without this an approved
+    Write could edit the live checkout -- past the landing gate -- or a
+    Read could hand `~/.ssh` to the model."""
+    if tool in NETWORK_TOOLS and not allow_network:
+        return f"{tool} reaches the network; [execution.claude_code] allow_network is off"
+    data = tool_input if isinstance(tool_input, Mapping) else {}
+    if tool in WRITE_TOOLS or tool in READ_TOOLS:
+        for key in _PATH_KEYS:
+            raw = data.get(key)
+            if not raw:
+                continue
+            target = _inside(root, str(raw))
+            if target is None:
+                return f"{raw!r} is outside this task's worktree; {tool} works only inside it"
+            relative = target.relative_to(Path(root).resolve())
+            if looks_like_credential_path(relative.parts):
+                return f"{raw!r} looks like a credentials path"
+    if tool == "Bash":
+        command = str(data.get("command") or "")
+        reason = refusal_for(command, dict(shell_refusals or DEFAULT_SHELL_REFUSALS))
+        reason = reason or refusal_for(command, CLAUDE_CODE_SHELL_REFUSALS)
+        if reason:
+            return f"that command {reason}"
+        if repo_root is not None:
+            live = {str(repo_root), str(Path(repo_root).resolve())}
+            tree = str(Path(root).resolve())
+            if any(p and p in command and not tree.startswith(p) for p in live):
+                return "that command names the live checkout; work stays in this task's worktree"
+    return ""
+
+
+#: The credentials the `claude` CLI itself signs in with; every other
+#: secret-shaped variable is blanked for it (`claude_code_env`).
+CLI_CREDENTIALS = frozenset({"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"})
+
+
+def claude_code_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """`{name: ""}` for every secret-shaped variable (`run_shell`'s own
+    test, `shell._is_secret_env`) but the CLI's own credential."""
+    source = os.environ if environ is None else environ
+    return {name: "" for name in source if _is_secret_env(name) and name.upper() not in CLI_CREDENTIALS}
 
 
 def render_brief(template: str, *, feature: str, acceptance: str, files: list[str], module: str) -> str:
@@ -198,6 +296,7 @@ class _Run:
         self.decisions: list[dict] = []
         self.text: list[str] = []
         self.result: Any = None
+        self.root: Path = Path(".")
 
 
 class ClaudeCodeTaskTool:
@@ -226,6 +325,7 @@ class ClaudeCodeTaskTool:
         self._sdk_loader = sdk_loader
         self._progress = progress or self._log_progress
         self._monotonic = monotonic
+        self._start_lock = asyncio.Lock()
 
     @property
     def timeout_s(self) -> float:
@@ -251,10 +351,6 @@ class ClaudeCodeTaskTool:
         why = hook_path(sdk)
         if why:
             return ToolResult.unconfigured(f"{TOOL_NAME} refuses to start: {why}")
-        runs_today = await self._runs_today(ctx)
-        if runs_today >= cc.max_runs_per_day:
-            return ToolResult.refused(f"{TOOL_NAME}: {runs_today} run(s) today already, the cap is "
-                                      f"{cc.max_runs_per_day} ([execution.claude_code] max_runs_per_day)")
         try:
             template = brief_template(Path(self._config.repo_root))
         except (OSError, ValueError) as exc:
@@ -262,14 +358,29 @@ class ClaudeCodeTaskTool:
         files = [str(f) for f in (args.get("files") or ()) if str(f).strip()]
         brief = render_brief(template, feature=feature, acceptance=str(args.get("acceptance") or ""),
                              files=files, module=str(args.get("module") or ""))
-        requester, channel = await self._requester(ctx)
+        found = await self._requester(ctx)
+        if found is None:
+            # Unknown is not "nobody": proposing Claude Code's calls with
+            # no requester would act for Sim itself, which may be more
+            # than the person who asked may do.
+            return ToolResult.refused(f"{TOOL_NAME}: could not read who asked for this call "
+                                      f"(action:{ctx.action_id}), so its calls cannot be proposed for them")
+        requester, channel = found
         root = Path(root)
         start_head = _git(root, "rev-parse", "HEAD").stdout.strip()
 
         run = _Run()
-        await self._append(ctx, "started", {"run": run.id, "feature": feature[:500], "files": files,
-                                            "requester": requester, "max_usd": cc.max_usd_per_run,
-                                            "max_turns": cc.max_turns, "wall_s": cc.wall_s})
+        run.root = root
+        # The count and the `started` that it counts under one lock: two
+        # calls at once both read "0 today" and both ran past the cap.
+        async with self._start_lock:
+            runs_today = await self._runs_today(ctx)
+            if runs_today >= cc.max_runs_per_day:
+                return ToolResult.refused(f"{TOOL_NAME}: {runs_today} run(s) today already, the cap is "
+                                          f"{cc.max_runs_per_day} ([execution.claude_code] max_runs_per_day)")
+            await self._append(ctx, "started", {"run": run.id, "feature": feature[:500], "files": files,
+                                                "requester": requester, "max_usd": cc.max_usd_per_run,
+                                                "max_turns": cc.max_turns, "wall_s": cc.wall_s})
         started = self._monotonic()
         status, reason = "ok", ""
         try:
@@ -346,8 +457,20 @@ class ClaudeCodeTaskTool:
             "permission_mode": "default",
             "hooks": {"PreToolUse": [sdk.HookMatcher(matcher=None, hooks=[pre_tool_use])]},
             "max_budget_usd": float(cc.max_usd_per_run),
-            # CLAUDE.md: the lock and contract rules.
-            "setting_sources": ["project"],
+            # No settings files at all. A project `.claude/settings.json`
+            # can carry hooks (commands run outside PreToolUse, so
+            # outside Guardian), MCP servers and allow rules, and the
+            # worktree is reused by a retry: one approved Write there
+            # would arm the next run. CLAUDE.md is read through the
+            # brief ("Read CLAUDE.md ... first"), a gated Read.
+            "setting_sources": [],
+            # The SDK hands the CLI this process's environment with
+            # `env` laid over it, and Claude Code's Bash inherits it:
+            # one approved `printenv` and every provider key Sim holds
+            # is in Anthropic's context. `run_shell` strips them
+            # (`shell._child_env`); here they are blanked, all but the
+            # CLI's own credential.
+            "env": claude_code_env(),
         }
         if not cc.allow_network:
             wanted["disallowed_tools"] = sorted(NETWORK_TOOLS)
@@ -386,8 +509,11 @@ class ClaudeCodeTaskTool:
         run.calls += 1
         action_id = f"claude-code-{run.id}-{run.calls}"
         record = {"action_id": action_id, "tool": tool}
-        if tool in NETWORK_TOOLS and not self._cc.allow_network:
-            allowed, why = False, f"{tool} reaches the network; [execution.claude_code] allow_network is off"
+        refused = local_refusal(tool, tool_input, root=run.root, repo_root=getattr(self._config, "repo_root", None),
+                                shell_refusals=getattr(self._config, "shell_refusals", None),
+                                allow_network=self._cc.allow_network)
+        if refused:
+            allowed, why = False, refused
         else:
             allowed, why = await self._ask_guardian(ctx, action_id, tool, tool_input, requester, channel)
         record.update({"allowed": allowed, "why": why[:300]})
@@ -444,18 +570,22 @@ class ClaudeCodeTaskTool:
 
     # -- records ---------------------------------------------------------------------------------
 
-    async def _requester(self, ctx) -> tuple[str, str]:
+    async def _requester(self, ctx) -> tuple[str, str] | None:
         """Who asked for this run, from Guardian's record of the proposal:
-        every Claude Code call is proposed on their behalf, never more."""
+        every Claude Code call is proposed on their behalf, never more.
+        None when that record cannot be read: the caller refuses."""
         ledger = getattr(ctx, "ledger", None)
         if ledger is None or not getattr(ctx, "action_id", ""):
-            return "", ""
-        with contextlib.suppress(Exception):
-            for event in await ledger.read(f"action:{ctx.action_id}"):
-                if event.type == "received":
-                    proposal = (event.payload or {}).get("proposal") or {}
-                    return str(proposal.get("requester") or ""), str(proposal.get("requester_channel") or "")
-        return "", ""
+            return None
+        try:
+            events = await ledger.read(f"action:{ctx.action_id}")
+        except Exception:  # noqa: BLE001 -- unreadable is unknown, never "nobody"
+            return None
+        for event in events:
+            if event.type == "received":
+                proposal = (event.payload or {}).get("proposal") or {}
+                return str(proposal.get("requester") or ""), str(proposal.get("requester_channel") or "")
+        return None
 
     async def _runs_today(self, ctx) -> int:
         ledger = getattr(ctx, "ledger", None)
@@ -508,6 +638,6 @@ def claude_code_tools(config) -> list:
     return [ClaudeCodeTaskTool(config)] if cc.enabled else []
 
 
-__all__ = ["BRIEF_FILE", "ClaudeCodeConfig", "ClaudeCodeTaskTool", "HOOK_PREFIX", "NETWORK_TOOLS", "SDK_MISSING",
-           "STREAM", "TOOL_NAME", "brief_template", "claude_code_tools", "hook_path", "load_sdk", "proposal_for",
+__all__ = ["BRIEF_FILE", "CLAUDE_CODE_SHELL_REFUSALS", "CLI_CREDENTIALS", "ClaudeCodeConfig", "claude_code_env", "ClaudeCodeTaskTool", "HOOK_PREFIX", "NETWORK_TOOLS", "SDK_MISSING",
+           "STREAM", "TOOL_NAME", "brief_template", "claude_code_tools", "hook_path", "load_sdk", "local_refusal", "proposal_for",
            "render_brief"]
