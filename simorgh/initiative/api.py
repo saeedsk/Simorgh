@@ -66,6 +66,15 @@ CHANNELS = ("phone", "screen", "speaker")
 #: How much each channel costs to use, before the hour and the room.
 CHANNEL_COST: dict[str, float] = {"phone": 0.1, "screen": 0.2, "speaker": 0.45}
 
+#: Channels that reach only the owner: both are `notify`, which has no
+#: recipient and goes to the person who runs Sim (`Delivery.tool`). A
+#: notice for anybody else may use only the speaker in the room they are
+#: in (`for_owner`). Not yet applied to the companion classes, whose
+#: night-time "her phone" stage 10 pinned (and `companion_shadow` sends
+#: to the owner on purpose): that is the same owner's phone, an open
+#: question for the creator (initiative CONTRACT.md).
+OWNER_ONLY: frozenset[str] = frozenset({"phone", "screen"})
+
 #: Under this, nothing is delivered: it waits for the digest instead
 #: -- which for a year was a sentence in a comment and nothing else.
 #: `Service._hold` is the digest now (stage 6 item 6).
@@ -189,6 +198,15 @@ def relevance(notice: Notice, situation: Situation) -> float:
     return 1.0 if notice.person in situation.people else 0.3
 
 
+def for_owner(notice: Notice, owner: str) -> bool:
+    """Whether the owner may read this notice on their own phone: one for
+    the household, or for the owner. `notify` has no recipient -- it
+    reaches the person who runs Sim -- so a notice for anybody else sent
+    that way is somebody else's result on the owner's phone (stage 18: a
+    background crew's report for Soodeh went to Saeed)."""
+    return not notice.person or notice.person.strip().casefold() == str(owner or "").strip().casefold()
+
+
 def alone(person: str, situation: Situation) -> bool:
     """Whether `person` is placed somewhere nobody else is. Somebody the
     house cannot place is not alone: `unknown` is not `yes`."""
@@ -296,11 +314,16 @@ def decide(notice: Notice, situation: Situation, *, owner: str = "Saeed", now: f
     private_to = notice.person if notice.kind in PRIVATE else ""
     best: Delivery | None = None
     for channel in CHANNELS:
+        if channel in OWNER_ONLY and notice.kind not in PERSONAL and not for_owner(notice, owner):
+            continue        # the owner's phone is not delivery to somebody else
         if channel == "speaker" and notice.person and notice.person not in situation.people:
             continue        # saying it in a room they are not in is not delivery
         if channel == "speaker" and private_to and not alone(private_to, situation):
             continue        # a private word is not said in front of somebody else
-        channel_cost = cost(channel, situation, now=now, private_to=private_to)
+        # A word to one person alone interrupts nobody else, for any notice
+        # with a person (a reminder they asked for, their background work's
+        # result); only a private class is ALSO kept off a shared room.
+        channel_cost = cost(channel, situation, now=now, private_to=private_to or notice.person)
         reach = REACH.get(channel, 1.0) if notice.kind in PERSONAL else 1.0
         utility = worth * reach - channel_cost
         if utility < WORTH_IT:
