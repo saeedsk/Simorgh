@@ -11,6 +11,12 @@ task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
 since = "2026-10-27T14:37:23+00:00"
 until = "2026-10-27T22:37:23+00:00"
 
+[locks.contracts]
+by = "claude-wave-a"
+task = "wave B: stage 15 follow-ups, core blocks, interop, routing report"
+since = "2026-10-27T15:14:09+00:00"
+until = "2026-10-27T22:14:09+00:00"
+
 [locks.docs]
 by = "claude-stage15"
 task = "findings: tokens, ablation, memory sidecars"
@@ -41,6 +47,12 @@ task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
 since = "2026-10-27T14:37:23+00:00"
 until = "2026-10-27T22:37:23+00:00"
 
+[locks.memory]
+by = "claude-wave-a"
+task = "wave B: stage 15 follow-ups, core blocks, interop, routing report"
+since = "2026-10-27T15:14:09+00:00"
+until = "2026-10-27T22:14:09+00:00"
+
 [locks.orchestration]
 by = "claude-wave-a"
 task = "wave A: stage 16 edges, stage 18 gaps, stage 17 router shadow"
@@ -52,3 +64,15 @@ by = "claude-wave-a"
 task = "wave A merge: prerequisite retry delay"
 since = "2026-10-27T15:09:55+00:00"
 until = "2026-10-27T21:09:55+00:00"
+
+[locks.telemetry]
+by = "claude-wave-a"
+task = "wave B: stage 15 follow-ups, core blocks, interop, routing report"
+since = "2026-10-27T15:14:09+00:00"
+until = "2026-10-27T22:14:09+00:00"
+
+[locks.worldmodel]
+by = "claude-wave-a"
+task = "wave B: stage 15 follow-ups, core blocks, interop, routing report"
+since = "2026-10-27T15:14:09+00:00"
+until = "2026-10-27T22:14:09+00:00"
