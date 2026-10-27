@@ -806,6 +806,7 @@ class SessionRunner:
         crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0, chat_crews: bool = False,
         tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
         route_none_margin: float = 0.15, route_groups=None, route_embed=None,
+        fact_lines: tuple[int, int] = (8, 8),
     ) -> None:
         #: `[orchestration] tool_routing` (stage 17, `routing.py`): off,
         #: shadow or on, for chat and spoken turns. `ablate = ["routing"]`
@@ -908,7 +909,8 @@ class SessionRunner:
         self._ledger = ledger
         self._clock = clock
         self._worker_id = worker_id
-        self._assembler = Assembler(bus, clock=clock, timeout_s=assemble_timeout_s, ledger=ledger)
+        self._assembler = Assembler(bus, clock=clock, timeout_s=assemble_timeout_s, ledger=ledger,
+                                    fact_lines=fact_lines)
         self._waiter = _EventWaiter(bus)
         # Each session's messages, durably, as `session:<id>` (stage 4 item 2).
         from .transcript import TranscriptWriter
