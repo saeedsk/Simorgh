@@ -44,3 +44,13 @@ class RelationsOverTheBus(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(reply["ok"])
         reply = await self._update(action="set_relation", name="Saeed", relation="", other="Aran")
         self.assertFalse(reply["ok"])
+
+    async def test_the_reply_names_the_word_as_it_is_kept(self):
+        reply = await self._update(action="set_relation", name="Saeed", relation="  My Son ", other="Aran")
+        self.assertTrue(reply["ok"], reply)
+        self.assertEqual(reply["detail"], "Saeed's son is Aran")
+        self.assertEqual((await self._person("Saeed"))["relations"], {"son": "Aran"})
+
+    async def test_a_sentence_for_a_word_is_refused_even_to_forget(self):
+        reply = await self._update(action="set_relation", name="Saeed", relation="x" * 60, other="")
+        self.assertFalse(reply["ok"], reply)

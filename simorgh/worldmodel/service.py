@@ -14,7 +14,7 @@ from dataclasses import replace
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message
-from simorgh.contracts.people import may_check_in
+from simorgh.contracts.people import may_check_in, normalise_relation
 from simorgh.contracts.protocols import Context, Health
 from simorgh.contracts.registry import error_reply_payload
 from simorgh.contracts.tone import split_tone
@@ -489,13 +489,17 @@ class Service:
                 # `other`, or "" to forget it. Memory resolves "my son" by it.
                 relation = str(payload.get("relation") or "").strip()
                 other = str(payload.get("other") or "").strip()
-                if not name or not relation:
+                # The word as it is kept: "My Son" is "son", and a sentence
+                # (over `RELATION_MAX_CHARS`) is no word -- refused even when
+                # it would only forget, rather than an ok that did nothing.
+                word = normalise_relation(relation)
+                if not name or not word:
                     raise ValueError("set_relation needs a name and a relation (son, wife, ...)")
                 person = self._people.set_relation(name, relation, other)
                 if person is None:
                     raise ValueError(f"I do not know anybody called {name!r}")
-                detail = (f"{person.name}'s {relation.lower()} is {person.relation(relation)}" if other
-                          else f"{person.name}: no {relation.lower()} recorded")
+                detail = (f"{person.name}'s {word} is {person.relation(relation)}" if other
+                          else f"{person.name}: no {word} recorded")
             else:
                 raise ValueError(f"{action!r} is not link, unlink, set_role, grant, revoke, "
                                  "add_interest, remove_interest, set_tool or set_relation")
