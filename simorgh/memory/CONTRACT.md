@@ -78,7 +78,7 @@ Authority: `Service.consumes` in `service.py:24-29` (pinned by `tests/simorgh/te
 | `system.tick.second` | `messages/system.py::SystemTickSecond` | simorgh/memory/service.py | every 30th tick publishes record counts as `system.metrics` |
 | `turn.completed` | `messages/task.py::TurnCompleted` | simorgh/memory/service.py | for a chat turn: feeds the conversation window and stores an episodic record tagged with session and `person:<name>` |
 
-Requests it makes: `cognition.think` (`purpose="consolidate"`, `consolidate_timeout_s`) from `consolidation.py` -- the distillation, the fact extraction and (stage 15, `entities = true`) `review_uncertain`'s YES/NO question about a close name pair, at most `MAX_SAME_QUESTIONS` (5) a pass; a missing, failed or `floor:true` reply means none of these this cycle.
+Requests it makes: `cognition.think` (`purpose="consolidate"`, `consolidate_timeout_s`) from `consolidation.py` -- the distillation, the fact extraction and (stage 15, `entities = true`) `review_uncertain`'s YES/NO question about a close name pair, at most `MAX_SAME_QUESTIONS` (5) a pass, and `summarise_entities`' 1-3 sentence summary of an entity with new facts, at most `MAX_SUMMARIES` (8) a pass (the plan names purpose `memory.summary`; the `contracts` enum lacks it, so these use `consolidate`); a missing, failed or `floor:true` reply means none of these this cycle.
 
 ## Produces
 
@@ -93,7 +93,7 @@ Requests it makes: `cognition.think` (`purpose="consolidate"`, `consolidate_time
 | `system.metrics` | `messages/system.py::SystemMetrics` | simorgh/memory/service.py | every 30 s: `gauges.records` per kind |
 | `cognition.think` | `messages/cognition.py::CognitionThink` | simorgh/memory/consolidation.py | request, once per pass, when the window has episodic records |
 
-`hop` (stage 15) is not declared in `contracts/messages/memory.py::MemoryRetrieveReply`; the `facts` objects admit additional properties, so it validates, and declaring it is a `contracts` change. Orchestration (`orchestration/context.py::_fact_lines`) renders the first 8 facts and does not read `hop`.
+A summary line (stage 15 item 3) rides in the same `facts` list as `{id: "<entity>#summary", subject: <name>, predicate: "in short:", object: <summary>, person_scope: "*", confidence: 1.0, summary: true, entity: <id>}`, one per entity the query names that has one, with `entities = true` and `graph_hops > 0`. `hop`, `summary` and `entity` are not declared in `contracts/messages/memory.py::MemoryRetrieveReply`; the `facts` objects admit additional properties, so it validates, and declaring it is a `contracts` change. Orchestration (`orchestration/context.py::_fact_lines`) renders the first 8 facts and does not read `hop`.
 
 `memory.stored`, `memory.consolidated`, `memory.contradiction.flagged` and `memory.forgotten` have no subscriber; they are on the allow-list in `tests/simorgh/contracts/test_topics_have_both_sides.py` as announcements for the Ledger and dashboard.
 
@@ -161,6 +161,7 @@ Consolidation records what somebody says they care about with the predicate `int
 - A consolidation pass runs `consolidate_after_start_s` after start (not only on the 6-hourly sleep tick).
 - Entities (stage 15, with `entities = true`): resolution is, in order, an exact alias; the People registry (`contracts.people.household_people()` unless `MemoryEngine.people` is set); a fuzzy match at edit distance <= 1 for names of five or more characters, accepted only when exactly one entity is that close; otherwise a new entity. A model is asked about identity only on the sleep tick, only for the ambiguous pairs, and only a plain YES from a real provider merges. A kinship word ("my wife") resolves through the speaker's People `relations` and never becomes an entity. Asking (`query_entities`) never creates one. A value object (digits, more than four words, over 40 chars) gets no entity.
 - Multi-hop recall (`recall.hop_facts`, stage 15 item 2): hop 1 is every live fact whose subject or object is an entity the query names; hop 2 every live fact touching the entity at the other end of a hop-1 fact. Only the facts the asking person may see are walked, so a fact private to somebody else is neither returned nor a bridge to one that is not (pinned by `test_multi_hop_recall.py::HopsNeverCrossPersonScopeTestCase`). The walk adds after the matched facts and the digest, never instead of them, skips what is already in the block, and marks each fact it added with `hop`.
+- An entity summary (stage 15 item 3, sleep tick) is written only from household-scoped (`*`) facts and stored with that scope, so a private fact never reaches one; it is dropped whole when it names a specific (`untraceable`) or a digit run its facts do not contain, or runs over `SUMMARY_MAX_CHARS` (400). A floor or failed reply writes nothing and is counted `skipped`; an entity whose live household facts are all already summarised is not asked about again.
 - A merge never rewrites a fact: facts keep the ids they recorded and `EntityIndex.canonical` maps every old id to the survivor.
 - No entry in `contracts/topics.py` SUBSCRIBE_ONLY_BY, PUBLISH_ONLY_BY or PUBLISH_PAYLOAD_CONSTRAINTS names memory.
 
@@ -178,6 +179,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/memory/test_first_consolidation.py` -- a pass runs shortly after start, not only on the sleep tick.
 - `tests/simorgh/memory/test_entities.py` -- each resolution rule, a merge leaving old ids resolvable, the Soo/Soodeh case, the backfill, and the sleep tick's model check (stage 15 item 1).
 - `tests/simorgh/memory/test_multi_hop_recall.py` -- the boiler -> Reza -> phone join, `graph_hops = 0` reproducing the block byte for byte, the cap, and hops never crossing `person_scope` (stage 15 item 2).
+- `tests/simorgh/memory/test_entity_summaries.py` -- a summary written and recalled, an untraceable one dropped, the floor writing none and reporting skipped, a private fact never summarised (stage 15 item 3).
 - `tests/simorgh/memory/test_embedders.py` -- provider choice, the hashing fallback, and that no progress bar can reach the screen (`ProgressBarsStayOffTheScreenTestCase`).
 
 ## Known issues (2026-09-18 evaluation)
@@ -189,6 +191,8 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - B7 -- the Ledger client is unbound; any subsystem can append to `memory:*`. Open; stage 1.
 
 ## Planned changes (roadmap)
+
+- Stage 15 items 1-3 built 2026-10-27, behind `[memory] entities = false`: entities and resolution (`entities.py`, `memory:entities`), multi-hop recall (`recall.hop_facts`, `graph_hops`, `graph_max_facts`, the `hop` field) and entity summaries on the sleep tick. Items 4-6 (the memory eval against Graphiti as a sidecar) decide whether `entities` defaults to true. Open, outside this lock: `contracts.people.Person` has no `relations`, so kinship words resolve only when `MemoryEngine.people` is given records that carry one; `cognition.think` has no `memory.summary` purpose; `hop`/`summary`/`entity` are undeclared in `MemoryRetrieveReply`; Orchestration shows 8 fact lines.
 
 - Stage 4 (session stream): the `session:<id>` stream becomes the working tier; `WorkingMemory` as fed today is the stopgap it replaces.
 - Stage 5 item 1 done 2026-09-19: a local embedder loads in a thread after the index is built (`MemoryEngine.warm_embedder`); until then `Embedder.embed` answers from hashing at once, and afterwards the hashed records are re-embedded in batches (`RecallIndex.upgrade`, `Embedder.embed_many`) and persisted to `memory:vectors`, which a restart reads instead of re-embedding. The default embedder stays `hashing` until item 2's matrix makes a dense recall cheap.

@@ -137,6 +137,21 @@ class TheBoilerTestCase(_ServiceCase):
         self.assertEqual(len([f for f in facts if "hop" in f]), 2)
 
 
+class TheSummaryLineTestCase(_ServiceCase):
+    """Stage 15 item 3's recall half: one line per entity the query names."""
+
+    async def test_a_summary_rides_in_the_block_once(self):
+        service = await self.boot(Config(entities=True))
+        await service.engine.store_fact(subject="Reza", predicate="phone number", object="0912 345 6789")
+        await service.engine._entity_event("entity.summary", {  # noqa: SLF001
+            "id": "person:reza", "summary": "Reza is the plumber.", "person_scope": "*", "fact_ids": []}, "t")
+        facts = await self.ask("ask Reza, Reza knows")
+        lines = [f for f in facts if f.get("summary")]
+        self.assertEqual([(f["entity"], f["object"]) for f in lines], [("person:reza", "Reza is the plumber.")])
+        await self.boot(Config(entities=True, graph_hops=0))
+        self.assertFalse([f for f in await self.ask("ask Reza") if f.get("summary")])
+
+
 class ZeroHopsIsTodaysBlockTestCase(_ServiceCase):
     QUERIES = [("what's the number of whoever fixed the boiler?", ""), ("when is my birthday", "Saeed"),
                ("what does Soodeh like?", "Soodeh"), ("who fixed the boiler", "Iris"), ("", "")]

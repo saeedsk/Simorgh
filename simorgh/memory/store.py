@@ -453,6 +453,21 @@ class MemoryEngine:
         return [(fact, was) for fact, was, _hop in
                 await self.graph_facts(query, person=person, hops=1, limit=10_000)]
 
+    async def entity_summaries(self, query: str, *, person: str = "") -> list:
+        """`(entity, summary)` for each entity the query names that has a
+        summary `person` may see (stage 15 item 3), in the order named."""
+        if not self._config.entities:
+            return []
+        index = await self._entities_synced()
+        wanted = {"*", person.strip().lower()} if person else {"*"}
+        out = []
+        for entity_id in await self.query_entities(query, speaker=person):
+            entity = index.get(entity_id)
+            scope = index.summarised.get(entity.id, (frozenset(), "*"))[1].strip().lower() if entity else ""
+            if entity is not None and entity.summary and scope in wanted:
+                out.append((entity, entity.summary))
+        return out
+
     async def graph_facts(self, query: str, *, person: str = "", hops: int = 2, limit: int = 12,
                           exclude=()) -> list:
         """Multi-hop recall (stage 15 item 2): `(fact, what it replaced,
