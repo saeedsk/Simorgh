@@ -73,6 +73,7 @@ python -m simorgh.evals memory --systems graphiti --paid --cap-usd 0.45 # in its
 | native_graph (stage 15) | 5/8 | 5/8 | 7/7 | 7/7 | 8/8 | 8/8 | **40/46** | ~2 ms | 0 |
 | Graphiti | 7/8 | 8/8 | 6/7 | 5/7 | 8/8 | 7/8 | **41/46** | 263 ms | $0.35 |
 | Cognee | 6/8 | 7/8 | 0/7 | 7/7 | 8/8 | 4/8 | 32/46 | 530 ms | $0.14 |
+| Mem0 (2.2.1) | -- | -- | -- | -- | -- | -- | not scored | -- | $0.27 |
 
 **Read the native rows with their caveat:** they are given each
 episode's facts as a perfect extractor would write them, so they measure
@@ -83,10 +84,11 @@ model calls. Graphiti is ahead on alias (7 vs 5) and multi-hop (8 vs 5),
 which is where stage 15 item 1's resolver can still learn. Cognee has no
 notion of "now" (0/7) and returned facts it should not (4/8 negative).
 
+Mem0 ingested all 150 episodes (2.5 calls and $0.0018 an episode) and then failed every question: mem0ai 2.x refuses `search(user_id=...)` and wants `filters={"user_id": ...}`. Fixed (both shapes supported); not rerun, since another $0.27 would have put the day at the edge of the $2 cap.
+
 **Recommendation:** keep native_graph. Turning `[memory] entities` on in
 the live Sim is the step that makes it real; it is still the creator's
-call (about 20 paid consolidation calls a night). Mem0 (item 5c) is built
-in wave B and runs next.
+call (about 20 paid consolidation calls a night). Mem0's scored run is the next paid step.
 
 **What it took to get numbers at all** (each fixed and committed):
 - Together serves no embedding model per token to this account, although

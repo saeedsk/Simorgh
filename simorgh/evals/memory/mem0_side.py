@@ -137,9 +137,26 @@ class Mem0Side(Sidecar):
         self.meter.check()
         found = []
         for user_id in groups_for(question.asker):
-            found.extend(results(self.memory.search(question.text, user_id=user_id, limit=LIMIT)))
+            found.extend(results(search(self.memory, question.text, user_id)))
         found.sort(key=lambda m: -float(m.get("score") or 0.0))
         return memory_lines(found)[:LIMIT]
+
+
+def search(memory, text: str, user_id: str):
+    """`Memory.search` scoped to one user, in whichever shape the installed
+    Mem0 takes: 2.x wants `filters={"user_id": ...}` and `top_k` and refuses
+    a top-level `user_id` (the first paid run, mem0ai 2.2.1, ingested all
+    150 episodes and then failed every question on it); 1.x took
+    `user_id=` and `limit=`."""
+    import inspect
+
+    try:
+        params = inspect.signature(memory.search).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "filters" in params:
+        return memory.search(text, filters={"user_id": user_id}, top_k=LIMIT)
+    return memory.search(text, user_id=user_id, limit=LIMIT)
 
 
 def results(reply) -> list[dict]:

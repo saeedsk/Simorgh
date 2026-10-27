@@ -672,3 +672,21 @@ class InjectedTokens(unittest.TestCase):
         self.assertGreater(result.injected["mean"], 0)
         self.assertLessEqual(result.injected["p50"], result.injected["p95"])
         self.assertIn("injected", result.as_dict())
+
+
+class Mem0SearchShapes(unittest.TestCase):
+    def test_2x_gets_filters_and_1x_gets_user_id(self):
+        from simorgh.evals.memory.mem0_side import LIMIT, search
+
+        class Two:
+            def search(self, query, *, top_k=20, filters=None, **kw):
+                if kw:
+                    raise ValueError(f"Top-level entity parameters {frozenset(kw)} are not supported")
+                return {"results": [{"memory": query, "who": filters["user_id"], "k": top_k}]}
+
+        class One:
+            def search(self, query, *, user_id, limit=100):
+                return [{"memory": query, "who": user_id, "k": limit}]
+
+        self.assertEqual(search(Two(), "q", "household")["results"][0], {"memory": "q", "who": "household", "k": LIMIT})
+        self.assertEqual(search(One(), "q", "person_mara")[0], {"memory": "q", "who": "person_mara", "k": LIMIT})
