@@ -85,6 +85,10 @@ def _proposed_args(call: dict):
     raw = call.get("args", {})
     if not isinstance(raw, dict):
         return raw
+    if call.get("tool") in CREW_TOOLS:
+        # Never proposed: answered with the arguments the session reads
+        # out of a marker line, so those are what the schema checks.
+        return SessionRunner._crew_args(str(call.get("tool")), raw)
     return to_action_payload(action_id="", task_id="", call=call, rationale="")["args"]
 
 
@@ -127,6 +131,9 @@ CREW_SCAFFOLDS = ("patch", "research", "plan")
 CHAT_CREW_AGENTS = ("research", "browser")
 CHAT_CREW_TOOLS = ("spawn", "await_agents", "check_agents", "send_agent", "cancel_agent", "read_ref")
 VOICE_CREW_TOOLS = ("spawn", "check_agents", "cancel_agent")
+#: Execution's `claude_code_task` (stage 18 item 12), named rather than
+#: imported (a subsystem may not import another): its cost is a crew's.
+CLAUDE_CODE_TOOL = "claude_code_task"
 #: A remote agent as a crew member (stage 18 item 9): `spawn{agent: "a2a:<name>"}`.
 A2A_PREFIX = "a2a:"
 #: Execution's `a2a:calls` stream, where `a2a_call` writes each status
@@ -136,6 +143,13 @@ _A2A_CALLS_STREAM = "a2a:calls"
 #: A background result joins the conversation it was asked in only when
 #: that conversation's last turn is this recent: the person is still in it.
 BACKGROUND_WINDOW_S = 30 * 60.0
+#: A background report a stop left undelivered is delivered at the next
+#: start only when it was filed this recently. Older is news nobody is
+#: waiting for -- and every crew delivered before the delivery record
+#: existed (2026-10-27) has no record, so without a bound the first start
+#: after the upgrade would say every past result again. Also lets a start
+#: skip a crew stream by its last event without reading all of it.
+PENDING_WINDOW_S = 24 * 3600.0
 #: After a cancel, how long a remote member waits for its in-flight call to
 #: name the remote task it must send `tasks/cancel` to.
 A2A_CANCEL_GRACE_S = 10.0
@@ -171,9 +185,11 @@ from simorgh.contracts.messages.crew import MemberBudget, is_terminal
 from simorgh.contracts.streamnames import crew_stream
 
 from .crew import (
-    CREW_BUDGET, BRIEF_INLINE_MAX, Crew, CrewRefused, build_report, render_background, render_inbox, render_report,
-    status_table,
+    CREW_BUDGET, BRIEF_INLINE_MAX, DELIVERED_KIND, Crew, CrewRefused, build_report, render_background, render_inbox, render_report,
+    status_table, TOOL_SPECS as CREW_TOOL_SPECS,
 )
+#: What `guardrails.validate` checks a crew call against (`crew.TOOL_SPECS`).
+CREW_SCHEMAS = {name: spec["input_schema"] for name, spec in CREW_TOOL_SPECS.items()}
 from .tools import is_read_only, known_tools, marker_hint, offered_tools, to_action_payload, tool_schemas
 
 # What a Guardian refusal looks like on a step, in one place. The step's
@@ -1392,7 +1408,7 @@ class SessionRunner:
                 # these calls is proposed. Guardian still gates every call
                 # that gets past this.
                 verdict = session.guards.check_calls(
-                    self._calls_to_run(tool_calls), tool_schemas(), args_of=_proposed_args)
+                    self._calls_to_run(tool_calls), {**tool_schemas(), **CREW_SCHEMAS}, args_of=_proposed_args)
                 if verdict is not None:
                     ended = await self._guard_verdict(session, step_no, verdict, think_reply, tool_calls)
                     if ended is not None:
@@ -1817,6 +1833,8 @@ class SessionRunner:
             offered = tuple(offered) + ("use_skill",)
         if offered and any(str(m.get("content") or "").startswith(pressure_mod.STUB_MARK) for m in session.messages):
             offered = tuple(offered) + (pressure_mod.RECALL_TOOL,)
+        if not no_tools:
+            session.offered = tuple(offered)
         if session.guards is not None and not no_tools:
             session.guards.offered = tuple(offered)
         messages = await self._assembler.assemble(session, session.profile.scaffold, user_text=user_text)
@@ -2621,7 +2639,19 @@ class SessionRunner:
         return {"argument": raw}
 
     async def _crew_tool(self, session: Session, call: dict) -> tuple[bool, str, str]:
+        from .guardrails import unknown_tool_text
+
         tool = str(call.get("tool") or "")
+        if tool not in session.offered:
+            # Answered only when this session's last think offered it: a
+            # member's `spawn`, a chat turn's `ask_parent`, a voice turn's
+            # `await_agents` is a tool this session does not have, whatever
+            # the model wrote. The guardrails say so before a call is run
+            # (`guardrails.validate`); this holds with them switched off
+            # (`ablate = ["nudge"]`) and on every path that reaches here.
+            text = unknown_tool_text(tool, session.offered)
+            self._note_unrecovered(session, f"{tool} is not a tool of this session")
+            return False, text, Detail(text, "refused")
         args = self._crew_args(tool, call.get("args"))
         handler = {
             "spawn": self._spawn, "await_agents": self._await_agents, "check_agents": self._check_agents,
@@ -2690,8 +2720,10 @@ class SessionRunner:
         budget = args.get("budget") if isinstance(args.get("budget"), dict) else {}
 
         def number(key, cast):
+            # The marker line's nested `budget`, or the native schema's flat
+            # `budget_<key>` (`crew.TOOL_SPECS`).
             try:
-                return max(cast(0), cast(budget.get(key) or 0))
+                return max(cast(0), cast(budget.get(key) or args.get(f"budget_{key}") or 0))
             except (TypeError, ValueError):
                 return cast(0)
 
@@ -3124,6 +3156,57 @@ class SessionRunner:
                 except Exception:  # noqa: BLE001
                     pass
 
+    # -- Claude Code's dollars (stage 18 item 12) ------------------------------------------
+
+    def _carve_claude_code(self, session: Session, payload: dict) -> str:
+        """A crew member's `claude_code_task` spends from the crew's dollars
+        like its thinks do: the run is capped at what the member and the
+        crew have left (`max_usd` on the proposal, which Guardian sees and
+        Execution holds the run to), and refused when that is nothing.
+        Outside a crew, or under a bound-free member, the tool's own
+        `max_usd_per_run` stands. Returns the refusal, or ""."""
+        crew = self._crew_of(session)
+        member = crew.members.get(session.task_id) if crew is not None else None
+        if member is None or not crew.bounded(member):
+            return ""
+        spent = crew.over_budget()
+        if spent:
+            return f"{CLAUDE_CODE_TOOL}: refused -- the crew budget is spent ({spent})"
+        caps = []
+        if crew.max_usd:
+            caps.append(crew.max_usd - crew.spent_usd)
+        if member.budget.usd:
+            caps.append(member.budget.usd - member.cost_usd)
+        if not caps:
+            return ""
+        left = round(min(caps), 4)
+        if left <= 0:
+            return f"{CLAUDE_CODE_TOOL}: refused -- this member's share of the crew's dollars is spent"
+        args = dict(payload.get("args") or {})
+        try:
+            asked = float(args.get("max_usd") or 0.0)
+        except (TypeError, ValueError):
+            asked = 0.0
+        args["max_usd"] = min(asked, left) if asked > 0 else left
+        payload["args"] = args
+        return ""
+
+    async def _charge_claude_code(self, session: Session, result: dict) -> None:
+        """What a `claude_code_task` run cost (its result's `cost_usd`,
+        which the CLI reports) counts as this session's spend, and a crew
+        member's as its crew's: spent out, every member is cancelled, as
+        when a think spends it."""
+        try:
+            cost = max(0.0, float((await self._remote_meta(result)).get("cost_usd") or 0.0))
+        except (TypeError, ValueError):
+            cost = 0.0
+        if not cost:
+            return
+        session.spent_usd += cost
+        crew = self._crew_of(session)
+        if crew is not None and session.task_id in crew.members:
+            await crew.charge(session.task_id, usd=cost)
+
     async def _remote_meta(self, captured: dict) -> dict:
         """What `a2a_call` reported about the remote task (`state`,
         `task_id`, `question`), from the result's metadata blob."""
@@ -3184,12 +3267,18 @@ class SessionRunner:
         for (person, channel), members in groups.items():
             if any(m.report is None or not is_terminal(m.status) for m in members):
                 continue
-            crew.delivered.update(m.handle for m in members)
             await self._deliver_to(crew, person, channel, members)
 
     async def _deliver_to(self, crew: Crew, person: str, channel: str, members: list) -> None:
+        crew.delivered.update(m.handle for m in members)
         if channel == "a2a":
             return
+        for m in members:
+            # On `crew:<id>` before the notice goes: a restart delivers what
+            # has no such record (`deliver_pending_background`), and never
+            # what has -- at most once, as a notice to a person should be.
+            await crew.send(m.handle, f"{channel or 'console'}:{person or 'household'}", DELIVERED_KIND,
+                            (m.report.summary if m.report else m.status)[:400], deliver=False)
         text = render_background(members)
         if channel in _NOTICE_CHANNELS:
             await self._bus.publish(Message.new(
@@ -3201,6 +3290,65 @@ class SessionRunner:
                 payload={"schedule_id": f"crew:{crew.crew_id}", "label": render_background(members, spoken=True),
                          "person": person}))
         await self._join_conversation(channel, person, text)
+
+    async def deliver_pending_background(self) -> int:
+        """Background reports a stop left undelivered, delivered once (stage
+        18 "Durability"): the process stopped after a member filed its
+        report and before the notice went -- or while the turn that asked
+        was still answering, or a sibling was still working. Each crew on
+        the ledger with background members is folded; a background member
+        with a report and no delivery record goes to its person now,
+        through the path a live delivery takes, and the record written
+        first makes a second start find nothing. A member that never
+        reported is not resumed (a chat turn's crew does not resume) and
+        has nothing to deliver. Only a report filed within
+        `PENDING_WINDOW_S` is delivered. Returns how many members were
+        delivered."""
+        from simorgh.contracts.streamnames import CREW_PREFIX
+
+        if self._ledger is None or not hasattr(self._ledger, "streams"):
+            return 0
+        try:
+            streams = await self._ledger.streams(CREW_PREFIX)
+        except Exception:  # noqa: BLE001 -- no crews to read is nothing to deliver
+            return 0
+        since = (_epoch(self._clock) or time.time()) - PENDING_WINDOW_S
+        count = 0
+        for stream in streams:
+            crew_id = stream[len(CREW_PREFIX):]
+            if not crew_id or crew_id in self._crews or crew_id in self._open:
+                continue
+            try:
+                # A crew whose last event is older than the window has no
+                # report recent enough: skipped without reading it all.
+                last = await self._ledger.read(stream, from_seq=await self._ledger.head(stream), limit=1)
+                if last and float(last[-1].ts or 0.0) < since:
+                    continue
+            except Exception:  # noqa: BLE001 -- the full read below decides
+                pass
+            try:
+                events = await self._ledger.read(stream)
+            except Exception:  # noqa: BLE001 -- one unreadable crew must not cost the others
+                continue
+            if not any(e.type == topics.CREW_SPAWNED and (e.payload or {}).get("background") for e in events):
+                continue
+            crew = self._new_crew(crew_id, events)
+            if crew.external:
+                continue
+            filed = {str((e.payload or {}).get("handle") or ""): float(e.ts or 0.0)
+                     for e in events if e.type == topics.CREW_REPORT}
+            groups: dict[tuple[str, str], list] = {}
+            for m in crew.children(crew.root):
+                if (m.background and m.handle not in crew.delivered and m.report is not None
+                        and filed.get(m.handle, 0.0) >= since):
+                    groups.setdefault((m.requester, m.requester_channel), []).append(m)
+            for (person, channel), members in groups.items():
+                try:
+                    await self._deliver_to(crew, person, channel, members)
+                    count += len(members)
+                except Exception:  # noqa: BLE001 -- one lost notice must not cost the next
+                    pass
+        return count
 
     async def _join_conversation(self, channel: str, person: str, text: str) -> None:
         from .transcript import append_exchange, conversation_id
@@ -3692,6 +3840,10 @@ class SessionRunner:
         refused = commit_of_unwritten_refusal(session, str(call.get("tool") or ""), payload.get("args") or {})
         if refused:
             return False, refused, Detail(refused, "refused")
+        if call.get("tool") == CLAUDE_CODE_TOOL:
+            refused = self._carve_claude_code(session, payload)
+            if refused:
+                return False, refused, Detail(refused, "refused")
         # How long this session waits for the result, on the wire (stage 1
         # item 5): the approval carries it to Execution, which never runs
         # the tool past it. A person's later yes is caused by their answer,
@@ -3765,6 +3917,8 @@ class SessionRunner:
             return False, text, Detail(text, "transient")
         if result.type == topics.ACTION_RESULT:
             ok = result.payload.get("ok", False)
+            if tool_name == CLAUDE_CODE_TOOL:
+                await self._charge_claude_code(session, result.payload)
             if ok:
                 record_side_effects(session, result.payload.get("side_effects") or ())
             full = result.payload.get("stdout_preview", "")

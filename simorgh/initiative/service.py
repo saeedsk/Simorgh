@@ -47,6 +47,7 @@ from .api import (
     Notice,
     Situation,
     acceptable_line,
+    for_owner,
     companion_gate,
     pushback,
     compose_prompt,
@@ -461,8 +462,16 @@ class Service:
             # written; until today nothing read the held list because
             # there was no held list.
             held = self._hold(notice)
-            await self._suppress(notice, "kept for the digest" if held
-                                 else "nothing was worth interrupting for this right now")
+            if held:
+                why = "kept for the digest"
+            elif notice.kind not in PERSONAL and not for_owner(notice, self._owner):
+                # Said, so a lost result is not a mystery: the phone is the
+                # owner's, and the room's speaker was not worth it or not there.
+                why = (f"only the speaker in {notice.person}'s room reaches {notice.person}, and it could not "
+                       "be used now (the phone is the owner's)")
+            else:
+                why = "nothing was worth interrupting for this right now"
+            await self._suppress(notice, why)
             return None
         text = notice.text
         if notice.kind in COMPOSED:

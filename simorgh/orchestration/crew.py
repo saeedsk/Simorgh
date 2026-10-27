@@ -39,6 +39,9 @@ CREW_BUDGET = "crew budget"
 BRIEF_INLINE_MAX = 1000
 #: The most of one claim a parsed finding keeps.
 CLAIM_MAX = 300
+#: The `crew.message` kind that records a background report delivered to
+#: the person who asked (from the member, to `<channel>:<person>`).
+DELIVERED_KIND = "report"
 #: How a member joined when the crew's bounds (members, dollars, tokens,
 #: wall-clock) do not apply to it: a `delegate` helper, and a project's plan
 #: node (stage 18 item 4), each keeping the bounds it had before crews.
@@ -198,6 +201,10 @@ class Crew:
         #: person who asked: per member, so a second background request
         #: under the same root (a Telegram chat's session lives across
         #: turns) gets its own notice and does not repeat the first.
+        #: Durable: each delivery is a `crew.message{kind: "report"}` from
+        #: the member on `crew:<id>`, written before the notice goes, and
+        #: `fold` rebuilds the set -- a restart delivers what was not
+        #: delivered, once, and never what was.
         self.delivered: set[str] = set()
         #: A crew under a chat turn or started from outside the house
         #: (`crew.spawn`): every member, at every depth, is a reader. A
@@ -397,6 +404,10 @@ class Crew:
             "via": member.via, "writer": member.writer, "brief_blob": member.brief_blob,
             "requester": member.requester, "requester_channel": member.requester_channel,
             **({"data": list(member.data)} if member.data else {}),
+            # A crew started from outside (`crew.spawn` from the A2A server):
+            # its caller folds `crew.report`, and a restart must not turn
+            # its reports into a household notice.
+            **({"external": True} if self.external else {}),
         }
 
     async def set_status(self, handle: str, status: str, reason: str = "") -> None:
@@ -590,6 +601,7 @@ class Crew:
         for e in events:
             p = dict(e.payload or {})
             if e.type == topics.CREW_SPAWNED:
+                crew.external = crew.external or bool(p.get("external"))
                 ref = str(p.get("brief_ref") or "")
                 crew.members[p["handle"]] = CrewMember(
                     handle=p["handle"], agent=str(p.get("agent") or ""), parent=str(p.get("parent") or ""),
@@ -623,6 +635,9 @@ class Crew:
                 sender = str(p.get("from") or "")
                 if p.get("kind") in ("progress", "milestone") and sender in crew.members:
                     crew.members[sender].last_progress = str(p.get("body") or "")[:200]
+                elif p.get("kind") == "report" and sender in crew.members:
+                    # A background report gone to its person (`DELIVERED_KIND`).
+                    crew.delivered.add(sender)
             elif e.type == topics.CREW_REPORT:
                 handle = str(p.get("handle") or "")
                 report = Report.from_dict(p.get("report") or {})
@@ -782,6 +797,95 @@ def render_background(members: list[CrewMember], *, spoken: bool = False) -> str
     return text if len(text) <= NOTICE_MAX else text[:NOTICE_MAX - 1] + "…"
 
 
+# -- the tools' own schemas --------------------------------------------------------------
+
+def _str(**extra) -> dict:
+    return {"type": "string", **extra}
+
+
+_HANDLES = {"type": "array", "items": {"type": "string"}}
+
+#: Each crew tool's `{description, input_schema}`, as a native provider is
+#: shown it. The crew tools are answered by the session, so no
+#: `tool.registered` from Execution ever described them, and a native
+#: provider saw ten names over `{"type": "object"}`. Flat on purpose: no
+#: property is an object (a spawn's `budget` is `steps`, `budget_usd`,
+#: `budget_tokens` and `budget_wall_s` here; the nested `budget` object the
+#: marker line carries is still read). Orchestration announces these on
+#: `tool.registered` at start (`service.py`), which is how Cognition
+#: learns any tool's schema, and `guardrails.validate` checks a call
+#: against them before it is answered.
+TOOL_SPECS: dict[str, dict] = {
+    "spawn": {
+        "description": "Start a crew member that works on its own while you carry on; returns its handle at once.",
+        "input_schema": {"type": "object", "required": ["brief"], "properties": {
+            "brief": _str(description="what the member should do"),
+            "agent": _str(description="research (default), browser, patch, ... or a2a:<name>"),
+            "report": _str(description="end, progress, milestones, silent, every_steps:N or every_s:T"),
+            "isolation": _str(enum=["fresh", "fork"]),
+            "background": {"type": "boolean", "description": "chat and voice: answer now, the report comes later"},
+            "steps": {"type": "integer"},
+            "budget_usd": {"type": "number"},
+            "budget_tokens": {"type": "integer"},
+            "budget_wall_s": {"type": "number"},
+            "data": {"type": "array", "items": {"type": "string"},
+                     "description": "a2a members: the data classes the message carries"},
+        }},
+    },
+    "await_agents": {
+        "description": "Wait for your members' reports without spending a step.",
+        "input_schema": {"type": "object", "properties": {
+            "handles": {**_HANDLES, "description": "none: every member not yet collected"},
+            "mode": _str(enum=["all", "any", "first_ok"]),
+            "timeout_s": {"type": "number"},
+        }},
+    },
+    "check_agents": {
+        "description": "A table of your members: status, last progress, steps, cost.",
+        "input_schema": {"type": "object", "properties": {"handles": _HANDLES}},
+    },
+    "send_agent": {
+        "description": "Send a message to a member, a sibling or your parent.",
+        "input_schema": {"type": "object", "required": ["to", "text"], "properties": {
+            "to": _str(description="a member's handle"), "text": _str(),
+            "kind": _str(enum=["steer", "note", "answer"]),
+        }},
+    },
+    "cancel_agent": {
+        "description": "Stop a member and, by default, everything under it.",
+        "input_schema": {"type": "object", "required": ["handle"], "properties": {
+            "handle": _str(), "reason": _str(), "cascade": {"type": "boolean"},
+        }},
+    },
+    "read_ref": {
+        "description": "Read the full text behind a ref a report or message named.",
+        "input_schema": {"type": "object", "required": ["ref"], "properties": {"ref": _str()}},
+    },
+    "report_progress": {
+        "description": "Tell your parent how it is going, in one line.",
+        "input_schema": {"type": "object", "required": ["text"], "properties": {
+            "text": _str(), "milestone": {"type": "boolean"}, "percent": {"type": "number"},
+        }},
+    },
+    "ask_parent": {
+        "description": "Ask your parent for a decision and wait; on timeout go on with the default.",
+        "input_schema": {"type": "object", "required": ["question"], "properties": {
+            "question": _str(), "timeout_s": {"type": "number"}, "default": _str(),
+        }},
+    },
+    "board_put": {
+        "description": "Write to the crew's shared board (last write wins).",
+        "input_schema": {"type": "object", "required": ["key", "value"], "properties": {
+            "key": _str(), "value": _str(),
+        }},
+    },
+    "board_get": {
+        "description": "Read the crew's shared board: one key, or all of it.",
+        "input_schema": {"type": "object", "properties": {"key": _str()}},
+    },
+}
+
+
 def status_table(members: list[CrewMember]) -> str:
     if not members:
         return "no crew members"
@@ -794,7 +898,7 @@ def status_table(members: list[CrewMember]) -> str:
 
 
 __all__ = [
-    "BRIEF_INLINE_MAX", "CREW_BUDGET", "Crew", "CrewMember", "CrewRefused", "Inbox", "build_report",
+    "BRIEF_INLINE_MAX", "CREW_BUDGET", "DELIVERED_KIND", "Crew", "CrewMember", "CrewRefused", "Inbox", "build_report",
     "NOTICE_MAX", "SPOKEN_MAX", "parse_report_text", "render_background", "render_inbox", "render_report",
-    "status_table",
+    "status_table", "TOOL_SPECS",
 ]
