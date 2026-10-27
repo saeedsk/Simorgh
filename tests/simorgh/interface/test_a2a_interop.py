@@ -335,7 +335,7 @@ class _Interop(unittest.IsolatedAsyncioTestCase):
         action_id = uuid.uuid4().hex[:12]
         await self.caller.bus("orchestration").publish(Message.new(
             topics.ACTION_PROPOSED, source="orchestration", payload={
-                "action_id": action_id, "tool": "a2a_call", "args": {"agent": "other_sim", **args},
+                "action_id": action_id, "tool": "a2a_call", "args": {"agent": "other_sim", "data": ["public"], **args},
                 "scope": {"network": True}, "reversibility": "irreversible",
                 "rationale": "a2a member: interop proof", "proposed_by": "orchestration",
                 "requester": PERSON, "requester_channel": "cli"}))
@@ -561,6 +561,24 @@ class TestVersionNegotiation(_Interop):
         for version in (None, "0.3", "0.3.0"):
             answered = await self.raw("tasks/get", {"id": "nope"}, version=version)
             self.assertEqual(answered["error"]["code"], server_a2a.TASK_NOT_FOUND, version)
+
+    async def test_a_stream_in_a_version_it_does_not_speak_is_one_error_and_nothing_runs(self):
+        message = {"role": "user", "messageId": "m1", "kind": "message", "parts": [{"kind": "text", "text": "hi"}]}
+        body = json.dumps({"jsonrpc": "2.0", "id": 7, "method": "message/stream",
+                           "params": {"message": message}}).encode()
+        status, reader, writer = await _http(self.url, method="POST", body=body, headers={
+            "Authorization": f"Bearer {self.device_token}", server_a2a.VERSION_HEADER: "1.0"})
+        try:
+            raw = await asyncio.wait_for(reader.read(), 10)
+        finally:
+            writer.close()
+        self.assertEqual(status, 200)
+        events = [json.loads(line[5:]) for line in raw.splitlines() if line.startswith(b"data:")]
+        self.assertEqual(len(events), 1, raw)
+        self.assertEqual(events[0]["id"], 7)
+        self.assertEqual(events[0]["error"]["code"], server_a2a.VERSION_NOT_SUPPORTED)
+        self.assertEqual(self.tasks(), [])
+        self.assertEqual(self.cognition.calls, [])
 
     async def test_the_client_refuses_an_agent_that_speaks_only_a_version_it_does_not(self):
         class _V1Only(PlainTransport):
