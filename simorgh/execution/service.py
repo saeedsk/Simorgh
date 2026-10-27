@@ -225,7 +225,7 @@ class Service:
         topics.CAMERA_EVENT, topics.TV_STATE, topics.DASH_STATE, topics.UI_DASH_KEY,
         topics.SYSTEM_SCHEDULE_ADD, topics.WORLD_ENV_QUERY, topics.WORLD_PEOPLE_UPDATE,
         topics.TASK_CREATE, topics.TASK_LIST_REQUEST, topics.TASK_CANCEL, topics.UI_COMMAND_REQUEST,
-        topics.MEMORY_FORGET, topics.MEMORY_STORE, topics.VOICE_VOICES_REQUEST,
+        topics.MEMORY_FORGET, topics.MEMORY_STORE, topics.VOICE_VOICES_REQUEST, topics.MEMORY_CORE_EDIT,
         topics.VOICE_CONTROL_REQUEST,
         # `room_play` (domains/media/roomplay.py): music on a room's satellite.
         topics.VOICE_ROOM_PLAY_REQUEST,
