@@ -477,13 +477,15 @@ _MARKER_ARG_HINT.update({
         "a room or player name on one line, or empty for every player in the house."
     ),
     "media_control": (
-        "first line: pause, resume, stop, next, previous, volume, mute, unmute, on or off. "
+        "first line: pause, resume, stop, next, previous, volume, mute, unmute, on or off -- pause "
+        "keeps the place, stop ends playback, off switches the player itself off. "
         'Second line, optional: {"where": "kitchen", "value": 30} -- volume is 0-100. Loud is '
         "refused unattended, and refused outright during quiet hours."
     ),
     "media_play": (
-        "first line: what to play -- a URL, a radio stream, or a media id the player "
-        'understands. Second line: {"where": "kitchen", "volume": 25}.'
+        "first line: what to play -- a URL, a stream URL, or a media id the player "
+        'understands. Second line: {"where": "kitchen", "volume": 25}. Home Assistant players '
+        "only: a genre or a room satellite is ROOM_PLAY."
     ),
     "music_now": "nothing -- it reports what the Mac's Music app is playing.",
     "music_control": (

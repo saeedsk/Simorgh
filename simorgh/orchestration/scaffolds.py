@@ -93,15 +93,22 @@ _TOOL_NOTES: dict[str, str] = {
     "energy_tariff": "show or set what the electricity costs -- nothing can be priced until "
                       "this is set",
     "media_now": "what is playing and where",
-    "media_control": "pause, resume, skip, stop or set the volume on a player",
-    "media_play": "play a URL or a stream on a player",
+    # Each line below that has a near neighbour says what separates it
+    # from that neighbour (stage 17 selection stress, 2026-10-27, where
+    # the full scaffold lost to the bare one on exactly these pairs);
+    # test_tool_notes_tell_neighbours_apart.py holds the facts.
+    "media_control": "a Home Assistant player (a TV, a speaker in the house): pause (keeps the place), resume, "
+                     "skip, stop (ends playback), off or on (the player itself), or set the volume",
+    "media_play": "play a URL or stream URL on a Home Assistant player (a TV, a speaker in the house) -- it finds "
+                  "no station by genre, and a room satellite is not one of its players",
     "music_now": "what the Mac's Music app is playing: track, artist, album, state, volume",
     "music_control": "play, pause, stop, next, previous, volume (0-100), mute or unmute the Mac's Music app -- "
                      "the person's own Apple Music and local library",
     "music_play": "play a playlist, album, artist or song by name in the Mac's Music app, or a local audio "
                   "file or a folder of them",
     "room_play": "play internet radio (a genre or station) or a stream on a room satellite's speaker -- where "
-                 "music goes when someone asks a satellite to play something; `stop` stops it",
+                 "music goes when someone asks a satellite to play something; it finds the station itself; "
+                 "`stop` stops it",
     "home_find": "find things in the house by name and get their entity ids",
     "home_state": "what one thing in the house is doing right now",
     "home_describe": "what is in the house and what each kind of thing can do",
@@ -230,9 +237,12 @@ _TOOL_NOTES: dict[str, str] = {
     "cam_setup": "the NVR's address and login, kept in secrets.toml; then a restart",
     "cam_list": "every camera on the NVR: number, name, online",
     "cam_state": "what a camera sees right now (motion, person, vehicle, animal) and what it has on",
-    "cam_snapshot": "a still from a camera, saved under workspace/cameras/",
-    "camera_describe": "what a camera can see right now, in words: `<camera>` (NVR or Ring)",
-    "look_at_image": "look at up to four image files and answer a question about them (for a video, extract frames first)",
+    "cam_snapshot": "take a NEW still from a live camera now, saved under workspace/cameras/ -- not for a "
+                    "picture that already exists (look_at_image)",
+    "camera_describe": "what a live camera can see right now, in words: `<camera>` (NVR or Ring) -- not for a "
+                       "saved picture",
+    "look_at_image": "look at up to four image files already on disk, by path (a saved snapshot included), and "
+                     "answer a question about them -- takes no new picture (for a video, extract frames first)",
     "remember_place": "keep what a place is called so it survives a restart: `house <name>`, `network <name> is <place>`, `forget network <name>`, or `places` to list",
     "overheard": "what was said near you that was not said TO you, and kept memos: `2 hours`, `from Ira`, `memos`; kept two days then gone",
     "overheard_note": "`memo <text>` pins one line of overheard speech for 48 hours -- a voice memo, "
