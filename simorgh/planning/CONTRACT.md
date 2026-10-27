@@ -138,7 +138,7 @@ Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus
 
 - `simorgh.planning.Service` (name `planning`, `VERSION = "0.1.0"`): constructed by `kernel/registry.py:133` with no arguments.
 - `simorgh.planning.config.Config`: imported by `kernel/configcheck.py:223`.
-- Nothing else is imported from outside the package; `Task` and the status names are not in `simorgh/contracts` (other packages see task payloads only). The reason prefixes `step budget exhausted`, `verification failed`, `finished with uncommitted changes` (`service.py`, bottom) are a string contract with `orchestration/session.py` that neither side can import.
+- Nothing else is imported from outside the package; `Task` and the status names are not in `simorgh/contracts` (other packages see task payloads only). The reason prefixes `step budget exhausted`, `verification failed`, `finished with uncommitted changes`, `prerequisite not done` (`service.py`, bottom) are a string contract with `orchestration/session.py` that neither side can import.
 - Module-level state: `scheduler.DEFAULT_PRIORITY_WEIGHTS` is a mutable dict built from `Config()` at import; it is exported but the Service never reads it (it passes `config.priority_weights`), so mutating it changes nothing. No other singletons. Per-instance state lost at restart: `_plans`, `_plan_by_task`, `_prompt_to_plan` (every plan in review or awaiting a human), `_cancel_requested`, `_last_blocked_answer`, drift and sibling-failure flags, `_recent_self_patches`.
 
 ## Invariants
@@ -158,7 +158,7 @@ A mined pattern (`reflect.patterns.found`) becomes a `research` task that asks f
 - A ready task is offered on the second tick without waiting for idle, and each (task, `updated_at`) generation is offered at most once.
 - A human-origin task is never deferred by the backlog bound; autonomous origins are deferred at `max_backlog` waiting tasks. A new human task preempts (requeues, never fails) the lowest-priority running task.
 - Intake dedupes against every known description regardless of status.
-- A blocked task comes back only after its retry delay (`continuation_delay_seconds` for continuation, verification and uncommitted reasons; otherwise `blocked_retry_delay_seconds`); after `max_blocked_retries` attempts, or when a verification-blocked retry repeats the same answer, it fails terminally.
+- A blocked task comes back only after its retry delay (`continuation_delay_seconds` for continuation, verification, uncommitted and last-step prerequisite (stage 16) reasons; otherwise `blocked_retry_delay_seconds`); after `max_blocked_retries` attempts, or when a verification-blocked retry repeats the same answer, it fails terminally.
 - A terminal failure blocks the whole downstream closure; project status is always computed from children, never stored; `project.completed`/`failed` fires once per project.
 - A plan with no parseable steps sends the project back to `available` with a notice; replans are bounded by `max_plan_revisions`; an unanswered human approval pauses the project after `human_approval_timeout_seconds`.
 - A re-grounding non-answer is never treated as drift: only a clear `no` supersedes a child.
@@ -178,6 +178,7 @@ The files below pin the interface above. Keep them green: `python tools/modtest.
 - `tests/simorgh/planning/test_project_decomposition.py` -- `parse_steps` keeps only steps under the live source roots, and the plan scaffold's format is what the parser reads.
 - `tests/simorgh/planning/test_decomposer_dedupe_planmode.py` -- the plan approval matrix, the human-approval timeout predicate, the dedupe threshold.
 - `tests/simorgh/planning/test_the_backlog_is_offered_without_an_idle_tick.py` -- ready work is offered on the second tick, once per generation.
+- `tests/simorgh/planning/test_a_held_back_commit_retries_as_a_continuation.py` -- stage 16: a last-step commit held back for `prerequisite not done` comes back on the continuation delay, since its edit is kept.
 - `tests/simorgh/planning/test_projects_on_crews.py` -- stage 18 item 4 against a fake crew runtime: three independent nodes run together (the project takes its longest node), the spawn names the node, the project and its acceptance, the per-project cap, a dependent node waits for its dependency, a failed node reports and ends the project, a `partial` report goes through the retry path, an unanswered spawn puts the project back on the queue, and a Worker may not claim a crew-run node. Review 2026-10-27: nothing starts while the system is paused or under `auto off`, and a human task does not preempt a crew-run node. The end-to-end run with Orchestration is `tests/simorgh/orchestration/test_crew_spawn.py`.
 
 ## Known issues (2026-09-18 evaluation)
