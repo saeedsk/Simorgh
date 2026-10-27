@@ -36,7 +36,7 @@ is why `evals` is in the boundary checker's `COMPOSITION_ROOTS` beside
 | `simorgh/evals/suites.py` | the suite registry, and each suite's adapter |
 | `simorgh/evals/runner.py` | repeats (one child process each), the table, the JSONL record |
 | `simorgh/evals/scenario.py` | the household script and its probes (was `tools/recall_scenario.py`) |
-| `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario \| house \| arcs \| ablate` |
+| `simorgh/evals/__main__.py` | `python -m simorgh.evals run \| list \| scenario \| house \| arcs \| ablate \| memory \| crew-bench` |
 | `simorgh/evals/ablation.py` | the stage-14 guardrail ablation runner: presets, the matrix, the cap, the table |
 | `simorgh/evals/crewbench.py` | `crew-bench` (stage 18 item 6): crews with fake providers -- message latency, spawn overhead, fan-out speedup, memory per member |
 | `simorgh/evals/house/` | the household simulator (stage 11): `sandbox.py`, `director.py`, `record.py`, `people.py`, `scene.py`, `script.py`, `hearing.py`, `timing.py`, `voicecache.py`, `run.py`, `scenarios/` |
