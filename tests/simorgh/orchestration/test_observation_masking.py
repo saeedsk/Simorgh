@@ -138,6 +138,42 @@ class MaskingRules(unittest.TestCase):
         self.assertTrue(_masked(out[2]))
 
     @run
+    async def test_a_failed_retry_of_the_same_tool_answers_the_error(self):
+        # Every later result failed, so only "a later step ran the same
+        # tool" can answer the first error; the retry itself (answered by
+        # nothing yet) stays.
+        error = _marker("read_file", "error: no such file\n" + BIG)
+        retry = _marker("read_file", "error: still no such file\n" + BIG)
+        other = _marker("list_dir", "error: denied\n" + BIG)
+        messages = [{"role": "user", "content": "task"},
+                    {"role": "assistant", "content": "READ_FILE: x"}, error,
+                    {"role": "assistant", "content": "READ_FILE: y"}, retry,
+                    {"role": "assistant", "content": "LIST_DIR: ."}, other]
+        failed = {pressure.digest(m["content"]) for m in (error, retry, other)}
+        out, made = await pressure.mask_old_results(messages, after_steps=1, put=_Store().put, failed=failed)
+        self.assertTrue(_masked(out[2]))
+        self.assertFalse(_masked(out[4]))
+        self.assertEqual(len(made), 1)
+
+    @run
+    async def test_a_sibling_in_the_same_step_does_not_answer_an_error(self):
+        # A parallel step: one call failed, its sibling succeeded. The
+        # success is not the model's answer to the failure -- only a later
+        # step is.
+        messages = [{"role": "user", "content": "q"},
+                    {"role": "assistant", "content": "", "tool_calls": [
+                        {"id": "c1", "tool": "read_file", "args": {}}, {"id": "c2", "tool": "search_code", "args": {}}]},
+                    {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "error: gone\n" + BIG},
+                    {"role": "tool", "tool_call_id": "c2", "name": "search_code", "content": BIG},
+                    {"role": "assistant", "content": "", "tool_calls": [{"id": "c3", "tool": "x", "args": {}}]},
+                    {"role": "tool", "tool_call_id": "c3", "name": "x", "content": "error: x\n" + BIG}]
+        failed = {pressure.digest(messages[2]["content"]), pressure.digest(messages[5]["content"])}
+        out, made = await pressure.mask_old_results(messages, after_steps=1, put=_Store().put, failed=failed)
+        self.assertFalse(_masked(out[2]))
+        self.assertTrue(_masked(out[3]))
+        self.assertEqual(len(made), 1)
+
+    @run
     async def test_short_results_are_left(self):
         messages = [{"role": "user", "content": "task"}]
         for i in range(4):
@@ -243,10 +279,47 @@ class _Cognition:
                            "tokens_limit": 1_000_000}})
 
 
+class _Native(_Cognition):
+    """Typed calls with ids (the native dialect); `calls` per reply, and
+    `tool` names what they call (an unknown tool earns a nudge)."""
+
+    def __init__(self, bus, *, turns: int, calls: int = 1, tool: str = "read_file"):
+        super().__init__(bus, turns=turns)
+        self._n_calls, self._tool = calls, tool
+
+    async def _on(self, message):
+        self.calls.append(message)
+        n = len(self.calls)
+        done = n > self._turns
+        calls = [] if done else [{"id": f"c{n}-{k}", "tool": self._tool, "args": {"path": f"n{n}-{k}.txt"}}
+                                 for k in range(self._n_calls)]
+        await self._bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
+            "text": "all read" if done else "", "tool_calls": calls,
+            "provider": "fake", "cost_usd": 0.0, "tokens": 10, "floor": False, "non_answer": False,
+            "compaction": {"layers_applied": [], "tokens_before": 10, "tokens_after": 10,
+                           "tokens_limit": 1_000_000}})
+
+
+class _MarkerBatch(_Cognition):
+    """Two read markers per reply: a marker-dialect batch."""
+
+    async def _on(self, message):
+        self.calls.append(message)
+        n = len(self.calls)
+        done = n > self._turns
+        await self._bus.reply(message, type=topics.COGNITION_THINK_REPLY, payload={
+            "text": "all read" if done else "READ_FILE: a\nREAD_FILE: b",
+            "tool_calls": [] if done else [{"tool": "read_file", "args": {"path": f"a{n}"}},
+                                           {"tool": "read_file", "args": {"path": f"b{n}"}}],
+            "provider": "fake", "cost_usd": 0.0, "tokens": 10, "floor": False, "non_answer": False,
+            "compaction": {"layers_applied": [], "tokens_before": 10, "tokens_after": 10,
+                           "tokens_limit": 1_000_000}})
+
+
 class InTheSession(unittest.TestCase):
-    async def _run(self, *, turns=5, fail=0, **runner_kw):
+    async def _run(self, *, turns=5, fail=0, cognition_cls=None, cognition_kw=None, **runner_kw):
         async with Harness() as h:
-            cognition = _Cognition(h.client("cognition"), turns=turns)
+            cognition = (cognition_cls or _Cognition)(h.client("cognition"), turns=turns, **(cognition_kw or {}))
             execution = _Execution(h.client("guardian"), fail=fail)
             await cognition.start()
             await execution.start()
@@ -281,6 +354,29 @@ class InTheSession(unittest.TestCase):
         failed = [m for m in session.messages if pressure.digest(str(m.get("content"))) in session.failed_results]
         self.assertEqual(len(failed), 1)
         self.assertIn("failed #1", failed[0]["content"])
+
+    @run
+    async def test_a_native_failure_is_marked_by_its_tool_turn(self):
+        session, _c, _r, _o = await self._run(turns=3, fail=1, cognition_cls=_Native)
+        failed = [m for m in session.messages if pressure.digest(str(m.get("content"))) in session.failed_results]
+        self.assertEqual([m.get("role") for m in failed], ["tool"])
+        self.assertIn("failed #1", failed[0]["content"])
+
+    @run
+    async def test_a_nudge_on_the_tool_channel_is_marked(self):
+        session, _c, _r, _o = await self._run(turns=1, cognition_cls=_Native,
+                                              cognition_kw={"tool": "no_such_tool"})
+        tools = [m for m in session.messages if m.get("role") == "tool"]
+        self.assertTrue(tools)
+        self.assertTrue(all(pressure.digest(m["content"]) in session.failed_results for m in tools))
+
+    @run
+    async def test_a_marker_batch_with_a_failure_is_marked(self):
+        session, _c, _r, _o = await self._run(turns=2, fail=1, cognition_cls=_MarkerBatch, parallel_read_tools=2)
+        batches = [m for m in session.messages if str(m.get("content")).startswith("Results of 2 lookups")]
+        self.assertEqual(len(batches), 2)
+        self.assertIn(pressure.digest(batches[0]["content"]), session.failed_results)
+        self.assertNotIn(pressure.digest(batches[1]["content"]), session.failed_results)
 
     @run
     async def test_off_is_byte_identical(self):
