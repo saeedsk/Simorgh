@@ -127,8 +127,9 @@ CrewSpawn = define(t.CREW_SPAWN, [
     O("device", Str),                   # the paired device that asked
     O("report", Str),                   # report policy for the member; parse_report_policy() reads it
     O("background", Bool),
-    O("context_id", Str),               # the caller's own context, when it sent one; members sent with
-                                        # the same one join one crew (`crew_id` = context_id)
+    O("context_id", Str),               # the crew to join: a plan node's project (`crew_id` = context_id);
+                                        # from outside (A2A's contextId), only a crew the same requester
+                                        # started, else refused or a fresh crew (orchestration CONTRACT.md)
     # A project's plan node (stage 18 item 4): Planning runs each ready node
     # of a project as a member of the crew rooted at the project.
     O("handle", Str),                   # the member's handle, chosen by the caller (the node's task id)
