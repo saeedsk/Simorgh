@@ -29,14 +29,17 @@ from dataclasses import dataclass, field
 from .corpus import Episode, Question
 from .meter import Meter
 
-#: The Together model Sim uses for embeddings in the sidecars. Overridable,
-#: because which embedding models are serverless on Together changes.
+#: Embeddings go to Gemini's OpenAI-compatible endpoint, not Together:
+#: on 2026-10-27 Together served no embedding model per token to this
+#: account (multilingual-e5-large-instruct and bge-base-en-v1.5 both
+#: answered HTTP 400 "non-serverless model", though `/v1/models` lists
+#: the second). Overridable, endpoint and key included, because that
+#: changes.
 EMBED_MODEL_ENV = "SIMORGH_EVALS_EMBED_MODEL"
-#: `BAAI/bge-base-en-v1.5` was the only embedding model Together served per
-#: token on 2026-10-27 (`/v1/models`, type "embedding"); the earlier
-#: default, multilingual-e5-large-instruct, needs a dedicated endpoint and
-#: failed the first paid run with HTTP 400. English-only, 512 tokens.
-DEFAULT_EMBED_MODEL = "BAAI/bge-base-en-v1.5"
+EMBED_BASE_URL_ENV = "SIMORGH_EVALS_EMBED_BASE_URL"
+EMBED_KEY_ENV = "GEMINI_API_KEY"
+DEFAULT_EMBED_MODEL = "gemini-embedding-001"
+DEFAULT_EMBED_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEFAULT_EMBED_DIMENSIONS = 768
 EMBED_DIMENSIONS_ENV = "SIMORGH_EVALS_EMBED_DIMENSIONS"
 KEY_ENV = "TOGETHER_API_KEY"
@@ -53,6 +56,8 @@ class Settings:
     price_in: float
     price_out: float
     embed_dimensions: int = DEFAULT_EMBED_DIMENSIONS
+    embed_base_url: str = DEFAULT_EMBED_BASE_URL
+    embed_api_key: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -62,7 +67,9 @@ class Settings:
                    base_url=together.DEFAULT_BASE_URL,
                    embed_model=os.environ.get(EMBED_MODEL_ENV, "") or DEFAULT_EMBED_MODEL,
                    price_in=together.PRICE_IN, price_out=together.PRICE_OUT,
-                   embed_dimensions=int(os.environ.get(EMBED_DIMENSIONS_ENV, "") or DEFAULT_EMBED_DIMENSIONS))
+                   embed_dimensions=int(os.environ.get(EMBED_DIMENSIONS_ENV, "") or DEFAULT_EMBED_DIMENSIONS),
+                   embed_base_url=os.environ.get(EMBED_BASE_URL_ENV, "") or DEFAULT_EMBED_BASE_URL,
+                   embed_api_key=os.environ.get(EMBED_KEY_ENV, ""))
 
 
 @dataclass
@@ -128,6 +135,8 @@ class Sidecar:
             return f"{self.name} needs a finite --cap-usd above zero (got {cap!r}); it never runs uncapped"
         if not self.settings.api_key:
             return f"{self.name}: no {KEY_ENV} in the environment"
+        if not self.settings.embed_api_key:
+            return f"{self.name}: no {EMBED_KEY_ENV} in the environment (embeddings go to {self.settings.embed_base_url})"
         return ""
 
     def estimate(self, episodes: int, questions: int) -> dict:
@@ -156,5 +165,5 @@ def groups_for(asker: str) -> list[str]:
     return ["household", f"person_{asker}"]
 
 
-__all__ = ["DEFAULT_EMBED_DIMENSIONS", "DEFAULT_EMBED_MODEL", "EMBED_DIMENSIONS_ENV", "EMBED_MODEL_ENV", "Ingestion", "KEY_ENV",
+__all__ = ["DEFAULT_EMBED_DIMENSIONS", "DEFAULT_EMBED_MODEL", "EMBED_BASE_URL_ENV", "EMBED_DIMENSIONS_ENV", "EMBED_KEY_ENV", "EMBED_MODEL_ENV", "Ingestion", "KEY_ENV",
            "Settings", "Sidecar", "groups_for"]

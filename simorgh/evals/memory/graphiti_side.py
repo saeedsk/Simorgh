@@ -78,10 +78,11 @@ class GraphitiSide(Sidecar):
             graph_driver=driver,
             llm_client=lib.OpenAIGenericClient(config=llm_config, client=client),
             embedder=lib.OpenAIEmbedder(
-                config=lib.OpenAIEmbedderConfig(api_key=s.api_key, base_url=s.base_url,
+                config=lib.OpenAIEmbedderConfig(api_key=s.embed_api_key, base_url=s.embed_base_url,
                                                 embedding_model=s.embed_model,
                                                 embedding_dim=s.embed_dimensions),
-                client=client),
+                client=MeteredClient(lib.AsyncOpenAI(api_key=s.embed_api_key, base_url=s.embed_base_url),
+                                     self.meter)),
             cross_encoder=lib.OpenAIRerankerClient(config=llm_config, client=client),
         )
         await self.graphiti.build_indices_and_constraints()

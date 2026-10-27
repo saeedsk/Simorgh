@@ -32,7 +32,7 @@ from simorgh.evals.memory.suite import dry_run, main, run_system
 from simorgh.evals.suites import PAID, SUITES
 
 _SETTINGS = Settings(api_key="test-key", model="m", base_url="http://127.0.0.1:9/v1", embed_model="e",
-                     price_in=1.0, price_out=1.0)
+                     price_in=1.0, price_out=1.0, embed_api_key="embed-key")
 
 
 def _usage(tokens_in: int, tokens_out: int = 0):
@@ -269,6 +269,16 @@ class GraphitiSidecar(unittest.TestCase):
         self.assertTrue(result.report.outcomes)
         self.assertTrue(all(o.status == SKIPPED for o in result.report.outcomes))
         self.assertEqual(os.environ["GRAPHITI_TELEMETRY_ENABLED"], "false")
+
+    def test_no_embedding_key_is_skipped_saying_which(self):
+        from dataclasses import replace
+
+        from simorgh.evals.memory.graphiti_side import GraphitiSide
+
+        side = GraphitiSide(paid=True, cap_usd=5.0, settings=replace(_SETTINGS, embed_api_key=""))
+        with mock.patch.dict(sys.modules, _fake_graphiti_modules({})):
+            result = asyncio.run(run_system(side, episodes()[:3]))
+        self.assertIn("GEMINI_API_KEY", result.skipped)
 
     def test_it_ingests_searches_by_group_and_counts_the_cost(self):
         store: dict = {}

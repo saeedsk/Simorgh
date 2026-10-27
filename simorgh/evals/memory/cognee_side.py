@@ -80,7 +80,7 @@ class CogneeSide(Sidecar):
         config.set_llm_config({"llm_provider": "custom", "llm_model": f"openai/{s.model}",
                                "llm_endpoint": s.base_url, "llm_api_key": s.api_key})
         config.set_embedding_config({"embedding_provider": "custom", "embedding_model": f"openai/{s.embed_model}",
-                                     "embedding_endpoint": s.base_url, "embedding_api_key": s.api_key,
+                                     "embedding_endpoint": s.embed_base_url, "embedding_api_key": s.embed_api_key,
                                      "embedding_dimensions": s.embed_dimensions})
         store = graph_store()
         if store and store not in LOCAL_GRAPH_STORES:
