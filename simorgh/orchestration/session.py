@@ -163,13 +163,25 @@ _NOTICE_CHANNELS = ("", "cli", "api", "http")
 SESSION_LOCAL = SESSION_LOCAL | CREW_TOOLS
 
 
+#: The data class a remote member's message carries when its spawn named
+#: none. `data` is a LABEL on what leaves the house, which `a2a_call`
+#: checks against the agent's `allowed_data` (a ceiling a person set);
+#: nothing reads the brief to see whether the label is true. So an unsaid
+#: class is not "public": that would let an unlabelled brief through to
+#: every agent a person allowed public data only. `private` is the most
+#: restrictive label -- only an agent allowed `*` or `private` takes it --
+#: so a spawn that wants a public-only agent must say `data: ["public"]`.
+UNDECLARED_DATA = "private"
+
+
 def _data_classes(value) -> tuple[str, ...]:
     """The data classes a remote member's message carries (`a2a_call`'s
-    `data`): a list or a comma-separated string; nothing said is `public`."""
+    `data`): a list or a comma-separated string; nothing said is
+    `UNDECLARED_DATA`."""
     items = value.split(",") if isinstance(value, str) else list(value or ()) if isinstance(
         value, (list, tuple, set, frozenset)) else []
     out = tuple(dict.fromkeys(str(i).strip().lower() for i in items if str(i).strip()))
-    return out or ("public",)
+    return out or (UNDECLARED_DATA,)
 from . import progress as progress_note
 from . import stophook
 from .stophook import (  # noqa: F401 -- re-exported: tests and callers import them from here
@@ -3255,7 +3267,9 @@ class SessionRunner:
                 tail = await self._ledger.tail(_A2A_CALLS_STREAM, on_call_event)
             except Exception:  # noqa: BLE001 -- no progress lines is not a failed member
                 tail = None
-        data = list(member.data or ("public",))
+        # A member folded from a `crew.spawned` written before its spawn
+        # recorded `data` is as undeclared as one whose spawn said none.
+        data = list(member.data or (UNDECLARED_DATA,))
         args: dict = {"agent": name, "message": text, "data": data}
         try:
             while True:
@@ -3552,13 +3566,22 @@ class SessionRunner:
     # -- crews started, steered and cancelled from outside a session (`crew.spawn`) -------
 
     async def spawn_external(self, *, agent: str, brief: str, requester: str, requester_channel: str,
-                             report: str = "end", background: bool = True) -> tuple[str, str]:
+                             report: str = "end", background: bool = True,
+                             context_id: str = "") -> tuple[str, str]:
         """`crew.spawn`: a crew with no session at its root, one member
         acting as `requester` on `requester_channel` -- what Guardian sees
         on every one of its proposals. Asked by the A2A server (stage 18
         item 10) for a paired caller. Returns `(crew_id, handle)`; raises
         `CrewRefused` with what to tell the asker. Read-only agents only:
-        a request from outside the house never starts a writer."""
+        a request from outside the house never starts a writer.
+
+        `context_id` is the caller's A2A `contextId`, "the same
+        conversation": the member joins that crew when it is one this
+        same (requester, channel) started from outside earlier, in memory
+        or folded from `crew:<id>` (`_external_crew_for`). Any other crew
+        -- another caller's, a session's, a project's -- is refused; an
+        id nobody started is a fresh crew under a new id, the server's to
+        choose as A2A's contextId is."""
         from simorgh.contracts.messages.crew import parse_report_policy
 
         from . import profiles as _agents
@@ -3580,8 +3603,12 @@ class SessionRunner:
             parse_report_policy(policy)
         except ValueError as exc:
             raise CrewRefused(str(exc)) from exc
-        crew_id = f"crew-{uuid.uuid4().hex[:12]}"
-        crew = self._new_crew(crew_id)
+        who = (str(requester or ""), str(requester_channel))
+        crew = await self._external_crew_for(str(context_id or "").strip(), who)
+        fresh = crew is None
+        if crew is None:
+            crew = self._new_crew(f"crew-{uuid.uuid4().hex[:12]}")
+        crew_id = crew.crew_id
         crew.external = True
         crew.read_only = True  # nothing a member starts may write or reach another house
         self._crews[crew_id] = crew
@@ -3592,14 +3619,51 @@ class SessionRunner:
                 parent=crew_id, agent=profile.name, brief=text, depth=1,
                 budget=crew.carve(crew_id, MemberBudget(steps=self._delegate_max_steps)), report_policy=policy,
                 background=bool(background), brief_ref=await self._brief_ref(text),
-                requester=str(requester or ""), requester_channel=str(requester_channel))
+                requester=who[0], requester_channel=who[1])
         except CrewRefused:
-            self._crews.pop(crew_id, None)
+            if fresh:
+                self._crews.pop(crew_id, None)
+            else:
+                self._forget_crew(crew_id)
             raise
         member.job = job
         child = self._member_session(None, member, profile)
         self._start_member(crew, member, child, text, None)
         return crew_id, member.handle
+
+    async def _external_crew_for(self, context_id: str, who: tuple[str, str]) -> Crew | None:
+        """The crew an outside caller's `contextId` names, when the caller
+        may join it; None for a fresh crew. `who` is (requester, channel).
+
+        Joined only when the crew was started from outside (`external`,
+        on its `crew.spawned` events), no session is at its root, and
+        every member in it acts for `who`: a caller who learnt another
+        caller's contextId, a session's crew id or a project's would
+        otherwise put its member, its messages and its report into that
+        crew. Those are refused, with one answer for all of them. An id
+        with no crew in memory and nothing on `crew:<id>` is None: a
+        caller's own made-up id never becomes a crew id here, so it can
+        never take one a session or a project will use later."""
+        if not context_id:
+            return None
+        crew = self._crews.get(context_id)
+        if crew is None and context_id not in self._open and self._ledger is not None:
+            try:
+                events = await self._ledger.read(crew_stream(context_id))
+            except Exception:  # noqa: BLE001 -- an unreadable stream is no crew to join
+                events = []
+            if events:
+                crew = self._new_crew(context_id, events)
+        if crew is None and context_id not in self._open:
+            return None
+        refused = CrewRefused(f"context {context_id} is not a conversation this caller started; "
+                              "send no contextId to start a new one")
+        if crew is None or context_id in self._open or not crew.external or not crew.members:
+            raise refused
+        if any((m.requester, m.requester_channel) != who or (m.depth <= 1 and m.parent != context_id)
+               for m in crew.members.values()):
+            raise refused
+        return crew
 
     async def crew_message_external(self, payload: dict) -> bool:
         """A `crew.message` from outside (the A2A server's caller answering

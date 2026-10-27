@@ -829,7 +829,9 @@ TOOL_SPECS: dict[str, dict] = {
             "budget_tokens": {"type": "integer"},
             "budget_wall_s": {"type": "number"},
             "data": {"type": "array", "items": {"type": "string"},
-                     "description": "a2a members: the data classes the message carries"},
+                     "description": "a2a members: the data classes the brief carries, checked against what "
+                                    "the agent may receive; none said is `private`, which most agents refuse, "
+                                    "so say public when it is"},
         }},
     },
     "await_agents": {

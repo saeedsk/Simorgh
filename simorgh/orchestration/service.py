@@ -392,7 +392,8 @@ class Service:
         -- gets one read-only member acting as `requester` on
         `requester_channel`, refused when the request names no channel: a
         crew acts for somebody through something, and Guardian weighs every
-        call as that."""
+        call as that. Its `context_id` joins a crew the same caller started
+        earlier (`SessionRunner.spawn_external`)."""
         from simorgh.contracts.registry import error_reply_payload
 
         from .crew import CrewRefused
@@ -425,12 +426,18 @@ class Service:
             else:
                 if not str(p.get("requester_channel") or "").strip():
                     raise CrewRefused("requester_channel is empty: a crew must act for somebody, through some channel")
-                worker = self._workers[self._next_worker % len(self._workers)]
-                self._next_worker += 1
+                # A caller's `context_id` (A2A's contextId) joins its own
+                # earlier crew, on the Worker already holding it when one does.
+                context_id = str(p.get("context_id") or "")
+                worker = next((w for w in self._workers if w.holds_crew(context_id)), None)
+                if worker is None:
+                    worker = self._workers[self._next_worker % len(self._workers)]
+                    self._next_worker += 1
                 crew_id, handle = await worker.spawn_crew(
                     agent=str(p.get("agent") or ""), brief=str(p.get("brief") or ""),
                     requester=str(p.get("requester") or ""), requester_channel=str(p.get("requester_channel") or ""),
-                    report=str(p.get("report") or "end"), background=p.get("background", True) is not False)
+                    report=str(p.get("report") or "end"), background=p.get("background", True) is not False,
+                    context_id=context_id)
         except (CrewRefused, ValueError) as exc:
             await refuse("refused", str(exc))
             return

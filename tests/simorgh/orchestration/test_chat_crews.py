@@ -693,5 +693,173 @@ class ReviewFixes(unittest.TestCase):
         self.assertEqual(len(crew.inboxes["t-root-h1"]), 0, "nobody may speak as a session's own crew parent")
 
 
+class AnA2aContextIsTheSameConversation(unittest.TestCase):
+    """An outside caller's `context_id` (A2A's contextId) joins a crew the
+    same (requester, channel) started earlier; anyone else's is refused,
+    and an id nobody started is a fresh crew under an id of the runner's."""
+
+    async def _spawn(self, runner, *, requester="Soodeh", channel="a2a", context_id="", brief="price of A"):
+        return await runner.spawn_external(agent="research", brief=brief, requester=requester,
+                                           requester_channel=channel, context_id=context_id)
+
+    @run
+    async def test_the_same_caller_joins_while_running_and_after_it_ended(self):
+        async with Harness() as h:
+            runner = _runner(h, keep=False)
+            gx = FakeGuardianExecution(h.client("guardian"))
+            cognition = CrewCognition(h.client("cognition"), {"*": [{"text": "A is 500.\n- a.md"}]},
+                                      delay={"*": 0.5})
+            await cognition.start(); await gx.start()
+            crew_id, first = await self._spawn(runner)
+            # Running: the crew is in memory, and the follow-up joins it.
+            same, second = await self._spawn(runner, context_id=crew_id, brief="and B?")
+            self.assertEqual(same, crew_id)
+            self.assertNotEqual(second, first)
+            crew = runner._crews[crew_id]  # noqa: SLF001
+            self.assertEqual(set(crew.members), {first, second})
+            self.assertTrue(crew.external and crew.read_only)
+            await asyncio.wait_for(asyncio.gather(crew.members[first].task, crew.members[second].task), 20)
+            await _until(lambda: crew_id not in runner._crews)  # noqa: SLF001
+            # Ended and forgotten: folded from `crew:<id>`, and joined again.
+            again, third = await self._spawn(runner, context_id=crew_id, brief="and C?")
+            folded = runner._crews[crew_id]  # noqa: SLF001
+            self.assertEqual(again, crew_id)
+            self.assertEqual(set(folded.members), {first, second, third})
+            self.assertTrue(folded.external and folded.read_only, "a folded crew is still outside and read-only")
+            self.assertEqual((folded.members[third].requester, folded.members[third].requester_channel),
+                             ("Soodeh", "a2a"))
+            await asyncio.wait_for(folded.members[third].task, 20)
+            await cognition.stop(); await gx.stop()
+
+    @run
+    async def test_another_caller_or_channel_is_refused_and_nothing_joins(self):
+        from simorgh.orchestration.crew import CrewRefused
+
+        async with Harness() as h:
+            runner = _runner(h)
+            gx = FakeGuardianExecution(h.client("guardian"))
+            cognition = CrewCognition(h.client("cognition"), {"*": [{"text": "A is 500.\n- a.md"}]})
+            await cognition.start(); await gx.start()
+            crew_id, handle = await self._spawn(runner)
+            crew = runner._crews[crew_id]  # noqa: SLF001
+            for who in (("Saeed", "a2a"), ("Soodeh", "telegram"), ("", "a2a")):
+                with self.assertRaises(CrewRefused) as caught:
+                    await self._spawn(runner, requester=who[0], channel=who[1], context_id=crew_id)
+                self.assertIn("not a conversation this caller started", str(caught.exception))
+            self.assertEqual(set(crew.members), {handle}, "a refused caller put nothing in the crew")
+            await asyncio.wait_for(crew.members[handle].task, 20)
+            await cognition.stop(); await gx.stop()
+
+    @run
+    async def test_a_sessions_or_a_projects_crew_is_refused_even_for_the_same_person(self):
+        from simorgh.orchestration.crew import CrewRefused
+
+        async with Harness() as h:
+            runner = _runner(h)
+            # A session's crew: its members act for the person on the same
+            # channel, but it was not started from outside.
+            session_crew = Crew("t-root")
+            runner._crews["t-root"] = session_crew  # noqa: SLF001
+            await session_crew.admit(parent="t-root", agent="research", brief="b", depth=1, budget=MemberBudget(),
+                                     requester="Soodeh", requester_channel="a2a")
+            # A project's crew, only on the ledger: plan nodes act for nobody.
+            project = Crew("proj-1")
+            await project.admit(parent="proj-1", agent="research", brief="b", depth=1, budget=MemberBudget())
+            await h.ledger.append("crew:proj-1", Event(
+                stream="crew:proj-1", type=topics.CREW_SPAWNED, ts=time.time(), trace_id="proj-1",
+                causation_id=None, payload=project.spawned_payload(project.members["proj-1-h1"]),
+                idempotency_key=uuid.uuid4().hex))
+            for context_id in ("t-root", "proj-1"):
+                with self.assertRaises(CrewRefused):
+                    await self._spawn(runner, context_id=context_id)
+            self.assertEqual(len(session_crew.members), 1)
+            self.assertNotIn("proj-1", runner._crews)  # noqa: SLF001
+
+    @run
+    async def test_an_unknown_context_starts_a_fresh_crew_under_the_runners_own_id(self):
+        async with Harness() as h:
+            runner = _runner(h)
+            gx = FakeGuardianExecution(h.client("guardian"))
+            cognition = CrewCognition(h.client("cognition"), {"*": [{"text": "A is 500.\n- a.md"}]})
+            await cognition.start(); await gx.start()
+            crew_id, handle = await self._spawn(runner, context_id="proj-later")
+            self.assertNotEqual(crew_id, "proj-later", "a caller's made-up id never becomes a crew id")
+            self.assertTrue(crew_id.startswith("crew-"))
+            self.assertNotIn("proj-later", runner._crews)  # noqa: SLF001
+            await asyncio.wait_for(runner._crews[crew_id].members[handle].task, 20)  # noqa: SLF001
+            await cognition.stop(); await gx.stop()
+
+    @run
+    async def test_crew_spawn_carries_the_context_to_the_worker_holding_it(self):
+        async with Harness() as h:
+            bus = h.client("orchestration")
+            workers = [Worker(bus, h.ledger, clock=h.clock.now, worker_id=f"w{i}", assemble_timeout_s=0.05,
+                              think_timeout_s=30.0) for i in (1, 2)]
+            service = Service()
+            service._ctx = SimpleNamespace(bus=bus)  # noqa: SLF001
+            service._workers = workers  # noqa: SLF001
+            await bus.subscribe(topics.CREW_SPAWN, service._on_crew_spawn)  # noqa: SLF001
+            gx = FakeGuardianExecution(h.client("guardian"))
+            cognition = CrewCognition(h.client("cognition"), {"*": [{"text": "A is 500.\n- a.md"}]},
+                                      delay={"*": 0.5})
+            await cognition.start(); await gx.start()
+            caller = h.client("interface")
+            base = {"agent": "research", "brief": "price of A", "requester": "Soodeh", "requester_channel": "a2a"}
+            first = (await caller.request(Message.new(topics.CREW_SPAWN, source="interface", payload=base),
+                                          timeout=5)).payload
+            follow = (await caller.request(Message.new(topics.CREW_SPAWN, source="interface", payload={
+                **base, "brief": "and B?", "context_id": first["crew_id"]}), timeout=5)).payload
+            self.assertEqual(follow["crew_id"], first["crew_id"])
+            holders = [w for w in workers if w.holds_crew(first["crew_id"])]
+            self.assertEqual(len(holders), 1, "one crew, one runner")
+            crew = holders[0]._runner._crews[first["crew_id"]]  # noqa: SLF001
+            self.assertEqual(set(crew.members), {first["handle"], follow["handle"]})
+            await asyncio.wait_for(asyncio.gather(*(m.task for m in crew.members.values())), 20)
+            await cognition.stop(); await gx.stop()
+
+
+class AnUndeclaredDataClassIsPrivate(unittest.TestCase):
+    """`data` labels what a remote member's brief carries, and `a2a_call`
+    checks the label against the agent's `allowed_data`: an unsaid label is
+    the most restrictive one, never `public`."""
+
+    def test_nothing_said_is_private_and_a_said_class_is_kept(self):
+        from simorgh.orchestration.session import UNDECLARED_DATA, _data_classes
+
+        self.assertEqual(UNDECLARED_DATA, "private")
+        for nothing in (None, [], "", " , ", [" "]):
+            self.assertEqual(_data_classes(nothing), ("private",), nothing)
+        self.assertEqual(_data_classes(["Public"]), ("public",))
+        self.assertEqual(_data_classes("public, calendar"), ("public", "calendar"))
+
+    @run
+    async def test_a_remote_member_spawned_without_data_sends_private(self):
+        async with Harness() as h:
+            remote = FakeRemote(h, [{"state": "completed", "text": "done"}])
+            cognition = CrewCognition(h.client("cognition"), {"t-root": [
+                {"tool_calls": [_call(1, "spawn", brief="which is cheaper?", agent="a2a:desk")]},
+                {"tool_calls": [_call(2, "await_agents", timeout_s=20)]},
+                {"text": "ok"}]})
+            await cognition.start(); await remote.start()
+            runner = _runner(h)
+            root = _root()
+            root.speaker, root.channel = "Saeed", "cli"
+            await asyncio.wait_for(runner.run(root, user_text="x"), timeout=30)
+            await cognition.stop(); await remote.stop()
+        self.assertEqual(remote.proposals[0]["args"]["data"], ["private"])
+        self.assertEqual(runner._crews["t-root"].members["t-root-h1"].data, ("private",))  # noqa: SLF001
+
+    def test_a2a_call_refuses_private_to_a_public_only_agent_before_sending(self):
+        from simorgh.execution.a2a import A2aAgentConfig, A2aCallTool
+
+        made = []
+        tool = A2aCallTool((A2aAgentConfig(name="desk", url="http://127.0.0.1:9/a2a"),),
+                           transport_factory=lambda agent: made.append(agent))
+        result = asyncio.run(tool.run({"agent": "desk", "message": "hi", "data": ["private"]}, ctx=None))
+        self.assertEqual(result.error_kind, "refused")
+        self.assertIn("may not receive private", result.error)
+        self.assertEqual(made, [], "nothing was sent")
+
+
 if __name__ == "__main__":
     unittest.main()
