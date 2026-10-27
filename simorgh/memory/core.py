@@ -25,28 +25,17 @@ never from the model's arguments (execution/tools.py
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
+
+# Which block an edit names, and who is unplaced, are shared with
+# Guardian's rule and the tool (`contracts/coreblocks.py`); re-exported
+# here under the names this module always had.
+from simorgh.contracts.coreblocks import HOUSEHOLD, UNPLACED, block_for, is_outside, is_unplaced, person_block
 
 #: One event per edit, on `memory:core` (a `memory:` stream, so it needs no
 #: entry of its own in `contracts/streamnames.py`).
 CORE_STREAM = "memory:core"
 EDITED = "core.edited"
-HOUSEHOLD = "household"
-
-#: Speakers whose block there is none of: a voice nobody matched is not a
-#: person to keep notes about, nor one who may edit the household's.
-UNPLACED = frozenset({"unknown", "unknown speaker", "stranger", "guest"})
-
-_SLUG = re.compile(r"[^a-z0-9؀-ۿ]+")
-#: What the model may write for "my own block".
-_MINE = frozenset({"me", "mine", "my", "self", "own", "person"})
-
-
-def person_block(name: str) -> str:
-    """`Soodeh` -> `person:soodeh`; "" for no name."""
-    slug = _SLUG.sub("-", " ".join((name or "").casefold().split())).strip("-")
-    return f"person:{slug}" if slug else ""
 
 
 def owner_name(people) -> str:
@@ -58,30 +47,21 @@ def owner_name(people) -> str:
     return ""
 
 
-def requester_name(requester: str, people) -> str:
+def requester_name(requester: str, people, *, channel: str = "") -> str:
     """The person a turn belongs to: the named speaker, the owner for the
-    console (no requester), "" for an unplaced voice."""
+    console (no requester on `""`/`cli`), "" for an unplaced voice, for
+    nobody named anywhere else (Sim's own idea, a plan node), and for an
+    outside channel (`a2a`), whoever it names."""
+    from simorgh.contracts.channels import is_console
+
+    if is_outside(channel):
+        return ""
     name = " ".join((requester or "").split())
     if not name:
-        return owner_name(people)
-    if name.casefold() in UNPLACED:
+        return owner_name(people) if is_console(channel) else ""
+    if is_unplaced(name):
         return ""
     return name
-
-
-def block_for(asked: str, requester: str) -> str:
-    """The block id an edit names: `household`, the requester's own (by
-    their name or `me`), or "" for anything else -- somebody else's block
-    included."""
-    flat = " ".join((asked or "").casefold().split())
-    if flat in (HOUSEHOLD, "house", "family", "home"):
-        return HOUSEHOLD
-    own = person_block(requester)
-    if not own:
-        return ""
-    if flat in _MINE or flat == own or person_block(flat) == own:
-        return own
-    return ""
 
 
 def apply_edit(text: str, old: str, new: str, *, limit: int) -> tuple[str, str]:

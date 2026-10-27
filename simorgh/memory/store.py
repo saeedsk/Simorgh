@@ -421,20 +421,29 @@ class MemoryEngine:
             out.append((own, name, index.text(own)))
         return out
 
-    async def edit_core(self, *, block: str, old: str, new: str, requester: str,
+    async def edit_core(self, *, block: str, old: str, new: str, requester: str, requester_channel: str = "",
                         source_ref: str = "", action_id: str = "") -> dict:
         """One `memory_core_edit`: `{ok, block, text, error}`.
 
-        `requester` is who asked, as Guardian recorded the proposal ("" the
-        owner's console); only their own block and `household` are theirs
-        to change. The event keeps the text it replaced and the turn it
-        came from, so every edit can be read back and undone."""
+        `requester` is who asked and `requester_channel` where from, as
+        Guardian recorded the proposal ("" on the console is the owner's);
+        only their own block and `household` are theirs to change, and
+        nothing is from an outside channel (`a2a`). Guardian has already
+        checked the same (`guardian/corememory.py`); this is the second
+        look. The event keeps the text it replaced and the turn it came
+        from, so every edit can be read back and undone."""
+        from simorgh.contracts.coreblocks import is_outside
+
         from .core import CORE_STREAM, EDITED, apply_edit, block_for, requester_name
 
-        name = requester_name(requester, self._people())
+        if is_outside(requester_channel):
+            return {"ok": False, "block": "", "text": "",
+                    "error": f"core memory is not edited from outside the house ({requester_channel})"}
+        name = requester_name(requester, self._people(), channel=requester_channel)
         if not name:
             return {"ok": False, "block": "", "text": "",
-                    "error": "a voice nobody recognised has no core block, and may not edit the household's"}
+                    "error": ("nobody I can place asked (an unrecognised voice, or no person at all): "
+                              "no core block of theirs, and not the household's")}
         target = block_for(block, name)
         if not target:
             return {"ok": False, "block": "", "text": "",
