@@ -1,0 +1,50 @@
+{
+  "$id": "https://simorgh.local/schema/memory.core.edit.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Command.",
+  "properties": {
+    "action_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "block": {
+      "type": "string"
+    },
+    "new": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "old": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requester": {
+      "type": "string"
+    },
+    "requester_channel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "block",
+    "requester"
+  ],
+  "title": "memory.core.edit",
+  "type": "object"
+}

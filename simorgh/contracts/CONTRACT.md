@@ -15,6 +15,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/a2a.py` | the crew's shapes as A2A's, both ways and pure (stage 18 item 8): `to_a2a_task(member, report)`, `from_a2a_task(task, *, crew_id, parent, handle, trusted=False)`, `to_a2a_message(crew_message)`, `from_a2a_message(message, *, crew_id, parent, handle, kind, seq, trusted=False)`, `task_state`, `member_status`; wire versions `1.0` (default) and `0.3`, pinned by the vendored schemas in `tests/simorgh/contracts/fixtures/a2a/` |
 | `simorgh/contracts/__init__.py` | imports `messages` to fill the registry; re-exports envelope and catalogue names |
 | `simorgh/contracts/channels.py` | the names of every channel a person reaches Sim by (cli, voice, api, chat, command, telegram, whatsapp) and their display names; `CONSOLE_CHANNELS` = `("", "cli")` and `is_console(channel)`, the owner's keyboard |
+| `simorgh/contracts/coreblocks.py` | whose core memory block is whose (stage 15 item 8): `CORE_EDIT_TOOL`, `HOUSEHOLD`, `HOUSEHOLD_NAMES`, `UNPLACED`, `OUTSIDE_CHANNELS` (`a2a`), `person_block`, `block_for`, `is_household`, `is_unplaced`, `is_outside` -- the vocabulary Guardian's `CoreMemoryRule`, Execution's `memory_core_edit` and Memory's `edit_core` share; each makes its own decision |
 | `simorgh/contracts/checkout.py` | the manifest telling `run_tests` where a containerised checkout's tests run (reads and writes files, runs git) |
 | `simorgh/contracts/compat.py` | schema-version translator registry; nothing registers a translator today |
 | `simorgh/contracts/connector.py` | `Connector` protocol for account-backed integrations; credential groups and rate budgets |
@@ -36,7 +37,7 @@ One-line status: layer shared · 6,497 lines · 23 test files · lock: `contract
 | `simorgh/contracts/messages/guardian.py` | `guardian.*` (5) |
 | `simorgh/contracts/messages/intent.py` | `intent.goal.stated` |
 | `simorgh/contracts/messages/learn.py` | `learn.*` (8) |
-| `simorgh/contracts/messages/memory.py` | `memory.*` (9) |
+| `simorgh/contracts/messages/memory.py` | `memory.*` (13) |
 | `simorgh/contracts/messages/percept.py` | `percept.*` (4) |
 | `simorgh/contracts/messages/persona.py` | `persona.*` (4) |
 | `simorgh/contracts/messages/plan.py` | `plan.*` and `project.*` (8) |
@@ -76,7 +77,7 @@ Nothing. `contracts` is a library; it has no `Service` and no bus client.
 
 ## Produces
 
-Nothing on the bus. It defines all 209 message types (`len(topics.CATALOG) == len(all_specs()) == 209`, checked 2026-10-27) and one schema file per type under `schema/`.
+Nothing on the bus. It defines all 213 message types (`len(topics.CATALOG) == len(all_specs()) == 213`, checked 2026-10-27 after `memory.core.edit`/`.reply`) and one schema file per type under `schema/`.
 
 ## Ledger streams
 
@@ -207,6 +208,7 @@ This package is Guardian-protected: Sim's own tasks cannot edit it. A human-run 
 - 2026-09-27: `voice.control.request` action `followup` (Follow Up Mode per satellite: `name` = board or "", `key` on|off|question|time|"", `value` = the time); `settings.persist_satellite(path, name, key, value)` writes one key into a `[[voice.satellites]]` entry. Producer: interface (`dispatch._followup`). Consumer: voice (`service._followup`).
 - 2026-09-27: `tiers.tier_of` puts a call that only makes the house quieter at tier 0 (`QUIETS`: media_control/music_control op stop|pause|mute, room_play what=stop|pause; `ONLY_STOPS`: cast_stop), so any voice -- one too short to recognise, a guest, a child -- may stop the music. Consumers: guardian (`tiers.py::PersonRule`, `TierRule`, `PresenceRule`), orchestration (checkpointing at tier >= 2; unaffected).
 - 2026-10-27: `tiers.REACHES_OUTSIDE` gains `a2a_call` (stage 18 item 9): it sends household data to a remote agent, so it is tier 3 -- a person says yes in every posture, `SIMORGH_GUARDIAN_AUTO_APPROVE` included. Registered `irreversible` with no network flag on Guardian's side, it was tier 2, the path auto-approve waves through. Consumers: guardian (`tiers.py::TierRule`, `PersonRule`, `PresenceRule`; the service's `tier` span attribute), orchestration (checkpointing at tier >= 2; unaffected).
+- 2026-10-27: `memory.core.edit{block, old?, new?, requester, requester_channel?, source_ref?, action_id?}` -> `memory.core.edit.reply{edited, block, text, reason}` (stage 15 item 8 review; schemas generated). `memory_core_edit`'s edit rode on `memory.retrieve` as an undeclared `core_edit` key, so any bus publisher could edit any block in anybody's name; the request is now in `PUBLISH_ONLY_BY` (execution only). The reply uses `edited`/`reason` because every reply reserves `ok`/`error` for the failed-to-answer shape (`registry.REPLY_ERROR_FIELDS`). `MemoryRetrieve` declares optional `core_for` (Str) and `MemoryRetrieveReply` optional `core: [{block, label, text}]`, both sent undeclared since item 8 (schemas regenerated; additive). New `coreblocks.py` (above). Producer of the edit: execution (`tools.py::MemoryCoreEditTool`); consumer: memory (`service.py::_on_core_edit`, which no longer reads the old key -- nothing persisted it). `core_for`: producer orchestration (`context.py`), consumer memory; `core`: producer memory, consumer orchestration. `coreblocks.py` consumers: guardian (`corememory.py::CoreMemoryRule`), execution (`tools.py::_core_edit_refusal`), memory (`core.py`, which re-exports its names).
 - 2026-10-27: `toolargs.MARKER_ARG_KEY` gains `propose_a2a_agent: proposal` (stage 18 item 9; one text block, as `propose_mcp_server`). Consumers: orchestration (`tools.py` marker args), cognition (`parser.py`; no change needed).
 - 2026-09-27: `memory.forget`'s `kinds` is `FORGET_KIND` -- the memory kinds plus `facts` (schema regenerated; additive). The console has sent `facts` for `forget facts|all` since 2026-09-25 and every one was refused at publish. Producer: interface (`dispatch.py` forget), execution (`memory_forget`). Consumer: memory (`store.forget_window`).
 - 2026-09-27: `settings.VOICE_SAFE_KEYS` gains `satellite_lead_in_ms` (0-2000). Consumer: voice (`SatelliteSpeaker`).

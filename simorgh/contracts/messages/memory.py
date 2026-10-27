@@ -20,6 +20,9 @@ MemoryRetrieve = define(t.MEMORY_RETRIEVE, [
     F("k", Int),
     O("budget_tokens", Int),
     O("filters", Obj(O("session_id", Str), O("task_type", Str), O("tags", List(Str)), O("since", Float))),
+    # Stage 15 item 8: whose core memory blocks to send back as `core` --
+    # the speaker's name, "" the console (the owner's). Absent, none.
+    O("core_for", Str),
 ])
 MemoryRetrieveReply = define(t.MEMORY_RETRIEVE_REPLY, [
     F("items", List(Obj(
@@ -39,6 +42,11 @@ MemoryRetrieveReply = define(t.MEMORY_RETRIEVE_REPLY, [
         # line (not a fact), and `entity` is that entity's id.
         O("hop", Int), O("via", Str), O("summary", Bool), O("entity", Str),
     ))),
+    # Stage 15 item 8: the core blocks a recall asked for with `core_for`,
+    # sent only while `[memory] core_blocks` is on -- `[]` says "on, none
+    # written". `block` is `household` or `person:<slug>`, `label` what a
+    # prompt calls it.
+    O("core", List(Obj(F("block", Str), F("label", Str), F("text", Str)))),
 ])
 MemoryStore = define(t.MEMORY_STORE, [
     F("kind", MEMORY_KIND),
@@ -81,3 +89,19 @@ MemoryForget = define(t.MEMORY_FORGET, [
     O("containing", Str), O("reason", Str),
 ])
 MemoryForgetReply = define(t.MEMORY_FORGET_REPLY, [F("forgotten", Int), F("refs", List(Str)), O("since", Float)])
+# Stage 15 item 8: one edit of a core memory block, Letta's
+# `core_memory_replace` -- `old` replaced by `new` in `block` (`household`,
+# `me`, or a person's name). `requester`/`requester_channel` are who asked,
+# from Guardian's record of the proposal, never the model's arguments;
+# Memory checks the block against them again. The reply says whether it
+# was `edited`, the block's text after (or as it stands, when refused) and
+# the `reason` when not -- not `ok`/`error`, which every reply reserves for
+# "failed to answer" (registry.py).
+MemoryCoreEdit = define(t.MEMORY_CORE_EDIT, [
+    F("block", Str), O("old", Str), O("new", Str),
+    F("requester", Str), O("requester_channel", Str),
+    O("source_ref", Str), O("action_id", Str),
+], doc="Command.")
+MemoryCoreEditReply = define(t.MEMORY_CORE_EDIT_REPLY, [
+    F("edited", Bool), F("block", Str), F("text", Str), F("reason", Str),
+])

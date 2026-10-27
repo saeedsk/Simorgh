@@ -179,6 +179,12 @@ MEMORY_FORGOTTEN = "memory.forgotten"
 #: says how much went
 MEMORY_FORGET = "memory.forget"
 MEMORY_FORGET_REPLY = "memory.forget.reply"
+#: `memory_core_edit`'s edit of one core memory block (stage 15 item 8):
+#: Letta's `core_memory_replace`, answered with the block's new text or
+#: why not. Execution alone may publish it (`PUBLISH_ONLY_BY`): the edit
+#: carries who asked, and only the tool reads that from Guardian's record.
+MEMORY_CORE_EDIT = "memory.core.edit"
+MEMORY_CORE_EDIT_REPLY = "memory.core.edit.reply"
 # --- 4.10 world / self ----------------------------------------------------
 WORLD_ENV_QUERY = "world.env.query"
 # A camera saw something: motion, a person, a vehicle, an animal
@@ -431,6 +437,10 @@ PUBLISH_ONLY_BY: dict[str, frozenset[str]] = {
     SYSTEM_RELOAD: frozenset({"interface", "kernel", "execution"}),
     SELF_MODEL_UPDATED: frozenset({"worldmodel"}),
     PLAN_PROPOSED: frozenset({"planning"}),
+    # The edit names its requester. Execution's tool reads that from
+    # Guardian's record of the approved call; any other publisher could
+    # write somebody's block in their name (stage 15 item 8 review).
+    MEMORY_CORE_EDIT: frozenset({"execution"}),
 }
 # A publisher allowed only for a restricted payload: (type, publisher) -> {field: allowed values}.
 PUBLISH_PAYLOAD_CONSTRAINTS: dict[tuple[str, str], dict[str, frozenset[str]]] = {

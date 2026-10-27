@@ -5,6 +5,32 @@
     {
       "additionalProperties": true,
       "properties": {
+        "core": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {
+              "block": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "block",
+              "label",
+              "text"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "error": {
           "additionalProperties": true,
           "properties": {
