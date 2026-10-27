@@ -245,7 +245,8 @@ class MemoryEngine:
         that this one also replaces -- "Reza moved to Tehran" ending "Reza
         lives in Shiraz" -- as the reconcile pass decided. Each is ended the
         same way, a `fact.superseded` event; one already ended, or the key's
-        own predecessor, is not ended twice.
+        own predecessor, is not ended twice, and one with another scope or
+        another subject entity is not ended at all.
         """
         from .facts import EVERYONE, FACT_STREAM, STORED, SUPERSEDED, Fact
 
@@ -275,9 +276,20 @@ class MemoryEngine:
                 idempotency_key=f"{FACT_STREAM}:{previous_id}:by:{fact.id}",
                 payload={"id": previous_id, "valid_to": now, "superseded_by": fact.id}))
         also: list[str] = []
+        # The same two rules `fact_candidates` chooses by, checked again
+        # here whoever the caller is: an extra fact is ended only when it
+        # has this fact's exact scope and the same subject entity. A caller
+        # naming another person's private fact, or a fact about somebody
+        # else, ends nothing. With entities off nothing has an entity, so
+        # `supersedes` ends nothing either.
+        entities = await self._entities_synced() if (supersedes and subject_id) else None
+        own = entities.canonical(subject_id) if entities is not None else ""
         for other_id in dict.fromkeys(str(i) for i in supersedes):
             other = index.by_id.get(other_id)
             if other is None or not other.live or other_id in (previous_id, fact.id):
+                continue
+            if (not own or other.person_scope.strip().lower() != scope.lower()
+                    or self.fact_ends(other, entities)[0] != own):
                 continue
             await self._ledger.append(FACT_STREAM, Event(
                 stream=FACT_STREAM, type=SUPERSEDED, ts=now, trace_id="", causation_id=None,

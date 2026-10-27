@@ -579,7 +579,12 @@ async def reconcile_fact(engine: MemoryEngine, entry: dict, *, bus: Bus, source:
             tally["noop"] = tally.get("noop", 0) + 1
             return None
     fact = await _store(ends)
-    tally["superseded"] = tally.get("superseded", 0) + len(ends)
+    # Counted from the ledger, not from the reply: a fact `store_fact`
+    # refused to end is not a supersession.
+    index = await engine._facts_synced()  # noqa: SLF001
+    ended = sum(1 for i in ends if index.by_id[i].superseded_by == fact.id)
+    if ended:
+        tally["superseded"] = tally.get("superseded", 0) + ended
     return fact
 
 

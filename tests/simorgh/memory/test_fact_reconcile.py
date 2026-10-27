@@ -183,6 +183,38 @@ class ReconcileTestCase(_Pass):
         self.assertEqual(await self._live(), [("*", "Reza", "lives in", "Tehran")])
 
 
+class StoreFactGuardTestCase(_Pass):
+    """`store_fact(supersedes=)` re-checks what `fact_candidates` chose by,
+    so no caller can end a fact across a scope or about another entity."""
+
+    async def test_supersedes_never_crosses_a_scope_or_an_entity(self):
+        private = await self.engine.store_fact(subject="Reza", predicate="owes", object="a ladder", person_scope="Saeed")
+        other = await self.engine.store_fact(subject="Reza Karimi", predicate="lives in", object="Isfahan")
+        shiraz = await self.engine.store_fact(subject="Reza", predicate="lives in", object="Shiraz")
+        new = await self.engine.store_fact(subject="Reza", predicate="moved to", object="Tehran",
+                                           supersedes=(private.id, other.id, shiraz.id))
+        self.assertEqual(await self._superseded(), {shiraz.id: new.id})
+
+    async def test_supersedes_ends_nothing_with_entities_off(self):
+        self.engine._config = Config(entities=False)  # noqa: SLF001
+        shiraz = await self.engine.store_fact(subject="Reza", predicate="lives in", object="Shiraz")
+        await self.engine.store_fact(subject="Reza", predicate="moved to", object="Tehran", supersedes=(shiraz.id,))
+        self.assertEqual(await self._superseded(), {})
+
+    async def test_no_supersession_loop(self):
+        # Shiraz -> Tehran, then the old value heard again: each step ends
+        # only a live fact and names a newer one, so the chain never closes.
+        shiraz = await self.engine.store_fact(subject="Reza", predicate="lives in", object="Shiraz")
+        tehran = (await self._extract(_every("UPDATE"), extracted=[{**TEHRAN[0], "predicate": "moved to"}]))[0]
+        back = (await self._extract(_every("UPDATE"),
+                                    extracted=[{**TEHRAN[0], "predicate": "lives in", "object": "Shiraz"}]))[0]
+        # An already-ended fact named again ends nothing.
+        await self.engine.store_fact(subject="Reza", predicate="likes", object="tea", supersedes=(shiraz.id, tehran.id))
+        self.assertEqual(await self._superseded(), {shiraz.id: tehran.id, tehran.id: back.id})
+        self.assertEqual(await self._live(), [("*", "Reza", "likes", "tea"), ("*", "Reza", "lives in", "Shiraz")])
+        self.assertEqual(self.tally, {"asked": 1, "superseded": 1})
+
+
 class EntitiesOffTestCase(_Pass):
     entities = False
 
