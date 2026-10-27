@@ -23,7 +23,8 @@ WorldPeopleUpdate = define(t.WORLD_PEOPLE_UPDATE, [
     # grant/revoke and add_interest/remove_interest: what a person said yes
     # to and what they care about (stage 10). The same write, the same
     # tier: consent is never inferred from a turn.
-    F("action", Enum("link", "unlink", "set_role", "grant", "revoke", "add_interest", "remove_interest", "set_tool")),
+    F("action", Enum("link", "unlink", "set_role", "grant", "revoke", "add_interest", "remove_interest", "set_tool",
+                     "set_relation")),
     O("name", Str),        # the household name; required for everything but unlink
     O("identity", Str),    # "telegram:irak", "whatsapp:1555...", "voice:ira"
     O("role", Str),        # owner | adult | child | guest | unknown
@@ -33,8 +34,13 @@ WorldPeopleUpdate = define(t.WORLD_PEOPLE_UPDATE, [
     # allow | ask | deny, or "" to let the person's role decide again.
     O("tool", Str),
     O("answer", Str),
+    # set_relation (stage 15): `name`'s `relation` ("son") is `other`
+    # ("Aran"), or "" to forget it. What memory reads to resolve "my son".
+    O("relation", Str),
+    O("other", Str),
 ], doc="Change who a person is as far as Sim is concerned (stage 6 item 4), what they said yes to and "
-       "what they care about (stage 10). A write: tier 3 on the way in, so a person confirms it.")
+       "what they care about (stage 10), and who their kin are (stage 15). A write: tier 3 on the way in, "
+       "so a person confirms it.")
 WorldPeopleUpdateReply = define(t.WORLD_PEOPLE_UPDATE_REPLY, [
     # `ok`/`error` are admitted on every reply by the registry.
     O("person", Obj()),

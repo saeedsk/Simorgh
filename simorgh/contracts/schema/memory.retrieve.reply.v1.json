@@ -35,6 +35,18 @@
               "confidence": {
                 "type": "number"
               },
+              "entity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hop": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "id": {
                 "type": "string"
               },
@@ -59,9 +71,21 @@
               "subject": {
                 "type": "string"
               },
+              "summary": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
               "valid_from": {
                 "type": [
                   "number",
+                  "null"
+                ]
+              },
+              "via": {
+                "type": [
+                  "string",
                   "null"
                 ]
               },
