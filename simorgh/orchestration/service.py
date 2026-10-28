@@ -135,7 +135,7 @@ class Service:
                             route_embed_timeout_s=self.config.route_embed_timeout_s,
                             fact_lines=(self.config.memory_fact_lines, self.config.memory_graph_lines),
                             mask_after_steps=self.config.mask_after_steps,
-                            tool_index=self.config.tool_index,
+                            tool_index=self.config.tool_index, supervisor=self.config.supervisor,
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)

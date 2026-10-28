@@ -833,11 +833,14 @@ class SessionRunner:
         tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
         route_none_margin: float = 0.15, route_groups=None, route_embed=None, route_embed_timeout_s: float = 0.3,
         fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0, tool_index: bool = False,
+        supervisor: bool = False,
     ) -> None:
         #: `[orchestration] tool_index` (2026-10-27, `toolindex.py`): the
         #: index of loadable tools, `tool_more{tool|need}`, and the check on
         #: a chat reply that says it cannot.
         self._tool_index = bool(tool_index)
+        #: `[orchestration] supervisor` (2026-10-28, `supervisor.py`).
+        self._supervisor = bool(supervisor)
         #: `[orchestration] mask_after_steps` (stage 17 item 7): a tool
         #: result this many steps old is masked at any pressure. 0 is off.
         self._mask_after_steps = max(0, int(mask_after_steps or 0))
@@ -1443,6 +1446,7 @@ class SessionRunner:
                 "task_id": session.task_id, "step_no": step_no, "phase": "gather",
                 "summary": f"asking the model (purpose={'chat' if session.profile.scaffold == 'chat' else 'draft'})",
             })
+            await self._take_goal(session)
             think_reply = await self._think(session, pending_user_text, last_step=is_last)
             pending_user_text = ""
 
@@ -1478,6 +1482,8 @@ class SessionRunner:
             session.budget.steps_used += 1
             tool_calls = think_reply.payload.get("tool_calls") or []
             floor = think_reply.payload.get("floor", False)
+            if tool_calls and not is_last:
+                self._start_goal(session)
 
             if tool_calls and not is_last and session.guards is not None:
                 # Stage 16: validation and step enforcement, before any of
@@ -1806,6 +1812,13 @@ class SessionRunner:
                 await self._record_step(session, step)
                 session.messages.append({"role": "assistant", "content": text})
                 session.messages.append({"role": "user", "content": stophook.unfinished_reply(pending)})
+                continue
+            # The supervisor (`[orchestration] supervisor`): a job with
+            # success criteria is reviewed against what its tools returned
+            # and the Leadership Principles before its answer goes out;
+            # below the bar with steps left, its feedback goes back as an
+            # order -- again only after more tools ran (2026-10-28).
+            if not is_last and await self._below_bar(session, step_no, text):
                 continue
             # The capability check (`[orchestration] tool_index`): a chat
             # reply that says it cannot, while a tool matching the request
@@ -4282,6 +4295,106 @@ class SessionRunner:
         session.record(step)
         await self._record_step(session, step)
         await self._checkpoint_critic(session, note)
+        return True
+
+    # -- the supervisor (`[orchestration] supervisor`, supervisor.py) ---------
+
+    def _start_goal(self, session: Session) -> None:
+        """The turn's first tool call: the supervisor sets the bar beside it."""
+        if (not self._supervisor or session.profile.scaffold != "chat" or session.goal_task is not None
+                or session.acceptance):
+            return
+        session.goal_task = asyncio.ensure_future(self._write_criteria(session))
+
+    async def _supervisor_think(self, session: Session, prompt: str) -> str:
+        req = Message.new(
+            topics.COGNITION_THINK, source=self._bus.source, trace_id=session.trace,
+            payload={"purpose": "chat", "tools": [], "messages": [{"role": "user", "content": prompt}],
+                     "budget": {"max_tokens": 600, "max_cost_usd": 0.05},
+                     # A supervisor answered by the floor would be canned
+                     # words in the shape of a judgement: none is better.
+                     "require_real_provider": True},
+            clock=self._clock)
+        try:
+            reply = await self._bus.request(req, timeout=self._think_timeout_s)
+        except Exception:  # noqa: BLE001 -- no supervisor is the turn as it was, never a failed turn
+            return ""
+        if (reply.payload or {}).get("floor"):
+            return ""
+        return str((reply.payload or {}).get("text") or "")
+
+    async def _write_criteria(self, session: Session) -> list[str]:
+        from . import supervisor
+
+        prior = [m for m in session.messages if m.get("role") in ("user", "assistant")]
+        return supervisor.parse_criteria(
+            await self._supervisor_think(session, supervisor.criteria_prompt(session.user_text, prior)))
+
+    #: How long a think waits for the bar still being written.
+    GOAL_WAIT_S = 4.0
+
+    async def _take_goal(self, session: Session) -> None:
+        """Put the criteria in front of Sim once they are written: waits a
+        little the first time (they started with the first tool call), and
+        never blocks a think for longer."""
+        task = session.goal_task
+        if task is None or session.goal_shown:
+            return
+        if not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=self.GOAL_WAIT_S)
+            except Exception:  # noqa: BLE001 -- still writing, or failed: look again next step
+                if not task.done():
+                    return
+        session.goal_shown = True
+        try:
+            criteria = task.result()
+        except Exception:  # noqa: BLE001
+            return
+        if not criteria:
+            return
+        from . import supervisor
+
+        session.acceptance = list(criteria)
+        step = Step(session.next_step_no(), "gather",
+                    ("supervisor's bar: " + "; ".join(supervisor.short(c) for c in criteria))[:400])
+        session.record(step)
+        await self._record_step(session, step)
+        session.messages.append({"role": "user", "content": supervisor.criteria_message(criteria)})
+
+    async def _below_bar(self, session: Session, step_no: int, text: str) -> bool:
+        """True when the answer was held back: the supervisor, reading what
+        the tools returned, says it is below the bar and work can go on."""
+        if not self._supervisor or not session.acceptance or session.profile.scaffold != "chat":
+            return False
+        ran = sum(1 for s in session.steps if getattr(s, "tool", None))
+        if ran <= session.goal_checked_at:
+            return False
+        session.goal_checked_at = ran
+        from . import supervisor
+
+        review = supervisor.parse_review(await self._supervisor_think(session, supervisor.review_prompt(
+            request=session.user_text, criteria=session.acceptance, steps=session.steps, answer=text)))
+        verdict = review["verdict"]
+        unmet = review.get("unmet") or []
+        summary = (f"supervisor: {verdict.replace('_', ' ')}"
+                   + (f", {max(len(session.acceptance) - len(unmet), 0)} of {len(session.acceptance)} met"
+                      if verdict != "unread" else "")
+                   + (f" -- {review['principle']}" if review.get("principle") else "")
+                   + (f": {review['feedback']}" if review.get("feedback") else ""))
+        step = Step(session.next_step_no(), "verify", summary[:400], ok=verdict in ("meets_bar", "unread"))
+        session.record(step)
+        await self._record_step(session, step)
+        self._telemetry.event("orchestration.supervisor", trace_id=session.trace or session.task_id,
+                              span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
+                              attrs={"verdict": verdict, "unmet": len(unmet), "criteria": len(session.acceptance),
+                                     "principle": review.get("principle", "")})
+        if verdict != "below_bar":
+            # Met; or cannot be met from here and the answer says so; or
+            # the review could not be read: the answer goes out.
+            return False
+        session.messages.append({"role": "assistant", "content": text})
+        session.messages.append({"role": "user", "content": supervisor.order_message(review)})
         return True
 
     async def _checkpoint_critic(self, session: Session, note) -> None:

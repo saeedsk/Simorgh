@@ -314,6 +314,13 @@ class Session:
     #: next step was last sent back (`stophook.announced_next_step`); -1
     #: when none was. It may be sent back again only after more ran.
     unfinished_nudged_at: int = -1
+    #: `[orchestration] supervisor` (`supervisor.py`): the side think writing
+    #: this job's success criteria (an asyncio task while it runs), whether
+    #: they have been put in front of the model, and how many tool steps
+    #: had run when a final answer was last checked against them.
+    goal_task: object = None
+    goal_shown: bool = False
+    goal_checked_at: int = -1
     #: Which embedder routed the turn: `memory:<model>/<dimension>`
     #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
     #: `injected`; and, when Memory's was wanted and the turn went

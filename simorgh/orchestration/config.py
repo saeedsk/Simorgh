@@ -256,6 +256,13 @@ class Config:
     # matching tool exists gets those tools and one nudge before it goes
     # out. Off: prompts, offers and replies are what they were.
     tool_index: bool = False
+    # Sim's supervisor (2026-10-28, `supervisor.py`): a bar raiser over a
+    # job asked for in chat. At the turn's first tool call it writes the
+    # job's success criteria and how each is measured; a final answer is
+    # reviewed against them and Amazon's Leadership Principles (as checks,
+    # `supervisor.PRINCIPLES`), and below the bar its feedback goes back as
+    # an order. Off: turns are what they were.
+    supervisor: bool = True
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
