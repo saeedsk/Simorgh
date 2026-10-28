@@ -42,6 +42,22 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 #: Per 1M tokens, Claude Opus 5.5: input, output, cache read, cache write
 #: (5-minute writes bill at 1.25x input).
 PRICE_IN, PRICE_OUT, PRICE_CACHED_IN, PRICE_CACHE_WRITE = 4.0, 20.0, 0.20, 5.0
+#: List prices per 1M (input, output, cache read, 5-minute cache write) by
+#: model, from Anthropic's pricing page (2026-10-27). A model named here is
+#: billed at its own price whatever the config says: `/model haiku` kept
+#: Opus's, and Sim counted a $0.0006 call as $0.024 -- 40x, its $5 day
+#: gone after $0.12 of real spend.
+MODEL_PRICES: dict[str, tuple[float, float, float, float]] = {
+    "claude-opus-5-5": (4.0, 20.0, 0.20, 5.0),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10, 2.50),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
+}
+#: Haiku 5.5 bills a prompt over 100k tokens (cache reads and writes
+#: included) at these prices instead, the whole request.
+LONG_PROMPT_TOKENS = 100_000
+LONG_PROMPT_PRICES: dict[str, tuple[float, float, float, float]] = {
+    "claude-haiku-5-5": (0.50, 2.50, 0.05, 0.625),
+}
 #: Thinking is billed output and counts against `max_tokens`: a chat
 #: turn's 1,000 would be spent thinking before any answer.
 MIN_MAX_TOKENS = 16_000
@@ -68,7 +84,7 @@ class AnthropicProvider:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self.effort = effort.strip()
-        self._prices = (price_in, price_out, price_cached_in, price_in * 1.25)
+        self._configured_prices = (price_in, price_out, price_cached_in, price_in * 1.25)
         # Test seam: callable(url, headers, body_bytes, timeout) -> str.
         self._transport = transport
         self._system_sha = ""
@@ -81,6 +97,20 @@ class AnthropicProvider:
 
     def set_model(self, model: str) -> None:
         self.model = model.strip() or DEFAULT_MODEL
+
+    def prices(self, prompt_tokens: int = 0) -> tuple[float, float, float, float]:
+        """(input, output, cache read, cache write) per 1M for the model in
+        use and a prompt of this size; the configured prices only for a
+        model the list does not name."""
+        if prompt_tokens > LONG_PROMPT_TOKENS and self.model in LONG_PROMPT_PRICES:
+            return LONG_PROMPT_PRICES[self.model]
+        return MODEL_PRICES.get(self.model, self._configured_prices)
+
+    def estimate_cost(self, tokens_in: int, tokens_out: int) -> float:
+        """One uncached call of this size, at this model's price (the
+        Router's pre-call check)."""
+        price_in, price_out, _, _ = self.prices(tokens_in)
+        return (tokens_in * price_in + tokens_out * price_out) / 1_000_000
 
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
@@ -161,7 +191,7 @@ class AnthropicProvider:
                                 metadata=billed.metadata)
 
     def _bill(self, uncached: int, output: int, cached: int, written: int) -> float:
-        price_in, price_out, price_cached, price_write = self._prices
+        price_in, price_out, price_cached, price_write = self.prices(uncached + cached + written)
         return round((uncached * price_in + output * price_out + cached * price_cached
                       + written * price_write) / 1_000_000, 8)
 
@@ -201,5 +231,5 @@ def to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     return system, turns
 
 
-__all__ = ["API_VERSION", "AnthropicProvider", "DEFAULT_MODEL", "KEY_NAME", "MIN_MAX_TOKENS",
+__all__ = ["API_VERSION", "AnthropicProvider", "DEFAULT_MODEL", "KEY_NAME", "MIN_MAX_TOKENS", "MODEL_PRICES",
            "to_anthropic_messages"]

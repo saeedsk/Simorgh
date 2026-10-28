@@ -115,8 +115,13 @@ class Router:
         return capabilities_of(self._by_name.get(name)).context_window
 
     def estimate_cost(self, name: str, tokens_in: int, tokens_out: int) -> float:
-        """What one call of this size would cost on `name`, uncached; 0
-        when it has no budget (the floor)."""
+        """What one call of this size would cost on `name`, uncached: the
+        provider's own price for the model it is on when it keeps one
+        (Anthropic, by model), else its budget's configured price; 0 with
+        neither (the floor)."""
+        own = getattr(self._by_name.get(name), "estimate_cost", None)
+        if callable(own):
+            return float(own(tokens_in, tokens_out))
         budget = self._budgets.get(name)
         return budget.estimate_cost(tokens_in, tokens_out) if budget is not None else 0.0
 
@@ -181,7 +186,7 @@ class Router:
                 continue
             provider_budget = self._budgets.get(name)
             if provider_budget is not None:
-                est_cost = provider_budget.estimate_cost(prompt_tokens, budget.max_tokens_out)
+                est_cost = self.estimate_cost(name, prompt_tokens, budget.max_tokens_out)
                 if est_cost > budget.max_cost_usd:
                     any_available_but_over_budget = True
                     continue

@@ -78,6 +78,25 @@ class TheBill(unittest.TestCase):
         # 100 in at $4, 50 out at $20, 1M read at $0.20, 1M written at $5.
         self.assertAlmostEqual(reply.cost_usd, 0.0004 + 0.001 + 0.20 + 5.0, places=6)
 
+    def test_haiku_is_billed_at_haiku_prices_not_the_configured_opus_ones(self):
+        provider = AnthropicProvider(api_key="k", model="claude-haiku-5-5", transport=_Wire(_reply(
+            input_tokens=4, cache_creation_input_tokens=4_824, output_tokens=4)))
+        # 4,824 written at $0.125, 4 in at $0.10, 4 out at $0.50 (live probe 2026-10-27).
+        self.assertAlmostEqual(_call(provider, CHAT).cost_usd, (4_824 * 0.125 + 4 * 0.10 + 4 * 0.50) / 1e6, places=9)
+        self.assertAlmostEqual(provider.estimate_cost(10_000, 1_000), (10_000 * 0.10 + 1_000 * 0.50) / 1e6)
+
+    def test_a_haiku_prompt_over_100k_pays_the_long_prompt_prices(self):
+        provider = AnthropicProvider(api_key="k", model="claude-haiku-5-5")
+        self.assertEqual(provider.prices(100_000), (0.10, 0.50, 0.01, 0.125))
+        self.assertEqual(provider.prices(100_001), (0.50, 2.50, 0.05, 0.625))
+
+    def test_switching_model_switches_the_price(self):
+        provider = AnthropicProvider(api_key="k")
+        provider.set_model("claude-sonnet-5-5")
+        self.assertEqual(provider.prices()[:2], (2.0, 10.0))
+        provider.set_model("claude-some-new-model")
+        self.assertEqual(provider.prices()[:2], (4.0, 20.0))  # the configured price
+
 
 class Failures(unittest.TestCase):
     def test_a_refusal_and_an_empty_answer_fail_over_with_their_bill(self):
