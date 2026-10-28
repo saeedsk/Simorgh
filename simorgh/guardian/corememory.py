@@ -5,8 +5,10 @@ Farsi" -- so writing one is writing what Sim believes about a person every
 time they speak. The plan's rule, checked here against the proposal's own
 requester rather than anything the model wrote:
 
-- a person's block only on behalf of that same person;
-- the `household` block by anyone in the household (owner, adult, child);
+- a person's block only on behalf of that same person, and only for a
+  member of the household (owner, adult, child): a guest, even a named
+  one, edits no core block (the creator's choice, 2026-10-27);
+- the `household` block by anyone in the household;
 - nothing for a voice Sim cannot place, for nobody at all (Sim's own idea,
   a plan node), or from an outside channel (`a2a`).
 
@@ -71,12 +73,13 @@ class CoreMemoryRule:
             who = "my own idea" if role == "sim" else "nobody I can place"
             return Decision("deny", self.layer, (f"{who}: no core block is theirs to edit",))
         asked = str((proposal.args or {}).get("block") or "")
-        if is_household(asked):
-            if role in HOUSEHOLD_ROLES:
-                return Decision("abstain", self.layer)
+        if role not in HOUSEHOLD_ROLES:
+            which = "the household's block" if is_household(asked) else "no core block, their own included,"
             return Decision("deny", self.layer,
                             (f"{requester or 'whoever asked'} is not one of the household, "
-                             "so the household's block is not theirs to edit",))
+                             f"so {which} is not theirs to edit",))
+        if is_household(asked):
+            return Decision("abstain", self.layer)
         # The console names nobody: it is the owner's, so their block.
         person = requester or _owner()
         if not person:

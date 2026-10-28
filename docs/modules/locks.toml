@@ -16,3 +16,9 @@ by = "claude-paid"
 task = "stage 17: mask2/routed presets and their paid measurement"
 since = "2026-10-28T04:36:34+00:00"
 until = "2026-10-28T12:36:34+00:00"
+
+[locks.guardian]
+by = "claude-paid"
+task = "core block edits limited to household members (creator, 2026-10-27)"
+since = "2026-10-28T04:42:01+00:00"
+until = "2026-10-28T12:42:01+00:00"

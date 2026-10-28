@@ -2,7 +2,7 @@
 
 Stage 15 item 8's plan: Guardian checks `memory_core_edit`'s `block`
 against the proposal's requester -- a person's block only on behalf of that
-same person, the household's by anyone in the household, never for a voice
+same person who is one of the household (a guest edits no block, 2026-10-27), the household's by anyone in the household, never for a voice
 Sim cannot place or from an outside (a2a) channel. Pinned against the real
 `DEFAULT_PIPELINE`, so a denial here is the gate's answer, not one rule's.
 """
@@ -63,6 +63,21 @@ class CoreMemoryRuleTestCase(unittest.IsolatedAsyncioTestCase):
         verdict = await self.decide(_edit("household", requester="Reza", channel="voice"))
         self.assertEqual(verdict.kind, "denied")
         self.assertIn("not one of the household", " ".join(verdict.reasons))
+
+    async def test_a_named_visitor_may_not_edit_even_their_own_block(self):
+        # The creator's choice, 2026-10-27: core blocks are the household's.
+        for block in ("me", "Reza", "person:reza"):
+            verdict = await self.decide(_edit(block, requester="Reza", channel="voice"))
+            self.assertEqual(verdict.kind, "denied", block)
+            self.assertEqual(verdict.layer, "core_memory")
+            self.assertIn("not one of the household", " ".join(verdict.reasons))
+
+    async def test_a_guest_by_the_people_store_may_not_edit_their_own_block(self):
+        async def role(name):
+            return "guest"
+
+        verdict = await self.decide(_edit("me", requester="Soodeh", channel="voice"), _ctx(role))
+        self.assertEqual(verdict.kind, "denied")
 
     async def test_the_people_stores_role_is_read_first(self):
         async def role(name):
