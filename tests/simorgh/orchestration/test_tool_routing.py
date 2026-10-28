@@ -274,7 +274,9 @@ class OnOffersTheRoute(unittest.TestCase):
         async with Harness() as h:
             calls, _, sessions = await _turns(h, ["thanks!"], tool_routing="on")
         self.assertTrue(sessions[0].route_conversational)
-        self.assertEqual(set(calls[0].payload["tools"]), {"remember", "memory_search", "memory_forget", "tool_more"})
+        # The core group: memory, plus the workbench (stage 19, `routing.CORE_CODE_TOOLS`).
+        self.assertEqual(set(calls[0].payload["tools"]),
+                         {"remember", "memory_search", "memory_forget", "tool_more", "run_analysis"})
 
 
 class ToolMore(unittest.TestCase):
