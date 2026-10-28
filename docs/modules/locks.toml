@@ -28,3 +28,9 @@ by = "claude-paid"
 task = "core block edits limited to household members (creator, 2026-10-27)"
 since = "2026-10-28T04:42:01+00:00"
 until = "2026-10-28T12:42:01+00:00"
+
+[locks.voice]
+by = "claude-paid"
+task = "echo before bystander; cancel the earlier ask only for a turn that is for Sim"
+since = "2026-10-28T04:50:33+00:00"
+until = "2026-10-28T12:50:33+00:00"

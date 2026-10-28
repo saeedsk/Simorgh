@@ -862,6 +862,29 @@ class TestASupersededAskIsCancelled(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p["turn"] for p in spoken], [1, 2])
 
 
+class TestAnEchoDoesNotCancelTheAsk(unittest.IsolatedAsyncioTestCase):
+    async def test_sims_own_aside_heard_back_cancels_nothing(self) -> None:
+        # Live 2026-10-27: "unsubscribe me from those" was being worked on,
+        # Sim's own "Okay." came back through the mic as a second turn, and
+        # that turn cancelled the first before anything asked whether it
+        # was Sim's own voice. An echo is dropped and supersedes nothing.
+        script = _Script((True, 20), (False, 15), (True, 20), (False, 15), (False, 10_000))
+        replies = _Replies(["done, unsubscribed"], delay=0.6)
+        session, bus, speaker, tts = _session(_config(), script, replies)
+        _distinct_questions(session, ["unsubscribe me from those promo senders", "Okay."])
+        session._voice_room.recent_said.append("Okay.")  # noqa: SLF001 -- the aside, said before it plays
+        session._sim_spoke_at = session._now()  # noqa: SLF001
+        await _run_until(session, lambda: bool([p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("echo")])
+                         and session.stats.turns >= 1, timeout=8.0)
+        self.assertFalse(bus.of(topics.TASK_CANCEL), "Sim's own echo cancelled the request it followed")
+        self.assertEqual(len(replies.asked), 1)
+        spoken = [p for p in bus.of(topics.VOICE_SPOKEN) if not p.get("quiet")]
+        self.assertEqual([(p["turn"], p.get("dropped", False)) for p in spoken], [(1, False)],
+                         "the answer that was owed is spoken, not dropped as 'a later turn was asked'")
+        self.assertFalse([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")
+                          and "talking to each other" in p.get("reason", "")])
+
+
 class OtherLanguageTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_turn_heard_in_a_language_the_house_does_not_speak_is_not_answered(self) -> None:
         # Live 2026-09-13: whisper called a line Turkish and Sim answered in Turkish.
@@ -1146,3 +1169,14 @@ class AStoryIsToldNotSummarised(unittest.TestCase):
             self.assertTrue(asked_to_continue(yes), yes)
         for no in ("go to the shop", "continue the washing machine", "", "what is on"):
             self.assertFalse(asked_to_continue(no), no)
+
+
+class TestRepeatsAnAside(unittest.TestCase):
+    def test_a_word_for_word_aside_is_matched_and_a_new_word_is_not(self) -> None:
+        from simorgh.voice.pipeline import repeats_an_aside
+
+        self.assertTrue(repeats_an_aside("Okay.", ["the reply", "Okay."]))
+        self.assertTrue(repeats_an_aside("right", ["Right."]))
+        self.assertFalse(repeats_an_aside("Okay, do it.", ["Okay."]))
+        self.assertFalse(repeats_an_aside("Okay.", ["Okay.", "a", "b", "c"]), "only the last few lines")
+        self.assertFalse(repeats_an_aside("", ["Okay."]))

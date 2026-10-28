@@ -39,7 +39,7 @@ from .commands import (HUSH, MUTE, OFF, RESTART, STOP, hush_seconds, opens_with_
 from .delivery import REGISTERS, Delivery, register_for_backchannel, register_for_reply, register_for_tone
 from .config import Config
 from .lang import language_of
-from .pipeline import NOT_SURE, Pipeline, echoes_recent, is_echo
+from .pipeline import NOT_SURE, Pipeline, echoes_recent, is_echo, repeats_an_aside
 from .planner import CONNECTORS, Context, SpokenResponsePlanner, asked_to_continue
 from .playback import StreamingPlayer
 from .stt.streaming import IncrementalRecogniser
@@ -741,7 +741,8 @@ class VoiceSession:
             if earlier is not None:
                 await self._repeat_waits(action.turn_id, earlier, action.text)
             else:
-                await self._cancel_outstanding(before=action.turn_id)
+                # The earlier ask is cancelled in `_ask_and_speak`, once
+                # this turn has passed the echo and "not for me" checks.
                 self._ask_task = asyncio.create_task(self._guarded(self._ask_and_speak(action.turn_id, action.text)))
         elif kind == Actions.SPEAK:
             pass  # handled by `_ask_and_speak`, which minted the response
@@ -1571,13 +1572,6 @@ class VoiceSession:
         await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
             "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
             "device": self._config.device, "session_id": session_id, "turn": turn_id, **who})
-        # Two people talking to each other: Sim listens and keeps the
-        # thread, but does not ask the model and does not speak, unless
-        # named or mid-exchange (voice/backchannel.py::addressed).
-        if await self._bystander(turn_id, speaker, text):
-            return
-        if await self._named_somebody_else(turn_id, speaker, text):
-            return
         # Within the exchange window, test against everything Sim said
         # recently -- a long reply returns as fragments, each too short
         # for the run matcher and each landing after `last_said` moved on.
@@ -1598,15 +1592,34 @@ class VoiceSession:
         # microphone as "Doing well, Saeed Khwai." and was recorded as
         # the creator's turn. `echoes_recent` catches that string
         # against that reply; it was never asked.
-        if recents and (echoes_recent(text, recents)
+        # A voice nobody placed saying exactly one of Sim's last few lines
+        # is Sim, however short (`repeats_an_aside`; live 2026-10-27).
+        if recents and ((echoes_recent(text, recents)
+                         or (not speaker and repeats_an_aside(text, recents)))
                         if (in_exchange_now or self._voice_room.speaking)
                         else (self._voice_room.last_said and is_echo(text, self._voice_room.last_said))):
             await self._pipeline._publish(topics.VOICE_TRANSCRIPT, {  # noqa: SLF001
                 "text": text, "confidence": clock.confidence, "seconds": _spoken_seconds(clock), "engine": clock.engine_stt,
                 "device": self._config.device, "session_id": session_id, "echo": True, "turn": turn_id})
-            self.turns.state = LISTENING
-            await self._announce(self.turns.state)
+            await self._asked_nothing(turn_id)
             return
+        # Two people talking to each other: Sim listens and keeps the
+        # thread, but does not ask the model and does not speak, unless
+        # named or mid-exchange (voice/backchannel.py::addressed). After
+        # the echo check, not before: live 2026-10-27, Sim's own "Okay."
+        # came back as a voice it could not place, was filed as "someone
+        # and Saeed are talking to each other", and never reached the
+        # echo check.
+        if await self._bystander(turn_id, speaker, text):
+            return
+        if await self._named_somebody_else(turn_id, speaker, text):
+            return
+        # Only now is this a turn for Sim, so only now does it supersede
+        # the one before. Cancelling on hearing (the ASK action) let Sim's
+        # own echo, the TV or a side remark kill a request still being
+        # worked on -- live 2026-10-27, "unsubscribe me from those" was
+        # cancelled by Sim's "Okay." coming back through the microphone.
+        await self._cancel_outstanding(before=turn_id)
         self._pipeline.last_heard = text
         self._last_user_text = text
         if self._player.playing and opens_with_stop(text):
@@ -1891,6 +1904,19 @@ class VoiceSession:
             lines = [tv] + lines
         return "\n".join(lines)
 
+    async def _asked_nothing(self, turn_id: int) -> None:
+        """This turn was not for Sim -- its own echo, two people talking,
+        words for somebody else -- so it asked nothing, and whatever
+        answer was owed before it is owed still (`turns.quiet_reply`, as
+        `_stay_quiet`). Without it an echo heard while Sim was working
+        retired the real question, whose answer was then dropped as "a
+        later turn was asked" (live 2026-10-27)."""
+        self.turns.quiet_reply(turn_id)
+        # Still thinking about an earlier turn: keep thinking.
+        if not (self.turns.state == THINKING and self.turns.asked_turn not in (0, turn_id)):
+            self.turns.state = LISTENING
+        await self._announce(self.turns.state)
+
     async def _bystander(self, turn_id: int, speaker: str, text: str) -> bool:
         """True when these words were two people talking to each other and
         Sim should keep listening: Sim was not named, Sim did not speak a
@@ -1928,8 +1954,7 @@ class VoiceSession:
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id, "quiet": True,
             "reason": f"{me} and {partner} are talking to each other"})
         self.stats.turns += 1
-        self.turns.state = LISTENING
-        await self._announce(self.turns.state)
+        await self._asked_nothing(turn_id)
         return True
 
     async def _named_somebody_else(self, turn_id: int, speaker: str, text: str) -> bool:
@@ -1974,8 +1999,7 @@ class VoiceSession:
             "text": "", "seconds": 0.0, "engine": "", "device": self._config.device, "turn": turn_id,
             "quiet": True, "reason": f"{me} was talking to {other}"})
         self.stats.turns += 1
-        self.turns.state = LISTENING
-        await self._announce(self.turns.state)
+        await self._asked_nothing(turn_id)
         return True
 
     def _household_names(self) -> tuple[str, ...]:

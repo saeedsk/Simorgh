@@ -111,6 +111,18 @@ def _holds_run(haystack: list[str], needle: list[str]) -> bool:
     return any(haystack[i:i + size] == needle for i in range(len(haystack) - size + 1))
 
 
+def repeats_an_aside(heard: str, recents, *, last: int = 3) -> bool:
+    """Whether `heard` is, word for word, one of the last few things Sim
+    said. `echoes_recent` never calls one word an echo -- a person says
+    "okay" too -- so the caller asks this only for a voice it could not
+    place, inside the exchange: live 2026-10-27, Sim's "Okay." and
+    "Right." came back as an unknown "you:" and were taken for a person."""
+    words = _spoken_words(heard)
+    if not words:
+        return False
+    return any(_spoken_words(said) == words for said in list(recents or [])[-last:] if said)
+
+
 def echoes_recent(heard: str, recents, *, min_words: int = 4) -> bool:
     """Whether `heard` is any of Sim's recent replies coming back.
 
@@ -671,4 +683,5 @@ class Pipeline:
                 self._logger.warning("voice.audio_not_kept", error=repr(exc))
 
 
-__all__ = ["NOT_SURE", "Pipeline", "STILL_THINKING", "TURNS_STREAM", "spoken_form"]
+__all__ = ["NOT_SURE", "Pipeline", "STILL_THINKING", "TURNS_STREAM", "echoes_recent", "is_echo", "repeats_an_aside",
+           "spoken_form"]
