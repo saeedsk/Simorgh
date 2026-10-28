@@ -5,12 +5,6 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.cognition]
-by = "claude-paid"
-task = "anthropic prices follow the model (Haiku/Sonnet)"
-since = "2026-10-28T07:00:57+00:00"
-until = "2026-10-28T15:00:57+00:00"
-
 [locks.docs]
 by = "claude-paid"
 task = "record creator decisions: native_graph live, sidecars eval-only"
