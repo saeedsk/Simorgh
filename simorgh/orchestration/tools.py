@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 
+from simorgh.contracts import toolargs
 from simorgh.contracts.toolargs import (
     MARKER_ARG_KEY,
     MARKER_JSON_REST,
@@ -837,6 +838,17 @@ def _json_object(text: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _sole_required(tool: str) -> str | None:
+    """The one required string argument of `tool`'s registered schema,
+    or None when there is not exactly one."""
+    schema = _SCHEMAS.get(tool) or {}
+    required = list(schema.get("required") or [])
+    if len(required) != 1:
+        return None
+    kind = ((schema.get("properties") or {}).get(required[0]) or {}).get("type")
+    return required[0] if kind in (None, "string") else None
+
+
 def marker_hint(tool: str) -> str | None:
     return _MARKER_ARG_HINT.get(tool)
 
@@ -872,6 +884,12 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
         elif tool in _MARKER_ARG_KEY:
             key = _MARKER_ARG_KEY[tool]
             args = {key: _one_value(key, raw)}
+        elif tool in toolargs.MARKER_KEY_VALUES:
+            # `REMEMBER: <fact>`, `CANCEL_TASK: <id>`: the shared table's
+            # reading, the same one the CLI `tool` command uses. This path
+            # never applied it, and `remember` refused every marker call
+            # (`fact` is required) -- live 2026-10-27, four in one turn.
+            args = toolargs.args_from_text(tool, str(raw)) or args
         else:
             # A tool with several fields and no mapping of its own: the
             # model's JSON object IS the arguments. Until 2026-09-29 it went
@@ -881,6 +899,11 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
             decoded = _json_object(str(raw))
             if decoded is not None:
                 args = decoded
+            elif (single := _sole_required(tool)) is not None:
+                # Plain text for a tool whose schema needs exactly one
+                # field: that field. `SPAWN: <what to do>` reached Guardian
+                # without its `brief` (live 2026-10-27).
+                args = {single: str(raw)}
     reversibility, network = _TOOL_POLICY.get(tool, ("irreversible", False))
     if tool == "home_call" and isinstance(args, dict):
         # Per-call safety (home-automation-design.md section 7). The

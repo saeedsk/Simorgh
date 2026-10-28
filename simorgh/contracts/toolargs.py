@@ -269,6 +269,11 @@ MARKER_KEY_VALUES: dict[str, str] = {
 }
 
 
+#: Key-value tools whose default key takes free text: a marker line that
+#: does not open with `key=` or `{` is the whole value, not its first word.
+MARKER_FREE_TEXT: frozenset[str] = frozenset({"remember"})
+
+
 def args_from_text(tool: str, raw: str) -> dict:
     """One block of text as a tool's arguments.
 
@@ -297,6 +302,19 @@ def args_from_text(tool: str, raw: str) -> dict:
         text = str(raw).strip()
         if not text:
             return {}
+        if tool in MARKER_FREE_TEXT and not text.startswith("{") \
+                and not re.match(r"^\w+\s*=", text):
+            # A sentence, not `key=value` pairs: the whole of it. Live
+            # 2026-10-27, `REMEMBER: When Saeed asks ... authorised=true`
+            # reached `remember` as `{"argument": ...}` four times, and this
+            # table would have kept the first word ("When").
+            return {MARKER_KEY_VALUES[tool]: text}
+        if tool in MARKER_FREE_TEXT:
+            # `fact=the gate code is 4411`: one key, its value runs on.
+            key = MARKER_KEY_VALUES[tool]
+            only = re.match(rf"^{key}\s*=\s*(.+)$", text, re.DOTALL)
+            if only and not re.search(r"\s\w+\s*=", only.group(1)):
+                return {key: only.group(1).strip().strip("\"'")}
         parsed = json_rest(text, MARKER_KEY_VALUES[tool])
         if MARKER_KEY_VALUES[tool] in parsed and parsed[MARKER_KEY_VALUES[tool]] == text and "=" not in text:
             word = text.split()[0]
@@ -323,6 +341,6 @@ def describe_arguments(tool: str) -> str:
     return "key=value pairs, or a JSON object"
 
 
-__all__ = ["MARKER_ARG_KEY", "MARKER_CODE_REST", "MARKER_JSON_REST", "MARKER_KEY_VALUES", "MARKER_NO_ARGS",
+__all__ = ["MARKER_ARG_KEY", "MARKER_CODE_REST", "MARKER_FREE_TEXT", "MARKER_JSON_REST", "MARKER_KEY_VALUES", "MARKER_NO_ARGS",
            "MARKER_SPLIT_FIRST_LINE", "args_from_text", "describe_arguments", "json_rest", "key_values",
            "strip_code_fence"]
