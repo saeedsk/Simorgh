@@ -5,12 +5,6 @@
 # A lock past `until` is stale and may be taken over.
 
 
-[locks.contracts]
-by = "claude-paid"
-task = "MAIL_SEARCH takes since/limit options"
-since = "2026-10-28T07:11:14+00:00"
-until = "2026-10-28T15:11:14+00:00"
-
 [locks.docs]
 by = "claude-paid"
 task = "record creator decisions: native_graph live, sidecars eval-only"
@@ -34,9 +28,3 @@ by = "claude-paid"
 task = "tool awareness: catalogue index, tool_more over the registry, capability-claim nudge"
 since = "2026-10-28T05:09:51+00:00"
 until = "2026-10-28T13:09:51+00:00"
-
-[locks.voice]
-by = "claude-paid"
-task = "tool asides no longer end the turn"
-since = "2026-10-28T07:08:00+00:00"
-until = "2026-10-28T15:08:00+00:00"
