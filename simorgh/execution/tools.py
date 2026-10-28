@@ -3571,22 +3571,28 @@ class ToolMoreTool:
     name = "tool_more"
     read_only = True
     reversibility = "read_only"
-    description = ("Ask for a tool group you were not offered this turn (home, media, cameras, "
-                   "calendar_mail, web, code, files, system, knowledge, security, people). "
-                   "Its tools are offered from your next step.")
+    description = ("Load tools you were not given this turn: a whole group (home, media, cameras, "
+                   "calendar_mail, web, code, files, system, knowledge, security, people) by `group`, one "
+                   "tool by name by `tool` -- the tool index in your turn note lists them -- or a search "
+                   "by `need`, what you need in plain words. Offered from your next step.")
     args_schema = {"type": "object", "properties": {
-        "group": {"type": "string", "description": "the tool group to add, by name"}},
-        "required": ["group"]}
+        "tool": {"type": "string", "description": "a tool name, or several separated by commas"},
+        "need": {"type": "string", "description": "what you need to do, in plain words, to search the tools"},
+        "group": {"type": "string", "description": "the tool group to add, by name"}}}
 
     def __init__(self, config: Config | None = None) -> None:
         self._config = config
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
-        group = str((args or {}).get("group") or "").strip()
-        if not group:
-            return ToolResult(ok=False, error="name the tool group to add")
-        return ToolResult(ok=True, output=f"the {group} tools are offered from the next step",
-                          metadata={"group": group})
+        # Orchestration checks the name and does the loading itself
+        # (`session._tool_more`); the call is here to be gated and recorded.
+        args = args or {}
+        for key in ("tool", "need", "group"):
+            value = str(args.get(key) or "").strip()
+            if value:
+                return ToolResult(ok=True, output=f"{key} {value!r}: offered from the next step",
+                                  metadata={key: value})
+        return ToolResult(ok=False, error="name a tool, a need or a tool group to add")
 
 
 def meta_tools(config: Config) -> list:

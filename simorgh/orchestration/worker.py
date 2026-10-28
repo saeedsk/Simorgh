@@ -154,7 +154,7 @@ class Worker:
         crew_limits: tuple[int, int, float, float, int] = (8, 1, 0.5, 900.0, 0), chat_crews: bool = False,
         tool_routing: str = "off", route_params: tuple[int, int, float] = (3, 3, 0.15),
         route_embed_timeout_s: float = 0.3,
-        fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0,
+        fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0, tool_index: bool = False,
     ) -> None:
         self._review_benchmark = review_benchmark
         self._attempt_limits = attempt_limits
@@ -212,6 +212,8 @@ class Worker:
             fact_lines=fact_lines,
             # `[orchestration] mask_after_steps` (stage 17 item 7).
             mask_after_steps=mask_after_steps,
+            # `[orchestration] tool_index` (2026-10-27, toolindex.py).
+            tool_index=tool_index,
             **runner_kwargs,
         )
         self._subs: list = []

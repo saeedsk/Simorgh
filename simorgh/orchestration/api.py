@@ -305,6 +305,11 @@ class Session:
     route: tuple | None = None
     route_conversational: bool = False
     route_more: list = field(default_factory=list)
+    #: Single tools `tool_more{tool|need}` or the capability check loaded
+    #: for this turn's later steps (`[orchestration] tool_index`).
+    extra_tools: list = field(default_factory=list)
+    #: Whether the capability check has nudged this turn (once a turn).
+    capability_nudged: bool = False
     #: Which embedder routed the turn: `memory:<model>/<dimension>`
     #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
     #: `injected`; and, when Memory's was wanted and the turn went

@@ -14,7 +14,7 @@ from simorgh.contracts.protocols import Context, Health
 
 from . import scaffolds
 from .config import Config
-from .tools import forget_registered, note_registered, note_schema, register_tool_policy
+from .tools import forget_registered, note_description, note_registered, note_schema, register_tool_policy
 
 # Execution's own stream names, duplicated rather than imported: a
 # subsystem may not import another subsystem
@@ -135,6 +135,7 @@ class Service:
                             route_embed_timeout_s=self.config.route_embed_timeout_s,
                             fact_lines=(self.config.memory_fact_lines, self.config.memory_graph_lines),
                             mask_after_steps=self.config.mask_after_steps,
+                            tool_index=self.config.tool_index,
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)
@@ -226,6 +227,7 @@ class Service:
             names.append(name)
             note_registered(name)
             note_schema(name, payload.get("input_schema"))
+            note_description(name, payload.get("description"))
             if "reversibility" in payload:
                 register_tool_policy(
                     name, reversibility=payload.get("reversibility", "irreversible"),
@@ -312,6 +314,7 @@ class Service:
         p = message.payload
         note_registered(p.get("name", ""))
         note_schema(p.get("name", ""), p.get("input_schema"))
+        note_description(p.get("name", ""), p.get("description"))
         register_tool_policy(
             p.get("name", ""), reversibility=p.get("reversibility", "irreversible"),
             provider=p.get("provider", "builtin"),

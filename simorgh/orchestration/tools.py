@@ -688,14 +688,30 @@ def known_tools() -> frozenset[str]:
     return frozenset(_REGISTERED)
 
 
+#: Each registered tool's description, from `tool.registered`: what the
+#: tool index (`toolindex.py`) says about a tool no scaffold note covers.
+_DESCRIPTIONS: dict[str, str] = {}
+
+
 def note_registered(name: str) -> None:
     if name:
         _REGISTERED.add(name)
 
 
+def note_description(name: str, description) -> None:
+    if name and description:
+        _DESCRIPTIONS[name] = str(description)
+
+
+def tool_description(name: str) -> str:
+    """What Execution said `name` does, "" when it said nothing."""
+    return _DESCRIPTIONS.get(name, "")
+
+
 def forget_registered() -> None:
     _REGISTERED.clear()
     _SCHEMAS.clear()
+    _DESCRIPTIONS.clear()
 
 
 #: Each registered tool's `input_schema`, from `tool.registered` (stage

@@ -27,9 +27,12 @@ class TheTool(unittest.IsolatedAsyncioTestCase):
         result = await ToolMoreTool(Config()).run({}, ctx=None)
         self.assertFalse(result.ok)
 
-    def test_its_schema_is_flat_and_needs_the_group(self):
+    def test_its_schema_is_flat_and_takes_a_group_a_tool_or_a_need(self):
+        # 2026-10-27 (tool awareness): `tool` and `need` beside `group`,
+        # none required -- Orchestration says which one a call is.
         schema = ToolMoreTool.args_schema
-        self.assertEqual(schema["required"], ["group"])
+        self.assertNotIn("required", schema)
+        self.assertEqual(set(schema["properties"]), {"group", "tool", "need"})
         self.assertTrue(all(p.get("type") != "object" for p in schema["properties"].values()))
 
     def test_it_is_a_meta_tool_not_a_builtin(self):

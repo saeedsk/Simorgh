@@ -192,6 +192,7 @@ from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -
 from simorgh.contracts.envelope import Event, Message
 
 from . import routing as routing_mod
+from . import toolindex
 from simorgh.contracts.messages.memory import EMBED_MAX_TEXTS
 from . import scaffolds
 from .api import Outcome, Session, Step
@@ -831,8 +832,12 @@ class SessionRunner:
         crew_max_wall_s: float = 900.0, crew_max_tokens: int = 0, chat_crews: bool = False,
         tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
         route_none_margin: float = 0.15, route_groups=None, route_embed=None, route_embed_timeout_s: float = 0.3,
-        fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0,
+        fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0, tool_index: bool = False,
     ) -> None:
+        #: `[orchestration] tool_index` (2026-10-27, `toolindex.py`): the
+        #: index of loadable tools, `tool_more{tool|need}`, and the check on
+        #: a chat reply that says it cannot.
+        self._tool_index = bool(tool_index)
         #: `[orchestration] mask_after_steps` (stage 17 item 7): a tool
         #: result this many steps old is masked at any pressure. 0 is off.
         self._mask_after_steps = max(0, int(mask_after_steps or 0))
@@ -1782,6 +1787,25 @@ class SessionRunner:
                 session.messages.append({"role": "assistant", "content": text})
                 session.messages.append({"role": "user", "content": bounce.reply})
                 continue
+            # The capability check (`[orchestration] tool_index`): a chat
+            # reply that says it cannot, while a tool matching the request
+            # exists, gets those tools and one nudge. Live 2026-10-27: "I
+            # can't click it from here" with `browse_page` registered.
+            unable = (self._capability_tools(session, text)
+                      if self._tool_index and not is_last and not session.capability_nudged
+                      and session.profile.scaffold == "chat" else [])
+            if unable:
+                session.capability_nudged = True
+                session.extra_tools.extend(t for t in unable if t not in session.extra_tools)
+                self._telemetry.event("orchestration.capability_check", trace_id=session.trace or session.task_id,
+                                      span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
+                                      attrs={"tools": list(unable), "channel": session.channel or ""})
+                step = Step(step_no, "act", f"said it cannot; offered {', '.join(unable)}", ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": toolindex.capability_nudge(unable)})
+                continue
             if not is_last and session.guards is not None:
                 verdict = session.guards.check_finish()
                 if verdict is not None:
@@ -2081,12 +2105,86 @@ class SessionRunner:
         if group and group not in session.route and group not in session.route_more:
             session.route_more.append(group)
 
+    #: The offer's own machinery: never in the tool index, never loaded.
+    _OFFER_MACHINERY = frozenset({routing_mod.TOOL_MORE, CORE_EDIT_TOOL, "use_skill", "delegate", WAIT,
+                                  pressure_mod.RECALL_TOOL, *CREW_PARENT_TOOLS, *CHAT_CREW_TOOLS,
+                                  *VOICE_CREW_TOOLS, *CREW_MEMBER_TOOLS})
+
+    def _loadable(self, session: Session) -> tuple[str, ...]:
+        """The tools this turn may load (`toolindex.loadable`)."""
+        return toolindex.loadable(read_only=bool(getattr(session.profile, "read_only", False)),
+                                  own=session.profile.tools, exclude=self._OFFER_MACHINERY)
+
+    def _capability_tools(self, session: Session, reply: str) -> list[str]:
+        """The tools to offer when `reply` says Sim cannot: loadable ones
+        that match the request and the reply, not already called this
+        turn. [] when the reply claims nothing or nothing matches."""
+        if not toolindex.claims_inability(reply):
+            return []
+        called = {str(s.tool) for s in session.steps if s.tool}
+        candidates = [t for t in self._loadable(session) if t not in called]
+        return toolindex.search(f"{session.user_text or ''} {reply}", candidates)
+
+    async def _load_tools(self, session: Session, call: dict, step_no: int,
+                          names: list[str]) -> tuple[bool, str, str]:
+        """Propose the `tool_more` call to Guardian like any other and,
+        approved, offer `names` from the next step."""
+        ok, summary, detail = await self._propose_and_await(
+            session, {**call, "args": {"tool": ", ".join(names)}}, step_no)
+        if not ok:
+            return ok, summary, detail
+        for name in names:
+            if name not in session.extra_tools:
+                session.extra_tools.append(name)
+        lines = "\n".join(f"- {n}: {toolindex.gist(n)}" for n in names)
+        text = f"Loaded, offered from your next step:\n{lines}"
+        return True, text, Detail(f"{routing_mod.TOOL_MORE}: {', '.join(names)}", "")
+
+    async def _tool_more_single(self, session: Session, call: dict, step_no: int,
+                                args: dict) -> tuple[bool, str, str] | None:
+        """`tool_more{tool}` / `tool_more{need}` (`[orchestration] tool_index`);
+        None for a `group` call, which the routing path answers."""
+        loadable = self._loadable(session)
+        wanted = args.get("tool")
+        if wanted:
+            raw = wanted if isinstance(wanted, list) else re.split(r"[\s,]+", str(wanted))
+            names = [str(n).strip().strip("\"'`").lower() for n in raw if str(n).strip()]
+            unknown = [n for n in names if n not in loadable]
+            if unknown:
+                near = toolindex.search(" ".join(unknown), loadable)
+                text = (f"{routing_mod.TOOL_MORE}: no tool called {', '.join(map(repr, unknown))} that this turn "
+                        f"may load." + (f" Closest: {', '.join(near)}." if near else
+                                        " The tool index in this turn's note lists the ones there are."))
+                return False, text, Detail(text, "refused")
+            return await self._load_tools(session, call, step_no, names)
+        need = str(args.get("need") or "").strip()
+        if need:
+            names = toolindex.search(need, loadable)
+            if not names:
+                text = (f"{routing_mod.TOOL_MORE}: no tool matches {need!r}. The tool index in this turn's "
+                        "note lists every tool there is; if none does it, say so plainly.")
+                return False, text, Detail(text, "refused")
+            return await self._load_tools(session, call, step_no, names)
+        return None
+
     async def _tool_more(self, session: Session, call: dict, step_no: int) -> tuple[bool, str, str]:
         """`tool_more{group}`: the model asks for a group the router left
         out. The name is checked here, then the call is proposed to
         Guardian like any other (Execution answers it), and only an
         approved call adds the group to the next step."""
         args = call.get("args") or {}
+        group_names = {g.name for g in self._groups()}
+        if self._tool_index and isinstance(args, dict) \
+                and str(args.get("group") or "").strip().lower() not in group_names:
+            # Not a group: a tool by name, or else what is needed in plain
+            # words -- whichever key the model (or the marker line) used.
+            single = dict(args)
+            bare = str(args.get("group") or args.get("argument") or "").strip()
+            if bare and not args.get("tool") and not args.get("need"):
+                single["tool" if bare.lower() in self._loadable(session) else "need"] = bare
+            answered = await self._tool_more_single(session, call, step_no, single)
+            if answered is not None:
+                return answered
         raw = (args.get("group") or args.get("argument") or "") if isinstance(args, dict) else args
         name = str(raw or "").strip().strip("\"'`").lower()
         groups = [g for g in self._groups() if g.tools and g.name != routing_mod.CONVERSATIONAL]
@@ -2167,6 +2265,14 @@ class SessionRunner:
             offered = tuple(offered) + tuple(t for t in crew_tools if t not in offered)
         if offered and session.crew_member:
             offered = tuple(offered) + tuple(t for t in CREW_MEMBER_TOOLS if t not in offered)
+        index_note = ""
+        if offered and self._tool_index:
+            # Tool awareness (`toolindex.py`): what this turn loaded, the
+            # way to load more, and an index of everything else it may.
+            offered = tuple(offered) + tuple(t for t in (*session.extra_tools, routing_mod.TOOL_MORE)
+                                             if t not in offered)
+            hidden = [t for t in self._loadable(session) if t not in offered and t not in not_shown]
+            index_note = toolindex.index_note(hidden)
         # What the crew said since the last think: after the prefix, never in it.
         await self._crew_inbox(session)
         catalog = self._catalog(session) if offered and not no_tools else ""
@@ -2193,7 +2299,8 @@ class SessionRunner:
                 session.guards.offered = tuple(session.guards.offered) + (CORE_EDIT_TOOL,)
         # Per-turn material goes to the latest user turn, so the system
         # prefix stays byte-identical from turn to turn (stage 4 item 4).
-        messages = scaffolds.with_turn_note(messages, scaffolds.when_line(_epoch(self._clock)))
+        messages = scaffolds.with_turn_note(messages, scaffolds.when_line(_epoch(self._clock))
+                                            + (f"\n\n{index_note}" if index_note else ""))
         # A chat turn by its scaffold, not its name: a future agent on the
         # chat scaffold under another name is a chat turn too (wave A
         # review, 2026-10-27). Today chat and voice_chat both are.

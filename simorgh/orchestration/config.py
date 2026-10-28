@@ -249,6 +249,13 @@ class Config:
     # 0 is off -- the prompt is byte-identical -- until the item's
     # measurement says the tokens saved beat the cache lost (plan: 2).
     mask_after_steps: int = 0
+    # Tool awareness (2026-10-27, `toolindex.py`): every tool-using turn
+    # gets a one-line index of the registered tools it may load but was
+    # not given; `tool_more` loads one by name (`tool`) or by a plain-words
+    # search (`need`); and a chat reply that says "I can't" while a
+    # matching tool exists gets those tools and one nudge before it goes
+    # out. Off: prompts, offers and replies are what they were.
+    tool_index: bool = False
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
