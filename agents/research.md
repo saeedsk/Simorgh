@@ -11,6 +11,9 @@ tools = [
     # profile that may reasonably need to index something first.
     "kb_search", "kb_ask", "kb_open", "kb_status", "kb_sources",
     "cal_list", "mail_search", "mail_read",
+    # Stage 19: a program over the full results (counts, ranks, joins,
+    # paging through a tool in a loop); a continued chat job runs here.
+    "run_analysis",
     # The one profile that should be able to actually run the
     # check, not just read what it found.
     "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",
