@@ -63,6 +63,18 @@ The criteria JSON gains `"approach"` and `"why"`.
 
 8a. **The supervisor holds Sim to the approach.** The approach and the split are part of the bar (`Session.approach`, `Session.split`). Early, at the first steps after the bar is set, and once per counter: if Sim's actions do not match the approach (a `parallel` job whose first call is not `spawn`, a `compute` job answered by reading, a voice job not sent to the background), the supervisor sends an order naming the missing step. At review, the members spawned (how many, and whether they overlapped) and the `run_analysis` runs are evidence, and a mismatch is `below_bar` under Bias for Action (it did not start what it was told to) or Customer Obsession (the person waited longer than needed). The creator, 2026-10-28: "the supervisor should be aware of when a multi-agent run is expected and hold Sim accountable to follow that model". *Accept:* a parallel job done serially gets an early order naming spawn; a fully spawned one passes; the order does not repeat.
 
+### Interface (lock `interface`)
+
+8b. **The agents panel.** The creator, 2026-10-28: "the TUI should have full support for multi/parallel agent runs: in one view the user sees all the ongoing agents and their progress; the screen divides, with a right panel dedicated to the agents running in the background: their output, progress, status, token use, input/output". When a crew is active and the terminal is wide enough, the TUI splits. The transcript and prompt stay on the left. The right panel lists every member, each with:
+- its brief (input);
+- its status and elapsed time;
+- its step count;
+- its last progress line, plus a few lines of the newest output;
+- tokens in/out and cost;
+- at the end, its report (output).
+
+The panel updates live from the `crew.*` topics and the budget events. A key or command toggles it and focuses a member to read its full output. A narrow terminal keeps today's inline tree. *Accept:* a render test of three members at 160 columns, a narrow fallback at 90, a live update from a progress event, and the toggle.
+
 ### Evals (lock `evals`)
 
 8. **Code-first suite.** Scenarios in at least four domains with fakes big enough that a page cannot answer them:
