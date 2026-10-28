@@ -44,8 +44,9 @@ class TheRequest(unittest.TestCase):
         self.assertEqual(url, "https://api.anthropic.com/v1/messages")
         self.assertEqual((headers["x-api-key"], headers["anthropic-version"]), ("k", API_VERSION))
         self.assertEqual(body["model"], "claude-opus-5-5")
-        self.assertEqual(body["system"], "You are Sim.")
-        self.assertEqual(body["messages"], [{"role": "user", "content": "hi"}])
+        self.assertEqual(body["system"], [{"type": "text", "text": "You are Sim.",
+                                           "cache_control": {"type": "ephemeral"}}])
+        self.assertEqual(body["messages"], [{"role": "user", "content": [{"type": "text", "text": "hi"}]}])
         self.assertEqual(body["cache_control"], {"type": "ephemeral"})
         self.assertEqual(body["max_tokens"], MIN_MAX_TOKENS, "thinking is billed output; 1000 is not room")
         self.assertNotIn("output_config", body, "no effort set: the model's own default")
@@ -99,7 +100,15 @@ class TheMessages(unittest.TestCase):
             {"role": "user", "content": "  "}, {"role": "assistant", "content": "partial"}])
         self.assertEqual(system, "a")
         self.assertEqual([t["role"] for t in turns], ["user", "assistant", "user", "assistant", "user"])
-        self.assertEqual(turns[2]["content"], "one\n\nresult")
+        self.assertEqual([b["text"] for b in turns[2]["content"]], ["one", "result"])
+
+    def test_a_growing_turn_keeps_every_earlier_block_byte_for_byte(self):
+        """The cache reads only where an earlier request's blocks ended."""
+        base = [{"role": "system", "content": "s"}, {"role": "user", "content": "ask"},
+                {"role": "assistant", "content": "MAIL_SEARCH: promo"}, {"role": "user", "content": "result 1"}]
+        _, before = to_anthropic_messages(base)
+        _, after = to_anthropic_messages(base + [{"role": "user", "content": "nudge"}])
+        self.assertEqual(after[-1]["content"][:len(before[-1]["content"])], before[-1]["content"])
 
 
 class TheConfig(unittest.TestCase):

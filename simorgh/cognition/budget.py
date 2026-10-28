@@ -70,7 +70,10 @@ class RollingWindowBudget:
             Event(
                 stream=stream_for(self._provider), type=SPEND_KIND, ts=self._clock.now(),
                 trace_id="", causation_id=None,
-                payload={"cost_usd": cost, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens},
+                # `cached_input_tokens`: whether a caching provider's
+                # prefix is read, readable from the stream alone.
+                payload={"cost_usd": cost, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens,
+                         "cached_input_tokens": response.cached_input_tokens},
             ),
         )
 

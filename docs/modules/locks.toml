@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.cognition]
+by = "claude-paid"
+task = "anthropic: prompt cache hits (blocks, system breakpoint); chat input budget"
+since = "2026-10-28T06:42:20+00:00"
+until = "2026-10-28T14:42:20+00:00"
+
 [locks.docs]
 by = "claude-paid"
 task = "record creator decisions: native_graph live, sidecars eval-only"

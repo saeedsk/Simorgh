@@ -22,6 +22,7 @@ Router moves past, never an empty answer.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -70,6 +71,7 @@ class AnthropicProvider:
         self._prices = (price_in, price_out, price_cached_in, price_in * 1.25)
         # Test seam: callable(url, headers, body_bytes, timeout) -> str.
         self._transport = transport
+        self._system_sha = ""
 
     def available(self) -> bool:
         return bool(self._api_key)
@@ -89,11 +91,17 @@ class AnthropicProvider:
         if not self._api_key:
             raise ProviderUnavailable(f"no Anthropic API key configured ({KEY_NAME})")
         system, turns = to_anthropic_messages(messages)
+        # Which system prompt this was, so a cache that never reads can be
+        # traced to a prompt that changes between calls.
+        self._system_sha = hashlib.sha256(system.encode()).hexdigest()[:12]
         body: dict = {"model": self.model, "max_tokens": max(int(max_tokens or 0), MIN_MAX_TOKENS),
                       "messages": turns, "cache_control": {"type": "ephemeral"},
                       "fallbacks": "default"}
         if system:
-            body["system"] = system
+            # A read point on the system prompt that survives whatever the
+            # conversation does after it; the top-level field caches the
+            # growing tail (prompt-caching guide, "agent loops").
+            body["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if self.effort:
             body["output_config"] = {"effort": self.effort}
         raw = self._post(f"{self._base_url}/v1/messages", body,
@@ -135,7 +143,8 @@ class AnthropicProvider:
         billed = ProviderResponse(
             text="", provider=self.name, input_tokens=uncached + written, output_tokens=output,
             cached_input_tokens=cached, cost_usd=self._bill(uncached, output, cached, written),
-            metadata={"model": data.get("model") or self.model})
+            metadata={"model": data.get("model") or self.model, "cache_read": cached, "cache_write": written,
+                      "system_sha": self._system_sha})
         text = "".join(str(b.get("text") or "") for b in data.get("content") or []
                        if isinstance(b, dict) and b.get("type") == "text").strip()
         stop = data.get("stop_reason")
@@ -160,9 +169,16 @@ class AnthropicProvider:
 def to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     """Sim's role/content list as `(system, messages)` for the Messages API:
     system lines joined into the top-level `system`; every other role is
-    user or assistant, empty turns dropped, neighbours of one role merged;
-    the first turn is the user's, and the last is never Sim's own (a final
-    assistant turn is a prefill, which Opus 5.5 refuses)."""
+    user or assistant, empty turns dropped, neighbours of one role put in
+    one turn as separate text blocks; the first turn is the user's, and the
+    last is never Sim's own (a final assistant turn is a prefill, which
+    Opus 5.5 refuses).
+
+    Separate blocks, never one joined string: a cache entry ends where the
+    last request's last block ended. Joined, a tool result appended to the
+    user turn rewrote that block, the boundary vanished, and every call of
+    a turn paid a full cache write and read nothing -- $1.99 in 19 calls,
+    live 2026-10-27."""
     system = "\n\n".join(str(m.get("content") or "") for m in messages
                          if m.get("role") == "system" and str(m.get("content") or "").strip())
     turns: list[dict] = []
@@ -173,14 +189,15 @@ def to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
         if not content.strip():
             continue
         role = "assistant" if m.get("role") == "assistant" else "user"
+        block = {"type": "text", "text": content}
         if turns and turns[-1]["role"] == role:
-            turns[-1]["content"] += "\n\n" + content
+            turns[-1]["content"].append(block)
         else:
-            turns.append({"role": role, "content": content})
+            turns.append({"role": role, "content": [block]})
     if not turns or turns[0]["role"] != "user":
-        turns.insert(0, {"role": "user", "content": "(continuing)"})
+        turns.insert(0, {"role": "user", "content": [{"type": "text", "text": "(continuing)"}]})
     if turns[-1]["role"] == "assistant":
-        turns.append({"role": "user", "content": "Continue."})
+        turns.append({"role": "user", "content": [{"type": "text", "text": "Continue."}]})
     return system, turns
 
 
