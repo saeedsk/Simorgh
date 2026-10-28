@@ -54,6 +54,21 @@ PRESETS: dict[str, dict[str, tuple[str, ...]]] = {
              "cognition": ("rescue",)},
 }
 
+#: Presets that turn a shipped-off feature ON over `sim` (stage 17's
+#: measurements), kept apart from `PRESETS` because that table is the
+#: plan's ablation table and a test holds it to the plan. Each is `sim`'s
+#: switches (none) plus the `[orchestration]` settings named here.
+SETTINGS: dict[str, dict[str, dict]] = {
+    "mask2": {"orchestration": {"mask_after_steps": 2}},
+    "routed": {"orchestration": {"tool_routing": "on"}},
+}
+
+
+def switches_for(preset: str) -> dict[str, tuple[str, ...]]:
+    """A preset's ablation switches; a `SETTINGS` preset has none."""
+    return PRESETS.get(preset) or PRESETS["sim"]
+
+
 #: Which scenario prefix each `--suite` name runs. A raw id prefix (any text
 #: with a "/") is accepted too, for a one-category look (`toolchain/recovery/`).
 SUITE_PREFIXES: dict[str, str] = {"toolchain": "toolchain/", "crew": "toolchain/crew/"}
@@ -176,9 +191,9 @@ def parse_presets(text: str) -> list[str]:
     """`"sim,bare"` -> names, in the order given; empty means all of them.
     An unknown name is a `ValueError` naming the ones that exist."""
     names = [p.strip() for p in (text or "").split(",") if p.strip()] or list(PRESETS)
-    unknown = [n for n in names if n not in PRESETS]
+    unknown = [n for n in names if n not in PRESETS and n not in SETTINGS]
     if unknown:
-        raise ValueError(f"no preset {', '.join(unknown)}; there is {', '.join(PRESETS)}")
+        raise ValueError(f"no preset {', '.join(unknown)}; there is {', '.join([*PRESETS, *SETTINGS])}")
     return list(dict.fromkeys(names))
 
 
@@ -225,7 +240,7 @@ def preset_config(preset: str, model: Model, *, spend_cap_usd: float | None = No
     budget enforces. `[cognition]` has no section-wide `max_spend_usd`;
     writing one would be a key nothing reads.
     """
-    switches = PRESETS[preset]
+    switches = switches_for(preset)
     cognition: dict = {"ablate": list(switches["cognition"]), "provider_order": [model.provider]}
     if not model.is_floor:
         table = _provider_defaults(model.provider)
@@ -233,7 +248,9 @@ def preset_config(preset: str, model: Model, *, spend_cap_usd: float | None = No
         if spend_cap_usd is not None:
             table["max_spend_usd"] = float(spend_cap_usd)
         cognition["providers"] = {model.provider: table}
-    return {"orchestration": {"ablate": list(switches["orchestration"])}, "cognition": cognition}
+    orchestration = {"ablate": list(switches["orchestration"]),
+                     **SETTINGS.get(preset, {}).get("orchestration", {})}
+    return {"orchestration": orchestration, "cognition": cognition}
 
 
 def _provider_defaults(provider: str) -> dict:
@@ -476,9 +493,10 @@ def dry_run(runs: list[Run], *, models: list[Model], presets: list[str], scenari
              f"{len(scenarios)} scenario(s) x {repeats} repeat(s) = {len(runs)} runs", ""]
     inert = inert_presets(presets, scenarios)
     for name in presets:
-        switches = PRESETS[name]
+        switches = switches_for(name)
         lines.append(f"  {name:<13} orchestration={list(switches['orchestration'])} "
-                     f"cognition={list(switches['cognition'])}" + ("  (inert here)" if name in inert else ""))
+                     f"cognition={list(switches['cognition'])}"
+                     + (f" sets={SETTINGS[name]}" if name in SETTINGS else "") + ("  (inert here)" if name in inert else ""))
     if inert:
         lines.append(f"  note: {', '.join(inert)} {INERT_NOTE}")
     lines.append("")
@@ -537,10 +555,11 @@ def inert_presets(presets: list[str], scenarios: list) -> list[str]:
                or getattr(c, "prerequisites", {}) for c in chats):
         off.add("steps")
     return [p for p in presets
-            if PRESETS[p]["orchestration"] and set(PRESETS[p]["orchestration"]) <= off
+            if p in PRESETS and PRESETS[p]["orchestration"] and set(PRESETS[p]["orchestration"]) <= off
             and not PRESETS[p]["cognition"]]
 
 
-__all__ = ["Cell", "DEFAULT_LOG", "FLOOR", "INERT_NOTE", "PER_RUN_CAP_USD", "inert_presets", "Model", "PRESETS", "Run", "RunResult", "SUITE_PREFIXES",
+__all__ = ["Cell", "DEFAULT_LOG", "FLOOR", "INERT_NOTE", "PER_RUN_CAP_USD", "inert_presets", "Model", "PRESETS", "Run", "RunResult", "SETTINGS", "SUITE_PREFIXES",
+           "switches_for",
            "cells", "child_env", "dry_run", "estimate_usd", "judge", "matrix", "parse_models",
            "parse_presets", "preset_config", "run_matrix", "scenarios_for", "table", "wilson"]
