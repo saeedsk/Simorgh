@@ -352,6 +352,10 @@ COGNITION_COMPACT_REPLY = "cognition.compact.reply"
 COGNITION_COMPACT_PRE = "cognition.compact.pre"
 COGNITION_COMPACT_DONE = "cognition.compact.done"
 COGNITION_PROVIDER_STATUS = "cognition.provider.status"
+# `/model`: which providers there are, and which answers first; with a
+# `provider` (or a Claude `model` alias) it moves that one to the front.
+COGNITION_MODEL_REQUEST = "cognition.model.request"
+COGNITION_MODEL_REPLY = "cognition.model.reply"
 GUARDIAN_REVIEW = "guardian.review"
 GUARDIAN_REVIEW_REPLY = "guardian.review.reply"
 GUARDIAN_POSTURE_CHANGED = "guardian.posture.changed"
@@ -447,6 +451,9 @@ PUBLISH_ONLY_BY: dict[str, frozenset[str]] = {
     # Guardian's record of the approved call; any other publisher could
     # write somebody's block in their name (stage 15 item 8 review).
     MEMORY_CORE_EDIT: frozenset({"execution"}),
+    # Which model thinks is what every call costs; a person at a console
+    # chooses it, not a tool call (2026-10-27, `/model`).
+    COGNITION_MODEL_REQUEST: frozenset({"interface"}),
 }
 # A publisher allowed only for a restricted payload: (type, publisher) -> {field: allowed values}.
 PUBLISH_PAYLOAD_CONSTRAINTS: dict[tuple[str, str], dict[str, frozenset[str]]] = {

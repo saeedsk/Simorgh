@@ -566,6 +566,15 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
     if name == "config":
         return await _config_command(ledger, args)
 
+    if name == "model":
+        # 2026-10-27: `/model` went to chat, and the model offered to
+        # switch with nothing behind the offer. Cognition owns the order;
+        # the choice is written to simorgh.toml so a restart keeps it.
+        want = args.strip()
+        return await _request(bus, topics.COGNITION_MODEL_REQUEST,
+                              {"provider": want, "persist": True} if want else {},
+                              timeout=5.0, render=render_mod.model_choice)
+
     if name == "pair":
         return _pair_command(devices, args)
 

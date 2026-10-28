@@ -78,3 +78,16 @@ CognitionProviderStatus = define(t.COGNITION_PROVIDER_STATUS, [
     O("model", Str),
     O("selected", Bool),
 ])
+CognitionModelRequest = define(t.COGNITION_MODEL_REQUEST, [
+    O("provider", Str),   # a provider name, or a model it calls ("GLM-5.3")
+    O("model", Str),      # a Claude model for claude_code_cli: opus, sonnet, haiku, claude-...
+    O("persist", Bool),   # also write it into simorgh.toml
+], doc="No provider and no model: just list. Otherwise move that provider to the front of the order.")
+CognitionModelReply = define(t.COGNITION_MODEL_REPLY, [
+    F("selected", Str),
+    F("order", List(Str)),
+    F("providers", List(Obj(F("name", Str), F("model", Str), F("available", Bool)))),
+    O("changed", Bool),
+    O("persisted", Str),  # the file written, when it was
+    O("refused", Str),
+])

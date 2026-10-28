@@ -26,6 +26,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("tool", "[name] [args]", "list every tool, or run one -- Guardian gates it as usual"),
     ("alerts", "[all|review]", "what the monitors have raised, and what is waiting for the digest"),
     ("config", "[section]", "the settings actually in force, and any nothing reads"),
+    ("model", "[name|opus|sonnet|haiku]", "which model Sim thinks with: list them, or switch (kept across restarts)"),
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
     ("tasks", "[all|work|wake <id>|clear]", "see the backlog (all of it), advance the next item, wake a waiting one, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
@@ -96,7 +97,7 @@ SPLASH_COMMANDS = 8
 #: "More"; a subcommand not listed here still completes (from the usage
 #: hint) but has no line of its own.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Look around", ("status", "domains", "capabilities", "config", "alerts", "tool")),
+    ("Look around", ("status", "domains", "capabilities", "config", "model", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "crew", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
     ("Voice, screen and cameras", ("voice", "room", "followup", "mute", "unmute", "pronounce", "tv", "next", "cameras", "ring")),
@@ -383,6 +384,10 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
     if name in ("mute", "unmute"):
         # `mute` / `unmute laptop` is the command; "mute the TV please"
         # is somebody asking, and the model should hear it.
+        return len(rest.split()) > 1
+    if name == "model":
+        # `model opus`, `model together_strong`; "model the kitchen in 3D"
+        # is somebody talking.
         return len(rest.split()) > 1
     if name == "room":
         # `room`, `room kitchen`, `room mute all`; "room is too warm" is

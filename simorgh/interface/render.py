@@ -1104,3 +1104,21 @@ def _task_panel(tasks: list[dict], projects: list[dict], *, limit: int = 20, ena
         footer = f"... {len(projects) - limit} more projects"
     return panel("Tasks", sections, count=f"{len(tasks)} task(s)" + (f" \u00b7 {counts}" if counts else ""),
                  footer=footer, enabled=enabled, unicode=unicode)
+
+
+def model_choice(payload: dict) -> str:
+    """`/model`: every provider, the one answering marked, and what changed."""
+    if payload.get("refused"):
+        head = f"not switched: {payload['refused']}"
+    elif payload.get("changed"):
+        head = f"thinking with {payload.get('selected')} now" + (
+            f" (saved to {payload['persisted']})" if payload.get("persisted") else " (not saved -- back on restart)")
+    else:
+        head = "models (`model <name>` to switch; `model opus|sonnet|haiku` for Claude via the Claude Code CLI)"
+    lines = [head]
+    for p in payload.get("providers") or []:
+        mark = "●" if p.get("name") == payload.get("selected") else " "
+        down = "" if p.get("available", True) else "  (unavailable)"
+        lines.append(f"  {mark} {p.get('name', '?'):18} {p.get('model', '')}{down}")
+    return "\n".join(lines)
+

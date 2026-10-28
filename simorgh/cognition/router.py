@@ -94,6 +94,10 @@ class Router:
     def candidate_names(self) -> list[str]:
         return [name for name in self._order if name in self._by_name] + [self._floor.name]
 
+    def set_order(self, order: tuple[str, ...]) -> None:
+        """A new default order (`/model`), taking effect on the next call."""
+        self._order = tuple(order)
+
     def selected_name(self) -> str:
         """The provider a call would go to right now: first in the
         configured order that is actually available. Budget exhaustion is

@@ -58,21 +58,29 @@ class ClaudeCodeProvider:
     # A CLI wrapper: text in, text out; no tool calls or images over this path.
     capabilities = Capabilities(context_window=200_000, cache_prefix=True)
     # The `claude` CLI picks its own model from the caller's
-    # subscription; this provider never names one, so it says that
-    # rather than guessing a version that may be wrong.
-    model = "whatever the `claude` CLI is signed in as"
+    # subscription unless `[cognition.providers.claude_code_cli] model`
+    # names one (`opus`, `sonnet`, `haiku` or a full id, passed as
+    # `--model`); with none it says that rather than guessing a version.
+    UNNAMED = "whatever the `claude` CLI is signed in as"
 
     def __init__(
         self, binary: str = "claude", timeout_seconds: float = 180.0,
-        env: dict[str, str] | None = None, runner: Runner | None = None,
+        env: dict[str, str] | None = None, runner: Runner | None = None, model: str = "",
     ) -> None:
         self._binary = binary
+        self._model = model.strip()
+        self.model = self._model or self.UNNAMED
         self._timeout = timeout_seconds
         self._base_env = env
         self._runner: Runner = runner or subprocess.run
 
     def available(self) -> bool:
         return shutil.which(self._binary) is not None
+
+    def set_model(self, model: str) -> None:
+        """`/model opus`: the next call asks the CLI for this model."""
+        self._model = model.strip()
+        self.model = self._model or self.UNNAMED
 
     async def complete(
         self, messages: list[dict], *, tools: list[dict] | None, max_tokens: int, timeout: float | None = None,
@@ -92,6 +100,8 @@ class ClaudeCodeProvider:
 
         env = self._subprocess_env()
         argv = [binary_path, "-p", prompt, "--output-format", "json", "--disallowedTools", "*"]
+        if self._model:
+            argv += ["--model", self._model]
         if system_prompt:
             # Full replacement, not --append-system-prompt: see the module
             # docstring -- Claude Code's own default identity is exactly

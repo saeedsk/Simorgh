@@ -1,0 +1,29 @@
+{
+  "$id": "https://simorgh.local/schema/cognition.model.request.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "No provider and no model: just list. Otherwise move that provider to the front of the order.",
+  "properties": {
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "persist": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [],
+  "title": "cognition.model.request",
+  "type": "object"
+}

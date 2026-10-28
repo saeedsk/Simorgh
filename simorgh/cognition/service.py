@@ -266,13 +266,17 @@ def _within_deadline(max_seconds: float, message: Message, now: float) -> float:
 
     return min(float(max_seconds), max(_MIN_CANDIDATE_SECONDS, left - 0.5))
 
+#: Claude model names `/model` hands to the Claude Code CLI (`--model`).
+CLAUDE_MODEL_ALIASES = frozenset({"opus", "sonnet", "haiku"})
+
+
 class Service:
     name = "cognition"
     version = VERSION
     consumes: tuple[str, ...] = (
         topics.COGNITION_THINK, topics.COGNITION_COMPACT_REQUEST,
         topics.SYSTEM_STATE_CHANGED, topics.SYSTEM_TICK_SECOND, topics.SYSTEM_STARTED,
-        topics.TOOL_REGISTERED,
+        topics.TOOL_REGISTERED, topics.COGNITION_MODEL_REQUEST,
     )
     # Requests count as produced: the assembler sends persona.voice and
     # self.summary and waits for their replies. (`world.env.query` for
@@ -282,10 +286,12 @@ class Service:
         topics.COGNITION_THINK_REPLY, topics.COGNITION_COMPACT_REPLY,
         topics.COGNITION_COMPACT_PRE, topics.COGNITION_COMPACT_DONE,
         topics.COGNITION_PROVIDER_STATUS, topics.SYSTEM_METRICS, topics.UI_NOTICE, topics.SESSION_DELTA,
-        topics.PERSONA_VOICE, topics.SELF_SUMMARY,
+        topics.PERSONA_VOICE, topics.SELF_SUMMARY, topics.COGNITION_MODEL_REPLY,
     )
 
-    def __init__(self, *, config: Config | None = None, providers: list | None = None) -> None:
+    def __init__(self, *, config: Config | None = None, providers: list | None = None,
+                 config_path=None) -> None:
+        self._config_path = config_path  # where `/model` persists; None: settings.config_path()
         self._config_from_caller = config
         self._config = config or Config()
         self._injected_providers = providers
@@ -372,7 +378,8 @@ class Service:
                     price_cached_in=extra.price_cached_in or extra.price_in or _together.PRICE_CACHED_IN,
                 ))
             real_providers.append(
-                ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds),
+                ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds,
+                                   model=self._config.providers["claude_code_cli"].model),
             )
             gemini_cfg = self._config.providers.get("gemini")
             if gemini_cfg is not None:
@@ -451,13 +458,15 @@ class Service:
         # for the native dialects (item 4). Cognition boots before Execution
         # registers anything, so nothing is missed.
         self._sub_tools = await ctx.bus.subscribe(topics.TOOL_REGISTERED, self._on_tool_registered)
+        self._sub_model = await ctx.bus.subscribe(topics.COGNITION_MODEL_REQUEST, self._on_model_request)
         self._real_providers = list(real_providers)
         for provider in real_providers:
             await self._emit_status(provider)
 
     async def stop(self) -> None:
         for sub in (self._sub_think, self._sub_compact, self._sub_state, self._sub_tick,
-                    getattr(self, "_sub_started", None), getattr(self, "_sub_tools", None)):
+                    getattr(self, "_sub_started", None), getattr(self, "_sub_tools", None),
+                    getattr(self, "_sub_model", None)):
             if sub is not None:
                 await sub.unsubscribe()
         if getattr(self, "_compressor", None) is not None:
@@ -771,6 +780,84 @@ class Service:
 
     async def _on_state_changed(self, message: Message) -> None:
         self._paused = message.payload.get("state") in ("paused", "stopping")
+
+    def _resolve_model_choice(self, want: str, model: str) -> tuple[str, str, str]:
+        """`(provider, claude_model, refused)` for `/model <want>`."""
+        names = [n for n in self._router.candidate_names() if n != self._floor.name]
+        word = (model or want).strip()
+        low = word.lower()
+        if model or low in CLAUDE_MODEL_ALIASES or low.startswith("claude-"):
+            if "claude_code_cli" not in names:
+                return "", "", "the Claude Code CLI is not set up here"
+            return "claude_code_cli", word, ""
+        if low in names:
+            return low, "", ""
+        by_model = [n for n in names if low and low in self._router.model_of(n).lower()]
+        if len(by_model) >= 1:
+            # The exact model first ("GLM-5.3" is together_strong, not
+            # GLM-5.3-Flash's together).
+            exact = [n for n in by_model if self._router.model_of(n).lower().rsplit("/", 1)[-1] == low]
+            return (exact or by_model)[0], "", ""
+        return "", "", (f"no provider or model called {word!r}; there is " + ", ".join(names)
+                         + ", and for Claude: " + ", ".join(sorted(CLAUDE_MODEL_ALIASES)))
+
+    def _persist_model_choice(self, order: tuple[str, ...], claude_model: str) -> str:
+        """Write the order (and the Claude model) into simorgh.toml, so the
+        choice outlives a restart. "" when it could not be written."""
+        import tomllib
+
+        from simorgh.contracts import settings as _settings
+
+        path = self._config_path or _settings.config_path()
+        try:
+            _settings.persist(path, "provider_order", list(order), section="cognition")
+            if claude_model:
+                with path.open("rb") as handle:
+                    table = dict(tomllib.load(handle).get("cognition") or {})
+                providers = dict(table.get("providers") or {})
+                providers["claude_code_cli"] = {**dict(providers.get("claude_code_cli") or {}), "model": claude_model}
+                _settings.persist(path, "providers", providers, section="cognition")
+        except Exception as exc:  # noqa: BLE001 -- the live switch stands; say the file did not change
+            self._ctx.logger.warning("cognition.model_not_persisted", detail=repr(exc))
+            return ""
+        return str(path)
+
+    async def _on_model_request(self, message: Message) -> None:
+        """`/model` (2026-10-27): list the providers, or move one to the
+        front of the default order -- live, and into simorgh.toml when
+        `persist`. Per-purpose routes (`[cognition.routes]`) still go
+        first for their purposes; this is the default for everything else."""
+        p = message.payload or {}
+        want, model = str(p.get("provider") or "").strip(), str(p.get("model") or "").strip()
+        changed, refused, persisted = False, "", ""
+        if self._router is not None and (want or model):
+            name, claude_model, refused = self._resolve_model_choice(want, model)
+            if not refused:
+                if claude_model:
+                    provider = next((x for x in self._real_providers if x.name == "claude_code_cli"), None)
+                    if provider is not None and hasattr(provider, "set_model"):
+                        provider.set_model(claude_model)
+                order = (name,) + tuple(n for n in self._config.provider_order if n != name)
+                self._config = dataclasses.replace(self._config, provider_order=order)
+                self._router.set_order(order)
+                changed = True
+                self._ctx.logger.info("cognition.model_switched", provider=name, model=claude_model)
+                if p.get("persist"):
+                    persisted = self._persist_model_choice(order, claude_model)
+                for provider in self._real_providers:
+                    await self._emit_status(provider)
+        names = self._router.candidate_names() if self._router is not None else []
+        payload = {
+            "selected": self._router.selected_name() if self._router is not None else "",
+            "order": list(self._config.provider_order),
+            "providers": [{"name": n, "model": self._model_of(n),
+                           "available": bool(getattr(self._router._by_name.get(n), "available", lambda: True)())}  # noqa: SLF001
+                          for n in names],
+            "changed": changed,
+            **({"persisted": persisted} if persisted else {}),
+            **({"refused": refused} if refused else {}),
+        }
+        await self._ctx.bus.reply(message, type=topics.COGNITION_MODEL_REPLY, payload=payload)
 
     def _model_of(self, provider_name: str) -> str:
         """The model this provider is configured to call, for the status
