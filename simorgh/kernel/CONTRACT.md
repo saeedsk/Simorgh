@@ -119,6 +119,7 @@ Other environment the package reads: `SIMORGH_CONFIG`, `SIMORGH_RUNTIME_DATA_DIR
 - Module-level mutable state: `registry.DEFAULT_SECRETS` (a dict; mutating it changes every later boot in the process), `cli._HARD_EXIT` (patched by tests), `configcheck.KNOWN_DEAD_FIELDS`/`EFFECTIVE_DEFAULTS` (dicts read as tables). Process-wide side effect: `cli._configure_logging` installs a root logging handler.
 
 ## Invariants
+- `registry.DEFAULT_SECRETS["cognition"]` gains `SIM_ANTHROPIC_API_KEY` (2026-10-27): the creator's Anthropic key for `cognition/providers/anthropic.py`, granted without a `[cognition] secrets` line like the other provider keys.
 
 - The Kernel is the only non-`guardian` publisher allowed for `action.approved` and one of the allowed publishers of `system.pause`, `system.resume`, `system.stop`, `system.restart`, `system.reload` (`contracts/topics.py` `PUBLISH_ONLY_BY`); the policy that enforces the whole table (`bus.enforcement.ReservedTopologyPolicy`) is installed by the Kernel on every client it builds.
 - Layers start in `LAYERS` order and a layer starts only after the previous layer is healthy; a boot failure records `failed` on the `system` stream and raises `KernelBootError`.

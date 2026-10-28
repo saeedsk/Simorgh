@@ -4,11 +4,14 @@ absent entirely -- the floor provider always answers."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import os
 from dataclasses import dataclass, field
 from typing import Mapping
 
 from .api import Budget
+from .providers import anthropic as anthropic_provider
 from .providers import together as together_provider
 
 DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
@@ -126,6 +129,18 @@ class Config:
             price_out=together_provider.PRICE_OUT,
             price_cached_in=together_provider.PRICE_CACHED_IN,
         ),
+        # Claude over the Messages API with the creator's own key
+        # (`SIM_ANTHROPIC_API_KEY`, 2026-10-27). Not in the default order:
+        # a config names it. Opus 5.5 is $4/$20 per 1M, so the day's cap
+        # is in dollars.
+        "anthropic": ProviderConfig(
+            max_calls=int(os.environ.get("SIMORGH_ANTHROPIC_DAILY_MAX_CALLS", "3000")),
+            window_seconds=86_400.0,
+            max_spend_usd=float(os.environ.get("SIMORGH_ANTHROPIC_DAILY_BUDGET_USD", "5.0")),
+            timeout_seconds=180.0, model=anthropic_provider.DEFAULT_MODEL,
+            price_in=anthropic_provider.PRICE_IN, price_out=anthropic_provider.PRICE_OUT,
+            price_cached_in=anthropic_provider.PRICE_CACHED_IN,
+        ),
         "claude_code_cli": ProviderConfig(
             max_calls=int(os.environ.get("SIMORGH_CLAUDE_CODE_MAX_CALLS", "500")),
             window_seconds=18_000.0, timeout_seconds=180.0,
@@ -201,8 +216,14 @@ class Config:
             # `problems` at start.
             problems += [f"providers.{k} is {type(v).__name__}, not a table -- write [cognition.providers.{k}]"
                          for k, v in raw["providers"].items() if not isinstance(v, Mapping)]
-            kwargs["providers"] = {**cls().providers, **{
-                k: ProviderConfig(**v) for k, v in raw["providers"].items() if isinstance(v, Mapping)
+            # A table sets what it names over that provider's defaults: a
+            # file `[cognition.providers.anthropic]` holding only
+            # `reasoning_effort` (what `/effort` writes) replaced the whole
+            # entry and dropped its dollar cap and prices (2026-10-27).
+            defaults = cls().providers
+            kwargs["providers"] = {**defaults, **{
+                k: (dataclasses.replace(defaults[k], **v) if k in defaults else ProviderConfig(**v))
+                for k, v in raw["providers"].items() if isinstance(v, Mapping)
             }}
         if "provider_order" in raw:
             kwargs["provider_order"] = tuple(raw["provider_order"])

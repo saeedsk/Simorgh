@@ -72,7 +72,10 @@ DEFAULT_SECRETS: dict[str, frozenset[str]] = {
     # reached the provider unless `[cognition] secrets = [...]` also listed
     # it; the creator added GEMINI_API_KEY there and it would have been
     # silently ignored.
-    "cognition": frozenset({"TOGETHER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"}),
+    # `SIM_ANTHROPIC_API_KEY` (2026-10-27): the creator's key for Claude
+    # over the Messages API (cognition/providers/anthropic.py).
+    "cognition": frozenset({"TOGETHER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY",
+                            "SIM_ANTHROPIC_API_KEY"}),
     # `SIM_TELEGRAM_TOKEN` is the bot token for interface/telegram.py.
     # Absent, the channel is simply off and says so; a person who sets
     # it should not also have to remember a `secrets = [...]` line.

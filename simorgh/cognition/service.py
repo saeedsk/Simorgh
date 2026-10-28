@@ -266,8 +266,10 @@ def _within_deadline(max_seconds: float, message: Message, now: float) -> float:
 
     return min(float(max_seconds), max(_MIN_CANDIDATE_SECONDS, left - 0.5))
 
-#: Claude model names `/model` hands to the Claude Code CLI (`--model`).
-CLAUDE_MODEL_ALIASES = frozenset({"opus", "sonnet", "haiku"})
+#: Claude model names `/model` takes: the API's id for each, used by the
+#: `anthropic` provider when it has a key; otherwise the alias goes to the
+#: Claude Code CLI as `--model`.
+CLAUDE_MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
 
 class Service:
@@ -376,6 +378,16 @@ class Service:
                     reasoning_effort=extra.reasoning_effort or _together.DEFAULT_REASONING_EFFORT,
                     price_in=extra.price_in or _together.PRICE_IN, price_out=extra.price_out or _together.PRICE_OUT,
                     price_cached_in=extra.price_cached_in or extra.price_in or _together.PRICE_CACHED_IN,
+                ))
+            anthropic_cfg = self._config.providers.get("anthropic")
+            if anthropic_cfg is not None:
+                from .providers.anthropic import KEY_NAME, AnthropicProvider
+
+                real_providers.append(AnthropicProvider(
+                    api_key=ctx.secrets.get(KEY_NAME), model=anthropic_cfg.model,
+                    timeout_seconds=anthropic_cfg.timeout_seconds, effort=anthropic_cfg.reasoning_effort,
+                    price_in=anthropic_cfg.price_in, price_out=anthropic_cfg.price_out,
+                    price_cached_in=anthropic_cfg.price_cached_in,
                 ))
             real_providers.append(
                 ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds,
@@ -788,6 +800,9 @@ class Service:
         word = (model or want).strip()
         low = word.lower()
         if model or low in CLAUDE_MODEL_ALIASES or low.startswith("claude-"):
+            api = self._router._by_name.get("anthropic")  # noqa: SLF001
+            if api is not None and api.available():
+                return "anthropic", CLAUDE_MODEL_ALIASES.get(low, word), ""
             if "claude_code_cli" not in names:
                 return "", "", "the Claude Code CLI is not set up here"
             return "claude_code_cli", word, ""
@@ -842,7 +857,7 @@ class Service:
             return ""
         return str(path)
 
-    def _persist_model_choice(self, order: tuple[str, ...], claude_model: str) -> str:
+    def _persist_model_choice(self, order: tuple[str, ...], claude_model: str, name: str = "claude_code_cli") -> str:
         """Write the order (and the Claude model) into simorgh.toml, so the
         choice outlives a restart. "" when it could not be written."""
         from simorgh.contracts import settings as _settings
@@ -850,7 +865,7 @@ class Service:
         path = self._config_path or _settings.config_path()
         try:
             _settings.persist(path, "provider_order", list(order), section="cognition")
-            if claude_model and not self._persist_provider_key("claude_code_cli", "model", claude_model):
+            if claude_model and not self._persist_provider_key(name, "model", claude_model):
                 return ""
         except Exception as exc:  # noqa: BLE001 -- the live switch stands; say the file did not change
             self._ctx.logger.warning("cognition.model_not_persisted", detail=repr(exc))
@@ -872,7 +887,7 @@ class Service:
             name, claude_model, refused = self._resolve_model_choice(want, model)
             if not refused:
                 if claude_model:
-                    provider = next((x for x in self._real_providers if x.name == "claude_code_cli"), None)
+                    provider = next((x for x in self._real_providers if x.name == name), None)
                     if provider is not None and hasattr(provider, "set_model"):
                         provider.set_model(claude_model)
                 order = (name,) + tuple(n for n in self._config.provider_order if n != name)
@@ -881,7 +896,7 @@ class Service:
                 changed = True
                 self._ctx.logger.info("cognition.model_switched", provider=name, model=claude_model)
                 if p.get("persist"):
-                    persisted = self._persist_model_choice(order, claude_model)
+                    persisted = self._persist_model_choice(order, claude_model, name)
                 for provider in self._real_providers:
                     await self._emit_status(provider)
         names = self._router.candidate_names() if self._router is not None else []

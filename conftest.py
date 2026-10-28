@@ -46,7 +46,7 @@ _KEEP = frozenset({"SIMORGH_OBSERVER_RUN_ID", "SIMORGH_LEDGER_WRITER_AUDIT"})
 #: or more each, 2026-09-14). A test of a provider passes its own key.
 _MODEL_CREDENTIALS = frozenset({
     "TOGETHER_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "VOYAGE_API_KEY",
-    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "SIM_ANTHROPIC_API_KEY",
 })
 
 #: Without a key Cognition would fall through to the `claude` CLI, when

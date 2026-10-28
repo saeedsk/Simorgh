@@ -114,6 +114,24 @@ class ModelSwitch(unittest.IsolatedAsyncioTestCase):
         self.assertIn("takes low, medium, high, xhigh, max", refused["refused"])
         self.assertIn("together has no effort setting", (await self._ask(effort="high"))["refused"])
 
+    async def test_opus_goes_to_the_api_provider_when_it_has_a_key(self):
+        self.toml = Path(tempfile.mkdtemp()) / "simorgh.toml"
+        api = _Claude()
+        api.name = "anthropic"
+        glm = _FakeProvider("together")
+        config = CognitionConfig(provider_order=("together", "anthropic", "floor"), assembly_request_timeout=0.05)
+        await self._make(providers=[glm, api], config=config)
+        await self.service.stop()
+        self.service = Service(config=config, providers=[glm, api], config_path=self.toml)
+        await self.service.start(self.ctx)
+        self.interface = make_client(self.bus._backend, source="interface", ledger=self.ledger, clock=self.clock)  # noqa: SLF001
+        await self.interface.start()
+        answer = await self._ask(provider="opus", persist=True)
+        self.assertEqual(answer["selected"], "anthropic")
+        self.assertEqual(api.model, "claude-opus-5-5")
+        written = tomllib.loads(self.toml.read_text())
+        self.assertEqual(written["cognition"]["providers"]["anthropic"]["model"], "claude-opus-5-5")
+
 
 class ClaudeCliModel(unittest.TestCase):
     def test_a_named_model_is_passed_as_model(self):

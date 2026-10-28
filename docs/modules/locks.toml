@@ -5,6 +5,12 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.cognition]
+by = "claude-paid"
+task = "anthropic provider: Opus 5.5 over the Messages API with SIM_ANTHROPIC_API_KEY"
+since = "2026-10-28T06:12:54+00:00"
+until = "2026-10-28T14:12:54+00:00"
+
 [locks.docs]
 by = "claude-paid"
 task = "record creator decisions: native_graph live, sidecars eval-only"
@@ -22,6 +28,18 @@ by = "claude-paid"
 task = "stage 17: mask2/routed presets and their paid measurement"
 since = "2026-10-28T04:36:34+00:00"
 until = "2026-10-28T12:36:34+00:00"
+
+[locks.interface]
+by = "claude-paid"
+task = "/model opus names the anthropic provider"
+since = "2026-10-28T06:12:54+00:00"
+until = "2026-10-28T14:12:54+00:00"
+
+[locks.kernel]
+by = "claude-paid"
+task = "cognition may read SIM_ANTHROPIC_API_KEY"
+since = "2026-10-28T06:12:54+00:00"
+until = "2026-10-28T14:12:54+00:00"
 
 [locks.orchestration]
 by = "claude-paid"
