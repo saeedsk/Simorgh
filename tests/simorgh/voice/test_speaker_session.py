@@ -232,6 +232,27 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([a[1] for a in replies.asked], ["Saeed", "", "Saeed"])
         self.assertEqual([c["before"] for c in replies.calls], ["", "Saeed", "Saeed"])
 
+    async def test_a_voice_sim_could_not_place_right_after_its_answer_is_the_person_it_answered(self):
+        # Live 2026-10-28: Sim offered "I can rerun it for the past 30 days
+        # if you want", the creator said "Don't ask me again, just do it.",
+        # the voice scored as nobody, and it was filed as "someone and
+        # Saeed are talking to each other". He had to say it again.
+        self.book.enroll("Ira", _vec(0.0)); self.book.enroll("Saeed", _vec(2.0))
+        voices = iter([_vec(2.02), _vec(4.5)])
+        heard = iter(["what time is it", "Don't ask me again, just do it."])
+        script = _Script(*[(True, 60), (False, 110)] * 2, (False, 10_000))
+        replies = _Replies("It is nine. I can check tomorrow too if you want.")
+        session, bus, _tts = _session(_config(), script, replies, self.embedder, self.book)
+
+        async def _transcribe(audio, *, language=""):
+            from simorgh.voice.api import Utterance
+            self.embedder.vector = next(voices, _vec(4.5))
+            return Utterance(text=next(heard, "hello"), confidence=0.95, seconds=1.2, engine="fake")
+        session._stt._inner.transcribe = _transcribe  # type: ignore[method-assign]  # noqa: SLF001
+        await _run_until(session, lambda: len(replies.asked) >= 2, timeout=12.0)
+        self.assertEqual([a[0] for a in replies.asked], ["what time is it", "Don't ask me again, just do it."])
+        self.assertEqual([p for p in bus.of(topics.VOICE_SPOKEN) if p.get("quiet")], [])
+
     async def test_an_unknown_voice_that_keeps_talking_is_background_until_it_names_sim(self):
         """An interview on the TV (2026-09-14): the model rightly stayed
         quiet on two fragments, then answered the third aloud. After two

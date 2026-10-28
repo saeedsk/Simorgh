@@ -336,6 +336,11 @@ def _fragment(text: str) -> bool:
     return len(words) <= 5 and any(len(w) == 1 and w.lower() not in ("و", "a", "i") for w in words)
 
 
+#: Playback ids of things Sim says that are not the turn's reply:
+#: acknowledgements, "still on it", a slow tool's filler, `say`, humming.
+ASIDE_PREFIXES = ("ack-", "tool-", "say-", "hum-")
+
+
 class VoiceSession:
     def __init__(self, *, pipeline: Pipeline, config: Config, microphone, speaker, recogniser, synthesiser,
                  detector_factory, clock=None, logger=None, embedder=None, speakers=None, room=None) -> None:
@@ -1940,7 +1945,12 @@ class VoiceSession:
         if asks_for_something_sim_does(text, names=self._household_names()):
             return False
         in_window = 0.0 <= now - self._sim_spoke_at <= self._config.exchange_window_s
-        if in_window and me == (self._last_asked_speaker or me):
+        # A voice nobody placed, just after Sim answered someone, is that
+        # person on a bad take, not a stranger: Sim's own echo was filtered
+        # out above. Live 2026-10-28: "Don't ask me again, just do it.",
+        # right after Sim offered to rerun a search, scored as nobody and
+        # was filed as "someone and Saeed are talking to each other".
+        if in_window and (not speaker or me == (self._last_asked_speaker or me)):
             return False
         others = {who for who, _said, at, _asked in self._room
                   if now - at <= self._config.exchange_window_s * 2 and who != me and who != "someone"}
@@ -3024,7 +3034,12 @@ class VoiceSession:
             "ref": ref, "seconds": round(audio.seconds, 3), "seq": self._tv_seq, "request_id": request_id})
 
     async def _on_playback_state(self, state: PlaybackState) -> None:
-        if state.request_id.startswith(("ack-", "say-", "hum-")):
+        # An aside is not the reply: its playback must not walk the turn.
+        # "tool-" was missing, so a slow tool's "Let me look." took the turn
+        # THINKING -> AGENT_SPEAKING -> LISTENING, and the answer it was
+        # covering for was dropped as "the session is listening" -- four of
+        # five tool asides on 2026-10-27/28.
+        if state.request_id.startswith(ASIDE_PREFIXES):
             return
         before = self.turns.state
         for action in self.turns.handle_playback_state(state):

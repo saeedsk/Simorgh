@@ -103,6 +103,39 @@ class ASlowToolIsCoveredOutLoud(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.said, [])
 
 
+class TheFillerIsNotTheReply(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-10-27/28: four of five turns that played "Let me look."
+    lost their answer as "not spoken -- the session is listening". The
+    filler's playback walked the turn THINKING -> AGENT_SPEAKING ->
+    LISTENING, because "tool-" was not among the aside ids the session
+    ignores."""
+
+    async def test_the_answer_is_still_spoken_after_the_filler_plays(self):
+        import asyncio
+
+        from simorgh.voice.api import PlaybackState, TranscriptEvent, VadEvent
+        from simorgh.voice.session import VoiceSession
+        from simorgh.voice.turns import Actions, Policy, TurnManager
+
+        turns = TurnManager(Policy(end_of_turn_silence_ms=600, min_speech_ms=200))
+        turns.start()
+        turns.handle_vad(VadEvent("speech_start", speech_ms=30))
+        turns.handle_vad(VadEvent("speech", speech_ms=600))
+        turns.handle_vad(VadEvent("silence", silence_ms=600))
+        turns.handle_transcript(TranscriptEvent("final", "check my promo mail", turns.turn_id))
+        self.assertEqual(turns.state, THINKING)
+
+        async def _nothing(*_a, **_k):
+            return None
+
+        session = SimpleNamespace(turns=turns, _settled=asyncio.Event(), _dispatch=_nothing, _announce=_nothing)
+        for phase in ("started", "finished"):
+            await VoiceSession._on_playback_state(  # noqa: SLF001
+                session, PlaybackState(phase, f"tool-{turns.turn_id}-mail_search"))
+        self.assertEqual(turns.state, THINKING)
+        self.assertEqual([a.kind for a in turns.reply_ready(turns.turn_id)], [Actions.SPEAK])
+
+
 class TheRecentP95(unittest.TestCase):
     """Orchestration measures what each tool costs, so `tool.started`
     can carry it without a telemetry query on the very path it is
