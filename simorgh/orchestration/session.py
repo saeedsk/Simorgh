@@ -4472,11 +4472,28 @@ class SessionRunner:
         # long the whole thing is, and say how to get the remainder.
         if len(text) <= cls._MODEL_RESULT_CHARS:
             return text
-        return (
-            text[: cls._MODEL_RESULT_CHARS]
-            + f"\n...[cut at {cls._MODEL_RESULT_CHARS} of {len(text)} chars;"
-            " for a file, READ_FILE: path:START-END returns just those lines]"
-        )
+        # The closing notes survive the cut: Execution appends "full data:
+        # results/<id>.json (200 rows)" and a tool its own "Stopped at the
+        # limit" AFTER the listing, so cutting the head off kept the
+        # listing and dropped the one line saying every row was on disk.
+        # Live 2026-10-28: asked for the noisiest senders of the month, Sim
+        # counted the 67 lines it could see, three turns running, and wrote
+        # a tally file that came out empty.
+        tail = ""
+        found = text.rfind("\n\nfull data: ")
+        if found >= cls._MODEL_RESULT_CHARS:
+            tail = text[found:]
+            notes = text.rfind("\n\n", cls._MODEL_RESULT_CHARS, found)
+            if notes != -1 and found - notes <= 1200:
+                tail = text[notes:]
+        head = text[: cls._MODEL_RESULT_CHARS]
+        cut = (f"\n...[cut at {cls._MODEL_RESULT_CHARS} of {len(text)} chars;"
+               " for a file, READ_FILE: path:START-END returns just those lines]")
+        if tail:
+            cut = (f"\n...[listing cut at {cls._MODEL_RESULT_CHARS} of {len(text)} chars. Every row is in the "
+                   "file named below: count, rank or filter with code over that file, never from this cut "
+                   "listing.]")
+        return head + cut + tail
 
     async def _propose_and_await(self, session: Session, call: dict, step_no: int, *,
                                  capture: dict | None = None) -> tuple[bool, str, str]:

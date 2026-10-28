@@ -422,6 +422,22 @@ class MailToolTestCase(_ToolCase):
         whole = await self._tools()["mail_search"].run({"limit": 40}, ctx=_ctx())
         self.assertNotIn("Stopped at", whole.output)
 
+    async def test_group_by_sender_counts_every_message_not_a_page(self):
+        """Live 2026-10-28: "the noisiest senders of the past 30 days" was
+        answered from the 67 lines the model could see."""
+        many = [{"uid": 100 + i, "folder": "INBOX", "subject": f"Deal {i}",
+                 "from": ("Temu <t@temu.example>" if i % 3 else "Uber <u@uber.example>"), "body": "x",
+                 "flags": []} for i in range(30)]
+        tools = super()._tools(connectors={"g": FakeImap("g", many)},
+                               pim_cloud_llm_may_see=("public", "personal", "sensitive"))
+        result = await tools["mail_search"].run({"group_by": "sender", "top": 5, "limit": 3}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("30 message(s)", result.output)
+        self.assertIn("every one counted", result.output)
+        self.assertIn("1. Temu <t@temu.example> -- 20", result.output)
+        self.assertIn("2. Uber <u@uber.example> -- 10", result.output)
+        self.assertEqual(result.metadata["rows"][0], {"sender": "Temu <t@temu.example>", "messages": 20})
+
     def test_since_looks_back_for_a_number_of_days(self):
         from datetime import datetime, timezone
 

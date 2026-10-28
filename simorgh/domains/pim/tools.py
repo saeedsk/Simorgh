@@ -159,6 +159,8 @@ class CalListTool(_PimTool):
 
 
 _BACK = {"day": 1, "week": 7, "month": 30, "year": 365}
+#: Most messages one `group_by=sender` count reads (From headers only).
+MAX_COUNTED = 5000
 
 
 def since_of(text: str, *, now: datetime) -> datetime:
@@ -189,6 +191,7 @@ class MailSearchTool(_PimTool):
             "query": {"type": "string"}, "folder": {"type": "string"},
             "account": {"type": "string"}, "limit": {"type": "integer"},
             "since": {"type": "string"}, "unread_only": {"type": "boolean"},
+            "group_by": {"type": "string", "enum": ["sender"]}, "top": {"type": "integer"},
         },
     }
 
@@ -209,6 +212,9 @@ class MailSearchTool(_PimTool):
                 since = since_of(str(args["since"]), now=self._now())
             except Ambiguous as exc:
                 return ToolResult.refused(f"refused: {exc}")
+
+        if str(args.get("group_by") or "").strip().lower() == "sender":
+            return await self._by_sender(chosen, args, since)
 
         messages, problems = [], []
         for name, connector in chosen.items():
@@ -254,6 +260,52 @@ class MailSearchTool(_PimTool):
                           error=("; ".join(problems) if problems and not messages else None),
                           metadata={"messages": len(messages), "rows": rows,
                                     "privacy": "personal"})
+
+
+    async def _by_sender(self, chosen, args, since):
+        """`group_by=sender`: messages per sender over the whole range, every
+        account, every page -- the answer to "who sends me the most"."""
+        cap = MAX_COUNTED
+        top = max(1, min(int(args.get("top") or 10), 100))
+        totals: dict[str, int] = {}
+        matched = counted = 0
+        problems = []
+        for name, connector in chosen.items():
+            try:
+                counts, m, c = await connector.sender_counts(
+                    str(args.get("query") or ""), folder=str(args.get("folder") or "INBOX"), since=since,
+                    unread_only=bool(args.get("unread_only")), max_messages=cap)
+            except BudgetExhausted as exc:
+                problems.append(f"{name}: {exc}")
+                continue
+            except Exception as exc:  # noqa: BLE001
+                status = await _safe_probe(connector)
+                problems.append(f"{name}: {status or _clean(exc)}")
+                continue
+            matched, counted = matched + m, counted + c
+            for sender, n in counts.items():
+                totals[sender] = totals.get(sender, 0) + n
+        span = f"since {since:%Y-%m-%d}" if since else "in the whole folder"
+        if not counted:
+            body = f"no messages matched {span}"
+        else:
+            ranked = _sender_table(totals, top)
+            body = (f"{counted} message(s) {span} from {len(totals)} sender(s), every one counted"
+                    + (f" (of {matched} matched; the newest {counted} -- count the rest with a "
+                       f"narrower since=)" if counted < matched else "")
+                    + f". Top {len(ranked)} by messages:\n"
+                    + "\n".join(f"  {i}. {sender} -- {n}" for i, (sender, n) in enumerate(ranked, 1)))
+        if problems:
+            body += "\n\ncould not read:\n" + "\n".join(f"- {p}" for p in problems)
+        rows = [{"sender": s, "messages": n} for s, n in _sender_table(totals, len(totals))]
+        return ToolResult(ok=not (problems and not counted), output=body,
+                          error=("; ".join(problems) if problems and not counted else None),
+                          metadata={"messages": counted, "matched": matched, "senders": len(totals), "rows": rows,
+                                    "privacy": "personal"})
+
+
+def _sender_table(counts: dict, top: int) -> list[tuple[str, int]]:
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:top]
 
 
 class MailReadTool(_PimTool):

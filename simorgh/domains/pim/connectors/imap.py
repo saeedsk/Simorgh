@@ -215,6 +215,40 @@ class ImapConnector:
 
         return await asyncio.to_thread(_search)
 
+    async def sender_counts(self, query: str = "", *, folder: str = "INBOX", since: datetime | None = None,
+                            unread_only: bool = False, max_messages: int = 5000,
+                            batch: int = 500) -> tuple[dict[str, int], int, int]:
+        """`({sender: messages}, matched, counted)` over EVERY message the
+        search matches, newest first, up to `max_messages` -- the From
+        header only, fetched `batch` at a time. "Who sends me the most"
+        is a count over the whole range; a listing cut at its limit
+        answered it from the newest twenty (live 2026-10-28)."""
+        import asyncio
+        from collections import Counter
+
+        client = await self._connect()
+        self._budget.take()
+
+        def _count():
+            code, _ = client.select(_quote(folder), readonly=True)
+            if code != "OK":
+                raise _MailError(f"no folder {folder!r}")
+            code, data = client.uid("SEARCH", None, *_criteria(query, since=since, unread_only=unread_only))
+            if code != "OK":
+                raise _MailError("the server refused that search")
+            uids = (data[0] or b"").split()[::-1]
+            matched, uids = len(uids), uids[:max(1, max_messages)]
+            counts: Counter = Counter()
+            for start in range(0, len(uids), max(1, batch)):
+                code, rows = client.uid("FETCH", b",".join(uids[start:start + batch]),
+                                        "(BODY.PEEK[HEADER.FIELDS (FROM)])")
+                if code != "OK":
+                    raise _MailError("the server refused to return those messages")
+                counts.update(m.sender or "(no sender)" for m in _messages(rows, folder=folder, account=self.name))
+            return dict(counts), matched, len(uids)
+
+        return await asyncio.to_thread(_count)
+
     async def fetch_body(self, uid: str, *, folder: str = "INBOX", max_chars: int = 20_000
                          ) -> MailMessage | None:
         """One message, with its body. `sensitive` -- the caller decides
