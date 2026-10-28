@@ -136,6 +136,8 @@ class Service:
                             fact_lines=(self.config.memory_fact_lines, self.config.memory_graph_lines),
                             mask_after_steps=self.config.mask_after_steps,
                             tool_index=self.config.tool_index, supervisor=self.config.supervisor,
+                            supervisor_approach=self.config.supervisor_approach,
+                            supervisor_lessons=self.config.supervisor_lessons,
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)

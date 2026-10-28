@@ -263,6 +263,15 @@ class Config:
     # `supervisor.PRINCIPLES`), and below the bar its feedback goes back as
     # an order. Off: turns are what they were.
     supervisor: bool = True
+    # Stage 19 (code-first problem solving), both read only with the
+    # supervisor on. `supervisor_approach`: the bar also says HOW the job is
+    # done (direct, compute, parallel, decompose, background), Sim is told
+    # the concrete next step, and the review checks the method. Off: the bar
+    # and the review are those of 2026-10-28. `supervisor_lessons`: a
+    # below-the-bar review the next one met becomes a lesson on
+    # `supervisor:lessons`, recalled into the bar for a similar job.
+    supervisor_approach: bool = True
+    supervisor_lessons: bool = True
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -309,7 +318,9 @@ class Config:
 
 
 #: The guardrails `[orchestration] ablate` may switch off.
-ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps", "routing"})
+ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps", "routing",
+                       # Stage 19 item 7b: a job whose bar is unmet goes on in the background.
+                       "continue"})
 #: `[orchestration] tool_routing` (stage 17); `routing.MODES`, duplicated so
 #: this module stays free of imports.
 ROUTING_MODES = ("off", "shadow", "on")

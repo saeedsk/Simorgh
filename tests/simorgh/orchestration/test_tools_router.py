@@ -742,7 +742,11 @@ class TestEveryBuiltinToolIsFullyWired(unittest.TestCase):
 
         # Every switchable tool on, as a person may turn them on.
         config = Config.from_mapping({"shell": True, "remote": True, "claude_code": {"enabled": True}})
-        registered = {tool.name for tool in builtin_tools(config) + domain_tools(config, secrets=None)} | SESSION_LOCAL
+        from simorgh.execution.workbench import workbench_tools
+
+        # The workbench registers beside the meta tools, out of `builtin_tools` (stage 19).
+        registered = {tool.name for tool in builtin_tools(config) + domain_tools(config, secrets=None)
+                      + workbench_tools(config)} | SESSION_LOCAL
         for kind, profile in BY_KIND.items():
             for name in profile.tools:
                 with self.subTest(profile=kind, tool=name):

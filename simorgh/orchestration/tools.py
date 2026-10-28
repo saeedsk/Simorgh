@@ -58,6 +58,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "find_package": ("read_only", True),
     "run_python_sandboxed": ("reversible", False),
     "run_js_sandboxed": ("reversible", False),
+    # Execution's workbench (stage 19): reversible, like the sandboxes it
+    # extends; each tool its program calls is its own gated action.
+    "run_analysis": ("reversible", False),
     "run_tests": ("reversible", False),
     "draft_candidate": ("reversible", False),
     # Model-callable since 2026-09-07 (profiles.py's own note): the tools
@@ -770,10 +773,22 @@ def offered_tools(profile_tools: tuple[str, ...]) -> tuple[str, ...]:
 
             pool = known or set(_TOOL_POLICY)
             offered.extend(t for t in sorted(pool) if fnmatch.fnmatchcase(t, name) and t not in offered)
+        elif name in OPTIONAL_TOOLS and known and name not in known:
+            # A registry that does not have it (the workbench switched off,
+            # or an Execution from before stage 19): not a tool to tell the
+            # model about. Before anything registered, it is offered like
+            # the rest of the profile.
+            continue
         elif name not in offered:
             offered.append(name)
     offered.extend(sorted(t for t in known if t.startswith("skill:") and t not in offered))
     return tuple(offered)
+
+
+#: Profile tools offered only while a registry that has announced tools
+#: includes them (stage 19): new, switchable tools a profile names ahead
+#: of every install.
+OPTIONAL_TOOLS = frozenset({"run_analysis"})
 
 
 def register_tool_policy(name: str, *, reversibility: str, provider: str,
