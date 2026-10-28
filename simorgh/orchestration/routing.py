@@ -38,7 +38,7 @@ import re
 import tomllib
 import unicodedata
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -93,7 +93,21 @@ def load_groups(path: Path = GROUPS_FILE) -> tuple[Group, ...]:
                          tools=tuple(str(t) for t in table.get("tools") or ()),
                          utterances=tuple(str(u) for u in table.get("utterances") or ()),
                          core=bool(table.get("core", False))))
+    named = {t for g in out for t in g.tools}
+    extra = tuple(t for t in CORE_CODE_TOOLS if t not in named)
+    if extra:
+        # Code over the full data is how ANY data job is done (stage 19), so
+        # it is offered on every turn, like recall: the core group gets it
+        # unless the file has put it in a group itself.
+        core = next((i for i, g in enumerate(out) if g.core), None)
+        if core is not None:
+            out[core] = replace(out[core], tools=out[core].tools + extra)
     return tuple(out)
+
+
+#: Tools added to the core group when the groups file names them nowhere
+#: (stage 19: Execution's workbench, `profiles.CODE_TOOLS`).
+CORE_CODE_TOOLS = ("run_analysis",)
 
 
 # -- the default embedding ---------------------------------------------------

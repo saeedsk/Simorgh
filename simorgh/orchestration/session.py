@@ -131,6 +131,9 @@ CREW_SCAFFOLDS = ("patch", "research", "plan")
 CHAT_CREW_AGENTS = ("research", "browser")
 CHAT_CREW_TOOLS = ("spawn", "await_agents", "check_agents", "send_agent", "cancel_agent", "read_ref")
 VOICE_CREW_TOOLS = ("spawn", "check_agents", "cancel_agent")
+#: Most spawns of one marker reply started in one step (stage 19: a
+#: parallel split is at most `supervisor.MAX_SPLIT` parts).
+SPAWN_BATCH = 6
 #: Execution's `claude_code_task` (stage 18 item 12), named rather than
 #: imported (a subsystem may not import another): its cost is a crew's.
 CLAUDE_CODE_TOOL = "claude_code_task"
@@ -489,6 +492,9 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "worktree_close": 60.0,
     "run_python_sandboxed": 45.0,
     "run_js_sandboxed": 45.0,
+    # The workbench (stage 19): a program that may call up to
+    # `workbench_max_calls` tools in turn.
+    "run_analysis": 150.0,
     "web_fetch": 45.0,
     "render_page": 30.0,
     "browse_page": 60.0,
@@ -833,8 +839,17 @@ class SessionRunner:
         tool_routing: str = "off", route_top_k: int = 3, route_sticky_turns: int = 3,
         route_none_margin: float = 0.15, route_groups=None, route_embed=None, route_embed_timeout_s: float = 0.3,
         fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0, tool_index: bool = False,
-        supervisor: bool = False,
+        supervisor: bool = False, supervisor_approach: bool = True, supervisor_lessons: bool = True,
     ) -> None:
+        #: `[orchestration] supervisor_approach` and `supervisor_lessons`
+        #: (stage 19): with the supervisor on, the bar also says HOW the job
+        #: is done and the review checks the method; and a below-the-bar
+        #: review that the next one met becomes a lesson, recalled into a
+        #: later bar for a similar job. Neither does anything with the
+        #: supervisor off.
+        self._approach = bool(supervisor_approach)
+        self._lessons_on = bool(supervisor_lessons)
+        self._lessons: list | None = None
         #: `[orchestration] tool_index` (2026-10-27, `toolindex.py`): the
         #: index of loadable tools, `tool_more{tool|need}`, and the check on
         #: a chat reply that says it cannot.
@@ -1447,6 +1462,7 @@ class SessionRunner:
                 "summary": f"asking the model (purpose={'chat' if session.profile.scaffold == 'chat' else 'draft'})",
             })
             await self._take_goal(session)
+            await self._check_approach(session)
             think_reply = await self._think(session, pending_user_text, last_step=is_last)
             pending_user_text = ""
 
@@ -2540,6 +2556,15 @@ class SessionRunner:
         `parallel_read_tools`. Anything that can change something still
         runs alone, and nothing after it runs in the same step."""
         batch = [tool_calls[0]]
+        if batch[0].get("tool") == "spawn":
+            # Spawns return at once (stage 18), so the spawns of one reply
+            # all start in this step whatever `parallel_read_tools` says: a
+            # parallel split (stage 19) runs together, not one per step.
+            for extra in tool_calls[1:]:
+                if extra.get("tool") != "spawn" or len(batch) >= SPAWN_BATCH:
+                    break
+                batch.append(extra)
+            return batch
         if self._parallel_reads < 2 or not self._batchable(batch[0]):
             return batch
         for extra in tool_calls[1:]:
@@ -4327,8 +4352,19 @@ class SessionRunner:
         from . import supervisor
 
         prior = [m for m in session.messages if m.get("role") in ("user", "assistant")]
-        return supervisor.parse_criteria(
-            await self._supervisor_think(session, supervisor.criteria_prompt(session.user_text, prior)))
+        lessons = []
+        if self._lessons_on:
+            try:
+                lessons = supervisor.recall_lessons(await self._load_lessons(), session.user_text)
+            except Exception:  # noqa: BLE001 -- no lessons is the bar as it was
+                lessons = []
+            if lessons:
+                await self._note_lesson_hits(session, lessons)
+        bar = supervisor.parse_criteria(await self._supervisor_think(
+            session, supervisor.criteria_prompt(session.user_text, prior, approach=self._approach, lessons=lessons)))
+        if not self._approach:
+            bar.approach, bar.why, bar.split = "direct", "", []
+        return bar
 
     #: How long a think waits for the bar still being written.
     GOAL_WAIT_S = 4.0
@@ -4351,16 +4387,135 @@ class SessionRunner:
             criteria = task.result()
         except Exception:  # noqa: BLE001
             return
-        if not criteria:
-            return
         from . import supervisor
 
+        bar = criteria
+        asked = getattr(bar, "approach", "direct")
+        approach = supervisor.effective_approach(
+            asked, voice=session.channel == "voice", crews=self._crews_for_bar(session),
+            compute=supervisor.ANALYSIS_TOOL in session.offered)
+        split = (list(getattr(bar, "split", ()) or ())
+                 if approach in (*supervisor.SPLIT_APPROACHES, "background") else [])
+        criteria = list(bar) + [c for c in supervisor.implied_criteria(approach, split) if c not in bar]
+        if not criteria:
+            return
         session.acceptance = list(criteria)
-        step = Step(session.next_step_no(), "gather",
-                    ("supervisor's bar: " + "; ".join(supervisor.short(c) for c in criteria))[:400])
+        session.approach, session.approach_inner, session.split = approach, asked, split
+        session.approach_why = getattr(bar, "why", "") or ""
+        session.approach_from = len(session.steps)
+        shown = "supervisor's bar: " + "; ".join(supervisor.short(c) for c in criteria)
+        if approach != "direct":
+            shown = (f"supervisor's bar ({approach}" + (f", {len(split)} parts" if split else "") + "): "
+                     + "; ".join(supervisor.short(c) for c in criteria))
+        step = Step(session.next_step_no(), "gather", shown[:400])
         session.record(step)
         await self._record_step(session, step)
-        session.messages.append({"role": "user", "content": supervisor.criteria_message(criteria)})
+        session.messages.append({"role": "user", "content": supervisor.criteria_message(
+            criteria, approach=approach, why=session.approach_why, split=split, refs=session.result_refs,
+            request=session.user_text, inner=asked)})
+
+    def _crews_for_bar(self, session: Session) -> bool:
+        """Whether this turn can start the crew a split or background
+        approach needs: chat crews on, a root turn offered `spawn`, and --
+        off the console -- a person named to bring a background report to
+        (the rule `_spawn` holds)."""
+        if not self._chat_crews or session.depth or "spawn" not in session.offered:
+            return False
+        return session.channel in _NOTICE_CHANNELS or session.speaker.strip().lower() not in ("", "unknown")
+
+    async def _check_approach(self, session: Session) -> None:
+        """At the first steps after the bar is set (stage 19): do Sim's
+        first actions start the approach the bar set? If not, the
+        supervisor's order goes in now, once -- not only at the answer."""
+        if (not self._supervisor or not self._approach or session.approach == "direct" or not session.goal_shown
+                or session.approach_checked_at >= 0):
+            return
+        since = [s for s in session.steps[session.approach_from:] if getattr(s, "tool", None)]
+        if not since:
+            return
+        session.approach_checked_at = sum(1 for s in session.steps if getattr(s, "tool", None))
+        from . import supervisor
+
+        review = supervisor.method_check(session.approach, split=session.split, steps=since,
+                                         refs=session.result_refs, early=True)
+        if review is None:
+            return
+        await self._supervisor_order(session, review, early=True)
+
+    async def _supervisor_order(self, session: Session, review: dict, *, early: bool = False) -> None:
+        from . import supervisor
+
+        step = Step(session.next_step_no(), "verify",
+                    (f"supervisor: {'approach not followed' if early else 'below bar'} -- "
+                     f"{review.get('principle', '')}: {review.get('feedback', '')}")[:400], ok=False)
+        session.record(step)
+        await self._record_step(session, step)
+        self._telemetry.event("orchestration.supervisor", trace_id=session.trace or session.task_id,
+                              span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
+                              attrs={"verdict": "below_bar", "unmet": 0, "criteria": len(session.acceptance),
+                                     "principle": review.get("principle", ""), "approach": session.approach,
+                                     "early": True})
+        if self._lessons_on:
+            session.lesson_pending = {"review": dict(review), "at": len(session.steps)}
+        session.messages.append({"role": "user", "content": supervisor.order_message(review)})
+
+    # -- lessons (stage 19 item 6, `[orchestration] supervisor_lessons`) ------
+
+    async def _load_lessons(self) -> list:
+        from . import supervisor
+
+        if self._lessons is None:
+            events = []
+            if self._ledger is not None:
+                try:
+                    events = await self._ledger.read(supervisor.LESSONS_STREAM)
+                except Exception:  # noqa: BLE001 -- no stream yet is no lessons
+                    events = []
+            self._lessons = supervisor.fold_lessons(events)
+        return self._lessons
+
+    async def _append_lesson_event(self, session: Session, type_: str, payload: dict) -> None:
+        from . import supervisor
+
+        if self._ledger is None:
+            return
+        await self._ledger.append(supervisor.LESSONS_STREAM, Event(
+            stream=supervisor.LESSONS_STREAM, type=type_, ts=_epoch(self._clock) or time.time(),
+            trace_id=session.trace or session.task_id, causation_id=None, payload=dict(payload),
+            idempotency_key=uuid.uuid4().hex))
+
+    async def _note_lesson_hits(self, session: Session, lessons: list) -> None:
+        from . import supervisor
+
+        for lesson in lessons:
+            lesson["hits"] = int(lesson.get("hits") or 0) + 1
+        try:
+            await self._append_lesson_event(session, supervisor.LESSON_HIT_EVENT,
+                                            {"ids": [str(l.get("id")) for l in lessons]})
+        except Exception:  # noqa: BLE001 -- a lost hit count loses nothing else
+            pass
+
+    async def _write_lesson(self, session: Session, review: dict, since: int) -> None:
+        """The order of `review` worked (the next review met the bar): what
+        it said, and what ran after it, is a lesson for similar jobs."""
+        from . import supervisor
+
+        fixed_by = [str(s.tool) for s in session.steps[since:] if getattr(s, "tool", None)]
+        lesson = supervisor.make_lesson(
+            request=session.user_text, review=review, fixed_by=fixed_by,
+            evidence_ref=(session.result_refs[-1] if session.result_refs else session.task_id),
+            now=_epoch(self._clock) or time.time(), lesson_id=uuid.uuid4().hex[:12])
+        if not lesson["rule"] or not lesson["situation"]:
+            return
+        try:
+            await self._append_lesson_event(session, supervisor.LESSON_EVENT, lesson)
+        except Exception:  # noqa: BLE001 -- an unwritten lesson is the turn as it was
+            return
+        if self._lessons is not None:
+            self._lessons.append(lesson)
+        step = Step(session.next_step_no(), "verify", f"supervisor: lesson kept -- {lesson['rule']}"[:400], ok=True)
+        session.record(step)
+        await self._record_step(session, step)
 
     async def _below_bar(self, session: Session, step_no: int, text: str) -> bool:
         """True when the answer was held back: the supervisor, reading what
@@ -4373,8 +4528,26 @@ class SessionRunner:
         session.goal_checked_at = ran
         from . import supervisor
 
-        review = supervisor.parse_review(await self._supervisor_think(session, supervisor.review_prompt(
-            request=session.user_text, criteria=session.acceptance, steps=session.steps, answer=text)))
+        # Stage 19: the method first. What ran against the approach the bar
+        # set is checked without a think; only a turn that followed it (or
+        # had no approach) has its answer judged by the model.
+        review = None
+        method = None
+        if self._approach:
+            since = session.steps[session.approach_from:]
+            review = supervisor.method_check(session.approach, split=session.split, steps=since,
+                                             refs=session.result_refs)
+            if review is None and session.approach == "background":
+                # Started in the background and acknowledged: the criteria
+                # are the member's to meet, and its report is reviewed by
+                # the person it reaches. The ack goes out.
+                return False
+            method = supervisor.method_summary(session.approach, why=session.approach_why, split=session.split,
+                                               steps=since)
+        if review is None:
+            review = supervisor.parse_review(await self._supervisor_think(session, supervisor.review_prompt(
+                request=session.user_text, criteria=session.acceptance, steps=session.steps, answer=text,
+                method=method)))
         verdict = review["verdict"]
         unmet = review.get("unmet") or []
         summary = (f"supervisor: {verdict.replace('_', ' ')}"
@@ -4388,7 +4561,14 @@ class SessionRunner:
         self._telemetry.event("orchestration.supervisor", trace_id=session.trace or session.task_id,
                               span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
                               attrs={"verdict": verdict, "unmet": len(unmet), "criteria": len(session.acceptance),
-                                     "principle": review.get("principle", "")})
+                                     "principle": review.get("principle", ""), "approach": session.approach})
+        if self._lessons_on:
+            # Below the bar, then met: the order worked, so it is a lesson.
+            if verdict == "below_bar":
+                session.lesson_pending = {"review": dict(review), "at": len(session.steps)}
+            elif verdict == "meets_bar" and session.lesson_pending:
+                pending, session.lesson_pending = session.lesson_pending, None
+                await self._write_lesson(session, pending["review"], pending["at"])
         if verdict != "below_bar":
             # Met; or cannot be met from here and the answer says so; or
             # the review could not be read: the answer goes out.
@@ -4615,6 +4795,9 @@ class SessionRunner:
                 await self._charge_claude_code(session, result.payload)
             if ok:
                 record_side_effects(session, result.payload.get("side_effects") or ())
+                # Its full rows are `results/<action_id>.json`: the ref a
+                # program reads (stage 19, `run_analysis inputs=[...]`).
+                session.result_refs = [*session.result_refs[-15:], action_id]
             full = result.payload.get("stdout_preview", "")
             error = result.payload.get("error") or ""
             if not ok:

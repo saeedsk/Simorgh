@@ -122,7 +122,27 @@ def load(directory: Path = AGENTS_DIR, rules: Path | None = RULES_DIR) -> dict[s
     return out
 
 
-AGENTS: dict[str, Profile] = load()
+#: Code over Sim's own data (stage 19): Execution's workbench, a program
+#: over the full rows of earlier results that may call read-only tools.
+#: Offered to the agents a chat, a spoken turn and their crew parts run as;
+#: `tools.offered_tools` drops it while Execution has not registered it.
+#: Added here, not in `agents/*.md`, so the agent files stay as a person
+#: wrote them and a workbench switched off is not a tool the model is told of.
+CODE_TOOLS = ("run_analysis",)
+CODE_AGENTS = ("chat", "voice_chat", "research")
+
+
+def _with_code_tools(agents: dict[str, Profile]) -> dict[str, Profile]:
+    from dataclasses import replace
+
+    for key in CODE_AGENTS:
+        if key in agents:
+            agents[key] = replace(agents[key], tools=tuple(agents[key].tools)
+                                  + tuple(t for t in CODE_TOOLS if t not in agents[key].tools))
+    return agents
+
+
+AGENTS: dict[str, Profile] = _with_code_tools(load())
 CHAT = AGENTS["chat"]
 PATCH = AGENTS["patch"]
 RESEARCH = AGENTS["research"]

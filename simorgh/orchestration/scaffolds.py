@@ -141,6 +141,9 @@ _TOOL_NOTES: dict[str, str] = {
     "kb_sources": "list, add, remove or scan the folders that feed the knowledge base",
     "kb_status": "how much is indexed, from where, last scanned when, and what failed",
     "run_python_sandboxed": "run a short Python snippet in a sandbox; no repo access",
+    "run_analysis": "run a Python program over the FULL rows of earlier results (inputs=[ref]); it can call "
+                    "read-only tools in a loop and keep a SQLite db -- for any count, rank, total or "
+                    "per-item job over more than one page",
     "run_js_sandboxed": "run a short JavaScript snippet with Node in a sandbox; no repo access",
     "apply_source_patch": "write a change to a source file -- or to workspace/, which is scratch: "
                            "not committed, not reviewed, and still there next session, so it is where "

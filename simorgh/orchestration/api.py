@@ -321,6 +321,26 @@ class Session:
     goal_task: object = None
     goal_shown: bool = False
     goal_checked_at: int = -1
+    #: Stage 19 (`[orchestration] supervisor_approach`): how the bar says the
+    #: job is done -- `direct|compute|parallel|decompose|background`, as this
+    #: turn can take it (`supervisor.effective_approach`) -- why, the approach
+    #: asked for before that (`approach_inner`), and for parallel and
+    #: decompose the parts (`split`: `{brief, criterion, approach}` each).
+    #: `approach_from` is how many steps there were when the bar was shown,
+    #: and `approach_checked_at` how many tool steps had run when the first
+    #: actions were checked against it (once; -1 until then).
+    approach: str = "direct"
+    approach_why: str = ""
+    approach_inner: str = ""
+    split: list = field(default_factory=list)
+    approach_from: int = 0
+    approach_checked_at: int = -1
+    #: The action ids of this turn's successful tool results, oldest first:
+    #: the refs `run_analysis inputs=[...]` reads in full (stage 19).
+    result_refs: list = field(default_factory=list)
+    #: A below-the-bar review waiting for the next review to meet the bar,
+    #: when it becomes a lesson (stage 19 item 6), with the step count then.
+    lesson_pending: dict | None = None
     #: Which embedder routed the turn: `memory:<model>/<dimension>`
     #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
     #: `injected`; and, when Memory's was wanted and the turn went
