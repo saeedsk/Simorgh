@@ -336,6 +336,14 @@ def _fragment(text: str) -> bool:
     return len(words) <= 5 and any(len(w) == 1 and w.lower() not in ("و", "a", "i") for w in words)
 
 
+def without_own_asides(segments: list, said: list) -> list:
+    """A multi-speaker turn without the segments that are, word for word,
+    one of Sim's last few lines (`repeats_an_aside`): Sim's own aside heard
+    back inside the person's turn. Never empties the turn."""
+    kept = [seg for seg in segments if not repeats_an_aside(seg.text, said)]
+    return kept or list(segments)
+
+
 #: Playback ids of things Sim says that are not the turn's reply:
 #: acknowledgements, "still on it", a slow tool's filler, `say`, humming.
 ASIDE_PREFIXES = ("ack-", "tool-", "say-", "hum-")
@@ -1502,6 +1510,18 @@ class VoiceSession:
                 await self._begin_introduction(turn_id, text, vector, name="" if wanted == "?" else wanted)
                 return
         segments = await self._attribute(turn_id, identification)
+        if len(segments) > 1:
+            # Sim's own aside, said while the person was still talking and
+            # heard back inside their turn, is not a second speaker. Live
+            # 2026-10-28: Sim hummed "Yep." under "Hey Sim ... check my email
+            # for the past 30 days"; the "Yep." came back scored as Iris,
+            # took the turn as its last sure voice, and the request went to
+            # Iris's conversation as Iris quoting Saeed -- QUIET.
+            kept = without_own_asides(segments, list(self._voice_room.recent_said))
+            if len(kept) < len(segments):
+                self._log("info", "voice.own_aside_in_turn", turn=turn_id,
+                          dropped=[seg.text[:20] for seg in segments if seg not in kept])
+                segments = kept
         self._last_segments = [seg.as_dict() for seg in segments]
         if segments:
             from .diarize import answering, lines
