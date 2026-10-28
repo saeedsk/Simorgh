@@ -118,6 +118,7 @@ class TogetherProvider:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._reasoning_effort = reasoning_effort
+        self.effort = reasoning_effort
         # Test seam: a callable(url, headers, body_bytes, timeout) -> str.
         # Nothing in the suite may make a real network call.
         self._transport = transport
@@ -128,6 +129,14 @@ class TogetherProvider:
     @property
     def model(self) -> str:
         return self._model
+
+    #: What `/effort` may set here (the OpenAI-style values Together takes).
+    EFFORT_LEVELS = ("low", "medium", "high")
+
+    def set_effort(self, effort: str) -> None:
+        """`/effort high`: the next call asks for this much reasoning."""
+        self._reasoning_effort = effort
+        self.effort = effort
 
     def available(self) -> bool:
         return bool(self._api_key)

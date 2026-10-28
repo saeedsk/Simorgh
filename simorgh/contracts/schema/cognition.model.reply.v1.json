@@ -63,6 +63,12 @@
               "available": {
                 "type": "boolean"
               },
+              "effort": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "model": {
                 "type": "string"
               },

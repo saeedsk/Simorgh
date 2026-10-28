@@ -575,6 +575,14 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
                               {"provider": want, "persist": True} if want else {},
                               timeout=5.0, render=render_mod.model_choice)
 
+    if name == "effort":
+        words = args.split()
+        payload = {"effort": words[0].lower(), "persist": True} if words else {}
+        if len(words) > 1:
+            payload["provider"] = words[1]
+        return await _request(bus, topics.COGNITION_MODEL_REQUEST, payload,
+                              timeout=5.0, render=render_mod.effort_choice)
+
     if name == "pair":
         return _pair_command(devices, args)
 

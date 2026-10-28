@@ -2,8 +2,14 @@
   "$id": "https://simorgh.local/schema/cognition.model.request.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "No provider and no model: just list. Otherwise move that provider to the front of the order.",
+  "description": "No provider, model or effort: just list. A provider or model alone moves it to the front of the order; with `effort`, sets that provider's effort and leaves the order alone.",
   "properties": {
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "model": {
       "type": [
         "string",

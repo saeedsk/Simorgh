@@ -26,8 +26,15 @@ class _Claude(_FakeProvider):
         super().__init__("claude_code_cli")
         self.model = ClaudeCodeProvider.UNNAMED
 
+        self.effort = ""
+
+    EFFORT_LEVELS = ClaudeCodeProvider.EFFORT_LEVELS
+
     def set_model(self, model):
         self.model = model
+
+    def set_effort(self, effort):
+        self.effort = effort
 
 
 class ModelSwitch(unittest.IsolatedAsyncioTestCase):
@@ -89,6 +96,24 @@ class ModelSwitch(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(refused["changed"])
         self.assertFalse(self.toml.read_text().count("provider_order"), "nothing persisted without persist")
 
+    async def test_effort_sets_the_answering_provider_and_persists(self):
+        await self._boot()
+        await self._ask(provider="opus")
+        answer = await self._ask(effort="xhigh", persist=True)
+        self.assertTrue(answer["changed"], answer)
+        self.assertEqual(self.claude.effort, "xhigh")
+        self.assertEqual(answer["order"][0], "claude_code_cli", "the order is left alone")
+        listed = {p["name"]: p.get("effort") for p in answer["providers"]}
+        self.assertEqual(listed["claude_code_cli"], "xhigh")
+        written = tomllib.loads(self.toml.read_text())
+        self.assertEqual(written["cognition"]["providers"]["claude_code_cli"]["reasoning_effort"], "xhigh")
+
+    async def test_a_level_the_provider_does_not_take_and_a_provider_with_none_are_refused(self):
+        await self._boot()
+        refused = await self._ask(effort="extreme", provider="opus")
+        self.assertIn("takes low, medium, high, xhigh, max", refused["refused"])
+        self.assertIn("together has no effort setting", (await self._ask(effort="high"))["refused"])
+
 
 class ClaudeCliModel(unittest.TestCase):
     def test_a_named_model_is_passed_as_model(self):
@@ -98,11 +123,12 @@ class ClaudeCliModel(unittest.TestCase):
             seen.append(argv)
             raise OSError("not really run")
 
-        provider = ClaudeCodeProvider(runner=runner, binary="sh", model="opus")
+        provider = ClaudeCodeProvider(runner=runner, binary="sh", model="opus", effort="high")
         self.assertEqual(provider.model, "opus")
         with self.assertRaises(Exception):
             provider._complete_sync("hi", "", 1.0)  # noqa: SLF001
         self.assertEqual(seen[0][seen[0].index("--model") + 1], "opus")
+        self.assertEqual(seen[0][seen[0].index("--effort") + 1], "high")
         provider.set_model("")
         self.assertEqual(provider.model, ClaudeCodeProvider.UNNAMED)
 

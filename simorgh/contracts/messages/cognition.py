@@ -82,11 +82,15 @@ CognitionModelRequest = define(t.COGNITION_MODEL_REQUEST, [
     O("provider", Str),   # a provider name, or a model it calls ("GLM-5.3")
     O("model", Str),      # a Claude model for claude_code_cli: opus, sonnet, haiku, claude-...
     O("persist", Bool),   # also write it into simorgh.toml
-], doc="No provider and no model: just list. Otherwise move that provider to the front of the order.")
+    # `/effort`: how hard that provider (the one answering, when none is
+    # named) thinks -- Claude: low..max, Together: low|medium|high.
+    O("effort", Str),
+], doc="No provider, model or effort: just list. A provider or model alone moves it to the front of the "
+       "order; with `effort`, sets that provider's effort and leaves the order alone.")
 CognitionModelReply = define(t.COGNITION_MODEL_REPLY, [
     F("selected", Str),
     F("order", List(Str)),
-    F("providers", List(Obj(F("name", Str), F("model", Str), F("available", Bool)))),
+    F("providers", List(Obj(F("name", Str), F("model", Str), F("available", Bool), O("effort", Str)))),
     O("changed", Bool),
     O("persisted", Str),  # the file written, when it was
     O("refused", Str),

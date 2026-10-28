@@ -1119,6 +1119,23 @@ def model_choice(payload: dict) -> str:
     for p in payload.get("providers") or []:
         mark = "●" if p.get("name") == payload.get("selected") else " "
         down = "" if p.get("available", True) else "  (unavailable)"
-        lines.append(f"  {mark} {p.get('name', '?'):18} {p.get('model', '')}{down}")
+        effort = f"  effort {p['effort']}" if p.get("effort") else ""
+        lines.append(f"  {mark} {p.get('name', '?'):18} {p.get('model', '')}{effort}{down}")
     return "\n".join(lines)
+
+
+def effort_choice(payload: dict) -> str:
+    """`/effort`: the effort of the provider answering, or what changed."""
+    selected = payload.get("selected", "")
+    if payload.get("refused"):
+        return f"effort not changed: {payload['refused']}"
+    current = next((p for p in payload.get("providers") or [] if p.get("name") == selected), {})
+    effort = current.get("effort") or "its default"
+    if payload.get("changed"):
+        return "effort set" + (f" (saved to {payload['persisted']})" if payload.get("persisted")
+                               else " (not saved -- back on restart)") + "\n" + model_choice(
+            {**payload, "changed": False, "refused": ""}).split("\n", 1)[-1]
+    return (f"{selected} thinks at {effort} effort. `effort <low|medium|high|xhigh|max> [provider]` sets it "
+            f"(Claude takes all five, Together low/medium/high).\n"
+            + model_choice(payload).split("\n", 1)[-1])
 

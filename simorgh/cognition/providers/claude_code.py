@@ -66,16 +66,26 @@ class ClaudeCodeProvider:
     def __init__(
         self, binary: str = "claude", timeout_seconds: float = 180.0,
         env: dict[str, str] | None = None, runner: Runner | None = None, model: str = "",
+        effort: str = "",
     ) -> None:
         self._binary = binary
         self._model = model.strip()
         self.model = self._model or self.UNNAMED
+        # `--effort`; "" leaves the CLI's own default.
+        self.effort = effort.strip()
         self._timeout = timeout_seconds
         self._base_env = env
         self._runner: Runner = runner or subprocess.run
 
     def available(self) -> bool:
         return shutil.which(self._binary) is not None
+
+    #: What `/effort` may set (the CLI's `--effort` values).
+    EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+    def set_effort(self, effort: str) -> None:
+        """`/effort high`: the next call passes `--effort high`."""
+        self.effort = effort.strip()
 
     def set_model(self, model: str) -> None:
         """`/model opus`: the next call asks the CLI for this model."""
@@ -102,6 +112,8 @@ class ClaudeCodeProvider:
         argv = [binary_path, "-p", prompt, "--output-format", "json", "--disallowedTools", "*"]
         if self._model:
             argv += ["--model", self._model]
+        if self.effort:
+            argv += ["--effort", self.effort]
         if system_prompt:
             # Full replacement, not --append-system-prompt: see the module
             # docstring -- Claude Code's own default identity is exactly

@@ -27,6 +27,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("alerts", "[all|review]", "what the monitors have raised, and what is waiting for the digest"),
     ("config", "[section]", "the settings actually in force, and any nothing reads"),
     ("model", "[name|opus|sonnet|haiku]", "which model Sim thinks with: list them, or switch (kept across restarts)"),
+    ("effort", "[low|medium|high|xhigh|max] [provider]", "how hard the model thinks: see it, or set it (kept across restarts)"),
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
     ("tasks", "[all|work|wake <id>|clear]", "see the backlog (all of it), advance the next item, wake a waiting one, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
@@ -97,7 +98,7 @@ SPLASH_COMMANDS = 8
 #: "More"; a subcommand not listed here still completes (from the usage
 #: hint) but has no line of its own.
 SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Look around", ("status", "domains", "capabilities", "config", "model", "alerts", "tool")),
+    ("Look around", ("status", "domains", "capabilities", "config", "model", "effort", "alerts", "tool")),
     ("Work", ("tasks", "cancel", "crew", "forget", "improve", "skill", "plan", "research", "interests", "benchmark")),
     ("The house and the people in it", ("home", "light", "people")),
     ("Voice, screen and cameras", ("voice", "room", "followup", "mute", "unmute", "pronounce", "tv", "next", "cameras", "ring")),
@@ -343,6 +344,9 @@ def parse(line: str) -> Command | None:
     return Command(name=None, args=stripped, raw=raw)
 
 
+#: The levels `effort` takes (Claude's CLI; Together takes the first three).
+_EFFORT_WORDS = frozenset({"low", "medium", "high", "xhigh", "max"})
+
 #: Punctuation a command never ends in, and a sentence often does.
 _SENTENCE_PUNCTUATION = ",.;:!?"
 
@@ -389,6 +393,11 @@ def _swallows_a_sentence(name: str, rest: str) -> bool:
         # `model opus`, `model together_strong`; "model the kitchen in 3D"
         # is somebody talking.
         return len(rest.split()) > 1
+    if name == "effort":
+        # `effort high`, `effort max claude_code_cli`; "effort is what
+        # counts" is a sentence.
+        words = rest.split()
+        return bool(words) and (len(words) > 2 or words[0].lower() not in _EFFORT_WORDS)
     if name == "room":
         # `room`, `room kitchen`, `room mute all`; "room is too warm" is
         # somebody talking.

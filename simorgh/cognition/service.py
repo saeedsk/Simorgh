@@ -379,7 +379,8 @@ class Service:
                 ))
             real_providers.append(
                 ClaudeCodeProvider(timeout_seconds=self._config.providers["claude_code_cli"].timeout_seconds,
-                                   model=self._config.providers["claude_code_cli"].model),
+                                   model=self._config.providers["claude_code_cli"].model,
+                                   effort=self._config.providers["claude_code_cli"].reasoning_effort),
             )
             gemini_cfg = self._config.providers.get("gemini")
             if gemini_cfg is not None:
@@ -801,22 +802,56 @@ class Service:
         return "", "", (f"no provider or model called {word!r}; there is " + ", ".join(names)
                          + ", and for Claude: " + ", ".join(sorted(CLAUDE_MODEL_ALIASES)))
 
-    def _persist_model_choice(self, order: tuple[str, ...], claude_model: str) -> str:
-        """Write the order (and the Claude model) into simorgh.toml, so the
-        choice outlives a restart. "" when it could not be written."""
+    async def _set_effort(self, want: str, effort: str, *, persist: bool) -> tuple[bool, str, str]:
+        """`/effort <level> [provider]`: `(changed, refused, persisted)`.
+        The provider answering now when none is named."""
+        name = self._router.selected_name()
+        if want:
+            name, _model, refused = self._resolve_model_choice(want, "")
+            if refused:
+                return False, refused, ""
+        provider = self._router._by_name.get(name)  # noqa: SLF001
+        levels = tuple(getattr(provider, "EFFORT_LEVELS", ()) or ())
+        if provider is None or not hasattr(provider, "set_effort") or not levels:
+            return False, f"{name} has no effort setting", ""
+        if effort not in levels:
+            return False, f"{name} takes {', '.join(levels)}; not {effort!r}", ""
+        provider.set_effort(effort)
+        self._ctx.logger.info("cognition.effort_set", provider=name, effort=effort)
+        persisted = self._persist_provider_key(name, "reasoning_effort", effort) if persist else ""
+        return True, "", persisted
+
+    def _persist_provider_key(self, name: str, key: str, value) -> str:
+        """`[cognition.providers.<name>] key = value` in simorgh.toml, every
+        other setting kept. "" when it could not be written."""
         import tomllib
 
         from simorgh.contracts import settings as _settings
 
         path = self._config_path or _settings.config_path()
         try:
-            _settings.persist(path, "provider_order", list(order), section="cognition")
-            if claude_model:
+            table: dict = {}
+            if path.is_file():
                 with path.open("rb") as handle:
                     table = dict(tomllib.load(handle).get("cognition") or {})
-                providers = dict(table.get("providers") or {})
-                providers["claude_code_cli"] = {**dict(providers.get("claude_code_cli") or {}), "model": claude_model}
-                _settings.persist(path, "providers", providers, section="cognition")
+            providers = dict(table.get("providers") or {})
+            providers[name] = {**dict(providers.get(name) or {}), key: value}
+            _settings.persist(path, "providers", providers, section="cognition")
+        except Exception as exc:  # noqa: BLE001 -- the live change stands; say the file did not change
+            self._ctx.logger.warning("cognition.setting_not_persisted", detail=repr(exc))
+            return ""
+        return str(path)
+
+    def _persist_model_choice(self, order: tuple[str, ...], claude_model: str) -> str:
+        """Write the order (and the Claude model) into simorgh.toml, so the
+        choice outlives a restart. "" when it could not be written."""
+        from simorgh.contracts import settings as _settings
+
+        path = self._config_path or _settings.config_path()
+        try:
+            _settings.persist(path, "provider_order", list(order), section="cognition")
+            if claude_model and not self._persist_provider_key("claude_code_cli", "model", claude_model):
+                return ""
         except Exception as exc:  # noqa: BLE001 -- the live switch stands; say the file did not change
             self._ctx.logger.warning("cognition.model_not_persisted", detail=repr(exc))
             return ""
@@ -829,8 +864,11 @@ class Service:
         first for their purposes; this is the default for everything else."""
         p = message.payload or {}
         want, model = str(p.get("provider") or "").strip(), str(p.get("model") or "").strip()
+        effort = str(p.get("effort") or "").strip().lower()
         changed, refused, persisted = False, "", ""
-        if self._router is not None and (want or model):
+        if self._router is not None and effort:
+            changed, refused, persisted = await self._set_effort(want, effort, persist=bool(p.get("persist")))
+        elif self._router is not None and (want or model):
             name, claude_model, refused = self._resolve_model_choice(want, model)
             if not refused:
                 if claude_model:
@@ -851,7 +889,8 @@ class Service:
             "selected": self._router.selected_name() if self._router is not None else "",
             "order": list(self._config.provider_order),
             "providers": [{"name": n, "model": self._model_of(n),
-                           "available": bool(getattr(self._router._by_name.get(n), "available", lambda: True)())}  # noqa: SLF001
+                           "available": bool(getattr(self._router._by_name.get(n), "available", lambda: True)()),  # noqa: SLF001
+                           "effort": str(getattr(self._router._by_name.get(n), "effort", "") or "")}  # noqa: SLF001
                           for n in names],
             "changed": changed,
             **({"persisted": persisted} if persisted else {}),
