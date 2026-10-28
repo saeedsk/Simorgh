@@ -18,6 +18,90 @@ from ..lang import ENGLISH, language_of
 WARM_LINES = {"fa": "سلام، امروز هوا خیلی خوبه و آفتابیه."}
 
 
+#: How long an engine that failed to speak is skipped before it is tried
+#: again: long enough not to pay its failure on every sentence, short
+#: enough that a fixed engine is back within minutes.
+CHAIN_RETRY_S = 600.0
+
+
+class FirstThatSpeaks:
+    """The local engines under a cloud voice, tried IN ORDER AT SPEAK TIME.
+
+    Opening was the only check: StyleTTS2 opens (it is a subprocess
+    wrapper) and then failed on every reply -- live 2026-10-27, a macOS
+    update made its venv's scipy unloadable -- so with ElevenLabs out of
+    credits every reply went silent while Kokoro sat working on disk. Now
+    an engine that raises while speaking is skipped for `CHAIN_RETRY_S`
+    and the next one speaks. Each engine is opened on first use; one that
+    cannot open is skipped the same way. Only the first is given the
+    request's voice: the others' voice names live in another namespace
+    (an ElevenLabs id is not a Kokoro voice)."""
+
+    speaks_ipa = False
+
+    def __init__(self, engines, *, clock=None) -> None:
+        import time
+
+        self._engines = list(engines)            # (name, opener) pairs
+        self._open: dict[str, object] = {}
+        self._failed: dict[str, float] = {}
+        self._clock = clock or time.monotonic
+        self.name = self._engines[0][0] if self._engines else "none"
+        self.last_engine = self.name
+
+    def _engine(self, name: str, opener):
+        if name not in self._open:
+            self._open[name] = opener()
+        return self._open[name]
+
+    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
+        import inspect
+        import logging
+
+        last: Exception | None = None
+        now = self._clock()
+        for index, (name, opener) in enumerate(self._engines):
+            failed_at = self._failed.get(name)
+            if failed_at is not None and now - failed_at < CHAIN_RETRY_S and index < len(self._engines) - 1:
+                continue
+            try:
+                engine = self._engine(name, opener)
+                kwargs = {"voice": voice if index == 0 else "", "speed": speed}
+                if tone and "tone" in inspect.signature(engine.synthesise).parameters:
+                    kwargs["tone"] = tone
+                audio = await engine.synthesise(text, **kwargs)
+            except Exception as exc:  # noqa: BLE001 -- the next engine's turn, never silence
+                last = exc
+                self._failed[name] = now
+                logging.getLogger("simorgh.voice").warning(
+                    "voice.tts_chain_skip %s failed (%s); trying the next engine", name, repr(exc)[:200])
+                continue
+            self._failed.pop(name, None)
+            self.last_engine = name
+            return audio
+        raise last if last is not None else RuntimeError("no engine to speak with")
+
+    def voices(self) -> list[str]:
+        return []
+
+    async def warmup(self) -> None:
+        if not self._engines:
+            return
+        name, opener = self._engines[0]
+        try:
+            warm = getattr(self._engine(name, opener), "warmup", None)
+            if callable(warm):
+                await warm()
+        except Exception:  # noqa: BLE001 -- a cold first engine is the chain's business at speak time
+            self._failed[name] = self._clock()
+
+
+#: Kokoro's voice when it stands in under a cloud voice, whose `tts_voice`
+#: is an id Kokoro does not know. Fixed rather than read from config: a
+#: voice is chosen per request and changing it must not rebuild engines.
+KOKORO_STAND_IN = "af_bella"
+
+
 class PolyglotSynthesiser:
     """One synthesiser per language, chosen by the reply's script.
 
@@ -206,7 +290,16 @@ def _elevenlabs(config, secrets):
             return secrets.get(KEY_NAME) if secrets is not None else None
         except Exception:  # noqa: BLE001 -- a key not scoped to voice is no key
             return None
-    return ElevenLabsSynthesiser(config, key=key, fallback=_mana(config))
+    from dataclasses import replace
+
+    from .piper import PiperSynthesiser
+
+    # Mana, then Piper, at speak time (`FirstThatSpeaks`): Mana runs in
+    # the StyleTTS2 venv, which a macOS update broke on 2026-10-27.
+    local = FirstThatSpeaks([("mana", lambda: _mana(config)),
+                             ("piper", lambda: PiperSynthesiser(replace(config, tts_voice=""),
+                                                                voice=config.tts_farsi_voice))])
+    return ElevenLabsSynthesiser(config, key=key, fallback=local)
 
 
 def _mana(config):
@@ -241,7 +334,14 @@ def open_synthesiser(config: Config, *, secrets=None) -> tuple[object | None, st
         local, why = open_synthesiser(replace(config, tts="styletts2"), secrets=secrets)
         if local is None:
             return None, why
-        inner = getattr(local, "_primary", local)
+        styletts = getattr(local, "_primary", local)
+        # ...and Kokoro, then `say`, AT SPEAK TIME too (`FirstThatSpeaks`):
+        # StyleTTS2 opened fine and then failed on every reply (2026-10-27).
+        inner = FirstThatSpeaks([
+            (getattr(styletts, "name", "styletts2"), lambda: styletts),
+            ("kokoro", lambda: KokoroSynthesiser(replace(config, tts_voice=KOKORO_STAND_IN))),
+            ("say", lambda: SaySynthesiser(replace(config, tts_voice=""))),
+        ])
 
         def key():
             try:
@@ -304,4 +404,4 @@ def open_synthesiser(config: Config, *, secrets=None) -> tuple[object | None, st
     return PolyglotSynthesiser(primary, config, openers=_default_openers(secrets)), why
 
 
-__all__ = ["PolyglotSynthesiser", "open_synthesiser"]
+__all__ = ["CHAIN_RETRY_S", "FirstThatSpeaks", "PolyglotSynthesiser", "open_synthesiser"]

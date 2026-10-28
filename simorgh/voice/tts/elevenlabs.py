@@ -146,8 +146,11 @@ class ElevenLabsSynthesiser:
             # Logged, not only kept: a reply that switched voices mid-way
             # could not be traced afterwards (2026-10-05).
             logging.getLogger("simorgh.voice").warning("voice.tts_fallback %s", why[:300])
-            self.last_engine = getattr(self._fallback, "name", "fallback")
-            return await self._fallback.synthesise(text, voice=voice, speed=speed, tone=tone)
+            audio = await self._fallback.synthesise(text, voice=voice, speed=speed, tone=tone)
+            # The engine that actually spoke: a `FirstThatSpeaks` chain
+            # may have passed its first engine by (2026-10-27).
+            self.last_engine = getattr(self._fallback, "last_engine", "") or getattr(self._fallback, "name", "fallback")
+            return audio
 
     async def warmup(self) -> None:
         warm = getattr(self._fallback, "warmup", None)

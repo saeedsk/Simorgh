@@ -37,6 +37,12 @@ until = "2026-10-28T12:44:57+00:00"
 
 [locks.orchestration]
 by = "claude-paid"
-task = "mail_unsubscribe (RFC 8058 one-click) and browse_page offered in chat"
-since = "2026-10-28T04:55:32+00:00"
-until = "2026-10-28T12:55:32+00:00"
+task = "tool awareness: catalogue index, tool_more over the registry, capability-claim nudge"
+since = "2026-10-28T05:09:51+00:00"
+until = "2026-10-28T13:09:51+00:00"
+
+[locks.voice]
+by = "claude-paid"
+task = "TTS fallback chain at speak time (StyleTTS2 broke on the macOS update)"
+since = "2026-10-28T05:11:27+00:00"
+until = "2026-10-28T13:11:27+00:00"
