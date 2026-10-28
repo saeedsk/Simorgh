@@ -466,8 +466,9 @@ ProgressFn = Callable[[ToolContext, dict], Awaitable[None]]
 
 def _data_classes(value: Any) -> tuple[str, ...]:
     """The classes a call says its message carries. Nothing said, or only
-    blanks, is `public`: an empty tuple would pass every agent's
-    `allowed_data` check, one that does not allow `public` included."""
+    blanks, is `private` (2026-10-27, as Orchestration's crew spawn): a
+    message is public only when the caller says so, and an empty tuple
+    would pass every agent's `allowed_data` check."""
     if isinstance(value, str):
         items = value.split(",")
     elif isinstance(value, (list, tuple, set, frozenset)):
@@ -477,7 +478,7 @@ def _data_classes(value: Any) -> tuple[str, ...]:
     else:
         items = [value]
     classes = tuple(str(item).strip().lower() for item in items if str(item).strip())
-    return classes or ("public",)
+    return classes or ("private",)
 
 
 def _truthy(value: Any) -> bool:
@@ -488,8 +489,8 @@ class A2aCallTool:
     name = "a2a_call"
     description = (
         "Send a message to a remote agent a person has configured (A2A) and return its answer. Arguments: "
-        "agent (its configured name), message, data (the data classes the message carries, default public; "
-        "refused when the agent may not receive one), task_id (to answer a question the agent asked, or with "
+        "agent (its configured name), message, data (the data classes the message carries: say [\"public\"] when it holds nothing personal; "
+        "default private; refused when the agent may not receive one), task_id (to answer a question the agent asked, or with "
         "no message to check on a task), cancel (true with task_id to cancel it). The message leaves the house."
     )
     read_only = False

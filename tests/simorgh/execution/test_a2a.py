@@ -30,6 +30,10 @@ from tests.simorgh.execution.test_service import _ExecutionServiceTestCase
 from tests.simorgh.helpers import FakeClock
 
 
+
+#: A test agent that takes the default (private) data a call names no class for.
+_PRIVATE_OK = ("public", "private")
+
 class _Logger:
     def __init__(self) -> None:
         self.events: list[str] = []
@@ -232,6 +236,9 @@ class _Case(unittest.IsolatedAsyncioTestCase):
         self.progress: list[dict] = []
 
     def tool(self, *, secrets=None, progress=True, **agent_kw) -> A2aCallTool:
+        # The test desk takes private data, so a call that names no class
+        # (private since 2026-10-27) reaches it; the refusal tests narrow it.
+        agent_kw.setdefault("allowed_data", ("public", "private"))
         agent = A2aAgentConfig(name="desk", url=self.server.url, poll_interval_s=1.0, max_wait_s=5.0, **agent_kw)
 
         async def _sleep(seconds):
@@ -280,7 +287,7 @@ class TestStreaming(_Case):
         types_ = [event.type for event in events]
         self.assertEqual(types_, ["sent", "progress", "progress", "completed"])
         sent = events[0].payload
-        self.assertEqual((sent["agent"], sent["data"], sent["chars"]), ("desk", ["public"], 2))
+        self.assertEqual((sent["agent"], sent["data"], sent["chars"]), ("desk", ["private"], 2))
         self.assertNotIn("hi", json.dumps(sent), "the message itself is not copied into the ledger")
 
     async def test_a_stream_that_breaks_after_the_task_exists_is_followed_by_polling(self):
@@ -461,7 +468,7 @@ class TestRefusals(_Case):
         self.assertIn("'GRPC'", result.error)
 
     async def test_a_remote_json_rpc_error_is_reported(self):
-        transport = RawTransport(A2aAgentConfig(name="desk", url=self.server.url))
+        transport = RawTransport(A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK))
         await transport.connect({})
         with self.assertRaises(a2a.A2aError):
             await transport._rpc("no/such", {})  # noqa: SLF001
@@ -469,7 +476,7 @@ class TestRefusals(_Case):
 
 class TestWithoutTheSdk(_Case):
     async def test_the_default_transport_reports_the_missing_package_and_sends_nothing(self):
-        agent = A2aAgentConfig(name="desk", url=self.server.url)
+        agent = A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK)
         tool = A2aCallTool((agent,))
         with unittest.mock.patch.dict(sys.modules, {"a2a": None, "a2a.client": None, "a2a.types": None}):
             result = await tool.run({"agent": "desk", "message": "x"}, ctx=self.ctx())
@@ -570,7 +577,7 @@ class TestTheSdkTransport(_Case):
         self.server.schemes = {"bearer": {"type": "http", "scheme": "bearer"}}
         self.server.on_stream = lambda params: [_status("t-1", "working", "busy"), "BREAK"]
         self.server.on_get = lambda task_id: _task(task_id, "completed", artifact="via the sdk")
-        agent = A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN", poll_interval_s=1.0)
+        agent = A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK, auth_secret="DESK_TOKEN", poll_interval_s=1.0)
 
         async def _sleep(_s):
             return None
@@ -591,7 +598,7 @@ class TestTheSdkTransport(_Case):
     async def test_the_real_sdk_against_the_fake_server(self):  # pragma: no cover - optional package
         self.server.on_stream = lambda params: [_status("t-1", "working", "busy"),
                                                 _task("t-1", "completed", artifact="real sdk")]
-        agent = A2aAgentConfig(name="desk", url=self.server.url)
+        agent = A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK)
         result = await A2aCallTool((agent,)).run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
         self.assertTrue(result.ok, result.error)
         self.assertIsInstance(SdkTransport(agent), SdkTransport)
@@ -653,7 +660,7 @@ class TestGuardianGatesTheCall(_ExecutionServiceTestCase):
         self.addAsyncCleanup(self.server.stop)
 
     async def _ready(self, *, approve: bool):
-        config = ExecutionConfig(repo_root=self.root, a2a_agents=(A2aAgentConfig(name="desk", url=self.server.url),))
+        config = ExecutionConfig(repo_root=self.root, a2a_agents=(A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK),))
         await self._start(config=config)
         self.assertIn("a2a_call", self.service._registry)  # noqa: SLF001
         self.service._registry["a2a_call"] = A2aCallTool(  # noqa: SLF001
@@ -714,14 +721,14 @@ class TestInteropFindings(_Case):
                     raise a2a.CardUnauthorized(challenge='Bearer realm="desk"')
                 return await super().card()
 
-        agent = A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN", poll_interval_s=1.0)
+        agent = A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK, auth_secret="DESK_TOKEN", poll_interval_s=1.0)
         tool = A2aCallTool((agent,), secrets={"DESK_TOKEN": "tok"}, transport_factory=_Gated)
         result = await tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
         self.assertTrue(result.ok, result.error)
         self.assertEqual(asked, [{}, {"Authorization": "Bearer tok"}])
 
         asked.clear()
-        no_secret = A2aCallTool((A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN"),),
+        no_secret = A2aCallTool((A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK, auth_secret="DESK_TOKEN"),),
                                 secrets={}, transport_factory=_Gated)
         result = await no_secret.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
         self.assertEqual(result.error_kind, "unconfigured")
@@ -745,7 +752,7 @@ class TestInteropFindings(_Case):
         # the call is unconfigured naming what the card asked for.
         for challenge, said in (('Basic realm="desk"', "Basic"), ("", "names no scheme")):
             asked.clear()
-            agent = A2aAgentConfig(name="desk", url=self.server.url, auth_secret="DESK_TOKEN")
+            agent = A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK, auth_secret="DESK_TOKEN")
             tool = A2aCallTool((agent,), secrets={"DESK_TOKEN": "tok"}, transport_factory=gated(challenge))
             result = await tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
             self.assertEqual(result.error_kind, "unconfigured", challenge)
@@ -757,7 +764,8 @@ class TestInteropFindings(_Case):
         # The same silent 401, with the agent's table declaring a bearer.
         asked.clear()
         agent = A2aAgentConfig.from_mapping("desk", {"url": self.server.url, "auth_secret": "DESK_TOKEN",
-                                                     "auth_scheme": "Bearer", "poll_interval_s": 1.0})
+                                                     "auth_scheme": "Bearer", "poll_interval_s": 1.0,
+                                                     "allowed_data": list(_PRIVATE_OK)})
         self.assertEqual(agent.auth_scheme, "bearer")
         tool = A2aCallTool((agent,), secrets={"DESK_TOKEN": "tok"}, transport_factory=gated(""))
         result = await tool.run({"agent": "desk", "message": "hi"}, ctx=self.ctx())
@@ -780,15 +788,25 @@ class TestInteropFindings(_Case):
 class TestReviewFindings(_Case):
     """Holes the stage 18 item 9 review found, each pinned."""
 
-    async def test_blank_data_classes_are_public_not_an_empty_set_that_passes_every_check(self):
+    async def test_blank_data_classes_are_private_not_an_empty_set_that_passes_every_check(self):
         # An agent allowed `calendar` only. `data: [" "]` used to fold to
         # no classes at all, and no classes passed the check.
         for data in ([" "], ["", "  "], " , ", []):
             result = await self.tool(allowed_data=("calendar",)).run(
                 {"agent": "desk", "message": "hello", "data": data}, ctx=self.ctx())
             self.assertEqual(result.error_kind, "refused", data)
-            self.assertIn("may not receive public", result.error)
+            self.assertIn("may not receive private", result.error)
         self.assertEqual(self.server.requests, [])
+
+    async def test_a_call_naming_no_data_is_private_and_a_public_only_agent_refuses_it(self):
+        # 2026-10-27: a message is public only when the caller says so.
+        public_only = self.tool(allowed_data=("public",))
+        refused = await public_only.run({"agent": "desk", "message": "hello"}, ctx=self.ctx())
+        self.assertEqual(refused.error_kind, "refused")
+        self.assertIn("may not receive private", refused.error)
+        self.assertEqual(self.server.requests, [])
+        said = await public_only.run({"agent": "desk", "message": "hello", "data": ["public"]}, ctx=self.ctx())
+        self.assertTrue(said.ok, said.error)
 
     async def test_a_data_value_that_is_not_a_list_is_a_class_not_a_crash(self):
         result = await self.tool().run({"agent": "desk", "message": "hello", "data": True}, ctx=self.ctx())
@@ -804,7 +822,7 @@ class TestReviewFindings(_Case):
                     yield _status("t-7", "working", "still going")
 
         ticks = iter(range(10_000))
-        agent = A2aAgentConfig(name="desk", url=self.server.url, poll_interval_s=1.0, max_wait_s=5.0)
+        agent = A2aAgentConfig(name="desk", url=self.server.url, allowed_data=_PRIVATE_OK, poll_interval_s=1.0, max_wait_s=5.0)
         self.server.streaming = True
         tool = A2aCallTool((agent,), transport_factory=_EndlessStream, sleep=self._no_sleep,
                            monotonic=lambda: float(next(ticks)))
