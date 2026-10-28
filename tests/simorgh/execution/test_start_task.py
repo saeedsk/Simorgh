@@ -219,3 +219,45 @@ class HeldAndAuthorisedTestCase(unittest.IsolatedAsyncioTestCase):
         bus = _Bus()
         await self.tool.run({"goal": "the same, guessed"}, ctx=_ctx(bus))
         self.assertEqual(bus.requests[0].payload["origin"], "assistant", "without the words, it is Sim's")
+
+
+class _Event:
+    def __init__(self, requester, channel):
+        self.type = "received"
+        self.payload = {"proposal": {"requester": requester, "requester_channel": channel}}
+
+
+class _Ledger:
+    def __init__(self, requester, channel):
+        self.events = [_Event(requester, channel)]
+
+    async def read(self, stream):
+        return self.events if stream == "action:a1" else []
+
+
+def _asked(bus, requester, channel):
+    return ToolContext(action_id="a1", task_id=None, scope={}, constraints={}, data_dir=Path("."),
+                       clock=None, logger=None, ledger=_Ledger(requester, channel), bus=bus)
+
+
+class AnAdultAskingIsTheGoAheadTestCase(unittest.IsolatedAsyncioTestCase):
+    """Live 2026-10-27: the creator asked by voice for a Claude Code agent,
+    the task sat behind `auto off`, and "start it" never started it. A
+    grown-up of the household asking in the turn is the go-ahead; who
+    asked is Guardian's record, never the model's word."""
+
+    async def _origin(self, requester, channel):
+        bus = _Bus()
+        await StartTaskTool(Config()).run({"goal": "find AWS stock products"}, ctx=_asked(bus, requester, channel))
+        return bus.requests[0].payload["origin"]
+
+    async def test_an_adult_by_voice_or_the_console_runs_it(self):
+        self.assertEqual(await self._origin("Saeed", "voice"), "human")
+        self.assertEqual(await self._origin("Soodeh", "telegram"), "human")
+        self.assertEqual(await self._origin("", "cli"), "human")
+
+    async def test_a_child_an_unplaced_voice_or_an_outsider_leaves_it_sims(self):
+        self.assertEqual(await self._origin("Aran", "voice"), "assistant")
+        self.assertEqual(await self._origin("unknown", "voice"), "assistant")
+        self.assertEqual(await self._origin("", "voice"), "assistant")
+        self.assertEqual(await self._origin("Saeed", "a2a"), "assistant")

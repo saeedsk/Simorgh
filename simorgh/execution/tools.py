@@ -1914,9 +1914,9 @@ class StartTaskTool:
             "steps": {"type": "integer"},
             "kind": {"type": "string", "enum": ["patch", "research", "project"]},
             "authorised": {"type": "boolean",
-                           "description": "true ONLY when the person explicitly said to go ahead without waiting "
-                                          "for approval, do it now, or the like; the task then runs even while "
-                                          "auto is off. A guess at what they meant is not that."},
+                           "description": "a grown-up of the household asking for the work is already the go-ahead; "
+                                          "set true only when somebody else's request (a child's, an unknown "
+                                          "voice's) was explicitly confirmed by an adult. A guess is not that."},
         },
     }
 
@@ -2003,6 +2003,16 @@ class StartTaskTool:
         # creator, 2026-09-13, whose task then sat behind `auto off`).
         # That is a human's decision, so the task is a human's.
         authorised = _truthy(args.get("authorised"))
+        # ...and a grown-up of the household asking in this turn is that
+        # decision too. Live 2026-10-27: "spawn a Claude Code agent to find
+        # AWS stock products" was queued behind `auto off` and the voice
+        # said "QUEUED"; "start it" then made the model do the search
+        # itself and leave the task waiting. The creator: stop asking
+        # twice. Who asked comes from Guardian's record of the proposal,
+        # never from the model; an unplaced voice, a child, an outside
+        # channel or an unreadable record still leaves the task Sim's.
+        asked_by = "" if authorised else _asked_by_an_adult(await _proposal_requester(ctx))
+        authorised = authorised or bool(asked_by)
         payload = {"kind": kind, "description": goal, "origin": "human" if authorised else "assistant",
                    "mode": "execute", "max_steps": steps}
         subject = str(args.get("subject") or "").strip()
@@ -2354,6 +2364,26 @@ async def _proposal_requester(ctx: ToolContext) -> tuple[str, str] | None:
             proposal = (event.payload or {}).get("proposal") or {}
             return str(proposal.get("requester") or ""), str(proposal.get("requester_channel") or "")
     return None
+
+
+def _asked_by_an_adult(who: tuple[str, str] | None) -> str:
+    """The grown-up of the household who asked for this call, "" when it
+    was nobody placed, a child, a guest or anyone outside: `the console`
+    for the owner's own terminal, else their name."""
+    from simorgh.contracts import household
+    from simorgh.contracts.channels import is_console
+    from simorgh.contracts.coreblocks import is_outside, is_unplaced
+
+    if who is None:
+        return ""
+    requester, channel = who[0].strip(), who[1]
+    if is_outside(channel):
+        return ""
+    if not requester:
+        return "the console" if is_console(channel) else ""
+    if is_unplaced(requester) or household.member(requester) is None or household.is_child(requester):
+        return ""
+    return household.member(requester).name
 
 
 def _core_edit_refusal(block: str, requester: str, channel: str) -> str:
