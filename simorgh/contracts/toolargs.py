@@ -257,6 +257,41 @@ def key_values(text: str) -> dict:
     return out
 
 
+#: One-line tools that also take trailing options: `MAIL_SEARCH: promo
+#: since=30 days limit=200` is `{"query": "promo", "since": "30 days",
+#: "limit": 200}`. Without them a month could not be searched from a marker
+#: at all -- the whole line was the query, and Sim told the creator it had
+#: used a 30-day filter and a limit of 200 when the tool got neither
+#: (live 2026-10-28).
+MARKER_OPTIONS: dict[str, tuple[str, ...]] = {
+    "mail_search": ("since", "limit", "folder", "account", "unread_only"),
+}
+
+
+def with_options(tool: str, key: str, raw: str) -> dict:
+    """`{key: raw}`, with any of `tool`'s `MARKER_OPTIONS` split off the
+    end of the line. The main value is always present (Guardian's
+    `marker_guaranteed` relies on it), "" when the line is only options."""
+    names = MARKER_OPTIONS.get(tool)
+    text = str(raw if raw is not None else "")
+    if not names:
+        return {key: text}
+    found = list(re.finditer(rf"(?:^|\s)({'|'.join(map(re.escape, names))})\s*=\s*", text))
+    if not found:
+        return {key: text}
+    out: dict = {key: text[:found[0].start()].strip()}
+    for i, match in enumerate(found):
+        end = found[i + 1].start() if i + 1 < len(found) else len(text)
+        value = text[match.end():end].strip().strip("\"'")
+        if re.fullmatch(r"\d+", value):
+            out[match.group(1)] = int(value)
+        elif value.lower() in ("true", "false", "yes", "no"):
+            out[match.group(1)] = value.lower() in ("true", "yes")
+        else:
+            out[match.group(1)] = value
+    return out
+
+
 #: Tools whose argument is `key=value` pairs (or a JSON object), with one
 #: bare word meaning the named default key: `CANCEL_TASK: e7817596bb18`
 #: is a task id; `LIST_TASKS: all` shows finished ones too.
@@ -297,7 +332,7 @@ def args_from_text(tool: str, raw: str) -> dict:
     if tool in MARKER_ARG_KEY:
         if tool in ("run_python_sandboxed", "run_js_sandboxed", "run_script"):
             raw = strip_code_fence(str(raw))
-        return {MARKER_ARG_KEY[tool]: raw}
+        return with_options(tool, MARKER_ARG_KEY[tool], raw)
     if tool in MARKER_KEY_VALUES:
         text = str(raw).strip()
         if not text:
@@ -335,12 +370,14 @@ def describe_arguments(tool: str) -> str:
             return f"<{first}> then a JSON object of options on the next line"
         return f"<{first}> then <{second}> on the following lines"
     if tool in MARKER_ARG_KEY:
+        if tool in MARKER_OPTIONS:
+            return f"<{MARKER_ARG_KEY[tool]}> [" + " ".join(f"{o}=..." for o in MARKER_OPTIONS[tool]) + "]"
         return f"<{MARKER_ARG_KEY[tool]}>"
     if tool in MARKER_KEY_VALUES:
         return f"<{MARKER_KEY_VALUES[tool]}> or key=value pairs"
     return "key=value pairs, or a JSON object"
 
 
-__all__ = ["MARKER_ARG_KEY", "MARKER_CODE_REST", "MARKER_FREE_TEXT", "MARKER_JSON_REST", "MARKER_KEY_VALUES", "MARKER_NO_ARGS",
+__all__ = ["MARKER_ARG_KEY", "MARKER_CODE_REST", "MARKER_FREE_TEXT", "MARKER_JSON_REST", "MARKER_KEY_VALUES", "MARKER_NO_ARGS", "MARKER_OPTIONS",
            "MARKER_SPLIT_FIRST_LINE", "args_from_text", "describe_arguments", "json_rest", "key_values",
-           "strip_code_fence"]
+           "strip_code_fence", "with_options"]

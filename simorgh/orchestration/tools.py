@@ -563,8 +563,12 @@ _MARKER_ARG_HINT.update({
         "\"7 days\" or an ISO date. Reads the creator's real calendar."
     ),
     "mail_search": (
-        "the search terms, on one line, or empty for the most recent messages. Returns subjects "
-        "and senders only -- bodies are sensitive and come from MAIL_READ, one at a time."
+        "the search terms, on one line, or empty for the most recent messages, then any of "
+        "since=<range> (\"30 days\", \"this week\", an ISO date), limit=<n> (default 20; up to the "
+        "configured cap), folder=, account=, unread_only=true. Newest first: when it returns exactly "
+        "`limit` messages there are probably more, so raise limit or narrow since before counting. "
+        "Example: MAIL_SEARCH: promo since=30 days limit=200. Returns subjects and senders only -- "
+        "bodies are sensitive and come from MAIL_READ, one at a time."
     ),
     "mail_read": (
         "an [account:folder:uid] reference exactly as MAIL_SEARCH printed it, to read that one "
@@ -883,7 +887,10 @@ def to_action_payload(*, action_id: str, task_id: str, call: dict, rationale: st
             args = {}
         elif tool in _MARKER_ARG_KEY:
             key = _MARKER_ARG_KEY[tool]
-            args = {key: _one_value(key, raw)}
+            # `MAIL_SEARCH: promo since=30 days limit=200`: the options
+            # split off the line (`toolargs.MARKER_OPTIONS`), or a month of
+            # mail cannot be asked for from a marker (live 2026-10-28).
+            args = toolargs.with_options(tool, key, _one_value(key, raw))
         elif tool in toolargs.MARKER_KEY_VALUES:
             # `REMEMBER: <fact>`, `CANCEL_TASK: <id>`: the shared table's
             # reading, the same one the CLI `tool` command uses. This path

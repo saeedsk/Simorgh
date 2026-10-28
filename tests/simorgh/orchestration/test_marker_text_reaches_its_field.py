@@ -36,6 +36,17 @@ class MarkerTextReachesItsField(unittest.TestCase):
         note_schema("pair", {"type": "object", "required": ["a", "b"]})
         self.assertEqual(_args("pair", "words"), {"argument": "words"})
 
+    def test_mail_search_takes_its_options_off_the_line(self):
+        """Live 2026-10-28: a month of promo mail could not be asked for --
+        the whole line was the query -- and Sim said it had used a 30-day
+        filter and a limit of 200 when the tool got `{"query": "promo"}`."""
+        self.assertEqual(_args("mail_search", "promo since=30 days limit=200"),
+                         {"query": "promo", "since": "30 days", "limit": 200})
+        self.assertEqual(_args("mail_search", "since=this week unread_only=true"),
+                         {"query": "", "since": "this week", "unread_only": True})
+        self.assertEqual(_args("mail_search", "invoice from Hydro One"), {"query": "invoice from Hydro One"})
+        self.assertEqual(toolargs.args_from_text("mail_search", "promo limit=50"), {"query": "promo", "limit": 50})
+
     def test_the_contract_table_agrees(self):
         self.assertEqual(toolargs.args_from_text("remember", "Iris likes owls"), {"fact": "Iris likes owls"})
 

@@ -413,6 +413,26 @@ class MailToolTestCase(_ToolCase):
         for row in result.metadata["rows"]:
             self.assertNotIn("body", row)
 
+    async def test_a_search_cut_at_its_limit_says_so(self):
+        """Live 2026-10-28: the "top five promo senders of the month" were
+        counted from the newest twenty, twice, with nothing saying more
+        existed."""
+        result = await self._tools()["mail_search"].run({"limit": 1}, ctx=_ctx())
+        self.assertIn("Stopped at the limit of 1", result.output)
+        whole = await self._tools()["mail_search"].run({"limit": 40}, ctx=_ctx())
+        self.assertNotIn("Stopped at", whole.output)
+
+    def test_since_looks_back_for_a_number_of_days(self):
+        from datetime import datetime, timezone
+
+        from simorgh.domains.pim.tools import since_of
+
+        now = datetime(2026, 10, 28, 12, tzinfo=timezone.utc)
+        self.assertEqual(since_of("30 days", now=now), datetime(2026, 9, 28, 12, tzinfo=timezone.utc))
+        self.assertEqual(since_of("past month", now=now), datetime(2026, 9, 28, 12, tzinfo=timezone.utc))
+        self.assertEqual(since_of("last 2 weeks", now=now), datetime(2026, 10, 14, 12, tzinfo=timezone.utc))
+        self.assertEqual(since_of("this week", now=now), datetime(2026, 10, 26, tzinfo=timezone.utc))
+
     async def test_an_unknown_account_lists_the_real_ones(self):
         result = await self._tools()["mail_search"].run({"account": "gmail"}, ctx=_ctx())
         self.assertFalse(result.ok)

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Message
@@ -158,6 +158,23 @@ class CalListTool(_PimTool):
                                     "from": start.isoformat(), "to": end.isoformat()})
 
 
+_BACK = {"day": 1, "week": 7, "month": 30, "year": 365}
+
+
+def since_of(text: str, *, now: datetime) -> datetime:
+    """Where a `since=` reaches back to. "30 days", "past month", "last 2
+    weeks" look BACK from now; anything else ("this week", "yesterday", an
+    ISO date) is the start of `parse_range`'s range. `parse_range` alone
+    reads "30 days" forward, as a calendar does -- for mail that was
+    "since midnight today"."""
+    match = re.fullmatch(r"\s*(?:(?:the\s+)?(?:past|last)\s+)?(\d+)?\s*(day|week|month|year)s?\s*(?:ago)?\s*",
+                         text.lower())
+    if match:
+        return now - timedelta(days=int(match.group(1) or 1) * _BACK[match.group(2)])
+    start, _ = parse_range(text, now=now)
+    return start
+
+
 class MailSearchTool(_PimTool):
     name = "mail_search"
     description = (
@@ -189,7 +206,7 @@ class MailSearchTool(_PimTool):
         since = None
         if args.get("since"):
             try:
-                since, _ = parse_range(str(args["since"]), now=self._now())
+                since = since_of(str(args["since"]), now=self._now())
             except Ambiguous as exc:
                 return ToolResult.refused(f"refused: {exc}")
 
@@ -214,6 +231,18 @@ class MailSearchTool(_PimTool):
             body = (f"{len(messages)} message(s) (`*` is unread). Use MAIL_READ with a uid to "
                     f"open one:\n" + "\n".join(
                         f"  [{m.account}:{m.folder}:{m.uid}]{m.render()}" for m in messages))
+        if len(messages) == limit:
+            # Newest first and cut at `limit`: a count over these is a count
+            # over the newest `limit`, not over the range. Sim reported the
+            # "top five promo senders of the month" from the newest twenty,
+            # twice (live 2026-10-28).
+            cap = int(getattr(self._config, "pim_max_results", 50))
+            body += (f"\n\nStopped at the limit of {limit}: older matches were not fetched. Before "
+                     f"counting over a range, search again with a larger limit (up to {cap}) or a "
+                     f"narrower since= and say how many you saw."
+                     if limit < cap else
+                     f"\n\nStopped at the cap of {cap}: older matches were not fetched. Search "
+                     f"narrower ranges with since= and say how many you saw.")
         if problems:
             body += "\n\ncould not read:\n" + "\n".join(f"- {p}" for p in problems)
         rows = [{"uid": m.uid, "account": m.account, "folder": m.folder, "subject": m.subject,
