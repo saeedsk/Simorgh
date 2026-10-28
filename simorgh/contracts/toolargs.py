@@ -63,6 +63,7 @@ MARKER_ARG_KEY: dict[str, str] = {
     "cal_list": "range",
     "mail_search": "query",
     "mail_read": "message",
+    "mail_unsubscribe": "messages",
     "kb_search": "query",
     "kb_ask": "question",
     "kb_open": "citation",

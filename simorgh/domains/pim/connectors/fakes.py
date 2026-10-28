@@ -189,6 +189,10 @@ def _build_message(spec: dict, *, headers_only: bool) -> bytes:
     message["To"] = ", ".join(spec.get("to", []) or [])
     message["Date"] = email.utils.format_datetime(
         spec.get("date") or datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc))
+    if spec.get("list_unsubscribe"):
+        message["List-Unsubscribe"] = spec["list_unsubscribe"]
+    if spec.get("list_unsubscribe_post"):
+        message["List-Unsubscribe-Post"] = spec["list_unsubscribe_post"]
     if spec.get("attachment"):
         message.set_content(spec.get("body", "") if not headers_only else "")
         message.add_attachment(b"binary", maintype="application", subtype="octet-stream",

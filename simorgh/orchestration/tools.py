@@ -127,6 +127,9 @@ _TOOL_POLICY: dict[str, tuple[str, bool]] = {
     "cal_list": ("read_only", True),
     "mail_search": ("read_only", True),
     "mail_read": ("read_only", True),
+    # Reaches out: POSTs the sender's own RFC 8058 one-click link. It
+    # cannot be taken back, so Guardian sees it as irreversible.
+    "mail_unsubscribe": ("irreversible", True),
     "remind": ("reversible", False),
     # -- security posture (domains/04-security-posture.md). All local:
     # `sec_self` inspects this machine and nothing else, which is why it
@@ -565,6 +568,10 @@ _MARKER_ARG_HINT.update({
     "mail_read": (
         "an [account:folder:uid] reference exactly as MAIL_SEARCH printed it, to read that one "
         "message's body."
+    ),
+    "mail_unsubscribe": (
+        "one [account:folder:uid] reference per line, exactly as MAIL_SEARCH printed them, one per "
+        "sender to unsubscribe from. Uses the sender's own one-click offer; no browser needed."
     ),
     "remind": (
         "first line: when -- \"20m\", \"tomorrow 9am\", \"friday at 15:00\", or an ISO "

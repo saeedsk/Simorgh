@@ -248,6 +248,32 @@ class ImapConnector:
 
         return await asyncio.to_thread(_fetch)
 
+    async def unsubscribe_headers(self, uid: str, *, folder: str = "INBOX") -> dict | None:
+        """The sender's own unsubscribe offer (RFC 2369 `List-Unsubscribe`,
+        RFC 8058 `List-Unsubscribe-Post`) for one message: headers only,
+        never the body. None when there is no such message."""
+        import asyncio
+
+        client = await self._connect()
+        self._budget.take()
+
+        def _fetch():
+            code, _ = client.select(_quote(folder), readonly=True)
+            if code != "OK":
+                raise _MailError(f"no folder {folder!r}")
+            code, rows = client.uid(
+                "FETCH", str(uid).encode(),
+                "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST)])")
+            if code != "OK" or not rows or not isinstance(rows[0], tuple):
+                return None
+            parsed = email.message_from_bytes(rows[0][1])
+            return {"sender": _address(parsed.get("From", "")),
+                    "subject": decode_header(parsed.get("Subject", "")),
+                    "list_unsubscribe": " ".join(str(parsed.get("List-Unsubscribe", "")).split()),
+                    "list_unsubscribe_post": str(parsed.get("List-Unsubscribe-Post", "")).strip()}
+
+        return await asyncio.to_thread(_fetch)
+
     # -- plumbing ------------------------------------------------------------
 
     async def _connect(self):

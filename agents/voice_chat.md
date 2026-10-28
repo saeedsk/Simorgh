@@ -28,7 +28,7 @@ tools = [
     # Answer-shaped only. `apply_source_patch`, `install_package`,
     # `run_script` and the sandboxes stay out on purpose: a six-step
     # spoken turn is answered, not built.
-    "remind", "cal_list", "mail_search", "mail_read",
+    "remind", "cal_list", "mail_search", "mail_read", "mail_unsubscribe", "browse_page",
     "home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",
     "energy_status", "energy_report",
     "media_now", "media_control", "media_play",

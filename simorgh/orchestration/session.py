@@ -523,6 +523,7 @@ _ACTION_TIMEOUTS: dict[str, float] = {
     "cal_list": 45.0,
     "mail_search": 60.0,
     "mail_read": 45.0,
+    "mail_unsubscribe": 90.0,
     "remind": 15.0,
     "kb_search": 30.0,
     "kb_ask": 30.0,

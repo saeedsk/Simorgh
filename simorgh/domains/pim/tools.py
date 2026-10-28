@@ -1,4 +1,4 @@
-"""The pim tools: `cal_list`, `mail_search`, `mail_read`, `remind`.
+"""The pim tools: `cal_list`, `mail_search`, `mail_read`, `mail_unsubscribe`, `remind`.
 
 Step 1 of the domain's build order, plus `remind` from step 2. Reading
 only -- no `mail_send`, no `cal_create`, no flags, no moves. That is not
@@ -6,6 +6,11 @@ an oversight: sending is irreversible and gets a human gate
 (`domains/02-calendar-mail-tasks.md` section 5), and a connector that
 cannot write at all is a stronger guarantee than a policy that says it
 should not.
+
+`mail_unsubscribe` (2026-10-27) is the one exception that reaches out:
+it never writes to the mailbox, but it POSTs the sender's own RFC 8058
+one-click link, which the creator asked for by voice ("I need you to be
+able to do so"). It is irreversible, so Guardian sees it as such.
 
 `remind` is the one that changes something, and it changes something
 entirely local: it compiles to a Kernel schedule. The Kernel has had a
@@ -22,6 +27,7 @@ configured session may not see that class.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -289,6 +295,164 @@ class MailReadTool(_PimTool):
                                     "chars": len(message.body)})
 
 
+_LINK = re.compile(r"<\s*([^<>\s]+)\s*>")
+
+
+def unsubscribe_links(header: str) -> tuple[list[str], list[str]]:
+    """`List-Unsubscribe`'s https and mailto links, in the sender's order
+    (RFC 2369: angle brackets, comma separated). Plain http is dropped:
+    RFC 8058 one-click is https only, and a token in clear text is not
+    something Sim sends."""
+    https, mailto = [], []
+    for link in _LINK.findall(header or ""):
+        lowered = link.lower()
+        if lowered.startswith("https://"):
+            https.append(link)
+        elif lowered.startswith("mailto:"):
+            mailto.append(link[7:].split("?", 1)[0])
+    return https, mailto
+
+
+def _public_https(url: str) -> str:
+    """Why `url` may not be posted to, or "" when it may: https only, and
+    never a host that resolves to this house's own network."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        return "not an https link"
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        return f"could not resolve {parts.hostname} ({exc.strerror or exc})"
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        if not address.is_global:
+            return f"{parts.hostname} is not a public address"
+    return ""
+
+
+def one_click_post(url: str, *, timeout_s: float = 15.0) -> int:
+    """RFC 8058 section 3.1: POST `List-Unsubscribe=One-Click` to the
+    https link. Returns the HTTP status; raises on a refusal or a
+    network failure."""
+    import urllib.request
+
+    why = _public_https(url)
+    if why:
+        raise ValueError(why)
+    request = urllib.request.Request(
+        url, data=b"List-Unsubscribe=One-Click", method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Simorgh/1 (one-click)"})
+    with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310 -- https only, checked above
+        return int(response.status)
+
+
+class MailUnsubscribeTool(_PimTool):
+    name = "mail_unsubscribe"
+    description = (
+        "Unsubscribe the creator from a sender's mailing list, using the unsubscribe offer in the "
+        "message's own headers (one-click, RFC 8058) -- no browser, no clicking. Takes one or more "
+        "[account:folder:uid] references from mail_search, one per sender. Says, per sender, whether it "
+        "is done, or that the sender only offers a page (open it with browse_page) or an email address."
+    )
+    read_only = False
+    reversibility = "irreversible"
+    args_schema = {
+        "type": "object", "required": ["messages"],
+        "properties": {"messages": {"type": "array", "items": {"type": "string"}}},
+    }
+
+    def __init__(self, config, *, post=None, **kwargs) -> None:
+        super().__init__(config, **kwargs)
+        self._post = post
+
+    async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
+        import asyncio
+
+        connectors = self._of_kind("imap")
+        if not connectors:
+            return self._nothing_configured("imap")
+        given = args.get("messages") or []
+        if isinstance(given, str):
+            given = re.split(r"[\s,]+", given)
+        references = [str(r).strip().strip("[]") for r in given if str(r).strip().strip("[]")]
+        if not references:
+            return ToolResult.refused("refused: no message given -- pass the [account:folder:uid] "
+                                      "references mail_search printed, one per sender")
+        post = self._post or one_click_post
+        lines, rows, seen = [], [], set()
+        for reference in references[:20]:
+            account, folder, uid = _reference(reference, connectors)
+            if account not in connectors:
+                lines.append(f"- {reference}: no mail account {account!r}")
+                continue
+            try:
+                found = await connectors[account].unsubscribe_headers(uid, folder=folder)
+            except BudgetExhausted as exc:
+                lines.append(f"- {reference}: {exc}")
+                continue
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"- {reference}: {_clean(exc)}")
+                continue
+            if found is None:
+                lines.append(f"- {reference}: no such message")
+                continue
+            sender = found["sender"] or reference
+            if sender.lower() in seen:
+                continue
+            seen.add(sender.lower())
+            https, mailto = unsubscribe_links(found["list_unsubscribe"])
+            one_click = "one-click" in found["list_unsubscribe_post"].lower().replace(" ", "")
+            row = {"sender": sender, "message": reference, "state": "", "link": ""}
+            if https and one_click:
+                try:
+                    status = await asyncio.to_thread(post, https[0])
+                except Exception as exc:  # noqa: BLE001 -- a refusal or the network; said per sender
+                    row.update(state="failed", link=https[0])
+                    lines.append(f"- {sender}: the one-click unsubscribe failed ({_clean(exc)}); "
+                                 f"the page is {https[0]}")
+                else:
+                    if 200 <= status < 300:
+                        row["state"] = "done"
+                        lines.append(f"- {sender}: unsubscribed (one-click, HTTP {status})")
+                    else:
+                        row.update(state="failed", link=https[0])
+                        lines.append(f"- {sender}: the sender answered HTTP {status}, so it is not done; "
+                                     f"the page is {https[0]}")
+            elif https:
+                row.update(state="page", link=https[0])
+                lines.append(f"- {sender}: no one-click offer; the unsubscribe page is {https[0]} "
+                             f"-- browse_page can open it and press the button")
+            elif mailto:
+                row.update(state="email", link=mailto[0])
+                lines.append(f"- {sender}: only unsubscribes by email to {mailto[0]}, and I cannot send mail")
+            else:
+                row["state"] = "none"
+                lines.append(f"- {sender}: the message carries no unsubscribe offer; the link at the "
+                             f"bottom of the email (mail_read) is the only way")
+            rows.append(row)
+        done = sum(1 for r in rows if r["state"] == "done")
+        body = f"{done} of {len(rows)} sender(s) unsubscribed:\n" + "\n".join(lines)
+        effects = [f"mail:unsubscribe:{r['sender']}" for r in rows if r["state"] == "done"]
+        return ToolResult(ok=bool(rows), output=body, error=None if rows else "nothing could be unsubscribed",
+                          side_effects=tuple(effects), metadata={"rows": rows, "done": done, "privacy": "personal"})
+
+
+def _reference(reference: str, connectors: dict) -> tuple[str, str, str]:
+    """`account:folder:uid`, `folder:uid` or `uid`, as mail_read reads it."""
+    parts = reference.split(":")
+    if len(parts) == 3:
+        account, folder, uid = parts
+    elif len(parts) == 2:
+        account, folder, uid = "", parts[0], parts[1]
+    else:
+        account, folder, uid = "", "INBOX", parts[0]
+    return account or next(iter(sorted(connectors))), folder, uid
+
+
 class RemindTool(_PimTool):
     name = "remind"
     description = (
@@ -388,7 +552,8 @@ async def _safe_probe(connector) -> str:
 
 def pim_tools(config, **kwargs) -> list:
     return [CalListTool(config, **kwargs), MailSearchTool(config, **kwargs),
-            MailReadTool(config, **kwargs), RemindTool(config, **kwargs)]
+            MailReadTool(config, **kwargs), MailUnsubscribeTool(config, **kwargs), RemindTool(config, **kwargs)]
 
 
-__all__ = ["CalListTool", "MailReadTool", "MailSearchTool", "RemindTool", "pim_tools"]
+__all__ = ["CalListTool", "MailReadTool", "MailSearchTool", "MailUnsubscribeTool", "RemindTool", "one_click_post",
+           "pim_tools", "unsubscribe_links"]

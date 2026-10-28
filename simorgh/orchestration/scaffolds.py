@@ -128,6 +128,8 @@ _TOOL_NOTES: dict[str, str] = {
     "mail_search": "search the creator's real mailbox -- subjects, senders and dates, never "
                     "bodies",
     "mail_read": "open one message from mail_search and read its body",
+    "mail_unsubscribe": "unsubscribe from senders' mailing lists by their own one-click offer, "
+                        "given mail_search references -- no browser, no clicking",
     "remind": "set a reminder that fires even when nobody is at the terminal -- \"20m\", "
                "\"tomorrow 9am\", \"friday at 15:00\"",
     "kb_search": "search the creator's OWN documents -- their files, PDFs, notes, scans -- and "

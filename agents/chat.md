@@ -10,6 +10,10 @@ tools = [
     # "what's on today", "did the plumber reply", "remind me at
     # 8" -- all chat questions, and all unanswerable from the web.
     "cal_list", "mail_search", "mail_read", "remind",
+    # "unsubscribe me from those" (the creator, by voice, 2026-10-27):
+    # one-click by the message's own headers; browse_page for a sender
+    # that only offers a page.
+    "mail_unsubscribe", "browse_page",
     # "am I exposed?" is a question a person asks in chat.
     "sec_posture", "sec_findings", "sec_show",
     # "was there a provider timeout just now?", "what did that error

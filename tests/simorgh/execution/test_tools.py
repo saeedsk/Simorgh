@@ -805,7 +805,7 @@ class TestBuiltinTools(unittest.TestCase):
             "find_package", "install_package", "run_script",
             "browse_page", "run_container", "notify", "policy_adopt",
             "kb_search", "kb_ask", "kb_open", "kb_sources", "kb_status",
-            "cal_list", "mail_search", "mail_read", "remind",
+            "cal_list", "mail_search", "mail_read", "mail_unsubscribe", "remind",
             "sec_self", "sec_posture", "sec_findings", "sec_show", "sec_accept",
             "home_find", "home_state", "home_describe", "home_call", "home_undo", "home_blink",
             "energy_status", "energy_report", "energy_tariff",

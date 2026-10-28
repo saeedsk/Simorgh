@@ -22,7 +22,7 @@
 
 [groups.calendar_mail]
 description = "The calendar, the mail, and reminders."
-tools = ["cal_list", "mail_search", "mail_read", "remind"]
+tools = ["cal_list", "mail_search", "mail_read", "mail_unsubscribe", "remind"]
 utterances = [
     "what's on today",
     "what's on my calendar tomorrow",
@@ -33,6 +33,7 @@ utterances = [
     "remind me at 8 to call mom",
     "remind me in 5 minutes",
     "when is my dentist appointment",
+    "unsubscribe me from those promo emails",
     "امروز چه برنامه‌ای دارم",
     "فردا تقویمم چی داره",
     "لوله‌کش جواب ایمیلم را داد؟",
@@ -274,7 +275,7 @@ utterances = [
 
 [groups.web]
 description = "The web: search, pages, places, listings, the news and the weather."
-tools = ["web_search", "web_fetch", "render_page", "search_listings", "geocode"]
+tools = ["web_search", "web_fetch", "render_page", "browse_page", "search_listings", "geocode"]
 utterances = [
     "search the web for the best laptop",
     "what's the weather tomorrow",

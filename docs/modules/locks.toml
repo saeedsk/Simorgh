@@ -5,11 +5,23 @@
 # A lock past `until` is stale and may be taken over.
 
 
+[locks.contracts]
+by = "claude-paid"
+task = "mail_unsubscribe (RFC 8058 one-click) and browse_page offered in chat"
+since = "2026-10-28T04:55:32+00:00"
+until = "2026-10-28T12:55:32+00:00"
+
 [locks.docs]
 by = "claude-paid"
 task = "record creator decisions: native_graph live, sidecars eval-only"
 since = "2026-10-28T04:36:07+00:00"
 until = "2026-10-28T12:36:07+00:00"
+
+[locks.domains]
+by = "claude-paid"
+task = "mail_unsubscribe (RFC 8058 one-click) and browse_page offered in chat"
+since = "2026-10-28T04:55:32+00:00"
+until = "2026-10-28T12:55:32+00:00"
 
 [locks.evals]
 by = "claude-paid"
@@ -23,14 +35,8 @@ task = "a2a_call: data defaults to private"
 since = "2026-10-28T04:44:57+00:00"
 until = "2026-10-28T12:44:57+00:00"
 
-[locks.guardian]
+[locks.orchestration]
 by = "claude-paid"
-task = "core block edits limited to household members (creator, 2026-10-27)"
-since = "2026-10-28T04:42:01+00:00"
-until = "2026-10-28T12:42:01+00:00"
-
-[locks.voice]
-by = "claude-paid"
-task = "echo before bystander; cancel the earlier ask only for a turn that is for Sim"
-since = "2026-10-28T04:50:33+00:00"
-until = "2026-10-28T12:50:33+00:00"
+task = "mail_unsubscribe (RFC 8058 one-click) and browse_page offered in chat"
+since = "2026-10-28T04:55:32+00:00"
+until = "2026-10-28T12:55:32+00:00"
