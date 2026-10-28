@@ -17,6 +17,8 @@ Registered today:
     research      GAIA, through `simorgh/benchmark`
     code          the SWE-bench Verified slice, through `simorgh/benchmark`
     toolchain     the household tool-chain pack (stage 14), one case per scenario
+    code_first    stage 19's data-shaped jobs in four domains, Sim answering (paid)
+    code_first_scripted  the same cases, two scripted models: is each one fair? (free)
 
 `household` is the one the loader's bless runs: it needs no model, no
 network and no money, it takes about two seconds, and it measures the
@@ -36,7 +38,7 @@ Runner = Callable[[], Awaitable[list[Outcome]]]
 
 #: Suites that cost real money. `run` refuses them without `--paid`,
 #: because "I ran the evals" should never be a surprise on a bill.
-PAID: frozenset[str] = frozenset({"trials", "tooluse", "research", "code", "toolchain", "crew"})
+PAID: frozenset[str] = frozenset({"trials", "tooluse", "research", "code", "toolchain", "crew", "code_first"})
 
 
 async def household() -> list[Outcome]:
@@ -351,6 +353,12 @@ SUITES: dict[str, Runner] = {
     "toolchain": toolchain,
     "crew": crew,
     "memory": lambda: __import__("simorgh.evals.memory.suite", fromlist=["outcomes"]).outcomes(),
+    # Stage 19 item 8. Two names, not one with a flag: the runner's
+    # repeat child always passes `--paid`, so a free suite whose
+    # behaviour turned on that flag would turn paid in its child.
+    "code_first": lambda: __import__("simorgh.evals.codefirst.run", fromlist=["sim_outcomes"]).sim_outcomes(),
+    "code_first_scripted": lambda: __import__("simorgh.evals.codefirst.run",
+                                              fromlist=["scripted_outcomes"]).scripted_outcomes(),
 }
 
 

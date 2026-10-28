@@ -6,6 +6,7 @@
     python -m simorgh.evals scenario --verbose     # the household script, per probe
     python -m simorgh.evals ablate --suite toolchain --models floor:floor --dry-run
     python -m simorgh.evals crew-bench             # crews with fake providers (free)
+    python -m simorgh.evals code-first --scripted  # stage 19's data jobs, scripted models (free)
 
 A suite that costs money needs `--paid`. That is not paternalism: the
 loader runs `run household` on every bless, and a suite that quietly
@@ -76,8 +77,14 @@ def main(argv: list[str]) -> int:
     sub.add_parser("memory", add_help=False, help="the memory suite: native vs graph vs sidecars (stage 15)")
     sub.add_parser("crew-bench", add_help=False,
                    help="crew micro-benchmark with fake providers: latency, overhead, speedup, memory (free)")
+    sub.add_parser("code-first", add_help=False,
+                   help="stage 19's data-shaped jobs in four domains: --scripted (free) or Sim (--paid)")
     args, rest = ap.parse_known_args(argv)
 
+    if args.command == "code-first":
+        from .codefirst.run import main as code_first_main
+
+        return code_first_main(rest)
     if args.command == "crew-bench":
         from .crewbench import main as crew_bench_main
 
