@@ -89,15 +89,29 @@ class _RecoveringClient(HomeAssistantClient):
         except HomeUnavailable as exc:
             if getattr(exc, "error_kind", "") != "transient":
                 raise
-            from .keeper import revive
+            from .keeper import revive, still_starting
 
             said = await revive(self.url)
             if not said:
+                booting = still_starting()
+                if booting:
+                    # Started a moment ago and not up yet: say THAT, not
+                    # "could not reach" -- live 2026-10-27 the second call
+                    # inside the boot was told the connection was down,
+                    # and Sim went looking for a broken install.
+                    raise HomeUnavailable(
+                        f"Home Assistant is booting: it was started {booting:.0f}s ago and usually answers "
+                        f"within two minutes. Tell the person that, and try again shortly; nothing is broken.",
+                        error_kind="transient") from None
                 raise
             self.revived = said
             try:
                 return await super()._request(method, path, body)
             except HomeUnavailable as again:
+                if "booting" in said or "is starting" in said:
+                    raise HomeUnavailable(
+                        f"Home Assistant was down and I {said}. Tell the person it is starting and to ask "
+                        f"again in a minute or two; nothing is broken.", error_kind="transient") from None
                 raise HomeUnavailable(f"{again} -- {said}", error_kind="transient") from None
 
 

@@ -90,6 +90,24 @@ class Revive(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self._revive("http://192.168.50.208", run), "")
         self.assertEqual(run.calls, [])
 
+    async def test_a_slow_boot_is_reported_as_booting_and_later_calls_hear_so(self):
+        run = _Runner({"Virtual Machine": "stopped"})
+        said = await keeper.revive("http://192.168.50.208", run=run, clock=lambda: self.clock[0],
+                                   wait=lambda _url: False)
+        self.assertIn("Home Assistant is booting", said)
+        self.clock[0] += 40
+        self.assertEqual(round(keeper.still_starting(clock=lambda: self.clock[0])), 40)
+        self.clock[0] += keeper.BOOT_WAIT_S
+        self.assertEqual(keeper.still_starting(clock=lambda: self.clock[0]), 0.0, "past the boot, no longer")
+
+    async def test_nothing_started_is_not_booting(self):
+        run = _Runner({"Virtual Machine": "started"})
+        await keeper.revive("http://192.168.50.208", run=run, clock=lambda: self.clock[0], wait=lambda _url: True)
+        self.assertEqual(keeper.still_starting(clock=lambda: self.clock[0]), 0.0)
+
+    def test_the_recovery_waits_less_than_a_tool_may(self):
+        self.assertLess(keeper.QUICK_WAIT_S, 30.0, "a home call's whole answer must fit its time limit")
+
 
 class TheToolSaysSo(unittest.IsolatedAsyncioTestCase):
     """The call is asked again after the recovery, and the answer says
@@ -129,3 +147,26 @@ class TheToolSaysSo(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Home Assistant was not answering: started the Home Assistant VM", result.output)
         self.assertIn("light.kitchen", result.output)
         self.assertEqual(len(calls), 2, "asked again after the recovery")
+
+    async def test_a_call_during_the_boot_is_told_it_is_booting(self):
+        import urllib.error
+
+        from simorgh.domains.home.tools import HomeFindTool
+
+        def opener(request, timeout=0):
+            raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+        tool = HomeFindTool(config=None, env={"HOME_ASSISTANT_URL": "http://192.168.50.208", "HOME_ASSISTANT_TOKEN": "t"})
+        real = tool._client
+
+        def client():
+            made = real()
+            made._opener = opener
+            return made
+
+        tool._client = client
+        with mock.patch("simorgh.domains.home.keeper.revive", return_value=""), \
+                mock.patch("simorgh.domains.home.keeper.still_starting", return_value=42.0):
+            result = await tool.run({"query": "living room"}, ctx=None)
+        self.assertFalse(result.ok)
+        self.assertIn("Home Assistant is booting: it was started 42s ago", result.error)

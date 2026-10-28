@@ -102,9 +102,15 @@ def configured() -> tuple[str, bool, str]:
         except (OSError, tomllib.TOMLDecodeError) as exc:
             print(f"  warning: {SECRETS_FILE} could not be read ({exc})")
             data = {}
-        for key in (VAULT_URL_KEY, VAULT_TOKEN_KEY):
-            if isinstance(data.get(key), str) and data[key]:
-                values[key] = data[key]
+        # Both names, as `_HomeTool._lookup` reads them: the plain
+        # `HOME_ASSISTANT_*` is what the creator's file holds, and reading
+        # only the `vault:` names here said "no token" while Sim's tools
+        # worked -- Sim repeated it to the creator (live 2026-10-27).
+        for key, plain in ((VAULT_URL_KEY, "HOME_ASSISTANT_URL"), (VAULT_TOKEN_KEY, "HOME_ASSISTANT_TOKEN")):
+            for name in (key, plain):
+                if isinstance(data.get(name), str) and data[name]:
+                    values[key] = data[name]
+                    break
         if values:
             where = str(SECRETS_FILE)
 
@@ -156,7 +162,30 @@ def _get(target: str, token: str) -> tuple[bool, str]:
     return True, message or "answered"
 
 
+def _is_local(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    return (urlparse(url).hostname or "") in ("localhost", "127.0.0.1", "::1")
+
+
 def cmd_status(_args) -> int:
+    url, has_token, where = configured()
+    if url and not _is_local(url):
+        # Sim's Home Assistant is the HA OS VM in UTM, on the LAN
+        # (docs/findings/2026-09-20-home-assistant-os-in-utm.md), not this
+        # machine's Docker. Checking Docker for it sent Sim to start a
+        # second, empty Home Assistant (live 2026-10-27).
+        print(f"config: url {url} (not this machine), token {'set' if has_token else 'MISSING'} (from {where})")
+        code, out, _ = run(["/Applications/UTM.app/Contents/MacOS/utmctl", "list"], timeout=15.0)
+        if code == 0:
+            print("utm: " + "; ".join(" ".join(line.split()[1:]) for line in out.splitlines()[1:]))
+        token = os.environ.get("HOME_ASSISTANT_TOKEN", "") or _secret(VAULT_TOKEN_KEY) or _secret("HOME_ASSISTANT_TOKEN")
+        ok, note = probe_api(url, token)
+        print(f"api: {'answers' if ok else 'not usable'} at {url} ({note})")
+        if not ok:
+            print("  fix: Sim's home tools start the VM themselves (domains/home/keeper.py); by hand: "
+                  "`utmctl start \"Virtual Machine\"`, then wait two minutes")
+        return 0 if ok else 1
     binary = docker_bin()
     if binary is None:
         print("docker: not installed. Docker Desktop is not on this machine.")
@@ -193,7 +222,7 @@ def cmd_status(_args) -> int:
     target = url or DEFAULT_URL
     token = os.environ.get("HOME_ASSISTANT_TOKEN", "")
     if not token and has_token:
-        token = _secret(VAULT_TOKEN_KEY)
+        token = _secret(VAULT_TOKEN_KEY) or _secret("HOME_ASSISTANT_TOKEN")
     ok, note = probe_api(target, token)
     if ok:
         print(f"api: answers at {target} ({note})")
@@ -231,6 +260,11 @@ def _require_daemon(binary: str | None) -> str | None:
 
 
 def cmd_up(args) -> int:
+    url, _has_token, _where = configured()
+    if url and not _is_local(url):
+        print(f"Sim's Home Assistant is at {url}, the UTM VM, not this machine's Docker; nothing started. "
+              "Sim's home tools start the VM themselves; by hand: `utmctl start \"Virtual Machine\"`.")
+        return 1
     binary = _require_daemon(docker_bin())
     if binary is None:
         return 1

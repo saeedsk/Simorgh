@@ -34,8 +34,14 @@ import time
 import urllib.parse
 from pathlib import Path
 
-#: How long a started VM gets to answer. HA OS boots in about a minute.
+#: How long HA OS takes from a VM start to answering: about a minute and
+#: a half (2026-10-27: the VM started at 23:18:11, HA at 23:19:52).
 BOOT_WAIT_S = 120.0
+#: How long a recovery waits for an answer before saying "it is booting".
+#: It waited the whole BOOT_WAIT_S, longer than the tool's own time limit:
+#: live 2026-10-27 the VM WAS started, the light call came back "no
+#: response (timed out)", and Sim told the creator it could not connect.
+QUICK_WAIT_S = 15.0
 #: One recovery attempt per this long.
 RETRY_AFTER_S = 300.0
 UTMCTL = "/Applications/UTM.app/Contents/MacOS/utmctl"
@@ -46,6 +52,9 @@ VM_NAMES = tuple(n for n in (os.environ.get("SIMORGH_HAOS_VM"), "Home Assistant"
 CONTAINER = "homeassistant"
 
 _last_attempt = 0.0
+#: When this process last STARTED something (a VM or the container), for
+#: `still_starting`: 0.0 when the last attempt started nothing.
+_last_started = 0.0
 _lock: asyncio.Lock | None = None
 
 
@@ -114,7 +123,7 @@ def _revive_vm(url: str, run, *, documents: Path = UTM_DOCUMENTS, wait=None) -> 
         started = f"{registered}the VM '{name}' was already running"
     if (wait or _wait_for)(url):
         return f"{started}; Home Assistant answers again"
-    return f"{started}, but Home Assistant has not answered in {BOOT_WAIT_S:.0f}s -- it may still be booting"
+    return f"{started}; Home Assistant is booting and usually answers within two minutes"
 
 
 def _revive_container(url: str, run, *, wait=None) -> str:
@@ -130,11 +139,11 @@ def _revive_container(url: str, run, *, wait=None) -> str:
         return f"could not start the '{CONTAINER}' container: {out.strip()[:160]}"
     if (wait or _wait_for)(url):
         return f"started the '{CONTAINER}' container; Home Assistant answers again"
-    return f"started the '{CONTAINER}' container, but Home Assistant has not answered yet"
+    return f"started the '{CONTAINER}' container; Home Assistant is starting and usually answers within a minute"
 
 
-def _wait_for(url: str) -> bool:
-    deadline = time.monotonic() + BOOT_WAIT_S
+def _wait_for(url: str, seconds: float = QUICK_WAIT_S) -> bool:
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if _answers(url):
             return True
@@ -145,7 +154,7 @@ def _wait_for(url: str) -> bool:
 async def revive(url: str, *, run=_run, clock=time.monotonic, wait=None, documents: Path = UTM_DOCUMENTS) -> str:
     """Try once to bring Home Assistant at `url` back; what was done, or ""
     when nothing was tried (unconfigured, already answering, tried lately)."""
-    global _last_attempt, _lock
+    global _last_attempt, _last_started, _lock
     if not url:
         return ""
     if _lock is None:
@@ -158,14 +167,28 @@ async def revive(url: str, *, run=_run, clock=time.monotonic, wait=None, documen
             return ""
         _last_attempt = now
         if _is_local(url):
-            return await asyncio.to_thread(_revive_container, url, run, wait=wait)
-        return await asyncio.to_thread(_revive_vm, url, run, documents=documents, wait=wait)
+            said = await asyncio.to_thread(_revive_container, url, run, wait=wait)
+        else:
+            said = await asyncio.to_thread(_revive_vm, url, run, documents=documents, wait=wait)
+        _last_started = now if "booting" in said or "is starting" in said else 0.0
+        return said
+
+
+def still_starting(*, clock=time.monotonic) -> float:
+    """Seconds since this process started Home Assistant and it has not
+    answered yet, or 0.0: a call in that window is told it is booting,
+    not that it cannot be reached."""
+    if not _last_started:
+        return 0.0
+    since = clock() - _last_started
+    return since if 0 <= since < BOOT_WAIT_S else 0.0
 
 
 def reset() -> None:
     """Forget the last attempt (tests)."""
-    global _last_attempt, _lock
-    _last_attempt, _lock = 0.0, None
+    global _last_attempt, _last_started, _lock
+    _last_attempt, _last_started, _lock = 0.0, 0.0, None
 
 
-__all__ = ["BOOT_WAIT_S", "CONTAINER", "RETRY_AFTER_S", "VM_NAMES", "reset", "revive"]
+__all__ = ["BOOT_WAIT_S", "CONTAINER", "QUICK_WAIT_S", "RETRY_AFTER_S", "VM_NAMES", "reset", "revive",
+           "still_starting"]
