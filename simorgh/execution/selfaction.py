@@ -50,11 +50,20 @@ class SelfActions:
         self._timeout_for = timeout_for
 
     async def run(self, tool_name: str, args: dict, *, rationale: str,
-                  timeout: float | None = None) -> ToolResult:
+                  timeout: float | None = None, action_id: str | None = None,
+                  scope: dict | None = None, extra: dict | None = None) -> ToolResult:
+        """`action_id`, `scope` and `extra` are for a call made on someone
+        else's behalf -- the workbench bridge (workbench.py): the id is
+        chosen by the caller so it can be recognised in `_on_approved`,
+        the scope is the parent call's, and `extra` adds the parent's
+        `task_id`, `requester`, `requester_channel` and a
+        `parent_action_id` to the proposal. The proposal's own fields
+        (`action_id`, `tool`, `args`, `reversibility`, `proposed_by`)
+        cannot be overridden by `extra`."""
         tool = self._registry.get(tool_name)
         if tool is None:
             return ToolResult.refused(f"unknown tool {tool_name!r}")
-        action_id = f"execution-{tool_name}-{uuid.uuid4().hex[:12]}"
+        action_id = action_id or f"execution-{tool_name}-{uuid.uuid4().hex[:12]}"
         if timeout is None:
             timeout = float(self._timeout_for(tool)) + GUARDIAN_MARGIN_S
         loop = asyncio.get_running_loop()
@@ -70,18 +79,17 @@ class SelfActions:
             # before a subscription made afterwards exists.
             for topic in (topics.ACTION_RESULT, topics.ACTION_DENIED):
                 subs.append(await self._bus.subscribe(topic, _on))
-            await self._bus.publish(Message.new(
-                topics.ACTION_PROPOSED, source=PROPOSED_BY,
-                payload={
-                    "action_id": action_id, "tool": tool_name, "args": dict(args or {}),
-                    "scope": {"paths": [], "network": True},
-                    # Guardian recomputes the class for a physical tool and
-                    # never widens on a proposer's label; the tool's own
-                    # declaration is the honest floor.
-                    "reversibility": str(getattr(tool, "reversibility", "") or "irreversible"),
-                    "rationale": rationale, "proposed_by": PROPOSED_BY,
-                },
-            ))
+            payload = {key: value for key, value in (extra or {}).items() if value not in (None, "")}
+            payload.update({
+                "action_id": action_id, "tool": tool_name, "args": dict(args or {}),
+                "scope": dict(scope) if scope else {"paths": [], "network": True},
+                # Guardian recomputes the class for a physical tool and
+                # never widens on a proposer's label; the tool's own
+                # declaration is the honest floor.
+                "reversibility": str(getattr(tool, "reversibility", "") or "irreversible"),
+                "rationale": rationale, "proposed_by": PROPOSED_BY,
+            })
+            await self._bus.publish(Message.new(topics.ACTION_PROPOSED, source=PROPOSED_BY, payload=payload))
             try:
                 message = await asyncio.wait_for(done, timeout=timeout)
             except asyncio.TimeoutError:
