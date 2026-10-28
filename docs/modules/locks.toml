@@ -29,8 +29,20 @@ task = "stage 19: workbench (data + sqlite + tool bridge for code)"
 since = "2026-10-28T08:14:07+00:00"
 until = "2026-10-28T16:14:07+00:00"
 
+[locks.interface]
+by = "claude-paid"
+task = "stage 19: TUI right-hand agents panel (split screen)"
+since = "2026-10-28T08:19:44+00:00"
+until = "2026-10-28T16:19:44+00:00"
+
 [locks.orchestration]
 by = "claude-paid"
 task = "a cut tool result keeps its closing notes"
 since = "2026-10-28T08:08:28+00:00"
 until = "2026-10-28T16:08:28+00:00"
+
+[locks.voice]
+by = "claude-paid"
+task = "stage 19: barge-in interrupts and steers the running task"
+since = "2026-10-28T08:31:13+00:00"
+until = "2026-10-28T16:31:13+00:00"

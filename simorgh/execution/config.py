@@ -265,6 +265,23 @@ class Config:
     results_max_rows: int = 500
     results_keep_files: int = 50
 
+    # -- the workbench (workbench.py, `run_analysis`; stage 19 items 1-3).
+    # A program over the full data, with a persistent per-job directory
+    # `<workbench_dir>/<job>/` (inputs copied from `results/`, a
+    # `work.db` that survives between calls) and a bridge through which
+    # it calls Sim's read-only tools, each one proposed to Guardian.
+    # `workbench = false` unregisters the tool and drops the "ref:" line
+    # from every structured result: the tools of 2026-10-27.
+    workbench: bool = True
+    workbench_dir: str = "results/work"
+    # Tool calls one run may make through `sim.call`.
+    workbench_max_calls: int = 50
+    # Wall-clock ceiling for one run, nested calls included; a run's own
+    # `timeout_s` argument may only shorten it.
+    workbench_timeout_s: float = 120.0
+    # A job directory nothing has touched for this long is swept.
+    workbench_keep_days: float = 7.0
+
     # -- persistent scratch (`workspace/`). The gap: every writable
     # directory Sim had was source -- anything written there is a change
     # somebody has to review, so an intermediate file, a scratch note, a
