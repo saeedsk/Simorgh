@@ -317,6 +317,46 @@ def _fitting_first(tools: tuple[str, ...], words: str) -> tuple[str, ...]:
     return tuple(sorted(tools, key=fit))
 
 
+#: "Next I'll work through Michaels, Equifax ...", "I'll start on Michaels
+#: now": the next step of the work, announced as the turn's last words.
+_NEXT_STEP = re.compile(
+    r"\bnext,?\s+i'?ll\b|\bnow\s+i'?ll\b|\bthen\s+i'?ll\b"
+    r"|\bi'?ll\s+(?:now\s+|then\s+|next\s+)?(?:start|begin|move|go|carry|keep|continue|work|get|tackle|do|try|retry|"
+    r"handle|process|follow|unsubscribe|run|search|check|look|read)\b[^.!?]{0,80}"
+    r"\b(?:now|next|one at a time|one by one|in turn|after that|the rest|the others|each|through)\b"
+    r"|\blet me (?:now\s+)?(?:start|continue|move on|go on|work through)\b", re.IGNORECASE)
+#: An offer or a question is the person's to answer, not a promise.
+_CONDITIONAL = re.compile(r"\bif\b|\bwant me\b|\bshall i\b|\bshould i\b|\bwould you\b|\bonce you\b", re.I)
+
+
+def announced_next_step(text: str, session) -> str:
+    """The words of a chat reply that announce the next step of the work as
+    something Sim will now do -- or "". A final answer ends the turn:
+    nothing runs after it, and nothing comes back to the promise.
+
+    Live 2026-10-28, asked to unsubscribe from six senders one at a time:
+    "Temu is done ... Next I'll work through Michaels, Equifax, Expedia,
+    FOX One and BigFuture, one at a time." -- the turn's last words. Asked
+    what happened: "the turn got cut off ... I'll start on Michaels now",
+    and that turn ended there too. Nothing had cut either off."""
+    if not text or getattr(session.profile, "scaffold", "") != "chat" or not offered_tools(session.profile.tools):
+        return ""
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        if sentence.rstrip().endswith("?") or _CONDITIONAL.search(sentence):
+            continue
+        match = _NEXT_STEP.search(sentence)
+        if match:
+            return sentence.strip()
+    return ""
+
+
+def unfinished_reply(quote: str) -> str:
+    return (f"You said \"{quote}\", but your turn ends the moment you answer without a tool call: nothing "
+            "runs after it and nothing will bring you back to it. Do that step now -- write the tool call -- "
+            "and keep going, one call per step, until every item is done or has failed. Then answer once, "
+            "with the result for each item. Stop early only to ask the person something you cannot decide.")
+
+
 @dataclass(frozen=True)
 class Bounce:
     rule: str       # "pronunciation" | "commit" | "promise" | "tv" | "effect"
@@ -380,5 +420,5 @@ def check(text: str, session) -> Bounce | None:
 
 
 __all__ = ["Bounce", "check", "claimed_effect", "claimed_to_commit", "claimed_to_note_a_pronunciation",
-           "claimed_to_start_work",
+           "claimed_to_start_work", "announced_next_step", "unfinished_reply",
            "claimed_tv_act", "promised_behaviour", "wanted_tv_act"]

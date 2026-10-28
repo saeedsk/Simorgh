@@ -575,8 +575,13 @@ _MARKER_ARG_HINT.update({
         "message's body."
     ),
     "mail_unsubscribe": (
-        "one [account:folder:uid] reference per line, exactly as MAIL_SEARCH printed them, one per "
-        "sender to unsubscribe from. Uses the sender's own one-click offer; no browser needed."
+        # One LINE: a marker's payload is its first line (cognition/parser.py
+        # `first_line_argument`). "One per line" sent only the first of six
+        # senders, and Sim said it had sent all six (live 2026-10-28).
+        "every [account:folder:uid] reference on ONE line, separated by spaces, exactly as MAIL_SEARCH "
+        "printed them, one per sender to unsubscribe from -- e.g. MAIL_UNSUBSCRIBE: [gmail:INBOX:301309] "
+        "[gmail:INBOX:301260]. Uses the sender's own one-click offer; no browser needed. It reports each "
+        "sender: done, or a page/email it could not finish -- open a page with browse_page to finish it."
     ),
     "remind": (
         "first line: when -- \"20m\", \"tomorrow 9am\", \"friday at 15:00\", or an ISO "

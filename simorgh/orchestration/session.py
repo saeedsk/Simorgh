@@ -1787,6 +1787,26 @@ class SessionRunner:
                 session.messages.append({"role": "assistant", "content": text})
                 session.messages.append({"role": "user", "content": bounce.reply})
                 continue
+            # A reply that announces its own next step ends the turn on a
+            # promise (live 2026-10-28: "Next I'll work through Michaels,
+            # Equifax ..." after one unsubscribe of six). Sent back to do it;
+            # again only once more tools have run, so a job making progress
+            # is carried to the end and a model that only repeats itself is not.
+            ran = sum(1 for s in session.steps if getattr(s, "tool", None))
+            pending = (stophook.announced_next_step(text, session)
+                       if not is_last and ran > session.unfinished_nudged_at else "")
+            if pending:
+                session.unfinished_nudged_at = ran
+                self._telemetry.event("orchestration.stop_hook", trace_id=session.trace or session.task_id,
+                                      span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
+                                      attrs={"rule": "unfinished", "scaffold": session.profile.scaffold})
+                step = Step(step_no, "act", f"rejected a reply that stops before the work: \"{pending[:80]}\"",
+                            ok=False)
+                session.record(step)
+                await self._record_step(session, step)
+                session.messages.append({"role": "assistant", "content": text})
+                session.messages.append({"role": "user", "content": stophook.unfinished_reply(pending)})
+                continue
             # The capability check (`[orchestration] tool_index`): a chat
             # reply that says it cannot, while a tool matching the request
             # exists, gets those tools and one nudge. Live 2026-10-27: "I

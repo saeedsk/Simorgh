@@ -310,6 +310,10 @@ class Session:
     extra_tools: list = field(default_factory=list)
     #: Whether the capability check has nudged this turn (once a turn).
     capability_nudged: bool = False
+    #: How many tool steps had run when a chat reply that announced its own
+    #: next step was last sent back (`stophook.announced_next_step`); -1
+    #: when none was. It may be sent back again only after more ran.
+    unfinished_nudged_at: int = -1
     #: Which embedder routed the turn: `memory:<model>/<dimension>`
     #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
     #: `injected`; and, when Memory's was wanted and the turn went
