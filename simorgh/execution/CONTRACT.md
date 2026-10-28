@@ -43,7 +43,7 @@ Since 2026-09-20 `run_tests` runs the suite through `procs.run_child`: its own p
 | `simorgh/execution/websearch.py` | `web_search` with spacing and a call budget |
 | `simorgh/execution/htmltext.py` | HTML to readable text for `web_fetch` |
 | `simorgh/execution/pdftext.py` | PDF to text |
-| `simorgh/execution/doctext.py` | DOCX, spreadsheet, CSV, image to text for `read_file` |
+| `simorgh/execution/doctext.py` | DOCX, spreadsheet, image to text for `read_file`; a `.csv`/`.tsv` that is not a zip is read as plain text since 2026-10-28 (`pathsafety._read_source`), so its line count and `path:START-END` ranges cover every row -- through the converter it was its first 200 rows and nothing past them could be read |
 | `simorgh/execution/render.py` | `render_page` / `browse_page` via Node + Puppeteer |
 | `simorgh/execution/notify.py` | `notify`: push a message to a person (irreversible) |
 | `simorgh/execution/tools.py::PeopleTool` | `people`: link a chat handle or voice to a household person, unlink one, set a role (stage 6 item 4); grant or revoke a permission (`wellbeing_checkins`, `interest_shares`) and add or remove an interest (stage 10), set a person's kin (`set_relation`, stage 15) -- consent travels the same tier-3 path as a link and is never inferred from a turn. Reversible, and tier 3 all the same (`contracts/tiers.py::CHANGES_WHO_SIM_TRUSTS`) -- a handle linked to a name reads that person's memories. Goes to World Model as `world.people.update`; Execution keeps no people of its own |

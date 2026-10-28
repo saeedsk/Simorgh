@@ -230,6 +230,14 @@ def _read_source(repo_root: Path, raw_path: str, *, readable_roots: tuple[str, .
         # screenshot in the repo, used to come back as binary noise
         # (doctext.py). `None` means "not one of mine" -- distinct from
         # "mine, and empty".
+        # A .csv/.tsv that is really text is read as text: through the
+        # spreadsheet converter it came back as its first 200 rows, and
+        # line ranges then paged over those 200, so a 3000-line index
+        # read "lines 1-5 of 201" and the rest could not be reached at
+        # all (stage 19 eval, 2026-10-28). The ordinary capping and
+        # `path:START-END` ranges below say how much there is.
+        if raw_path.lower().endswith((".csv", ".tsv")) and not data.startswith(b"PK"):
+            return data.decode(errors="replace"), "", False
         handled = document_to_text(data, name=raw_path)
         if handled is not None:
             text, problem = handled
