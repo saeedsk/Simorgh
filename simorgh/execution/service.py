@@ -32,12 +32,13 @@ import contextlib
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 
 from simorgh.bus.client import UNBOUNDED
 from simorgh.contracts import topics
 from simorgh.contracts.envelope import Event, Message, time_left
-from simorgh.contracts.protocols import ERROR_KINDS, Health, ToolContext, NULL_TELEMETRY, error_kind_of
+from simorgh.contracts.protocols import ERROR_KINDS, Health, ToolContext, ToolResult, NULL_TELEMETRY, error_kind_of
 
 from . import pathsafety
 from .config import Config
@@ -52,6 +53,7 @@ from .mcp_sdk import make_client as make_mcp_client
 from .vision import CameraVision
 from .tools import RunTestsTool, SkillTool, builtin_tools, memory_tools, meta_tools
 from .worktree import WorktreeManager, worktree_tools
+from .workbench import bridge_refusal, job_id, record_job_ref, ref_note, workbench_tools
 from .claudecode import HOOK_PREFIX as CLAUDE_CODE_HOOK_PREFIX
 from .verifier import ApprovalVerifier
 
@@ -267,6 +269,12 @@ class Service:
         # One worktree per code task (worktree.py); None when the repo
         # is not a git checkout or `[execution] worktrees = false`.
         self._worktrees: WorktreeManager | None = None
+        # Action ids of the workbench's nested calls in flight
+        # (`_bridge_call`). Their parent `run_analysis` already holds a
+        # semaphore slot and waits on them, so they run without one:
+        # four parallel runs each waiting on a nested call would
+        # otherwise hold every slot and wait forever.
+        self._bridged: set[str] = set()
 
     async def start(self, ctx) -> None:
         self._ctx = ctx
@@ -295,6 +303,8 @@ class Service:
         # `memory_core_edit` (stage 15 item 8): a chat session offers it only
         # while Memory has core blocks on; registered always, so it is known.
         system_tools += memory_tools(self._config)
+        # `run_analysis` (stage 19): a program over the job's full data.
+        system_tools += workbench_tools(self._config)
         # External adapters (external.py) load last so a hand-built tool of
         # the same name is never shadowed by an optional package's.
         external = load_external_tools(self._config.external_tools, logger=ctx.logger)
@@ -377,6 +387,14 @@ class Service:
             bus=ctx.bus, ledger=ctx.ledger, logger=ctx.logger, registry=self._registry,
             timeout_for=lambda tool: timeout_for(tool, {}, self._config.default_timeout_s),
         )
+        # The workbench's `sim.call` goes through the same proposal path
+        # (`_bridge_call`), so Guardian decides every nested call.
+        for tool in list(self._registry.values()):
+            if callable(getattr(tool, "bind_bridge", None)):
+                tool.bind_bridge(self._bridge_call)
+                # Job directories of sessions long gone (`workbench_keep_days`).
+                with contextlib.suppress(OSError):
+                    tool.sweep()
         self._vision = CameraVision(config=self._config, registry=self._registry, ctx=ctx,
                                     act=self._self_actions.run)
         self._subs.append(await ctx.bus.subscribe(topics.CAMERA_EVENT, self._vision.on_camera_event))
@@ -989,7 +1007,9 @@ class Service:
             await self._publish_result(message, action_id, ok=False, error="unknown tool", error_kind="refused")
             return
 
-        async with self._semaphore:
+        # A workbench's nested call runs under its parent's slot (`_bridged`).
+        slot = contextlib.nullcontext() if action_id in self._bridged else self._semaphore
+        async with slot:
             await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "started", {"action_id": action_id, "tool": tool.name}))
             start = time.monotonic()
             timeout = timeout_for(tool, approved.get("constraints") or {}, self._config.default_timeout_s)
@@ -1030,7 +1050,7 @@ class Service:
             # analyse the rest, which is the whole point of fetching
             # them (2026-09-09 -- the comparables analysis another agent
             # ran on 95120 listings needs the data, not a summary).
-            output = self._store_rows(action_id, result, output)
+            output = self._store_rows(action_id, result, output, job=task_id)
             output_ref = ""
             preview = output
             if len(output.encode("utf-8")) > self._config.blob_inline_threshold_bytes:
@@ -1163,7 +1183,7 @@ class Service:
     async def _finish(self, action_id: str) -> None:
         await self._ctx.ledger.append(INFLIGHT_STREAM, self._event(INFLIGHT_STREAM, "finished", {"action_id": action_id}))
 
-    def _store_rows(self, action_id: str, result, output: str) -> str:
+    def _store_rows(self, action_id: str, result, output: str, *, job: str | None = None) -> str:
         """Write a tool's structured rows to a real file and name it in
         the output. Returns the output, unchanged when there is nothing
         to store.
@@ -1191,7 +1211,82 @@ class Service:
         note = f"\n\nfull data: {rel} ({len(capped)} of {len(rows)} rows)"
         if len(capped) == len(rows):
             note = f"\n\nfull data: {rel} ({len(rows)} rows)"
+        if getattr(self._config, "workbench", True):
+            # Stage 19 item 3: every structured result names its ref and
+            # how to compute over it, as the LAST line, so Orchestration's
+            # cut keeps it with the "full data:" note above it. The job
+            # index is what `inputs=['last']` and `sim.rows` read.
+            note += "\n" + ref_note(action_id, len(capped))
+            try:
+                record_job_ref(self._config, job_id(job, action_id), action_id)
+            except OSError as exc:
+                self._ctx.logger.warning("workbench_index_failed", action_id=action_id, error=repr(exc))
         return output + note
+
+    async def _bridge_call(self, tool_name: str, args: dict, *, parent: ToolContext):
+        """One `sim.call` from a `run_analysis` program (workbench.py).
+
+        Proposed like any call (`SelfActions.run`: `action.proposed`,
+        Guardian, `_on_approved`, the full-rows store), carrying the
+        parent's task id, requester and scope, and `parent_action_id`.
+        Only read-only tools; an unknown or writing one is refused by name
+        before anything is proposed. The parent's `action:` stream gets a
+        `nested_call` event per call, so the run's own record lists them.
+        Returns the result with `metadata` `action_id`, `ref` (the results
+        id, "" without rows) and `rows` (every stored row)."""
+        tool = self._registry.get(tool_name)
+        refusal = bridge_refusal(tool_name, tool)
+        if refusal:
+            await self._note_nested(parent.action_id, {"tool": tool_name, "ok": False, "refused": refusal})
+            return ToolResult.refused(refusal)
+        if self._self_actions is None:
+            return ToolResult(ok=False, error="the tool bridge is unavailable: Execution has not started",
+                              error_kind="unconfigured")
+        proposal = await self._proposal_of(parent.action_id)
+        extra = {"parent_action_id": parent.action_id,
+                 "task_id": proposal.get("task_id") or parent.task_id,
+                 "requester": proposal.get("requester"), "requester_channel": proposal.get("requester_channel")}
+        scope = dict(parent.scope or {})
+        scope["paths"] = []
+        scope.setdefault("network", True)
+        action_id = f"wb-{uuid.uuid4().hex[:12]}"
+        self._bridged.add(action_id)
+        try:
+            result = await self._self_actions.run(
+                tool_name, args, rationale=f"run_analysis {parent.action_id}: sim.call {tool_name}",
+                action_id=action_id, scope=scope, extra=extra)
+        finally:
+            self._bridged.discard(action_id)
+        rows = self._stored_rows(action_id)
+        await self._note_nested(parent.action_id, {"action_id": action_id, "tool": tool_name,
+                                                   "ok": bool(result.ok), "rows": len(rows)})
+        metadata = dict(result.metadata or {})
+        metadata.update({"action_id": action_id, "ref": action_id if rows else "", "rows": rows})
+        return ToolResult(ok=result.ok, output=result.output, error=result.error, side_effects=result.side_effects,
+                          metadata=metadata, error_kind=result.error_kind)
+
+    async def _proposal_of(self, action_id: str) -> dict:
+        try:
+            events = await self._ctx.ledger.read(f"action:{action_id}")
+        except Exception:  # noqa: BLE001 -- no record means no requester to carry, not no call
+            return {}
+        for event in events:
+            if event.type == "received" and isinstance((event.payload or {}).get("proposal"), dict):
+                return dict(event.payload["proposal"])
+        return {}
+
+    def _stored_rows(self, action_id: str) -> list:
+        path = self._config.repo_root / self._config.results_dir / f"{action_id}.json"
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
+    async def _note_nested(self, parent_id: str, payload: dict) -> None:
+        stream = f"action:{parent_id}"
+        with contextlib.suppress(Exception):
+            await self._ctx.ledger.append(stream, self._event(stream, "nested_call", payload))
 
     def _prune_results(self, directory: Path) -> None:
         files = sorted(directory.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
