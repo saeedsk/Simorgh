@@ -198,6 +198,11 @@ class Config:
     compress_tool_results: bool = False
     compress_min_chars: int = 4_000
     compress_rate: float = 0.5
+    # How far a turn that outgrows its purpose's `max_tokens_in` may widen,
+    # when the answering model's own window holds it (`Service._widened`).
+    # 0 or anything at or under a purpose's ceiling: never widen. 200k
+    # tokens on Opus is about $0.80 uncached, $0.04 read from the cache.
+    extend_context_tokens: int = 200_000
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
@@ -238,7 +243,7 @@ class Config:
             "snip_keep_last_segments", "microcompact_trigger_fraction", "collapse_keep_full_segments",
             "collapse_trigger_fraction",
             "availability_poll_seconds", "assembly_request_timeout",
-            "compress_tool_results", "compress_min_chars", "compress_rate",
+            "compress_tool_results", "compress_min_chars", "compress_rate", "extend_context_tokens",
         ):
             if key in raw:
                 kwargs[key] = raw[key]

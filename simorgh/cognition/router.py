@@ -98,17 +98,27 @@ class Router:
         """A new default order (`/model`), taking effect on the next call."""
         self._order = tuple(order)
 
-    def selected_name(self) -> str:
-        """The provider a call would go to right now: first in the
-        configured order that is actually available. Budget exhaustion is
-        not consulted -- that needs an await, and this exists to answer
-        "what is thinking for me", which should not require I/O."""
+    def selected_name(self, order: tuple[str, ...] | None = None) -> str:
+        """The provider a call would go to right now: first in `order` (the
+        configured order by default) that is actually available. Budget
+        exhaustion is not consulted -- that needs an await, and this exists
+        to answer "what is thinking for me", which should not require I/O."""
         now = self._clock.now()
-        for name in self._order:
+        for name in (order or self._order):
             provider = self._by_name.get(name)
             if provider is not None and provider.available() and self._cooldown_until.get(name, 0.0) <= now:
                 return name
         return self._floor.name
+
+    def context_window(self, name: str) -> int:
+        """`name`'s declared context window in tokens; 0 when unknown."""
+        return capabilities_of(self._by_name.get(name)).context_window
+
+    def estimate_cost(self, name: str, tokens_in: int, tokens_out: int) -> float:
+        """What one call of this size would cost on `name`, uncached; 0
+        when it has no budget (the floor)."""
+        budget = self._budgets.get(name)
+        return budget.estimate_cost(tokens_in, tokens_out) if budget is not None else 0.0
 
     def is_native(self, name: str) -> bool:
         """Whether `name` is handed tool specs (`tool_dialect = "native"`)."""

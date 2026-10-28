@@ -15,6 +15,7 @@ from pathlib import Path
 
 from simorgh.bus.factory import make_backend, make_client
 from simorgh.bus.config import Config as BusConfig
+from simorgh.cognition.api import Capabilities
 from simorgh.cognition.config import Config as CognitionConfig, ProviderConfig
 from simorgh.cognition.service import Service
 from simorgh.contracts import topics
@@ -594,3 +595,42 @@ class ADeliberateRouteIsNotAMove(CognitionServiceTestCase):
         self.assertEqual(strong.calls, 2)
         self.assertEqual(default.calls, 2)
         self.assertEqual(notices, [])
+
+
+class _WideProvider(_FakeProvider):
+    capabilities = Capabilities(context_window=1_000_000)
+
+
+def _wide_think(budget_in: int) -> Message:
+    return Message.new(topics.COGNITION_THINK, source="test", payload={
+        "purpose": "chat", "messages": [{"role": "user", "content": "x" * 4_000}],
+        "budget": {"max_tokens_in": budget_in, "max_tokens": 60, "max_cost_usd": 0.1},
+        "require_real_provider": False, "allow_summarize": False,
+    })
+
+
+class ContextWidensToTheModel(unittest.TestCase):
+    def test_extend_context_tokens_is_read_from_the_file(self):
+        self.assertEqual(CognitionConfig.from_mapping({"extend_context_tokens": 50_000}).extend_context_tokens, 50_000)
+
+
+class ATurnWidensToTheAnsweringModel(CognitionServiceTestCase):
+    """A turn larger than its purpose's input ceiling is answered by a
+    model whose own window holds it, not refused (live 2026-10-27: an
+    unsubscribe turn on Opus, 1M context, died at 26k against chat's 12k)."""
+
+    async def test_a_wide_model_answers_a_turn_over_the_purpose_ceiling(self):
+        config = CognitionConfig(provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+                                 collapse_keep_full_segments=1)
+        await self._make(providers=[_WideProvider()], config=config)
+        reply = await self.bus.request(_wide_think(60), timeout=5.0)
+        self.assertTrue(reply.payload.get("ok", True), reply.payload)
+        self.assertEqual(reply.payload["provider"], "fake_llm")
+
+    async def test_widening_switched_off_keeps_the_ceiling(self):
+        config = CognitionConfig(provider_order=("fake_llm", "floor"), assembly_request_timeout=0.05,
+                                 collapse_keep_full_segments=1, extend_context_tokens=0)
+        await self._make(providers=[_WideProvider()], config=config)
+        reply = await self.bus.request(_wide_think(60), timeout=5.0)
+        self.assertEqual(reply.payload["error"]["code"], "context_too_large")
+

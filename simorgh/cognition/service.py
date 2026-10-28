@@ -191,6 +191,10 @@ class DeltaGate:
                 self._line, self._line_is_prose = "", False
 
 
+def _need_tokens(messages: list[dict], protected_tokens: int) -> int:
+    return protected_tokens + sum(estimate_tokens(str(m.get("content") or "")) for m in messages)
+
+
 def _with_turn_note(messages: list[dict], note: str) -> list[dict]:
     """`messages` with `note` at the head of the latest user turn, or as a
     user turn of its own when the transcript ends on anything else."""
@@ -610,6 +614,18 @@ class Service:
             )
             protected = [b for b in assembled.blocks if b.protected]
             protected_tokens = sum(b.tokens for b in protected)
+
+            # A per-purpose route, or the strong route when the caller escalates,
+            # tried before the default order (design section 7).
+            # A named tier takes its own route when there is one (`routes.farsi`
+            # for a Farsi turn, 2026-09-28), else the strong route: asking for
+            # a tier never lands lower than asking for "strong" did.
+            tier = str(payload.get("tier") or "")
+            strong = bool(tier)
+            route = ((self._config.routes.get(tier) or self._config.routes.get("strong")) if tier else None) \
+                or self._config.routes.get(purpose.value)
+            order = tuple(dict.fromkeys(tuple(route) + tuple(self._config.provider_order))) if route else None
+            budget, order = self._widened(budget, order, source_messages, protected_tokens, message.trace_id)
             if protected_tokens > budget.max_tokens_in:
                 await self._error_reply(message, "context_too_large", "protected blocks alone exceed the budget")
                 return
@@ -658,16 +674,6 @@ class Service:
                 think_messages.append({"role": "user", "content": ""})  # never call complete() with zero messages
             native_messages = _typed_transcript(protected_text, messages, compacted)
 
-            # A per-purpose route, or the strong route when the caller escalates,
-            # tried before the default order (design section 7).
-            # A named tier takes its own route when there is one (`routes.farsi`
-            # for a Farsi turn, 2026-09-28), else the strong route: asking for
-            # a tier never lands lower than asking for "strong" did.
-            tier = str(payload.get("tier") or "")
-            strong = bool(tier)
-            route = ((self._config.routes.get(tier) or self._config.routes.get("strong")) if tier else None) \
-                or self._config.routes.get(purpose.value)
-            order = tuple(dict.fromkeys(tuple(route) + tuple(self._config.provider_order))) if route else None
             if strong and route and self._ctx is not None:
                 self._ctx.logger.info("cognition.escalated", purpose=purpose.value, route=list(route),
                                       reason=str(payload.get("tier_reason") or ""))
@@ -871,6 +877,35 @@ class Service:
             self._ctx.logger.warning("cognition.model_not_persisted", detail=repr(exc))
             return ""
         return str(path)
+
+    def _widened(self, budget: Budget, order: tuple[str, ...] | None, messages: list[dict],
+                 protected_tokens: int, trace_id: str) -> tuple[Budget, tuple[str, ...] | None]:
+        """The purpose's input ceiling is a working size, not a wall: a turn
+        that does not fit it, answered by a model whose own window does,
+        gets that model's room (up to `extend_context_tokens`), a per-call
+        cost cap that pays for it, and an order of only the providers that
+        can hold it. Chat's 12k was written for 32k-context models; with
+        Opus (1M) answering, an unsubscribe turn died at 26k as
+        `context_too_large` (live 2026-10-27). The provider's daily cap
+        still bounds the total."""
+        ceiling = self._config.extend_context_tokens
+        need = _need_tokens(messages, protected_tokens)
+        if ceiling <= budget.max_tokens_in or need <= budget.max_tokens_in:
+            return budget, order
+        names = tuple(order) if order else tuple(self._config.provider_order)
+        lead = self._router.selected_name(names)
+        window = self._router.context_window(lead)
+        limit = min(ceiling, window - budget.max_tokens_out)
+        if limit <= budget.max_tokens_in:
+            return budget, order
+        fits = tuple(n for n in names if self._router.context_window(n) - budget.max_tokens_out >= min(need, limit))
+        cost = self._router.estimate_cost(lead, min(need, limit), budget.max_tokens_out)
+        widened = dataclasses.replace(budget, max_tokens_in=limit,
+                                      max_cost_usd=max(budget.max_cost_usd, round(cost * 1.25, 4)))
+        if self._ctx is not None:
+            self._ctx.logger.info("cognition.context_widened", trace_id=trace_id, provider=lead, need=need,
+                                  limit=limit, was=budget.max_tokens_in, max_cost_usd=widened.max_cost_usd)
+        return widened, fits
 
     async def _on_model_request(self, message: Message) -> None:
         """`/model` (2026-10-27): list the providers, or move one to the
