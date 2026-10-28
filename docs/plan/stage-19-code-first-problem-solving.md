@@ -75,6 +75,24 @@ The criteria JSON gains `"approach"` and `"why"`.
 
 The panel updates live from the `crew.*` topics and the budget events. A key or command toggles it and focuses a member to read its full output. A narrow terminal keeps today's inline tree. *Accept:* a render test of three members at 160 columns, a narrow fallback at 90, a live update from a progress event, and the toggle.
 
+7b. **Persistence guardrails.** The creator, 2026-10-28: "I have not observed Sim retry; it just ignores, bails out and sits idle ... I expect a higher bar on agentic guardrails". The ledger agrees. On `task:6b0c6c98`, six voice steps went:
+- a capped search;
+- an off-task grep of Sim's own tests;
+- the identical search again;
+- a shell run that printed nothing, counted `ok`;
+- a stop-hook bounce;
+- a give-up answer ("I can start that if you say so").
+
+Nothing resumed the job. The retries that exist (a transient provider error retried once, 3 nudges for a malformed call) are plumbing, not persistence. Build these, each named in `ablate`:
+- (a) **No identical retry:** the same tool with the same args in a turn is not run; Sim is told to change strategy.
+- (b) **Empty success is not evidence:** an `ok` with no output or no rows is not counted as evidence.
+- (c) **Replan after a failure, a cap or a `below_bar`:** the strategies tried are listed for the model, and two distinct ones are required before `blocked`.
+- (d) **Running out of steps or time with criteria unmet continues the job in the background, never as a give-up.**
+- (e) **Open jobs** (`orchestration:open_jobs`) are resumed after a restart or by a heartbeat, or reported once as blocked.
+- (f) **An off-task step is flagged early.**
+
+*Accept:* a replay of that six-step trajectory ends in a background continuation and never repeats the search.
+
 ### Evals (lock `evals`)
 
 8. **Code-first suite.** Scenarios in at least four domains with fakes big enough that a page cannot answer them:
