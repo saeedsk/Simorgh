@@ -28,9 +28,3 @@ by = "claude-paid"
 task = "tool awareness: catalogue index, tool_more over the registry, capability-claim nudge"
 since = "2026-10-28T05:09:51+00:00"
 until = "2026-10-28T13:09:51+00:00"
-
-[locks.voice]
-by = "claude-paid"
-task = "Sim's own aside inside a turn does not take the turn"
-since = "2026-10-28T07:33:57+00:00"
-until = "2026-10-28T15:33:57+00:00"
