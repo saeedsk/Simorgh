@@ -318,7 +318,9 @@ class Config:
 
 
 #: The guardrails `[orchestration] ablate` may switch off.
-ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps", "routing"})
+ABLATABLE = frozenset({"scaffold", "verify", "revisions", "recovery", "nudge", "steps", "routing",
+                       # Stage 19 item 7b: a job whose bar is unmet goes on in the background.
+                       "continue"})
 #: `[orchestration] tool_routing` (stage 17); `routing.MODES`, duplicated so
 #: this module stays free of imports.
 ROUTING_MODES = ("off", "shadow", "on")

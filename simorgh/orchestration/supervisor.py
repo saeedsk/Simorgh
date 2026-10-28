@@ -534,6 +534,49 @@ def order_message(review: dict) -> str:
               "be done, your answer says which, why, and the evidence.")
 
 
+# -- continuation (stage 19 item 7b(d)) ----------------------------------------
+#
+# The creator, 2026-10-28, by voice, after a six-step turn ended on "Say
+# continue and I'll run the weekly searches": "You should do it
+# automatically. You should not ask me. I already asked you." A turn that
+# runs out of steps or time with its criteria unmet is not an ending: the
+# job goes on as one background member, and the person is told in a line.
+
+#: What the person hears when a job goes on in the background.
+CONTINUES_ACK = "This needs more than one turn, so I'm carrying on with it in the background; I'll tell you when it's done."
+
+
+def strategies_tried(steps, *, limit: int = 8) -> list[str]:
+    """What this turn has already tried, one line per tool call, newest
+    last: the continuation must not repeat them as they were."""
+    out = []
+    for step in steps:
+        tool = getattr(step, "tool", None)
+        if not tool:
+            continue
+        ok = getattr(step, "ok", None)
+        mark = "ok" if ok else ("failed" if ok is False else "?")
+        summary = " ".join(str(getattr(step, "summary", "") or "").split())
+        out.append(f"{tool} [{mark}]: {summary[:120]}")
+    return out[-limit:]
+
+
+def continuation_brief(request: str, criteria, *, why: str, steps=(), refs=(), approach: str = "") -> str:
+    """The background member's brief: the job, its bar, what was tried, and
+    the results in hand -- everything the turn knew, so it carries on
+    rather than starting again."""
+    done = "; ".join(short(c) for c in criteria)
+    tried = "\n".join(f"- {s}" for s in strategies_tried(steps))
+    held = ", ".join(r for r in list(refs)[-6:] if r)
+    return (f"Carry on with this job; the turn that started it {why}. The job: {request[:600]}"
+            + (f"\nDone when: {done}." if done else "")
+            + (f"\nAlready tried (do not repeat a call as it was; change the strategy):\n{tried}" if tried else "")
+            + (f"\nResults in hand, readable in full with {ANALYSIS_TOOL} inputs=[...]: {held}." if held else "")
+            + (_METHOD_HINT if approach in ("compute", *SPLIT_APPROACHES) else "")
+            + "\nFinish the whole job; never ask the person whether to go on. End with the result for each "
+              "criterion and its evidence.")
+
+
 # -- lessons (stage 19 item 6, `[orchestration] supervisor_lessons`) ---------
 #
 # A lesson is written when a review was below the bar and the next review
@@ -613,7 +656,7 @@ def lessons_text(lessons) -> str:
 __all__ = ["ANALYSIS_TOOL", "APPROACHES", "APPROACH_PROMPT", "Bar", "CRITERIA_INTRO", "CRITERIA_PROMPT",
            "LESSONS_STREAM", "LESSON_EVENT", "LESSON_HIT_EVENT", "MAX_CRITERIA", "MAX_LESSONS", "MAX_SPLIT",
            "PART_AGENT", "PRINCIPLES", "REVIEW_METHOD", "REVIEW_PROMPT", "SPLIT_APPROACHES", "VERDICTS",
-           "analysis_hint", "approach_step", "criteria_message", "criteria_prompt", "effective_approach",
+           "CONTINUES_ACK", "analysis_hint", "approach_step", "continuation_brief", "strategies_tried", "criteria_message", "criteria_prompt", "effective_approach",
            "fold_lessons", "implied_criteria", "lessons_text", "make_lesson", "method_check", "method_summary",
            "order_message", "parse_criteria", "parse_review", "part_brief", "principles_text", "recall_lessons",
            "review_prompt", "short", "trajectory", "whole_brief"]

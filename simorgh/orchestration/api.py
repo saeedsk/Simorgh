@@ -341,6 +341,14 @@ class Session:
     #: A below-the-bar review waiting for the next review to meet the bar,
     #: when it becomes a lesson (stage 19 item 6), with the step count then.
     lesson_pending: dict | None = None
+    #: The supervisor's newest verdict this turn ("" before any), the
+    #: background member a job that ran out of steps or time continues as
+    #: ("" when none: at most one continuation per job), and how many tool
+    #: steps had run when a reply asking permission to go on was last sent
+    #: back (stage 19 item 7b).
+    last_verdict: str = ""
+    continued_as: str = ""
+    go_on_nudged_at: int = -1
     #: Which embedder routed the turn: `memory:<model>/<dimension>`
     #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
     #: `injected`; and, when Memory's was wanted and the turn went

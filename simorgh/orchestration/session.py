@@ -1421,6 +1421,11 @@ class SessionRunner:
                 step = Step(session.next_step_no(), "act", f"{BUDGET_REASON}: {spent}", ok=False)
                 session.record(step)
                 await self._record_step(session, step)
+                # Stage 19 item 7b(d): a job with its bar unmet goes on in
+                # the background rather than ending here.
+                continued = await self._continue_unmet(session, why=f"ran out of its budget ({spent})")
+                if continued is not None:
+                    return continued
                 return Outcome("blocked", reason=f"{BUDGET_REASON}: {spent}")
             # Cooperative, and checked between steps rather than during
             # one: a cancel must not tear down a provider call or leave a
@@ -1705,7 +1710,11 @@ class SessionRunner:
                 # looking things up. "Step budget exhausted" is not an
                 # answer -- it was spoken aloud to the creator, 2026-09-13,
                 # about a failed test -- so one more call, with no tools,
-                # says what was found.
+                # says what was found. Unless the job's bar is unmet: then
+                # it goes on in the background (stage 19 item 7b(d)).
+                continued = await self._continue_unmet(session, why="ran out of steps")
+                if continued is not None:
+                    return continued
                 answer = await self._wrap_up(session)
                 if answer:
                     step = Step(step_no, "act", "answered from what was found; the lookups had used the budget", ok=True)
@@ -1834,6 +1843,27 @@ class SessionRunner:
             # and the Leadership Principles before its answer goes out;
             # below the bar with steps left, its feedback goes back as an
             # order -- again only after more tools ran (2026-10-28).
+            if "continue" not in self._ablate and self._unmet(session):
+                # Stage 19 item 7b(d): a reply that asks permission for work
+                # the person already asked for is never the answer while the
+                # bar is unmet. Sent back once; asked again with nothing run
+                # since, or on the last step, the job goes on in the
+                # background. The last step's answer is reviewed too: below
+                # the bar with no step left, it goes on in the background.
+                asked = stophook.asks_to_continue(text)
+                if asked and not is_last and ran > session.go_on_nudged_at:
+                    session.go_on_nudged_at = ran
+                    step = Step(step_no, "act", f"rejected a reply that asks to go on: \"{asked[:80]}\"", ok=False)
+                    session.record(step)
+                    await self._record_step(session, step)
+                    session.messages.append({"role": "assistant", "content": text})
+                    session.messages.append({"role": "user", "content": stophook.go_on_reply(asked)})
+                    continue
+                if asked or (is_last and await self._below_bar(session, step_no, text, last=True)):
+                    continued = await self._continue_unmet(
+                        session, why="ran out of steps" if is_last else "stopped to ask permission")
+                    if continued is not None:
+                        return continued
             if not is_last and await self._below_bar(session, step_no, text):
                 continue
             # The capability check (`[orchestration] tool_index`): a chat
@@ -4457,7 +4487,65 @@ class SessionRunner:
                                      "early": True})
         if self._lessons_on:
             session.lesson_pending = {"review": dict(review), "at": len(session.steps)}
+        session.last_verdict = "below_bar"
         session.messages.append({"role": "user", "content": supervisor.order_message(review)})
+
+    # -- continuation (stage 19 item 7b(d), `ablate = ["continue"]` off) ------
+
+    def _unmet(self, session: Session) -> bool:
+        """A job whose bar is set and not met: not judged met, not shown to
+        be blocked, and not already continuing in the background."""
+        return (self._supervisor and bool(session.acceptance) and session.profile.scaffold == "chat"
+                and not session.depth and not session.crew_member and not session.continued_as
+                and session.last_verdict not in ("meets_bar", "blocked")
+                and not (session.approach == "background" and any(
+                    getattr(s, "tool", None) == "spawn" and getattr(s, "ok", None) for s in session.steps)))
+
+    async def _continue_unmet(self, session: Session, *, why: str) -> Outcome | None:
+        """The turn `why` ("ran out of steps", "ran out of time", "stopped to
+        ask permission") with its criteria unmet:
+        the job goes on as one background member that carries the bar, what
+        was tried and the refs in hand, and the person is told so in one
+        line. None when it cannot (switched off, met, nobody to tell)."""
+        if "continue" in self._ablate or not self._unmet(session):
+            return None
+        if session.channel not in _NOTICE_CHANNELS and session.speaker.strip().lower() in ("", "unknown"):
+            # Its report would have nobody to go to (the rule `_spawn` holds).
+            return None
+        from . import profiles as _agents
+        from . import supervisor
+
+        agent = _agents.AGENTS.get(supervisor.PART_AGENT)
+        if agent is None:
+            return None
+        job = supervisor.continuation_brief(session.user_text, session.acceptance, why=why, steps=session.steps,
+                                            refs=session.result_refs, approach=session.approach_inner)
+        try:
+            crew = await self._crew_for(session)
+            carved = crew.carve(session.task_id, MemberBudget(steps=max(3, self._delegate_max_steps)))
+            brief = self._brief(session, job, crew=True)
+            member = await crew.admit(
+                parent=session.task_id, agent=agent.name, brief=brief, depth=session.depth + 1, budget=carved,
+                report_policy="end", isolation="fresh", writer=self._writes(agent),
+                brief_ref=await self._brief_ref(brief), background=True,
+                requester=session.speaker, requester_channel=session.channel)
+        except (CrewRefused, ValueError):
+            return None
+        member.job = job
+        child = self._member_session(session, member, agent, job=job)
+        self._start_member(crew, member, child, brief, session)
+        session.continued_as = member.handle
+        step = Step(session.next_step_no(), "act",
+                    f"supervisor: the turn {why} with the bar unmet -- continues in the background as {member.handle}",
+                    ok=True)
+        session.record(step)
+        await self._record_step(session, step)
+        self._telemetry.event("orchestration.supervisor", trace_id=session.trace or session.task_id,
+                              span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
+                              attrs={"verdict": "continued", "why": why, "handle": member.handle,
+                                     "criteria": len(session.acceptance), "approach": session.approach})
+        session.messages.append({"role": "assistant", "content": supervisor.CONTINUES_ACK})
+        return Outcome("completed", result_summary=supervisor.CONTINUES_ACK)
 
     # -- lessons (stage 19 item 6, `[orchestration] supervisor_lessons`) ------
 
@@ -4517,14 +4605,17 @@ class SessionRunner:
         session.record(step)
         await self._record_step(session, step)
 
-    async def _below_bar(self, session: Session, step_no: int, text: str) -> bool:
+    async def _below_bar(self, session: Session, step_no: int, text: str, *, last: bool = False) -> bool:
         """True when the answer was held back: the supervisor, reading what
-        the tools returned, says it is below the bar and work can go on."""
+        the tools returned, says it is below the bar and work can go on.
+        `last`: the turn has no step left, so below the bar is only said
+        (True), and an answer already judged since the last tool keeps
+        that verdict (stage 19 item 7b)."""
         if not self._supervisor or not session.acceptance or session.profile.scaffold != "chat":
             return False
         ran = sum(1 for s in session.steps if getattr(s, "tool", None))
         if ran <= session.goal_checked_at:
-            return False
+            return last and session.last_verdict == "below_bar"
         session.goal_checked_at = ran
         from . import supervisor
 
@@ -4569,10 +4660,15 @@ class SessionRunner:
             elif verdict == "meets_bar" and session.lesson_pending:
                 pending, session.lesson_pending = session.lesson_pending, None
                 await self._write_lesson(session, pending["review"], pending["at"])
+        session.last_verdict = verdict
         if verdict != "below_bar":
             # Met; or cannot be met from here and the answer says so; or
             # the review could not be read: the answer goes out.
             return False
+        if last:
+            # No step is left to follow an order: the caller continues the
+            # job in the background instead (`_continue_unmet`).
+            return True
         session.messages.append({"role": "assistant", "content": text})
         session.messages.append({"role": "user", "content": supervisor.order_message(review)})
         return True

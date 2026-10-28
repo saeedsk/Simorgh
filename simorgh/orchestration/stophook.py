@@ -350,6 +350,36 @@ def announced_next_step(text: str, session) -> str:
     return ""
 
 
+#: Permission asked for more of the work (stage 19 item 7b): "Say continue
+#: and I'll run the weekly searches", "want me to keep going?", "I can do
+#: the rest if you like". Live 2026-10-28, by voice, after the person had
+#: asked for the whole job: "You should do it automatically. You should not
+#: ask me. I already asked you."
+_ASKS_TO_GO_ON = re.compile(
+    r"\b(?:say|tell me|just say)\s+(?:\"|')?(?:continue|go(?: ahead)?|yes|the word|more|next)\b"
+    r"|\bwant me to\b|\bshall i\b|\bshould i (?:go on|go ahead|keep|continue|carry on|start|run|do|finish|proceed)\b"
+    r"|\bwould you like me to\b|\bdo you want me to\b|\blet me know if you(?:'d| would)? (?:like|want)\b"
+    r"|\bif you (?:say so|like|want|'d like|would like)\b[^.!?]{0,60}\bi (?:can|could|will|'ll)\b"
+    r"|\bi (?:can|could|will|'ll) [^.!?]{0,80}\bif you (?:say so|like|want|'d like|would like|tell me)\b",
+    re.IGNORECASE)
+
+
+def asks_to_continue(text: str) -> str:
+    """The sentence of a reply that asks the person's permission to do
+    more of the work -- or "". Whether that work was already asked for is
+    the caller's to know (a job with success criteria still unmet)."""
+    for sentence in re.split(r"(?<=[.!?])\s+", (text or "").strip()):
+        if _ASKS_TO_GO_ON.search(sentence):
+            return sentence.strip()
+    return ""
+
+
+def go_on_reply(quote: str) -> str:
+    return (f"You asked \"{quote}\", but the person already asked for the whole job, and it is not done: do "
+            "not ask permission for it. Take the next step now with a tool call -- a different strategy if "
+            "the last one fell short -- and keep going until every criterion is met.")
+
+
 def unfinished_reply(quote: str) -> str:
     return (f"You said \"{quote}\", but your turn ends the moment you answer without a tool call: nothing "
             "runs after it and nothing will bring you back to it. Do that step now -- write the tool call -- "
@@ -420,5 +450,5 @@ def check(text: str, session) -> Bounce | None:
 
 
 __all__ = ["Bounce", "check", "claimed_effect", "claimed_to_commit", "claimed_to_note_a_pronunciation",
-           "claimed_to_start_work", "announced_next_step", "unfinished_reply",
+           "claimed_to_start_work", "announced_next_step", "unfinished_reply", "asks_to_continue", "go_on_reply",
            "claimed_tv_act", "promised_behaviour", "wanted_tv_act"]
