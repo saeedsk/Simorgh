@@ -40,15 +40,3 @@ by = "claude-paid"
 task = "a cut tool result keeps its closing notes"
 since = "2026-10-28T08:08:28+00:00"
 until = "2026-10-28T16:08:28+00:00"
-
-[locks.simloader]
-by = "claude-mini"
-task = "PATH for tools, bandit, voice stack on first boot"
-since = "2026-10-29T08:58:38+00:00"
-until = "2026-10-29T16:58:38+00:00"
-
-[locks.voice]
-by = "claude-mini"
-task = "py3.13+: audioop is gone; stdlib rms"
-since = "2026-10-29T08:54:01+00:00"
-until = "2026-10-29T16:54:01+00:00"
