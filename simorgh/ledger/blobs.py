@@ -66,8 +66,10 @@ class InMemoryBlobStore:
 class LocalBlobStore:
     """`<root>/<aa>/<sha256>` plus a `.meta` sidecar (content type, size).
     Writes are atomic (tmp -> fsync -> os.replace) so a crash mid-write
-    never leaves a partial blob under its final name; a re-put of
-    existing content is a no-op."""
+    never leaves a partial blob under its final name; the `.meta` sidecar
+    is written (atomically) before the blob's final `os.replace`, so a
+    crash never leaves a blob without its metadata; a re-put of existing
+    content is a no-op."""
 
     def __init__(self, root: Path, *, fsync: bool = True) -> None:
         self.root = Path(root)
@@ -79,7 +81,7 @@ class LocalBlobStore:
     def put(self, data: bytes, *, content_type: str) -> str:
         digest = sha256_hex(data)
         path = self._path(digest)
-        if not path.exists():
+        if not path.exists() or not path.with_name(path.name + ".meta").exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(path.name + ".tmp")
             with open(tmp, "wb") as fh:
@@ -87,9 +89,20 @@ class LocalBlobStore:
                 fh.flush()
                 if self._fsync:
                     os.fsync(fh.fileno())
-            os.replace(tmp, path)
+            # Write the `.meta` sidecar (itself atomically: tmp -> fsync ->
+            # os.replace) BEFORE the blob lands under its final name, so a
+            # crash can never leave a blob without its metadata. (If the
+            # crash comes first, the leftover blob is orphaned rather than
+            # metadata-less.)
             meta = path.with_name(path.name + ".meta")
-            meta.write_text(json.dumps({"content_type": content_type, "size": len(data)}), encoding="utf-8")
+            meta_tmp = path.with_name(path.name + ".meta.tmp")
+            with open(meta_tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"content_type": content_type, "size": len(data)}))
+                fh.flush()
+                if self._fsync:
+                    os.fsync(fh.fileno())
+            os.replace(meta_tmp, meta)
+            os.replace(tmp, path)
         return f"blob:{digest}"
 
     def get(self, ref: str) -> bytes:
