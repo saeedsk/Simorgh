@@ -196,6 +196,7 @@ class Service:
         )
         self._cognition = BusCognitionCaller(
             ctx.bus, ctx.clock, source=ctx.source, timeout=self.config.think_timeout_s,
+            telemetry=getattr(ctx, "telemetry", None),
         )
         if self.config.project_crews:
             self._project_crews = ProjectCrews(
