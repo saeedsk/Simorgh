@@ -67,7 +67,11 @@ class MusicApp:
         # `st` is a reserved word to the Music dictionary ("Expected
         # expression but found st"); plain names and explicit `as text`
         # coercions, and a `player position` that may be missing value.
+        # Fields are joined with the unit separator (ASCII 31), which
+        # cannot appear in track title/artist/album text: a "|" in
+        # metadata used to shift every field and corrupt the parse.
         script = (
+            'set d to (ASCII character 31)\n'
             'set playerState to (player state as text)\n'
             'set vol to sound volume\n'
             'set pos to ""\n'
@@ -77,12 +81,12 @@ class MusicApp:
             'set info to ""\n'
             'try\n'
             '  set t to current track\n'
-            '  set info to (name of t) & "|" & (artist of t) & "|" & (album of t) & "|" & (duration of t as text)\n'
+            '  set info to (name of t) & d & (artist of t) & d & (album of t) & d & (duration of t as text)\n'
             'end try\n'
-            'return playerState & "|" & (vol as text) & "|" & pos & "|" & info'
+            'return playerState & d & (vol as text) & d & pos & d & info'
         )
         raw = await self.tell(script)
-        parts = raw.split("|")
+        parts = raw.split("\x1f")
         state = {"state": parts[0] if parts else "unknown", "volume": int(float(parts[1])) if len(parts) > 1 and parts[1] else None,
                  "position": float(parts[2]) if len(parts) > 2 and parts[2] not in ("", "missing value") else None}
         if len(parts) >= 7:
