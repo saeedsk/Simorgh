@@ -41,12 +41,6 @@ task = "a cut tool result keeps its closing notes"
 since = "2026-10-28T08:08:28+00:00"
 until = "2026-10-28T16:08:28+00:00"
 
-[locks.simloader]
-by = "claude-mini"
-task = "first-boot provisioning: packages, certificates, tools, secrets file"
-since = "2026-10-29T07:34:29+00:00"
-until = "2026-10-29T15:34:29+00:00"
-
 [locks.voice]
 by = "claude-paid"
 task = "stage 19: barge-in interrupts and steers the running task"
