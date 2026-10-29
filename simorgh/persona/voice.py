@@ -54,6 +54,10 @@ class VoiceComposer:
         phrase = mood_phrase(state)
         mood_sentence = f"Right now you're feeling {phrase}."
         room = max_chars - len(mood_sentence) - 1  # -1 for the joining space
-        identity = self._identity_summary if room >= len(self._identity_summary) else self._identity_summary[:max(0, room)]
+        identity = self._identity_summary
+        if room < len(identity):
+            cut = identity[: max(0, room)]
+            space = cut.rfind(" ")
+            identity = cut[:space] if space > 0 else cut
         block = f"{identity} {mood_sentence}".strip() if identity else mood_sentence
         return Voice(style_block=block[:max_chars], mood_phrase=phrase, register=register)
