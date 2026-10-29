@@ -668,6 +668,42 @@ class SomethingWorthTelling(unittest.IsolatedAsyncioTestCase):
         await service._on_idle(None)
         self.assertEqual(service.published, [], "a queue of these is a feed again")
 
+    async def test_day_rollover_clears_stale_seeking_and_asked_about(self):
+        """The `_sought_today`/`_delivered_today` reset on day rollover
+        used to leave `_seeking` and `_asked_about` holding yesterday's
+        person mappings: a task still marked in flight blocked all
+        research the next day, and a check-in from yesterday suppressed
+        today's. They are cleared with the counters."""
+        import types
+
+        from simorgh.initiative.api import Situation
+
+        service = self._service(people=[self._person()], present=["Aran"])
+        # stale leftovers from "yesterday"
+        service._seeking = {"t1": "Aran"}
+        service._asked_about = {"Aran": 100_000.0 - 3600.0}
+        clock = types.SimpleNamespace(now=lambda: 100_000.0 + 86_400)
+        service._ctx.clock = clock
+        async def _situation():
+            return Situation(people={"Aran": "kitchen"})
+        service._situation = _situation
+        await service._on_idle(None)
+        self.assertEqual(service._day, int((100_000.0 + 86_400) // 86_400))
+        self.assertNotIn("t1", service._seeking,
+                         "yesterday's lookup must not block today's")
+        self.assertEqual(service._asked_about, {},
+                         "yesterday's check-in must not suppress today's")
+        self.assertEqual(service._delivered_today, 0)
+        self.assertEqual(service._sought_today, 1,
+                         "the counters were reset to 0 and today's seek counted afresh")
+        # and, unblocked, today's research actually went out
+        self.assertEqual(len(service.published), 1)
+        self.assertEqual(service.published[0].payload["kind"], "research")
+        self.assertIn("Aran", service._seeking.values(),
+                      "the new day's seek is tracked, not yesterday's")
+        self.assertTrue(all(k != "t1" for k in service._seeking),
+                        "yesterday's task id is gone, only today's remains")
+
     async def test_what_comes_back_is_offered_not_said(self):
         from simorgh.contracts.envelope import Message
         from simorgh.contracts import topics
