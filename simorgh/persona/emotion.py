@@ -53,7 +53,10 @@ def react(text: str, *, lexicon_weight: float = 0.15, exclamation_arousal: float
     valence_delta = 0.0
     arousal_delta = lexicon_weight * sum(1 for t in tokens if t in _HIGH_AROUSAL_WORDS)
     for i, token in enumerate(tokens):
-        negated = i > 0 and _is_negator(tokens[i - 1])
+        negated = any(
+            _is_negator(tokens[j])
+            for j in range(max(0, i - 2), i)
+        )
         if token in _POSITIVE_WORDS:
             valence_delta += -lexicon_weight if negated else lexicon_weight
         elif token in _NEGATIVE_WORDS:
