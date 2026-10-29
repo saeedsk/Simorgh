@@ -40,3 +40,15 @@ by = "claude-paid"
 task = "a cut tool result keeps its closing notes"
 since = "2026-10-28T08:08:28+00:00"
 until = "2026-10-28T16:08:28+00:00"
+
+[locks.simloader]
+by = "claude-mini"
+task = "reprovision when voice_setup changes"
+since = "2026-10-29T09:07:58+00:00"
+until = "2026-10-29T17:07:58+00:00"
+
+[locks.tools]
+by = "claude-mini"
+task = "voice_setup on Python 3.14"
+since = "2026-10-29T09:07:58+00:00"
+until = "2026-10-29T17:07:58+00:00"
