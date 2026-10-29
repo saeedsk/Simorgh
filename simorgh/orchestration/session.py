@@ -2504,7 +2504,8 @@ class SessionRunner:
             session.last_think_error = str(error.get("code") or "")
             return None
         session.last_think_error = ""
-        session.context_pressure = pressure_mod.pressure(reply.payload)
+        session.context_pressure = pressure_mod.pressure(reply.payload,
+                                                        previous=session.context_pressure)
         return reply
 
     def _skills(self) -> list:
