@@ -22,7 +22,10 @@ def _ctx() -> ToolContext:
 class _Osascript:
     """Records every script; answers state queries with a canned line."""
 
-    def __init__(self, state="playing|42|12.5|Blue Train|John Coltrane|Blue Train|643.0", fail_on=None):
+    # The real AppleScript joins fields with the unit separator (ASCII
+    # 31), which cannot appear in track metadata; a "|" in a title
+    # must no longer shift the fields (regression: test_pipe_in_metadata).
+    def __init__(self, state="\x1f".join(["playing", "42", "12.5", "Blue Train", "John Coltrane", "Blue Train", "643.0"]), fail_on=None):
         self.scripts: list[str] = []
         self.state = state
         self.fail_on = fail_on
@@ -54,6 +57,18 @@ class MusicAppTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok, result.error)
         self.assertIn("Blue Train -- John Coltrane", result.output)
         self.assertEqual(result.metadata["volume"], 42)
+
+    async def test_pipe_in_metadata_does_not_shift_fields(self):
+        # Regression: a "|" in a track's title/album used to shift every
+        # field; the unit separator (ASCII 31) the script now uses cannot
+        # appear in metadata, so the parse stays correct.
+        osa = _Osascript(state="\x1f".join(["playing", "42", "12.5",
+                                            "Blue | Train", "John | Coltrane", "Blue|Train", "643.0"]))
+        now, _, _ = _tools(osa)
+        result = await now.run({}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertIn("Blue | Train -- John | Coltrane", result.output)
+        self.assertEqual(result.metadata["duration"], 643.0)
 
     async def test_transport_ops_send_the_right_verbs(self):
         osa = _Osascript()
