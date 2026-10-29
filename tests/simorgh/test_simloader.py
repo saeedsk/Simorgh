@@ -990,6 +990,7 @@ class ABrandNewMachineSetsItselfUpTestCase(unittest.TestCase):
             mock.patch.dict(os.environ, {"SIMORGH_RUNTIME_DATA_DIR": str(self.data)}),
             mock.patch.object(simloader, "ensure_certificates", return_value=""),
             mock.patch.object(simloader, "ensure_ollama", return_value=([], [], "")),
+            mock.patch.object(simloader, "ensure_voice", return_value=([], [])),
             mock.patch.object(simloader.shutil, "which", return_value="/bin/true"),
         ]
         for patch in patches:
@@ -1175,6 +1176,69 @@ class TheLocalModelArrivesOnItsOwnTestCase(unittest.TestCase):
         os.environ["SIMORGH_LOCAL_MODEL"] = ""
         self.assertEqual(simloader.ensure_ollama(self.repo, dry_run=False, run=self._run), ([], [], ""))
         self.assertEqual(self.calls, [])
+
+
+class WhatTheTerminalDidNotSayTestCase(unittest.TestCase):
+    """2026-10-29, the new Mac: a terminal with no `~/.local/bin` and no
+    `brew shellenv` -- every ClaudeCodeProvider test failed "'claude' not
+    found on PATH" and the gate rolled back; the voice stack refused."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_tool_directories_that_exist_are_appended(self):
+        present, absent = self.root / "bin", self.root / "nowhere"
+        present.mkdir()
+        os.environ["PATH"] = "/usr/bin:/bin"
+        with mock.patch.object(simloader, "TOOL_DIRS", (str(present), str(absent), "/bin")):
+            why = simloader.ensure_path()
+        self.assertEqual(os.environ["PATH"], f"/usr/bin:/bin:{present}")
+        self.assertIn(str(present), why)
+        self.assertNotIn(str(absent), why)
+
+    def test_a_complete_path_is_left_alone(self):
+        os.environ["PATH"] = "/usr/bin:/bin"
+        with mock.patch.object(simloader, "TOOL_DIRS", ("/bin",)):
+            self.assertEqual(simloader.ensure_path(), "")
+        self.assertEqual(os.environ["PATH"], "/usr/bin:/bin")
+
+    def _voice_repo(self) -> Path:
+        (self.root / "tools").mkdir()
+        (self.root / "tools" / "voice_setup.py").write_text("")
+        return self.root
+
+    def test_a_missing_voice_stack_runs_the_setup_tool(self):
+        repo, calls = self._voice_repo(), []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0)
+
+        with mock.patch.object(simloader, "package_installed", return_value=False):
+            self.assertEqual(simloader.ensure_voice(repo, dry_run=False, run=run), (["voice"], []))
+        self.assertEqual(calls[0][1], str(repo / "tools" / "voice_setup.py"))
+        self.assertIn("large-v3-turbo", calls[0])
+
+    def test_a_voice_stack_already_there_is_not_fetched_again(self):
+        repo = self._voice_repo()
+        models = repo / simloader.VOICE_MODEL_DIR
+        models.mkdir(parents=True)
+        (models / f"ggml-{simloader.VOICE_WHISPER}.bin").write_bytes(b"")
+        run = mock.Mock()
+        with mock.patch.object(simloader, "package_installed", return_value=True):
+            self.assertEqual(simloader.ensure_voice(repo, dry_run=False, run=run), ([], []))
+        run.assert_not_called()
+
+    def test_a_failed_voice_setup_is_reported_not_fatal(self):
+        repo = self._voice_repo()
+        with mock.patch.object(simloader, "package_installed", return_value=False):
+            got = simloader.ensure_voice(repo, dry_run=False, run=lambda a, **k: subprocess.CompletedProcess(a, 1))
+        self.assertEqual(got, ([], ["voice"]))
 
 
 class PythonOrgPythonGetsCertificatesTestCase(unittest.TestCase):

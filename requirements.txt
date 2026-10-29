@@ -60,3 +60,9 @@ pytesseract>=0.3
 # four self-hosted providers beside it (ntfy, Gotify, Home Assistant,
 # Matrix) are plain HTTP and need nothing installed at all.
 apprise>=1.9
+
+# Guardian's static analysis of code Sim writes (guardian/rules.py,
+# StaticAnalysisRule). Optional to boot -- without it the rule abstains --
+# but execution's boot probe reports the system degraded, and a new
+# machine without it failed the boot gate (2026-10-29).
+bandit>=1.7

@@ -13,12 +13,14 @@ starts Ollama, pulls the local fallback model (`qwen3.8`, 18 GB; another with
 `SIMORGH_LOCAL_MODEL=<name>`, none with `SIMORGH_LOCAL_MODEL=`) and sets
 `[cognition.providers.ollama] model` unless one is already set, creates
 `~/.simorgh/secrets.toml` owner-only with the common keys commented out,
-and gives the repository a git identity if the machine has none. It runs
+gives the repository a git identity if the machine has none, adds
+`~/.local/bin` and Homebrew's directories to Sim's PATH when the terminal
+lacks them, and runs `tools/voice_setup.py` (about 2.2 GB) unless the voice
+stack is already there (`SIMORGH_NO_VOICE_SETUP=1` skips it). It runs
 once per machine and again when that list changes; a missing required
 package stops the boot instead of rolling back. `python simloader.py
 provision --dry-run` shows what it would do; `SIMORGH_NO_PROVISION=1` or
-`--no-provision` skips it. Homebrew itself, Docker and the voice
-models (`tools/voice_setup.py`) stay manual.
+`--no-provision` skips it. Homebrew itself and Docker stay manual.
 
 ## Talking to Sim (voice, fully local)
 

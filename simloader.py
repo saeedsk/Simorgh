@@ -1354,6 +1354,18 @@ PROVISION_VERSION = 1
 #: names another; empty skips it.
 OLLAMA_MODEL = "qwen3.8"
 OLLAMA_URL = "http://127.0.0.1:11434"
+
+#: Where a Mac keeps the tools Sim looks up by name. A terminal opened
+#: before `~/.zshrc` gained `~/.local/bin`, or one with no `brew
+#: shellenv`, starts Sim without them: on the new Mac every
+#: ClaudeCodeProvider test failed "'claude' not found on PATH", and the
+#: Homebrew tools first boot had just installed were invisible to Sim.
+TOOL_DIRS = ("~/.local/bin", "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin")
+
+#: The whisper.cpp model the voice stack fetches (tools/voice_setup.py's
+#: default; large-v3-turbo hears Farsi).
+VOICE_MODEL_DIR = "workspace/voice/models"
+VOICE_WHISPER = "large-v3-turbo"
 PROVISION_STAMP = "provisioned.json"
 
 SECRETS_TEMPLATE = """\
@@ -1558,6 +1570,41 @@ def ensure_git_identity(repo: Path, *, dry_run: bool) -> str:
     return f"set this repository's git identity to {name} <{email}>"
 
 
+def ensure_path() -> str:
+    """Append the tool directories that exist and PATH lacks, for the
+    gate and for Sim (both inherit this process's environment). Appended,
+    not prepended, so nothing the creator's shell chose is shadowed."""
+    have = os.environ.get("PATH", "").split(os.pathsep)
+    added = [d for d in (str(Path(p).expanduser()) for p in TOOL_DIRS) if d not in have and Path(d).is_dir()]
+    if not added:
+        return ""
+    os.environ["PATH"] = os.pathsep.join([p for p in have if p] + added)
+    return f"added to PATH for Sim: {', '.join(added)}"
+
+
+def voice_ready(repo: Path) -> bool:
+    model_dir = repo / VOICE_MODEL_DIR
+    return package_installed("kokoro-onnx") and (model_dir / f"ggml-{VOICE_WHISPER}.bin").is_file()
+
+
+def ensure_voice(repo: Path, *, dry_run: bool, run=subprocess.run) -> tuple[list[str], list[str]]:
+    """The local voice stack: pinned packages and about 2.2 GB of models,
+    through tools/voice_setup.py (its own progress on screen). `voice on`
+    on the new Mac refused: no recogniser, no Kokoro. Never stops a boot."""
+    script = repo / "tools" / "voice_setup.py"
+    if os.environ.get("SIMORGH_NO_VOICE_SETUP") == "1" or not script.is_file() or voice_ready(repo):
+        return [], []
+    say("the voice stack is not set up (speech models, Kokoro)", "step")
+    if dry_run:
+        return ["voice"], []
+    say("running tools/voice_setup.py (about 2.2 GB; its progress follows)", "note")
+    ok = run([sys.executable, str(script), "--model-dir", str(repo / VOICE_MODEL_DIR),
+              "--whisper", VOICE_WHISPER], cwd=repo).returncode == 0
+    say(f"  voice: {'set up' if ok else 'setup failed; `python tools/voice_setup.py` shows why'}",
+        "ok" if ok else "warn")
+    return (["voice"], []) if ok else ([], ["voice"])
+
+
 def local_model() -> str:
     return os.environ.get("SIMORGH_LOCAL_MODEL", OLLAMA_MODEL).strip()
 
@@ -1687,7 +1734,7 @@ def provision(repo: Path, notes: Path, *, dry_run: bool = False, force: bool = F
     again whenever that list changes -- not on every boot, so a tool
     with no build for this Mac is not retried each time."""
     done: list[str] = []
-    for step in (ensure_secrets_file(repo, dry_run=dry_run), ensure_git_identity(repo, dry_run=dry_run)):
+    for step in (ensure_path(), ensure_secrets_file(repo, dry_run=dry_run), ensure_git_identity(repo, dry_run=dry_run)):
         if step:
             done.append(step)
     stamp = notes / PROVISION_STAMP
@@ -1702,7 +1749,9 @@ def provision(repo: Path, notes: Path, *, dry_run: bool = False, force: bool = F
         installed, failed = install_packages(repo, dry_run=dry_run, run=run)
         tools_installed, tools_failed = install_tools(dry_run=dry_run, run=run)
         model_installed, model_failed, configured = ensure_ollama(repo, dry_run=dry_run, run=run)
-        tools_installed, tools_failed = tools_installed + model_installed, tools_failed + model_failed
+        voice_installed, voice_failed = ensure_voice(repo, dry_run=dry_run, run=run)
+        tools_installed = tools_installed + model_installed + voice_installed
+        tools_failed = tools_failed + model_failed + voice_failed
         if configured:
             done.append(configured)
     else:
