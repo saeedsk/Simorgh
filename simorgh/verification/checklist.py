@@ -17,7 +17,14 @@ from dataclasses import dataclass
 from .api import CheckContext, ThinkReply, VerifyRequest
 from .parsing import parse_final_verdict
 
-_ITEM_LINE = re.compile(r"^\s*\d+[.):]\s*(.+)$")
+#: Numbered items (`1. ...`) and bullet/checkbox items (`- [ ] ...`,
+#: `* ...`, `• ...`). Models writing checklists in markdown use
+#: checkboxes and bullets at least as often as numbers; before this,
+#: those lines were silently dropped and the reviewer saw an empty or
+#: shrunken checklist. A bare bullet marker with no text after it does
+#: not match (`\s+` after the bullet), so `---` rules and stray `-`
+#: lines stay out.
+_ITEM_LINE = re.compile(r"^\s*(?:\d+[.):]\s*|[-*•]\s+)(?:\[[ xX]\]\s*)?(.+)$")
 
 #: A tag the model wrote, in the spellings it actually uses. The old
 #: pattern accepted exactly `[optional]` in lowercase, so `[Optional]`,
