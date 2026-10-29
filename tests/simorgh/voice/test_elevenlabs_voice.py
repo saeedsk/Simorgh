@@ -93,7 +93,9 @@ class ElevenLabsVoice(unittest.TestCase):
             started = time.monotonic()
             await engine.synthesise("سلام")
             return time.monotonic() - started   # the thread left behind is not the caller's wait
-        self.assertLess(asyncio.run(timed()), 1.8)
+        # A timeout is transient: the slow reply costs the first attempt,
+        # the 0.5s backoff, and the one retry before the fallback.
+        self.assertLess(asyncio.run(timed()), 3.5)
         self.assertEqual(mana.spoke, ["سلام"])
 
 
