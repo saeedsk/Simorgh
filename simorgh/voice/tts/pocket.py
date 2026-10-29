@@ -148,13 +148,12 @@ def trim_silence(audio):
     a sentence at a time: on the satellite, with the board fetching each
     sentence, that was one to one and a half seconds of nothing between
     sentences -- "hop hop" (the creator, 2026-09-28)."""
-    import audioop
-
     from ..api import Audio
+    from ..vad import EnergyDetector  # `audioop` left the standard library in Python 3.13
 
     pcm, rate = audio.pcm, audio.sample_rate
     frame = max(2, int(rate * 0.02)) * 2
-    levels = [audioop.rms(pcm[i:i + frame], 2) for i in range(0, max(0, len(pcm) - frame + 1), frame)]
+    levels = [EnergyDetector.rms(pcm[i:i + frame]) for i in range(0, max(0, len(pcm) - frame + 1), frame)]
     if not levels or max(levels) == 0:
         return audio
     bar = max(levels) * 0.05

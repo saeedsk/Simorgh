@@ -763,9 +763,10 @@ class SatelliteLink:
             if run.pcm is not None:
                 run.pcm += data
             if len(data) >= 2:
-                import audioop
+                # `audioop` left the standard library in Python 3.13.
+                from .vad import EnergyDetector
 
-                run.peak = max(run.peak, audioop.rms(data, 2))
+                run.peak = max(run.peak, int(EnergyDetector.rms(data[:len(data) // 2 * 2])))
         if run is not None and not run.ended and not run.vad_ended_at:
             self.microphone.feed(data)
 

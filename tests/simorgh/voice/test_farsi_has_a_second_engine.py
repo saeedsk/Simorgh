@@ -15,6 +15,7 @@ got Piper would conclude MMS sounds exactly like Piper.
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import unittest
 from unittest import mock
 
@@ -117,6 +118,9 @@ class ChoosingAFarsiEngine(unittest.TestCase):
 
 
 class TheMmsEngineIsOptional(unittest.TestCase):
+    # The patch target needs `transformers` itself; a machine without it
+    # (the new Mac, 2026-10-29) has nothing to refuse.
+    @unittest.skipUnless(importlib.util.find_spec("transformers"), "transformers is not installed")
     def test_it_refuses_by_name_without_its_model(self):
         """Every engine here refuses by name rather than failing at the
         first spoken word."""
