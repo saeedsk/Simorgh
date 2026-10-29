@@ -9,4 +9,6 @@ gates every other effect.
 from .api import Delivery, Notice, Situation, decide
 from .service import Service, VERSION
 
-__all__ = ["Delivery", "Notice", "Service", "Situation", "VERSION", "decide"]
+__version__ = VERSION
+
+__all__ = ["Delivery", "Notice", "Service", "Situation", "VERSION", "__version__", "decide"]
