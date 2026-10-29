@@ -233,8 +233,12 @@ class Service:
             # Model can apply the same console rule rather than trust "".
             payload = {"facet": facet, "value": value, "confidence": record.confidence,
                        "person": person, "channel": channel}
-            await self._ctx.bus.publish(Message.new(topics.PERSONA_USER_MODEL_UPDATED, source=self._ctx.source, payload=payload))
+            # Ledger first, publish second: if the append raises (e.g. an
+            # oversized payload the Event schema rejects), World Model must
+            # never hold a facet the Ledger failed to record. The cap can
+            # only bound one error class; this ordering covers the rest.
             await self._persist("persona:user_model", topics.PERSONA_USER_MODEL_UPDATED, payload)
+            await self._ctx.bus.publish(Message.new(topics.PERSONA_USER_MODEL_UPDATED, source=self._ctx.source, payload=payload))
 
     async def _on_task_completed(self, message: Message) -> None:
         await self._apply_and_announce(valence=self.config.outcome_nudge_success, source="task.completed")
