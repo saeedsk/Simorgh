@@ -137,6 +137,40 @@ class FakeImapServer:
                     continue
                 rows.append(self._row(message, full="RFC822" in spec and "HEADER" not in spec))
             return "OK", rows
+        if command == "STORE":
+            wanted = self._uid_set(args[0] if args else None)
+            op = (args[1] if len(args) > 1 else b"").decode().upper()
+            flag_text = (args[2] if len(args) > 2 else b"").decode().strip("()").strip()
+            flags = [f for f in flag_text.split() if f]
+            for message in self._in(self.selected):
+                if message["uid"] not in wanted:
+                    continue
+                current = list(message.get("flags", []))
+                if op.startswith("+"):
+                    for flag in flags:
+                        if flag not in current:
+                            current.append(flag)
+                elif op.startswith("-"):
+                    current = [flag for flag in current if flag not in flags]
+                else:
+                    current = list(flags)
+                message["flags"] = current
+            return "OK", [b"stored"]
+        if command == "COPY":
+            wanted = self._uid_set(args[0] if args else None)
+            target = (args[1] if len(args) > 1 else b"").decode().strip('"')
+            if target not in self._folders:
+                return "NO", [f"no such mailbox {target}".encode()]
+            for message in [m for m in self._in(self.selected) if m["uid"] in wanted]:
+                copy = dict(message)
+                copy["uid"] = self._next_uid()
+                copy["folder"] = target
+                self.messages.append(copy)
+            return "OK", [b"copied"]
+        if command == "EXPUNGE":
+            self.messages = [m for m in self.messages
+                             if "\\Deleted" not in m.get("flags", [])]
+            return "OK", [b"expunged"]
         return "NO", [b"unsupported"]
 
     def close(self):
@@ -147,7 +181,59 @@ class FakeImapServer:
         self.closed = True
         return "BYE", [b"bye"]
 
+    def append(self, mailbox, flags, date_time, message):
+        """The IMAP APPEND path: a message delivered into a folder.
+
+        `mailbox` may arrive quoted, `flags` as `'(\\Seen)'` or None, and
+        `message` as raw RFC 5322 bytes -- the shapes `imaplib.append`
+        passes through. The bytes are parsed back into a message spec so
+        appended mail goes through the same wire-building path the
+        connector's real parser reads back.
+        """
+        self.commands.append(("append", mailbox, flags))
+        name = mailbox.strip('"') if isinstance(mailbox, str) else mailbox.decode().strip('"')
+        if name not in self._folders:
+            return "NO", [f"no such mailbox {name}".encode()]
+        raw = message if isinstance(message, bytes) else str(message).encode()
+        parsed = email.message_from_bytes(raw)
+        spec = {
+            "uid": self._next_uid(),
+            "folder": name,
+            "flags": self._flag_list(flags),
+            "subject": str(parsed.get("Subject", "")),
+            "from": str(parsed.get("From", "")),
+            "to": [str(a) for a in (parsed.get_all("To") or [])],
+            "body": parsed.get_payload() or "",
+        }
+        if parsed.get("Date"):
+            try:
+                spec["date"] = email.utils.parsedate_to_datetime(str(parsed.get("Date")))
+            except (TypeError, ValueError):
+                pass
+        if parsed.get("List-Unsubscribe"):
+            spec["list_unsubscribe"] = str(parsed.get("List-Unsubscribe"))
+        self.messages.append(spec)
+        return "OK", [b"appended"]
+
     # -- building wire responses ---------------------------------------------
+
+    def _next_uid(self) -> int:
+        used = [m["uid"] for m in self.messages
+                if isinstance(m.get("uid"), int)]
+        return (max(used) if used else 0) + 1
+
+    def _uid_set(self, blob) -> set[int]:
+        if blob is None:
+            return set()
+        if isinstance(blob, str):
+            blob = blob.encode()
+        return {int(x) for x in blob.split(b",") if x.strip()}
+
+    def _flag_list(self, flags) -> list[str]:
+        if not flags:
+            return []
+        text = flags.decode() if isinstance(flags, bytes) else str(flags)
+        return [f for f in text.strip("()").split() if f]
 
     def _in(self, folder: str) -> list[dict]:
         return [m for m in self.messages if m.get("folder", "INBOX") == (folder or "INBOX")]
