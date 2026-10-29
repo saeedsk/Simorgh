@@ -9,29 +9,37 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import time
 from pathlib import Path
 
 
 class GitStateFacet:
     name = "git_state"
 
+    _TTL = 2.0
+
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root
+        self._cache: dict | None = None
+        self._cached_at: float = 0.0
 
     def invalidate(self) -> None:
-        # Nothing to invalidate: no cache here, and no periodic refresh
-        # either. This used to claim "the caller (service.py) re-polls
-        # on its own refresh_seconds cadence" -- it does not, and
-        # `kernel/configcheck.py` already lists `worldmodel.git.
-        # refresh_seconds` among its KNOWN_DEAD_NESTED_FIELDS for
-        # exactly that reason. Every query shells out to `git` afresh,
-        # so this answer is never stale; it is only unthrottled.
-        pass
+        # Drop the short-TTL cache; the next query shells out to git afresh.
+        self._cache = None
+        self._cached_at = 0.0
 
     async def get(self, args: dict) -> dict:
         return await asyncio.to_thread(self._read)
 
     def _read(self) -> dict:
+        now = time.monotonic()
+        if self._cache is not None and now - self._cached_at < self._TTL:
+            return self._cache
+        self._cache = self._read_uncached()
+        self._cached_at = now
+        return self._cache
+
+    def _read_uncached(self) -> dict:
         def run(*args: str) -> str | None:
             try:
                 result = subprocess.run(
