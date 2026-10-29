@@ -69,6 +69,23 @@ class PressureModule(unittest.TestCase):
         self.assertAlmostEqual(pressure.pressure({"compaction": {"tokens_before": 70, "tokens_limit": 100}}), 0.7)
         self.assertEqual(pressure.pressure({}), 0.0)
 
+    def test_error_reply_carries_previous_pressure_forward(self):
+        """An error / missing-compaction reply keeps the last known pressure
+        instead of dropping to 0.0 and skipping a due layer-A/B compaction."""
+        last = 0.9
+        for payload in ({}, {"compaction": None}, {"compaction": {}},
+                        {"compaction": {"tokens_before": 10, "tokens_limit": 0}},
+                        {"compaction": {"tokens_before": "x", "tokens_limit": 100}}):
+            self.assertAlmostEqual(pressure.pressure(payload, previous=last), last,
+                                   msg=f"payload {payload!r} should carry {last} forward")
+        # a real measurement still overwrites, including a genuine 0.0
+        self.assertAlmostEqual(pressure.pressure(
+            {"compaction": {"tokens_before": 0, "tokens_limit": 100}}, previous=last), 0.0)
+        self.assertAlmostEqual(pressure.pressure(
+            {"compaction": {"tokens_before": 85, "tokens_limit": 100}}, previous=0.0), 0.85)
+        # default with nothing to carry is still 0.0
+        self.assertEqual(pressure.pressure({}), 0.0)
+
     @run
     async def test_old_results_are_stubbed_and_the_newest_kept(self):
         store = {}
