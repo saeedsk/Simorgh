@@ -217,6 +217,10 @@ class Service:
         day = int(now // 86_400)
         if day != self._day:
             self._day, self._delivered_today, self._sought_today = day, 0, 0
+            # yesterday's unfinished lookups and check-ins are yesterday's:
+            # keep the person mappings from going stale across days
+            self._seeking.clear()
+            self._asked_about.clear()
         # Idle with somebody here is also when the day's small things
         # are worth saying, and this is before the research gates
         # because a digest costs nothing and a search costs money.
