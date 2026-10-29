@@ -41,6 +41,22 @@ def is_reply_routed(message: Message) -> bool:
     return bool(message.reply_to) and bool(message.correlation_id)
 
 
+def _collapse_groups(candidates: list[Registered]) -> list[Registered]:
+    """Collapse competing subscriptions to one delivery per group:
+    the first registered member stands in for the group (the backend
+    picks the actual member at dispatch time); broadcast subscriptions
+    (group=None) each get their own delivery."""
+    out: list[Registered] = []
+    seen_groups: set[str] = set()
+    for r in candidates:
+        if r.spec.group is None:
+            out.append(r)
+        elif r.spec.group not in seen_groups:
+            seen_groups.add(r.spec.group)
+            out.append(r)
+    return out
+
+
 def route(message: Message, registered: list[Registered]) -> list[Registered]:
     """The subscriptions this message is delivered to, one entry per
     broadcast subscription and one per competing group (the first
@@ -49,30 +65,17 @@ def route(message: Message, registered: list[Registered]) -> list[Registered]:
     if is_reply_routed(message):
         # Point-to-point, but still one delivery per competing group:
         # a plain pattern loop would fan a reply out to every member.
-        out: list[Registered] = []
-        seen_groups: set[str] = set()
-        for r in registered:
-            if r.spec.pattern != message.reply_to:
-                continue
-            if r.spec.group is None:
-                out.append(r)
-            elif r.spec.group not in seen_groups:
-                seen_groups.add(r.spec.group)
-                out.append(r)
-        return out
-    out: list[Registered] = []
-    seen_groups: set[str] = set()
-    for r in registered:
-        if is_inbox(r.spec.pattern):
-            continue  # inboxes only ever receive replies
-        if not matches(r.spec.pattern, message.type):
-            continue
-        if r.spec.group is None:
-            out.append(r)
-        elif r.spec.group not in seen_groups:
-            seen_groups.add(r.spec.group)
-            out.append(r)
-    return out
+        return _collapse_groups(
+            [r for r in registered if r.spec.pattern == message.reply_to]
+        )
+    return _collapse_groups(
+        [
+            r
+            for r in registered
+            if not is_inbox(r.spec.pattern)  # inboxes only ever receive replies
+            and matches(r.spec.pattern, message.type)
+        ]
+    )
 
 
 def groups_for(message: Message, registered: list[Registered]) -> set[str]:
