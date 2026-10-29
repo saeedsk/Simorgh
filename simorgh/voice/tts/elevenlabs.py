@@ -38,7 +38,15 @@ RATE = 24000
 #: `tts_elevenlabs_timeout_s`: a joined run of sentences is longer than one,
 #: and a timeout falls back to another voice mid-reply.
 SECONDS_PER_100_CHARS = 1.5
+#: Seconds to wait before the one retry of a transient failure (HTTP 429/5xx,
+#: `URLError`, timeout) -- a momentary blip should not drop a spoken piece to
+#: the plainer fallback voice.
+RETRY_BACKOFF_S = 0.5
 KEY_NAME = "ELEVENLABS_API_KEY"
+#: A failure worth exactly one retry: a network blip or a throttled/overloaded
+#: server, not a refusal (bad key, bad voice) or a hard error.
+class Transient(RuntimeError):
+    pass
 #: Sim's tones (contracts/tone.py) as ElevenLabs audio tags -- a bracketed
 #: direction the v3/v4 models act on and never say aloud. Every one made an
 #: audible difference in both voices, Farsi and English (the creator's A/B,
@@ -91,7 +99,11 @@ class ElevenLabsSynthesiser:
                 return response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read()[:300].decode("utf-8", "replace") if hasattr(exc, "read") else ""
+            if exc.code == 429 or exc.code >= 500:
+                raise Transient(f"ElevenLabs HTTP {exc.code}: {detail}") from exc
             raise RuntimeError(f"ElevenLabs HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise Transient(f"ElevenLabs {exc.reason}") from exc
 
     def _voice(self) -> str:
         """The configured voice: an id is used as is; a name is looked up
@@ -138,19 +150,33 @@ class ElevenLabsSynthesiser:
         try:
             audio = await asyncio.wait_for(asyncio.to_thread(self._speak, text, tone),
                                            timeout=self._timeout(text) + 1.0)
-            self.last_engine = ENGINE
-            return audio
-        except Exception as exc:  # noqa: BLE001 -- any failure is the fallback's turn, never silence
-            why = f"ElevenLabs failed after {time.monotonic() - started:.1f}s ({exc}); spoke with {self._fallback.name}"
-            self.problems = (self.problems + [why[:300]])[-5:]
-            # Logged, not only kept: a reply that switched voices mid-way
-            # could not be traced afterwards (2026-10-05).
-            logging.getLogger("simorgh.voice").warning("voice.tts_fallback %s", why[:300])
-            audio = await self._fallback.synthesise(text, voice=voice, speed=speed, tone=tone)
-            # The engine that actually spoke: a `FirstThatSpeaks` chain
-            # may have passed its first engine by (2026-10-27).
-            self.last_engine = getattr(self._fallback, "last_engine", "") or getattr(self._fallback, "name", "fallback")
-            return audio
+        except Exception as first:  # noqa: BLE001 -- any failure is the fallback's turn, never silence
+            if not isinstance(first, (Transient, TimeoutError, asyncio.TimeoutError)):
+                return await self._spoke_fallback(text, voice, speed, tone, started, first)
+            logging.getLogger("simorgh.voice").warning(
+                "voice.tts_retry transient ElevenLabs failure (%s); one retry after %.1fs",
+                str(first)[:200], RETRY_BACKOFF_S)
+            try:
+                await asyncio.sleep(RETRY_BACKOFF_S)
+                audio = await asyncio.wait_for(asyncio.to_thread(self._speak, text, tone),
+                                               timeout=self._timeout(text) + 1.0)
+            except Exception as exc:  # noqa: BLE001
+                return await self._spoke_fallback(text, voice, speed, tone, started, exc)
+        self.last_engine = ENGINE
+        return audio
+
+    async def _spoke_fallback(self, text: str, voice: str, speed: float, tone: str,
+                              started: float, exc: Exception) -> Audio:
+        why = f"ElevenLabs failed after {time.monotonic() - started:.1f}s ({exc}); spoke with {self._fallback.name}"
+        self.problems = (self.problems + [why[:300]])[-5:]
+        # Logged, not only kept: a reply that switched voices mid-way
+        # could not be traced afterwards (2026-10-05).
+        logging.getLogger("simorgh.voice").warning("voice.tts_fallback %s", why[:300])
+        audio = await self._fallback.synthesise(text, voice=voice, speed=speed, tone=tone)
+        # The engine that actually spoke: a `FirstThatSpeaks` chain
+        # may have passed its first engine by (2026-10-27).
+        self.last_engine = getattr(self._fallback, "last_engine", "") or getattr(self._fallback, "name", "fallback")
+        return audio
 
     async def warmup(self) -> None:
         warm = getattr(self._fallback, "warmup", None)
@@ -158,4 +184,5 @@ class ElevenLabsSynthesiser:
             await warm()
 
 
-__all__ = ["API", "ENGINE", "SECONDS_PER_100_CHARS", "ElevenLabsSynthesiser", "KEY_NAME", "RATE", "TONE_TAGS", "tagged"]
+__all__ = ["API", "ENGINE", "RETRY_BACKOFF_S", "SECONDS_PER_100_CHARS", "ElevenLabsSynthesiser",
+           "KEY_NAME", "RATE", "TONE_TAGS", "Transient", "tagged"]
