@@ -1338,7 +1338,7 @@ REQUIRED_PACKAGES = ("pytest", "pytest-xdist", "certifi", "keyring")
 #: Command-line tools Sim looks up by name (`shutil.which`), as Homebrew
 #: formulae. Every one is optional: without it the capability that needs
 #: it refuses by name. Casks and services (Docker, Ollama, Tailscale) are
-#: left to the creator.
+#: left to the creator -- except Ollama, below.
 BREW_FORMULAE = {
     "ffmpeg": "ffmpeg", "tesseract": "tesseract", "whisper-cli": "whisper-cpp", "node": "node",
     "uv": "uv", "yt-dlp": "yt-dlp", "rg": "ripgrep", "qrencode": "qrencode", "shellcheck": "shellcheck",
@@ -1346,6 +1346,14 @@ BREW_FORMULAE = {
 
 #: Bump to make every machine run the full provisioning once more.
 PROVISION_VERSION = 1
+
+#: The local model Sim falls back to when no cloud provider answers
+#: (cognition's Ollama provider, off until `[cognition.providers.ollama]
+#: model` is set). The creator, 2026-10-29: install Ollama and pull Qwen
+#: 3.8 on a new machine (18 GB; tools and vision). `SIMORGH_LOCAL_MODEL`
+#: names another; empty skips it.
+OLLAMA_MODEL = "qwen3.8"
+OLLAMA_URL = "http://127.0.0.1:11434"
 PROVISION_STAMP = "provisioned.json"
 
 SECRETS_TEMPLATE = """\
@@ -1550,12 +1558,122 @@ def ensure_git_identity(repo: Path, *, dry_run: bool) -> str:
     return f"set this repository's git identity to {name} <{email}>"
 
 
+def local_model() -> str:
+    return os.environ.get("SIMORGH_LOCAL_MODEL", OLLAMA_MODEL).strip()
+
+
+def ollama_models(base_url: str = OLLAMA_URL) -> list[str] | None:
+    """The models the local Ollama server has, or None if none is running."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/tags", timeout=2) as resp:
+            return [str(m.get("name", "")) for m in json.loads(resp.read()).get("models", [])]
+    except (OSError, ValueError):
+        return None
+
+
+def _has_model(models: list[str], model: str) -> bool:
+    return any(m == model or m == f"{model}:latest" for m in models)
+
+
+def ollama_config_file(repo: Path) -> Path:
+    """The simorgh.toml the kernel will read: ./simorgh.toml, then the
+    data dir's (kernel/config.py's order), created there if neither exists."""
+    data_dir, _secrets = runtime_paths(repo)
+    return next((p for p in (repo / "simorgh.toml", data_dir / "simorgh.toml") if p.is_file()),
+                data_dir / "simorgh.toml")
+
+
+def ensure_ollama_config(repo: Path, model: str, *, dry_run: bool) -> str:
+    """Turn the Ollama fallback on with `model`, unless a model is
+    already configured. Appends a table and checks the result parses
+    before writing, so a file it cannot extend safely is left alone."""
+    import tomllib
+
+    path = ollama_config_file(repo)
+    text = path.read_text() if path.is_file() else ""
+    try:
+        current = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return ""  # config_files_parse reports it
+    if ((current.get("cognition") or {}).get("providers") or {}).get("ollama", {}).get("model"):
+        return ""
+    table = f'[cognition.providers.ollama]\nmodel = "{model}"\n'
+    updated = (text.rstrip("\n") + "\n\n" if text.strip() else "") + table
+    try:
+        tomllib.loads(updated)
+    except tomllib.TOMLDecodeError:
+        return f"could not add [cognition.providers.ollama] to {path}; set model = \"{model}\" there by hand"
+    if dry_run:
+        return f"would set [cognition.providers.ollama] model = \"{model}\" in {path}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(updated)
+    return f"Sim's local fallback is {model} ([cognition.providers.ollama] in {path})"
+
+
+def ensure_ollama(repo: Path, *, dry_run: bool, run=subprocess.run, wait_s: float = 30.0) -> tuple[list[str], list[str], str]:
+    """Install Ollama, start it, pull the local model, point Sim at it.
+    Returns (installed, failed, what was configured). Nothing here stops
+    a boot: without the model Sim simply has no local fallback."""
+    model = local_model()
+    if not model:
+        return [], [], ""
+    installed: list[str] = []
+    brew = shutil.which("brew") or next((p for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew")
+                                         if Path(p).is_file()), "")
+    ollama = shutil.which("ollama") or ""
+    if not ollama:
+        if not brew:
+            say("Ollama is missing and there is no Homebrew to install it with (https://ollama.com)", "warn")
+            return [], ["ollama"], ""
+        say("Ollama is missing", "step")
+        if dry_run:
+            return ["ollama", model], [], ensure_ollama_config(repo, model, dry_run=True)
+        say("installing Ollama with Homebrew", "note")
+        if run([brew, "install", "--quiet", "ollama"], capture_output=True, text=True,
+               env=dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_ENV_HINTS="1")).returncode != 0:
+            say("  ollama: failed", "warn")
+            return [], ["ollama"], ""
+        installed.append("ollama")
+        ollama = shutil.which("ollama") or str(Path(brew).parent / "ollama")
+    models = ollama_models()
+    if models is None:
+        if dry_run:
+            return installed + [model], [], ensure_ollama_config(repo, model, dry_run=True)
+        say("starting the Ollama server", "note")
+        # `brew services` only knows the formula; the Ollama app's CLI
+        # (/usr/local/bin/ollama) serves by hand.
+        started = bool(brew) and run([brew, "services", "start", "ollama"],
+                                     capture_output=True, text=True).returncode == 0
+        if not started:
+            subprocess.Popen([ollama, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        deadline = time.monotonic() + wait_s
+        while models is None and time.monotonic() < deadline:
+            time.sleep(1)
+            models = ollama_models()
+        if models is None:
+            say(f"  the Ollama server did not come up within {wait_s:.0f}s; not pulling {model}", "warn")
+            return installed, [model], ""
+    if not _has_model(models, model):
+        say(f"local model {model} is not downloaded", "step")
+        if dry_run:
+            return installed + [model], [], ensure_ollama_config(repo, model, dry_run=True)
+        say(f"downloading {model} with Ollama (several GB; its progress follows)", "note")
+        if run([ollama, "pull", model]).returncode != 0:
+            say(f"  {model}: download failed", "warn")
+            return installed, [model], ""
+        installed.append(model)
+    return installed, [], ensure_ollama_config(repo, model, dry_run=dry_run)
+
+
 def provision_fingerprint(repo: Path) -> str:
     import hashlib
 
     path = repo / "requirements.txt"
     body = path.read_bytes() if path.is_file() else b""
-    return hashlib.sha256(body + repr((PROVISION_VERSION, REQUIRED_PACKAGES, BREW_FORMULAE)).encode()).hexdigest()[:16]
+    return hashlib.sha256(body + repr((PROVISION_VERSION, REQUIRED_PACKAGES, BREW_FORMULAE, local_model())).encode()).hexdigest()[:16]
 
 
 def provision(repo: Path, notes: Path, *, dry_run: bool = False, force: bool = False,
@@ -1583,6 +1701,10 @@ def provision(repo: Path, notes: Path, *, dry_run: bool = False, force: bool = F
         rule("first boot on this machine: setting it up" if not previous else "setting this machine up")
         installed, failed = install_packages(repo, dry_run=dry_run, run=run)
         tools_installed, tools_failed = install_tools(dry_run=dry_run, run=run)
+        model_installed, model_failed, configured = ensure_ollama(repo, dry_run=dry_run, run=run)
+        tools_installed, tools_failed = tools_installed + model_installed, tools_failed + model_failed
+        if configured:
+            done.append(configured)
     else:
         missing = [p for p in REQUIRED_PACKAGES if not package_installed(p)]
         installed, failed = install_packages_only(missing, dry_run=dry_run, run=run) if missing else ([], [])

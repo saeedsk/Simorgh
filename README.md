@@ -8,13 +8,16 @@ A multi-agent cognitive architecture that orchestrates specialized emotional, te
 (pytest, pytest-xdist, certifi, keyring) into the Python that runs Sim,
 links a CA bundle for python.org's Python (what `Install Certificates.command`
 does), `brew install`s the tools Sim looks up by name (ffmpeg, tesseract,
-whisper-cpp, node, uv, yt-dlp, ripgrep, qrencode, shellcheck), creates
+whisper-cpp, node, uv, yt-dlp, ripgrep, qrencode, shellcheck), installs and
+starts Ollama, pulls the local fallback model (`qwen3.8`, 18 GB; another with
+`SIMORGH_LOCAL_MODEL=<name>`, none with `SIMORGH_LOCAL_MODEL=`) and sets
+`[cognition.providers.ollama] model` unless one is already set, creates
 `~/.simorgh/secrets.toml` owner-only with the common keys commented out,
 and gives the repository a git identity if the machine has none. It runs
 once per machine and again when that list changes; a missing required
 package stops the boot instead of rolling back. `python simloader.py
 provision --dry-run` shows what it would do; `SIMORGH_NO_PROVISION=1` or
-`--no-provision` skips it. Homebrew itself, Docker, Ollama and the voice
+`--no-provision` skips it. Homebrew itself, Docker and the voice
 models (`tools/voice_setup.py`) stay manual.
 
 ## Talking to Sim (voice, fully local)

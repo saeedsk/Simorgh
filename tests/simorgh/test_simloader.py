@@ -989,6 +989,7 @@ class ABrandNewMachineSetsItselfUpTestCase(unittest.TestCase):
         patches = [
             mock.patch.dict(os.environ, {"SIMORGH_RUNTIME_DATA_DIR": str(self.data)}),
             mock.patch.object(simloader, "ensure_certificates", return_value=""),
+            mock.patch.object(simloader, "ensure_ollama", return_value=([], [], "")),
             mock.patch.object(simloader.shutil, "which", return_value="/bin/true"),
         ]
         for patch in patches:
@@ -1077,6 +1078,103 @@ class ABrandNewMachineSetsItselfUpTestCase(unittest.TestCase):
         self.assertEqual(self.pip_calls, [])
         self.assertFalse((self.data / "secrets.toml").exists())
         self.assertFalse((self.notes / simloader.PROVISION_STAMP).exists())
+
+
+class TheLocalModelArrivesOnItsOwnTestCase(unittest.TestCase):
+    """The creator, 2026-10-29: a new machine gets Ollama and Qwen 3.8, and
+    Sim is pointed at it -- never at the cost of a boot."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name) / "repo"
+        self.repo.mkdir()
+        self.data = Path(tmp.name) / "data"
+        self.calls: list[list[str]] = []
+        self.server: list[str] | None = None
+        self.have = {"brew": "/opt/homebrew/bin/brew"}
+        env = {k: v for k, v in os.environ.items() if k != "SIMORGH_LOCAL_MODEL"}
+        env["SIMORGH_RUNTIME_DATA_DIR"] = str(self.data)
+        for patch in (mock.patch.dict(os.environ, env, clear=True),
+                      mock.patch.object(simloader.shutil, "which", side_effect=lambda b: self.have.get(b)),
+                      mock.patch.object(simloader, "ollama_models", side_effect=lambda *a: self.server),
+                      mock.patch.object(simloader.time, "sleep"),
+                      mock.patch.object(simloader.subprocess, "Popen")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def _run(self, argv, **kw):
+        self.calls.append(list(argv))
+        if argv[1:] == ["install", "--quiet", "ollama"]:
+            self.have["ollama"] = "/opt/homebrew/bin/ollama"
+        elif argv[1:] == ["services", "start", "ollama"]:
+            self.server = []
+        elif argv[1:2] == ["pull"]:
+            self.server = [f"{argv[2]}:latest"]
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    def _config(self) -> dict:
+        import tomllib
+        return tomllib.loads((self.data / "simorgh.toml").read_text())
+
+    def test_nothing_there_installs_starts_pulls_and_configures(self):
+        installed, failed, configured = simloader.ensure_ollama(self.repo, dry_run=False, run=self._run)
+        self.assertEqual((installed, failed), (["ollama", "qwen3.8"], []))
+        self.assertEqual([c[1:] for c in self.calls],
+                         [["install", "--quiet", "ollama"], ["services", "start", "ollama"], ["pull", "qwen3.8"]])
+        self.assertIn("qwen3.8", configured)
+        self.assertEqual(self._config()["cognition"]["providers"]["ollama"]["model"], "qwen3.8")
+
+    def test_a_model_already_downloaded_is_not_pulled_again(self):
+        self.have["ollama"] = "/usr/local/bin/ollama"
+        self.server = ["qwen3.8:latest"]
+        simloader.ensure_ollama(self.repo, dry_run=False, run=self._run)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self._config()["cognition"]["providers"]["ollama"]["model"], "qwen3.8")
+
+    def test_the_ollama_app_without_the_formula_is_served_by_hand(self):
+        self.have["ollama"] = "/usr/local/bin/ollama"
+
+        def run(argv, **kw):
+            if argv[1:] == ["services", "start", "ollama"]:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="no formula")
+            return self._run(argv, **kw)
+
+        simloader.subprocess.Popen.side_effect = lambda *a, **k: setattr(self, "server", [])
+        installed, _failed, _configured = simloader.ensure_ollama(self.repo, dry_run=False, run=run)
+        self.assertEqual(simloader.subprocess.Popen.call_args.args[0], ["/usr/local/bin/ollama", "serve"])
+        self.assertEqual(installed, ["qwen3.8"])
+
+    def test_a_model_the_creator_already_chose_is_kept(self):
+        self.data.mkdir()
+        (self.data / "simorgh.toml").write_text('[cognition.providers.ollama]\nmodel = "llama3"\n')
+        self.have["ollama"] = "/usr/local/bin/ollama"
+        self.server = ["qwen3.8:latest"]
+        _i, _f, configured = simloader.ensure_ollama(self.repo, dry_run=False, run=self._run)
+        self.assertEqual(configured, "")
+        self.assertEqual(self._config()["cognition"]["providers"]["ollama"]["model"], "llama3")
+
+    def test_an_existing_config_is_extended_not_replaced(self):
+        self.data.mkdir()
+        (self.data / "simorgh.toml").write_text('[voice]\nrate = 1.1\n')
+        self.have["ollama"] = "/usr/local/bin/ollama"
+        self.server = ["qwen3.8:latest"]
+        simloader.ensure_ollama(self.repo, dry_run=False, run=self._run)
+        self.assertEqual(self._config()["voice"], {"rate": 1.1})
+        self.assertEqual(self._config()["cognition"]["providers"]["ollama"]["model"], "qwen3.8")
+
+    def test_a_failed_download_configures_nothing(self):
+        self.have["ollama"] = "/usr/local/bin/ollama"
+        self.server = []
+        fail = lambda argv, **kw: subprocess.CompletedProcess(argv, 1, stdout="", stderr="")  # noqa: E731
+        installed, failed, configured = simloader.ensure_ollama(self.repo, dry_run=False, run=fail)
+        self.assertEqual((installed, failed, configured), ([], ["qwen3.8"], ""))
+        self.assertFalse((self.data / "simorgh.toml").exists())
+
+    def test_an_empty_model_name_skips_all_of_it(self):
+        os.environ["SIMORGH_LOCAL_MODEL"] = ""
+        self.assertEqual(simloader.ensure_ollama(self.repo, dry_run=False, run=self._run), ([], [], ""))
+        self.assertEqual(self.calls, [])
 
 
 class PythonOrgPythonGetsCertificatesTestCase(unittest.TestCase):
