@@ -41,16 +41,26 @@ RECALL_TOOL = "recall_result"
 _RESULT_HEADS = ("Result of ", "Results of ")
 
 
-def pressure(reply_payload: dict) -> float:
-    """tokens_before / tokens_limit from a think reply; 0.0 when either is
-    missing (an older Cognition, an error reply)."""
-    compaction = reply_payload.get("compaction") or {}
+def pressure(reply_payload: dict, previous: float = 0.0) -> float:
+    """tokens_before / tokens_limit from a think reply.
+
+    When the reply carries no usable compaction data (an older Cognition,
+    an error or missing-compaction reply) the last known pressure
+    (`previous`) is carried forward instead of dropping to 0.0, so one
+    errored think does not make the session skip a due layer-A/B
+    compaction. A reply that genuinely reports pressure still overwrites
+    it, including a real 0.0 from an empty context.
+    """
+    compaction = reply_payload.get("compaction")
+    if not isinstance(compaction, dict) or "tokens_before" not in compaction \
+            or "tokens_limit" not in compaction:
+        return previous
     try:
-        before = float(compaction.get("tokens_before") or 0)
-        limit = float(compaction.get("tokens_limit") or 0)
+        before = float(compaction["tokens_before"] or 0)
+        limit = float(compaction["tokens_limit"] or 0)
     except (TypeError, ValueError):
-        return 0.0
-    return before / limit if limit > 0 else 0.0
+        return previous
+    return before / limit if limit > 0 else previous
 
 
 def is_result(message: dict) -> bool:
