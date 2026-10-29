@@ -67,6 +67,8 @@ def summarize(spans: list[dict]) -> dict:
 
 
 def report(path: str | Path, *, since_s: float, mode: str = "shadow", now: float | None = None) -> dict:
+    if mode not in SPANS:
+        raise ValueError(f"unknown routing mode {mode!r}; expected one of {sorted(SPANS)}")
     now = time.time() if now is None else now
     out = summarize(read_spans(path, SPANS[mode], since=now - since_s))
     out["since_s"] = since_s
