@@ -61,6 +61,12 @@ from .api import is_real_contradiction
 from .embed import cosine_similarity, embed_text, sparse_embed_text
 from .embedders import HASHING, comparable
 
+#: The fraction of live records below which `RecallIndex.sync` rebuilds a
+#: `KindIndex` instead of leaving tombstoned records to be filtered at
+#: query time forever. 0.25 means: when a quarter of what the index holds
+#: is forgotten, pay one rebuild to stop carrying it.
+TOMBSTONE_COMPACT_RATIO = 0.25
+
 
 @dataclass(slots=True)
 class Record:
@@ -171,6 +177,63 @@ class KindIndex:
             # postings above: a rounded component changes the cosine,
             # and "the same ranking as before" is the point.
             self.vectors.append((provider, array("d", vector)))
+
+    def compact(self, keep) -> int:
+        """Rebuild the index over the kept positions, dropping the rest.
+
+        This is the tombstone-side fix for the append-only exception the
+        class docstring names: query-time tombstone filtering never
+        shrinks `records`, `postings`, `terms`, `vectors` or `lengths`,
+        so a kind that is forgotten from heavily grows the index (and
+        every scan that walks its postings) without bound. When the
+        tombstoned share passes the threshold, `RecallIndex.sync` calls
+        this with the live positions.
+
+        Nothing is re-embedded: the hashing path recomputes its postings
+        from the record text, which is a pure function of that text (the
+        same property that makes index-time embedding sound), and the
+        dense path keeps the already-stored vectors, renumbered. The
+        cursor is untouched -- compaction of the index is not a read, and
+        the Ledger is not asked for anything. Returns how many records
+        were dropped.
+        """
+        keep = list(keep)
+        removed = len(self.records) - len(keep)
+        if removed <= 0:
+            return 0
+        old_records, old_vectors, old_fresh = self.records, self.vectors, self.fresh
+        self.records = [old_records[i] for i in keep]
+        self.postings = {}
+        self.terms = {}
+        self.lengths = array("i")
+        self._matrix = None
+        if self._hashing:
+            self.vectors = []
+            self.fresh = []
+            for record in self.records:
+                for bucket, weight in sparse_embed_text(record.content):
+                    posting = self.postings.get(bucket)
+                    if posting is None:
+                        posting = self.postings[bucket] = (array("i"), array("d"))
+                    posting[0].append(len(self.records) - 1)
+                    posting[1].append(weight)
+        else:
+            self.vectors = [old_vectors[i] for i in keep]
+            kept_refs = {record.ref for record in self.records}
+            self.fresh = [entry for entry in old_fresh if entry[0] in kept_refs]
+            for record in self.records:
+                words = _words(record.content)
+                self.lengths.append(len(words))
+                counts: dict[str, int] = {}
+                for word in words:
+                    counts[word] = counts.get(word, 0) + 1
+                for word, count in counts.items():
+                    posting = self.terms.get(word)
+                    if posting is None:
+                        posting = self.terms[word] = (array("i"), array("i"))
+                    posting[0].append(len(self.records) - 1)
+                    posting[1].append(count)
+        return removed
 
     def similarities(self, query: str) -> dict[int, float]:
         """`{position: cosine}` for every record with a non-zero cosine
@@ -290,7 +353,11 @@ class RecallIndex:
     Ledger by `sync`."""
 
     def __init__(self, ledger: Ledger, embedder, *, streams, tombstone_stream: str,
-                 contradiction_stream: str) -> None:
+                 contradiction_stream: str,
+                 compact_ratio: float = TOMBSTONE_COMPACT_RATIO) -> None:
+        # Tombstone ratio below which a kind index is rebuilt rather than
+        # left to shed forgotten records only at query time.
+        self.compact_ratio = compact_ratio
         self._ledger = ledger
         self._embedder = embedder
         # `getattr`, not `embedder.provider`: a test double is allowed
@@ -344,6 +411,23 @@ class RecallIndex:
                         content=payload.get("content", ""),
                         source_ref=payload.get("source_ref", ""),
                     ), self._embedder, self.persisted.get(ref))
+                self._maybe_compact(index)
+
+    def _maybe_compact(self, index: KindIndex) -> int:
+        """Rebuild `index` when tombstoned records pass the ratio.
+
+        The record set only ever grows between rebuilds, and tombstones
+        only ever accumulate, so checking after each sync is enough:
+        nothing can un-trigger between two syncs. Returns records dropped.
+        """
+        total = len(index.records)
+        if not total:
+            return 0
+        live = sum(1 for record in index.records if record.ref not in self.tombstoned)
+        if live / total > 1.0 - self.compact_ratio:
+            return 0
+        return index.compact([i for i, record in enumerate(index.records)
+                              if record.ref not in self.tombstoned])
 
     def _apply_vector(self, event) -> None:
         vector = decode_vector(event.payload.get("v", ""))
