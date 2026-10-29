@@ -163,10 +163,9 @@ class ImapConnector:
     async def folders(self) -> list[str]:
         import asyncio
 
-        client = await self._connect()
         self._budget.take()
 
-        def _list():
+        def _list(client):
             code, rows = client.list()
             if code != "OK":
                 return []
@@ -179,7 +178,7 @@ class ImapConnector:
                     out.append(decode_folder(match.group(1)))
             return out
 
-        return await asyncio.to_thread(_list)
+        return await self._call(_list)
 
     async def search(self, query: str = "", *, folder: str = "INBOX", limit: int = 20,
                      since: datetime | None = None, unread_only: bool = False
@@ -188,10 +187,9 @@ class ImapConnector:
         docstring."""
         import asyncio
 
-        client = await self._connect()
         self._budget.take()
 
-        def _search():
+        def _search(client):
             code, _ = client.select(_quote(folder), readonly=True)
             if code != "OK":
                 raise _MailError(f"no folder {folder!r}")
@@ -213,7 +211,7 @@ class ImapConnector:
                 raise _MailError("the server refused to return those messages")
             return _messages(rows, folder=folder, account=self.name)
 
-        return await asyncio.to_thread(_search)
+        return await self._call(_search)
 
     async def sender_counts(self, query: str = "", *, folder: str = "INBOX", since: datetime | None = None,
                             unread_only: bool = False, max_messages: int = 5000,
@@ -226,10 +224,9 @@ class ImapConnector:
         import asyncio
         from collections import Counter
 
-        client = await self._connect()
         self._budget.take()
 
-        def _count():
+        def _count(client):
             code, _ = client.select(_quote(folder), readonly=True)
             if code != "OK":
                 raise _MailError(f"no folder {folder!r}")
@@ -247,7 +244,7 @@ class ImapConnector:
                 counts.update(m.sender or "(no sender)" for m in _messages(rows, folder=folder, account=self.name))
             return dict(counts), matched, len(uids)
 
-        return await asyncio.to_thread(_count)
+        return await self._call(_count)
 
     async def fetch_body(self, uid: str, *, folder: str = "INBOX", max_chars: int = 20_000
                          ) -> MailMessage | None:
@@ -255,10 +252,9 @@ class ImapConnector:
         what may see it."""
         import asyncio
 
-        client = await self._connect()
         self._budget.take()
 
-        def _fetch():
+        def _fetch(client):
             code, _ = client.select(_quote(folder), readonly=True)
             if code != "OK":
                 raise _MailError(f"no folder {folder!r}")
@@ -280,7 +276,7 @@ class ImapConnector:
                 flags=tuple(_flags(rows[0])),
             )
 
-        return await asyncio.to_thread(_fetch)
+        return await self._call(_fetch)
 
     async def unsubscribe_headers(self, uid: str, *, folder: str = "INBOX") -> dict | None:
         """The sender's own unsubscribe offer (RFC 2369 `List-Unsubscribe`,
@@ -288,10 +284,9 @@ class ImapConnector:
         never the body. None when there is no such message."""
         import asyncio
 
-        client = await self._connect()
         self._budget.take()
 
-        def _fetch():
+        def _fetch(client):
             code, _ = client.select(_quote(folder), readonly=True)
             if code != "OK":
                 raise _MailError(f"no folder {folder!r}")
@@ -306,15 +301,47 @@ class ImapConnector:
                     "list_unsubscribe": " ".join(str(parsed.get("List-Unsubscribe", "")).split()),
                     "list_unsubscribe_post": str(parsed.get("List-Unsubscribe-Post", "")).strip()}
 
-        return await asyncio.to_thread(_fetch)
+        return await self._call(_fetch)
 
     # -- plumbing ------------------------------------------------------------
+
+    async def _call(self, fn):
+        """Run a blocking IMAP operation against the connected client.
+
+        A server that drops an idle connection does not fail at drop
+        time -- it fails on the *next* command, as `imaplib.IMAP4.abort`
+        or a bare `OSError`. So: one attempt; on a dropped connection,
+        throw the cached client away, sign in again, and try once more.
+        The operation therefore survives idle-timeout disconnects, and a
+        genuinely dead mailbox still fails fast on the second attempt.
+        """
+        import asyncio
+        import imaplib
+
+        client = await self._connect()
+        try:
+            return await asyncio.to_thread(fn, client)
+        except (imaplib.IMAP4.abort, OSError):
+            self._client = None
+            client = await self._connect()
+            return await asyncio.to_thread(fn, client)
 
     async def _connect(self):
         import asyncio
 
         if self._client is not None:
-            return self._client
+            client = self._client
+
+            def _alive() -> bool:
+                try:
+                    return client.noop()[0] == "OK"
+                except Exception:  # noqa: BLE001 -- a dropped socket raises all sorts
+                    return False
+
+            if await asyncio.to_thread(_alive):
+                return client
+            # Idle-timeout disconnect: sign in afresh on the next call.
+            self._client = None
 
         def _open():
             try:
