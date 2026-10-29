@@ -28,6 +28,7 @@ so Interface proxies it behind Sim's own token instead.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -50,14 +51,29 @@ API_PORT = 1984
 #: fMP4 over the WebSocket, which the proxy does carry.
 WEBRTC_PORT = 8555
 
-#: The project publishes one static binary per platform.
-RELEASES = "https://github.com/AlexxIT/go2rtc/releases/latest/download"
+#: The project publishes one static binary per platform. Pinned to a known
+#: release -- never "latest" -- so the binary fetched is the binary that was
+#: verified. Moving the pin is a deliberate edit that re-records the
+#: checksums below.
+VERSION = "v1.9.15"
+RELEASES = f"https://github.com/AlexxIT/go2rtc/releases/download/{VERSION}"
 ASSETS = {
     ("Darwin", "arm64"): "go2rtc_mac_arm64.zip",
     ("Darwin", "x86_64"): "go2rtc_mac_amd64.zip",
     ("Linux", "x86_64"): "go2rtc_linux_amd64",
     ("Linux", "aarch64"): "go2rtc_linux_arm64",
     ("Linux", "armv7l"): "go2rtc_linux_arm",
+}
+#: sha256 of each asset in the pinned release, taken from the release files
+#: themselves (fetched once, hashed, recorded here). A download that does
+#: not match is refused rather than run -- the relay is a network-facing
+#: service, and a silently different binary is not acceptable.
+CHECKSUMS = {
+    "go2rtc_mac_arm64.zip": "d0cf858a71803dce2377423bc830639137ee96c335f88e9912e7f7898374266d",
+    "go2rtc_mac_amd64.zip": "7ca6075421b824eebe0383d20bd42a6f6a7ec7591a60931d42290f1d375169b9",
+    "go2rtc_linux_amd64": "20b46c6910734cb05ecefb234066f36868ff19b42ba1418a7a32e13a3e035712",
+    "go2rtc_linux_arm64": "af416f22b21a24ab83b8d78642190b4932ae695b4e386853f11d1b0319781763",
+    "go2rtc_linux_arm": "cbffe4075a004e2015fd9d7e324800ab7968b52f49e9ce803361879d5e246028",
 }
 
 
@@ -100,6 +116,16 @@ def install(root: Path, *, system: str, machine: str, log=None) -> tuple[str, st
             payload = response.read()
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         return "", f"could not fetch go2rtc: {exc!r}"
+    expected = CHECKSUMS.get(asset, "")
+    if not expected:
+        return "", (f"no recorded sha256 for {asset} at {VERSION} -- record the "
+                    f"checksum before installing; the HLS relay still works")
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != expected:
+        target.unlink(missing_ok=True)
+        return "", (f"go2rtc {asset} failed checksum verification "
+                    f"(sha256 {digest}, expected {expected}) -- refused; the "
+                    f"download is not the recorded binary for {VERSION}")
     if asset.endswith(".zip"):
         import io
         import zipfile
