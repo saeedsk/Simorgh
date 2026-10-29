@@ -38,7 +38,7 @@ KINDS = ("chat", "patch", "skill", "research", "project")
 DEPENDENCY_FAILED_NOTE = "dependency_failed:"
 MODES = ("plan", "execute")
 RISKS = ("low", "medium", "high")
-ORIGINS = ("human", "curiosity", "reflection", "research", "project", "planner", "benchmark")
+ORIGINS = ("human", "assistant", "planning", "curiosity", "reflection", "research", "project", "planner", "benchmark")
 
 
 @dataclass(frozen=True)
@@ -94,6 +94,29 @@ class Task:
     #: topic to hear, or both. Cleared when it wakes.
     wake_at: float | None = None
     wake_on: str = ""
+
+    def validate(self) -> None:
+        """Raise ValueError on unknown status/kind/mode/risk/origin.
+
+        Called by __post_init__ so a malformed task fails at
+        construction instead of surfacing downstream.
+        """
+        checks = (
+            ("status", self.status, frozenset({PENDING, AVAILABLE, CLAIMED, IN_PROGRESS, PAUSED, WAITING, BLOCKED, COMPLETED, FAILED})),
+            ("kind", self.kind, frozenset(KINDS)),
+            ("mode", self.mode, frozenset(MODES)),
+            ("risk", self.risk, frozenset(RISKS)),
+            ("origin", self.origin, frozenset(ORIGINS)),
+        )
+        for name, value, allowed in checks:
+            if value not in allowed:
+                raise ValueError(
+                    f"task {self.id!r}: unknown {name} {value!r}; "
+                    f"expected one of {sorted(allowed)}"
+                )
+
+    def __post_init__(self) -> None:
+        self.validate()
 
     def with_status(self, status: str, *, note: str = "", updated_at: float, attempt: bool = False) -> "Task":
         # A finished task keeps no lease. It used to: completion left the
