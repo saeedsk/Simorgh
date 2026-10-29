@@ -21,7 +21,9 @@ from .service import FILENAME
 from .tokens import format_report, parse_since, report
 
 
-def _path(args) -> Path:
+def _path(args, parser: argparse.ArgumentParser) -> Path:
+    if args.file and args.data_dir:
+        parser.error("--file and --data-dir are mutually exclusive")
     if args.file:
         return Path(args.file).expanduser()
     data_dir = args.data_dir or os.environ.get("SIMORGH_RUNTIME_DATA_DIR") or "~/.simorgh"
@@ -45,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         since_s = parse_since(args.since)
     except ValueError as exc:
         parser.error(str(exc))
-    path = _path(args)
+    path = _path(args, parser)
     if not path.exists():
         print(f"{args.command}: no telemetry file at {path}", file=sys.stderr)
         return 1
