@@ -35,8 +35,14 @@ def build_reply(task_type: str, *, competence: CompetenceTable, config: Config) 
     if not scores:
         samples = competence.samples(task_type)
         if samples == 0:
-            return {"success_rate": 0.5, "samples": 0}
-        return {"success_rate": competence.success_rate(task_type), "samples": samples}
+            return {"success_rate": 0.5, "samples": 0, "no_strategies_known": True}
+        # History exists but no strategy breakdown: mark it explicitly so
+        # callers never have to infer "floor" from the samples count.
+        return {
+            "success_rate": competence.success_rate(task_type),
+            "samples": samples,
+            "no_strategies_known": True,
+        }
     best = scores[0]
     parts = best.strategy.split(":")
     provider = parts[0] if parts else best.strategy
