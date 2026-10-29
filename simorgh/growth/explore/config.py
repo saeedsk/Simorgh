@@ -4,8 +4,11 @@ below carries a v1 name in a comment so the migration is traceable."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Mapping
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_TOPICS = (
     ("https://hnrss.org/frontpage", "technology"),
@@ -69,6 +72,12 @@ class Config:
         focus = m.pop("focus", None) or {}
         topics = m.pop("interest_default_topics", None)
         kwargs = {k: v for k, v in m.items() if k in cls.__dataclass_fields__}
+        unknown = [k for k in m if k not in cls.__dataclass_fields__]
+        if unknown:
+            log.warning(
+                "growth.explore config: ignoring unknown keys %s "
+                "(valid: %s)", sorted(unknown), ", ".join(sorted(cls.__dataclass_fields__)),
+            )
         if topics is not None:
             kwargs["interest_default_topics"] = tuple(tuple(t) for t in topics)
         return cls(focus=dict(focus), **kwargs)
