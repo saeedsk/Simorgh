@@ -15,6 +15,8 @@ licence.
 from __future__ import annotations
 
 import argparse
+import importlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +29,12 @@ PACKAGES = (
     "soundfile==0.14.0",    # WAV reading/writing (BSD-3)
     "numpy>=1.26",
 )
+#: Pure-Python packages whose Requires-Python cap is older than the wheels
+#: they need. kokoro-onnx 0.6.1 says `<3.14` because onnxruntime had no
+#: 3.14 build when it was released; onnxruntime, numpy, espeakng-loader
+#: and phonemizer all do now (PyPI, 2026-10-29). On a newer Python it is
+#: installed with the cap ignored and its dependencies resolved normally.
+CAP_IGNORABLE = ("kokoro-onnx",)
 OPTIONAL = (
     "faster-whisper",       # CTranslate2 Whisper, when whisper.cpp is not wanted (MIT)
 )
@@ -34,6 +42,32 @@ OPTIONAL = (
 
 def pip(*args: str) -> int:
     return subprocess.call([sys.executable, "-m", "pip", "install", "-q", *args])
+
+
+def _name(requirement: str) -> str:
+    return re.split(r"[<>=!~\[ ;]", requirement, maxsplit=1)[0]
+
+
+def install(packages: tuple[str, ...] = PACKAGES, *, pip=pip) -> int:
+    """Install `packages`; 0 when every one is in. When the batch fails,
+    the rest go in without the CAP_IGNORABLE ones, and those go in with
+    their Requires-Python cap ignored but not their dependencies' caps
+    (`--no-deps`, then the dependencies they declare, normally)."""
+    if pip(*packages) == 0:
+        return 0
+    capped = [p for p in packages if _name(p) in CAP_IGNORABLE]
+    rest = [p for p in packages if p not in capped]
+    if not capped or pip(*rest) != 0:
+        return 1
+    print(f"retrying {', '.join(capped)} past its Python cap ({sys.version.split()[0]}); see CAP_IGNORABLE")
+    if pip("--ignore-requires-python", "--no-deps", *capped) != 0:
+        return 1
+    from importlib import metadata
+
+    importlib.invalidate_caches()
+    deps = [r.split(";")[0].strip() for p in capped for r in (metadata.requires(_name(p)) or [])
+            if "extra ==" not in r]
+    return pip(*deps) if deps else 0
 
 
 def main() -> int:
@@ -44,7 +78,7 @@ def main() -> int:
                         help="whisper.cpp model to fetch (large-v3-turbo hears Farsi; base.en is English only)")
     args = parser.parse_args()
     print("packages:", ", ".join(PACKAGES))
-    if pip(*PACKAGES) != 0:
+    if install() != 0:
         print("pip failed; see above", file=sys.stderr)
         return 1
     if args.no_models:

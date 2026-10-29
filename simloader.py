@@ -1718,8 +1718,10 @@ def ensure_ollama(repo: Path, *, dry_run: bool, run=subprocess.run, wait_s: floa
 def provision_fingerprint(repo: Path) -> str:
     import hashlib
 
-    path = repo / "requirements.txt"
-    body = path.read_bytes() if path.is_file() else b""
+    # The voice stack's own installer counts too: a fix to it should be
+    # tried on the machine it failed on, not only on the next new one.
+    body = b"".join(p.read_bytes() for p in (repo / "requirements.txt", repo / "tools" / "voice_setup.py")
+                    if p.is_file())
     return hashlib.sha256(body + repr((PROVISION_VERSION, REQUIRED_PACKAGES, BREW_FORMULAE, local_model())).encode()).hexdigest()[:16]
 
 
