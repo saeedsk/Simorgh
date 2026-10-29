@@ -54,7 +54,7 @@ class TelemetryStore:
         self._lock = threading.Lock()
 
     # -------------------------------------------------------------- lifecycle
-    def open(self) -> None:
+    def open(self, *, prune_older_than: float | None = None) -> None:
         with self._lock:
             if self._conn is not None:
                 return
@@ -65,6 +65,8 @@ class TelemetryStore:
             conn.execute(f"PRAGMA busy_timeout={int(self._busy_timeout_ms)}")
             conn.executescript(SCHEMA)
             self._conn = conn
+        if prune_older_than is not None:
+            self.prune(prune_older_than)
 
     def close(self) -> None:
         with self._lock:
@@ -142,9 +144,10 @@ class TelemetryStore:
                     "samples": conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]}
 
     # -------------------------------------------------------------- retention
-    def prune(self, older_than_ts: float, *, spans: bool = False) -> dict[str, int]:
-        """Delete samples older than `older_than_ts` in one transaction
-        (and spans too when `spans` is True). Returns the rows removed."""
+    def prune(self, older_than_ts: float, *, spans: bool = True) -> dict[str, int]:
+        """Delete rows older than `older_than_ts` in one transaction --
+        samples by `ts`, and (by default, since both tables are indexed on
+        time) spans by `start`. Returns the rows each table lost."""
         with self._lock:
             conn = self._require()
             conn.execute("BEGIN")
