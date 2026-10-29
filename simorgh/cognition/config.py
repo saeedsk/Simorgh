@@ -14,22 +14,40 @@ from .api import Budget
 from .providers import anthropic as anthropic_provider
 from .providers import together as together_provider
 
+#: Live-calibrated purpose deadlines (the 90s/300s timing notes), exposed
+#: as `[cognition]` fields `chat_max_seconds` / `draft_max_seconds` so
+#: retuning them after new timing evidence is a config edit, not a code edit.
+#:
+#: chat 90s, not the 180s default: past that the voice path has given up and
+#: the work is spent on an answer nobody hears (live 2026-09-15: a 109s call,
+#: and two answers binned at 60s). Not lower, either -- the budget is split
+#: between the candidates, and GLM spends 30-50s on a 5,000-token voice
+#: prompt, so a tight cap makes the primary AND the failover both time out
+#: and hands the floor a turn that was going to be answered. `[voice]
+#: reply_timeout_s` sits just above this, so the cap is what binds.
+#:
+#: draft 300s, not the 180s default: the Router shares a purpose's deadline
+#: between candidates (`remaining / (still to try + 1)`), so 180s over four
+#: providers was a 36s slice -- and a real drafting call on a SWE-bench case
+#: measured up to 42.5s (60 calls, live 2026-09-22). The slow tail was timing
+#: out and costing the case its answer, while the model was working normally.
+DEFAULT_CHAT_MAX_SECONDS: float = 90.0
+DEFAULT_DRAFT_MAX_SECONDS: float = 300.0
+
+
 DEFAULT_PURPOSE_BUDGETS: dict[str, Budget] = {
-    # 90s, not the 180s default: past that the voice path has given up and the
-    # work is spent on an answer nobody hears (live 2026-09-15: a 109s call,
-    # and two answers binned at 60s). Not lower, either -- the budget is split
-    # between the candidates, and GLM spends 30-50s on a 5,000-token voice
-    # prompt, so a tight cap makes the primary AND the failover both time out
-    # and hands the floor a turn that was going to be answered. `[voice]
-    # reply_timeout_s` sits just above this, so the cap is what binds.
-    "chat": Budget(12_000, 1_000, 0.05, max_seconds=90.0),
+    # 90s: see the note on DEFAULT_CHAT_MAX_SECONDS above (live 2026-09-15:
+    # a 109s call, and two answers binned at 60s; GLM spends 30-50s on a
+    # 5,000-token voice prompt, so a tight cap times out primary AND
+    # failover). `[voice] reply_timeout_s` sits just above this.
+    "chat": Budget(12_000, 1_000, 0.05, max_seconds=DEFAULT_CHAT_MAX_SECONDS),
     # 300 s, not the 180 s default: the Router shares a purpose's deadline
     # between candidates (`remaining / (still to try + 1)`), so 180 s over
     # four providers was a 36 s slice -- and a real drafting call on a
     # SWE-bench case measured up to 42.5 s (60 calls, live 2026-09-22).
     # The slow tail was timing out and costing the case its answer, while
     # the model was working normally.
-    "draft": Budget(40_000, 8_000, 0.5, max_seconds=300.0),
+    "draft": Budget(40_000, 8_000, 0.5, max_seconds=DEFAULT_DRAFT_MAX_SECONDS),
     "plan": Budget(24_000, 2_000, 0.2, require_real=False),
     "review": Budget(12_000, 1_000, 0.05, require_real=False),
     "research": Budget(24_000, 2_000, 0.2),
@@ -153,6 +171,12 @@ class Config:
         ),
     })
     purposes: Mapping[str, Budget] = field(default_factory=lambda: dict(DEFAULT_PURPOSE_BUDGETS))
+    # The live-calibrated purpose deadlines (see the note above
+    # DEFAULT_CHAT_MAX_SECONDS), also settable from `[cognition]` directly --
+    # tuning them is a config edit, not a code edit. `purposes` is built from
+    # the same numbers, so the two stay in step unless TOML overrides one.
+    chat_max_seconds: float = DEFAULT_CHAT_MAX_SECONDS
+    draft_max_seconds: float = DEFAULT_DRAFT_MAX_SECONDS
     # Per-purpose provider order, tried before `provider_order`:
     # `{"draft": ("together_strong",), "strong": ("together_strong",)}`. The
     # key "strong" is used when a request asks for `tier: "strong"`
@@ -244,6 +268,7 @@ class Config:
             "collapse_trigger_fraction",
             "availability_poll_seconds", "assembly_request_timeout",
             "compress_tool_results", "compress_min_chars", "compress_rate", "extend_context_tokens",
+            "chat_max_seconds", "draft_max_seconds",
         ):
             if key in raw:
                 kwargs[key] = raw[key]
