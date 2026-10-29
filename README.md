@@ -1,6 +1,22 @@
 # Simorgh
 A multi-agent cognitive architecture that orchestrates specialized emotional, technical, and persona-driven sub-routines into a unified, highly skilled, and adaptive human-like artificial consciousness.
 
+## First boot on a new machine
+
+`./sim.sh` sets the machine up itself before its first gate (`simloader.py`
+`provision`): it pip-installs `requirements.txt` plus what the gate needs
+(pytest, pytest-xdist, certifi, keyring) into the Python that runs Sim,
+links a CA bundle for python.org's Python (what `Install Certificates.command`
+does), `brew install`s the tools Sim looks up by name (ffmpeg, tesseract,
+whisper-cpp, node, uv, yt-dlp, ripgrep, qrencode, shellcheck), creates
+`~/.simorgh/secrets.toml` owner-only with the common keys commented out,
+and gives the repository a git identity if the machine has none. It runs
+once per machine and again when that list changes; a missing required
+package stops the boot instead of rolling back. `python simloader.py
+provision --dry-run` shows what it would do; `SIMORGH_NO_PROVISION=1` or
+`--no-provision` skips it. Homebrew itself, Docker, Ollama and the voice
+models (`tools/voice_setup.py`) stay manual.
+
 ## Talking to Sim (voice, fully local)
 
 `./sim.sh`, then `voice on`. Speech in and out run on this machine after

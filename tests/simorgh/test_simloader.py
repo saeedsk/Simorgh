@@ -483,6 +483,7 @@ class LoaderTestCase(unittest.TestCase):
 
         argv = ["run", "--repo", str(self.repo.path), "--notes", str(self.notes)]
         with self._gate([(True, "green")]), \
+             mock.patch.object(simloader, "provision", return_value=(True, "")), \
              mock.patch.object(simloader, "launch_sim", return_value=simloader.RESTART_EXIT_CODE), \
              mock.patch.object(simloader.os, "execv", side_effect=_execv):
             with self.assertRaises(_Execd):
@@ -969,6 +970,156 @@ class ABrokenFileIsNotABadImage(unittest.TestCase):
     def test_no_secrets_file_at_all_is_fine(self):
         """Env-only deployments have none, and always worked."""
         self.assertEqual(self._loader().config_files_parse(self.repo), (True, ""))
+
+
+class ABrandNewMachineSetsItselfUpTestCase(unittest.TestCase):
+    """2026-10-29: on a new Mac mini the gate failed on every image with
+    "No module named pytest" and the loader rolled back three tags. A
+    machine that lacks packages is not a bad image: the loader installs
+    what Sim needs first, and never rolls back for the machine."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.repo = _Repo(self.root)
+        self.notes = self.root / "notes"
+        self.data = self.root / "data"
+        (self.repo.path / "requirements.txt").write_text("# optional\npypdf>=6.0  # pdfs\n")
+        patches = [
+            mock.patch.dict(os.environ, {"SIMORGH_RUNTIME_DATA_DIR": str(self.data)}),
+            mock.patch.object(simloader, "ensure_certificates", return_value=""),
+            mock.patch.object(simloader.shutil, "which", return_value="/bin/true"),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.installed: set[str] = set()
+        self.pip_calls: list[list[str]] = []
+        installed = mock.patch.object(simloader, "package_installed",
+                                      side_effect=lambda r: r.split(">")[0] in self.installed)
+        installed.start()
+        self.addCleanup(installed.stop)
+
+    def _run(self, argv, **kw):
+        if argv[1:3] == ["-m", "pip"]:
+            wanted = [a for a in argv[4:] if not a.startswith("-")]
+            self.pip_calls.append(wanted)
+            self.installed |= {w.split(">")[0] for w in wanted}
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    def test_the_first_boot_installs_requirements_and_what_the_gate_needs(self):
+        ok, _why = simloader.provision(self.repo.path, self.notes, run=self._run)
+        self.assertTrue(ok)
+        self.assertEqual(self.pip_calls, [["pypdf>=6.0", *simloader.REQUIRED_PACKAGES]])
+        self.assertTrue((self.notes / simloader.PROVISION_STAMP).is_file())
+        self.assertIn('"provisioned"', (self.notes / "decisions.jsonl").read_text())
+
+    def test_a_later_boot_does_not_install_again(self):
+        simloader.provision(self.repo.path, self.notes, run=self._run)
+        simloader.provision(self.repo.path, self.notes, run=self._run)
+        self.assertEqual(len(self.pip_calls), 1)
+
+    def test_a_changed_requirements_file_provisions_again(self):
+        simloader.provision(self.repo.path, self.notes, run=self._run)
+        (self.repo.path / "requirements.txt").write_text("pypdf>=6.0\napprise>=1.9\n")
+        simloader.provision(self.repo.path, self.notes, run=self._run)
+        self.assertEqual(self.pip_calls[-1], ["apprise>=1.9"])
+
+    def test_an_optional_package_that_will_not_install_does_not_stop_the_boot(self):
+        def run(argv, **kw):
+            if "pypdf>=6.0" in argv:
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="no wheel")
+            return self._run(argv, **kw)
+
+        ok, _why = simloader.provision(self.repo.path, self.notes, run=run)
+        self.assertTrue(ok)
+        self.assertTrue(set(simloader.REQUIRED_PACKAGES) <= self.installed)
+
+    def test_no_pytest_stops_the_boot_without_a_rollback(self):
+        fail = lambda argv, **kw: subprocess.CompletedProcess(argv, 1, stdout="", stderr="offline")  # noqa: E731
+        _git(self.repo.path, "tag", "-a", "sim-good-0001", "-m", "g")
+        before = self.repo.commit("two")
+        real = simloader.provision
+        with mock.patch.object(simloader, "provision", side_effect=lambda r, n: real(r, n, run=fail)), \
+             mock.patch.object(simloader, "run_gate") as gate:
+            rc = simloader.main(["run", "--repo", str(self.repo.path), "--notes", str(self.notes)])
+        self.assertEqual(rc, 5)
+        gate.assert_not_called()
+        self.assertEqual(_git(self.repo.path, "rev-parse", "--short", "HEAD"), before, "not rolled back")
+        self.assertIn('"unprovisioned"', (self.notes / "decisions.jsonl").read_text())
+
+    def test_the_secrets_file_is_created_owner_only(self):
+        simloader.provision(self.repo.path, self.notes, run=self._run)
+        secrets = self.data / "secrets.toml"
+        self.assertEqual(secrets.stat().st_mode & 0o777, 0o600)
+        import tomllib
+        self.assertEqual(tomllib.loads(secrets.read_text()), {}, "a template of comments only")
+
+    def test_an_existing_secrets_file_is_kept_and_made_owner_only(self):
+        self.data.mkdir()
+        secrets = self.data / "secrets.toml"
+        secrets.write_text('GEMINI_API_KEY = "k"\n')
+        secrets.chmod(0o644)
+        simloader.provision(self.repo.path, self.notes, run=self._run)
+        self.assertEqual(secrets.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(secrets.read_text(), 'GEMINI_API_KEY = "k"\n')
+
+    def test_a_machine_with_no_git_identity_borrows_the_last_author(self):
+        """`git tag -a` refuses to run without one, and a new Mac has none."""
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}):
+            why = simloader.ensure_git_identity(self.repo.path, dry_run=False)
+        self.assertIn("T <t@t>", why)
+        self.assertEqual(_git(self.repo.path, "config", "--local", "user.email"), "t@t")
+
+    def test_a_dry_run_changes_nothing(self):
+        simloader.provision(self.repo.path, self.notes, dry_run=True, run=self._run)
+        self.assertEqual(self.pip_calls, [])
+        self.assertFalse((self.data / "secrets.toml").exists())
+        self.assertFalse((self.notes / simloader.PROVISION_STAMP).exists())
+
+
+class PythonOrgPythonGetsCertificatesTestCase(unittest.TestCase):
+    """python.org's Python has no CA bundle until `Install Certificates
+    .command` runs: every feed on the new Mac failed CERTIFICATE_VERIFY_FAILED."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.bundle = self.root / "certifi" / "cacert.pem"
+        self.bundle.parent.mkdir()
+        self.bundle.write_text("bundle")
+        fake = type(sys)("certifi")
+        fake.where = lambda: str(self.bundle)
+        for patch in (mock.patch.dict(sys.modules, {"certifi": fake}), mock.patch.dict(os.environ)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        os.environ.pop("SSL_CERT_FILE", None)
+
+    def _paths(self, cafile, openssl_cafile):
+        import ssl
+        return ssl.DefaultVerifyPaths(cafile, None, "SSL_CERT_FILE", openssl_cafile, "SSL_CERT_DIR", "")
+
+    def test_the_bundle_is_linked_where_openssl_looks(self):
+        target = self.root / "etc" / "openssl" / "cert.pem"
+        with mock.patch("ssl.get_default_verify_paths", return_value=self._paths(None, str(target))):
+            why = simloader.ensure_certificates(dry_run=False)
+        self.assertIn("linked", why)
+        self.assertEqual(target.resolve(), self.bundle.resolve())
+
+    def test_where_it_cannot_link_sim_is_pointed_at_the_bundle(self):
+        blocked = self.root / "file"
+        blocked.write_text("")
+        target = blocked / "cert.pem"  # a parent that is a file: mkdir fails
+        with mock.patch("ssl.get_default_verify_paths", return_value=self._paths(None, str(target))):
+            why = simloader.ensure_certificates(dry_run=False)
+        self.assertIn("SSL_CERT_FILE", why)
+        self.assertEqual(os.environ["SSL_CERT_FILE"], str(self.bundle))
+
+    def test_a_python_that_has_certificates_is_left_alone(self):
+        with mock.patch("ssl.get_default_verify_paths", return_value=self._paths("/etc/cert.pem", "/x")):
+            self.assertEqual(simloader.ensure_certificates(dry_run=False), "")
 
 
 class TheHouseGateLeavesTheRepoAlone(unittest.TestCase):

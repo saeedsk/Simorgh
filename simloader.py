@@ -34,12 +34,14 @@ Usage:
     python simloader.py bless            gate HEAD and, if green, tag it known-good
     python simloader.py status           what is tagged, what would roll back to what
     python simloader.py rollback         step back one known-good tag, deliberately
+    python simloader.py provision        set this machine up (packages, tools, secrets file); --dry-run
 
 `run` is what sim.sh should call. Its loop: gate the checkout, and if the
 gate fails, step back one tag and try again, up to `--max-rollbacks`.
 Once the gate passes it hands off to Sim, with a start-up watchdog: if
 Sim exits non-zero inside `--watchdog` seconds, that counts as a bad
-image too.
+image too. Before any of that, `run` provisions the machine (see
+`provision`): on a brand-new install it installs what Sim needs itself.
 """
 
 from __future__ import annotations
@@ -1319,6 +1321,308 @@ def config_files_parse(repo: Path) -> tuple[bool, str]:
     return True, ""
 
 
+# ------------------------------------------------------------ provisioning
+# A brand-new machine (a Mac mini, 2026-10-29) booted a checkout 991
+# commits behind main: python.org's Python 3.14 had no pytest, so the
+# gate failed on every image -- "No module named pytest" -- and the
+# loader rolled back three tags before giving up. Like a broken config
+# file, a missing package is not a bad image and no rollback can fix
+# it. So before the first gate the loader sets the machine up itself,
+# and afterwards it refuses to judge code on a machine that cannot run
+# the gate at all.
+
+#: Python packages the gate itself cannot run without. A failure to
+#: install one of these stops the boot (exit 5) instead of rolling back.
+REQUIRED_PACKAGES = ("pytest", "pytest-xdist", "certifi", "keyring")
+
+#: Command-line tools Sim looks up by name (`shutil.which`), as Homebrew
+#: formulae. Every one is optional: without it the capability that needs
+#: it refuses by name. Casks and services (Docker, Ollama, Tailscale) are
+#: left to the creator.
+BREW_FORMULAE = {
+    "ffmpeg": "ffmpeg", "tesseract": "tesseract", "whisper-cli": "whisper-cpp", "node": "node",
+    "uv": "uv", "yt-dlp": "yt-dlp", "rg": "ripgrep", "qrencode": "qrencode", "shellcheck": "shellcheck",
+}
+
+#: Bump to make every machine run the full provisioning once more.
+PROVISION_VERSION = 1
+PROVISION_STAMP = "provisioned.json"
+
+SECRETS_TEMPLATE = """\
+# Sim's secrets (owner-only: Sim refuses this file unless it is mode 600).
+# Created by simloader.py on first boot. Uncomment what you have; the
+# environment always wins over this file. Everything is optional --
+# a capability whose key is missing says so by name.
+
+# Models
+# ANTHROPIC_API_KEY = ""
+# GEMINI_API_KEY = ""
+# OPENAI_API_KEY = ""
+
+# Web search
+# BRAVE_API_KEY = ""
+# SERPER_API_KEY = ""
+
+# The house
+# HOME_ASSISTANT_URL = ""
+# HOME_ASSISTANT_TOKEN = ""
+
+# Notifications
+# SIM_TELEGRAM_TOKEN = ""
+# APPRISE_URLS = ""
+"""
+
+
+def runtime_paths(repo: Path) -> tuple[Path, Path]:
+    """(data dir, secrets file), resolved the way `config_files_parse`
+    resolves them. A config that will not parse falls back to the
+    defaults here; `config_files_parse` is what reports it."""
+    import tomllib
+
+    data_dir = Path(os.environ.get("SIMORGH_RUNTIME_DATA_DIR") or (Path.home() / ".simorgh"))
+    config: dict = {}
+    for path in (repo / "simorgh.toml", data_dir / "simorgh.toml"):
+        if path.is_file():
+            try:
+                with path.open("rb") as fh:
+                    config = tomllib.load(fh)
+            except (OSError, tomllib.TOMLDecodeError):
+                config = {}
+            break
+    named = str((config.get("secrets") or {}).get("file") or "${data_dir}/secrets.toml")
+    return data_dir, Path(named.replace("${data_dir}", str(data_dir))).expanduser()
+
+
+def requirement_names(repo: Path) -> list[str]:
+    """Every package requirements.txt names, then the required ones."""
+    names: list[str] = []
+    path = repo / "requirements.txt"
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                names.append(line)
+    bare = {re.split(r"[<>=!~\[ ;]", n, maxsplit=1)[0].lower() for n in names}
+    names += [p for p in REQUIRED_PACKAGES if p.lower() not in bare]
+    return names
+
+
+def package_installed(requirement: str) -> bool:
+    from importlib import metadata
+
+    name = re.split(r"[<>=!~\[ ;]", requirement, maxsplit=1)[0]
+    try:
+        metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+def _pip(requirements: list[str], run=subprocess.run) -> tuple[bool, str]:
+    cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-q", *requirements]
+    proc = run(cmd, capture_output=True, text=True)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode != 0 and "Permission denied" in out and "--user" not in cmd:
+        proc = run([*cmd[:4], "--user", *cmd[4:]], capture_output=True, text=True)
+        out = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode == 0, out.strip()
+
+
+def install_packages(repo: Path, *, dry_run: bool, run=subprocess.run) -> tuple[list[str], list[str]]:
+    """Install what requirements.txt names and this Python lacks.
+    Returns (installed, failed). One package with no wheel for this
+    Python must not block the rest, so a failed batch is retried one
+    package at a time."""
+    missing = [r for r in requirement_names(repo) if not package_installed(r)]
+    if not missing:
+        return [], []
+    say(f"Python packages missing: {', '.join(missing)}", "step")
+    if dry_run:
+        return missing, []
+    say(f"installing them with {sys.executable} -m pip (a minute or two)", "note")
+    ok, _out = _pip(missing, run)
+    if ok:
+        return missing, []
+    installed, failed = [], []
+    for requirement in missing:
+        ok, out = _pip([requirement], run)
+        (installed if ok else failed).append(requirement)
+        if not ok:
+            say(f"  could not install {requirement}: {(out.splitlines() or [''])[-1][:160]}", "warn")
+    return installed, failed
+
+
+def ensure_certificates(*, dry_run: bool) -> str:
+    """python.org's macOS Python ships no CA bundle until its `Install
+    Certificates.command` runs; until then every HTTPS fetch fails with
+    CERTIFICATE_VERIFY_FAILED (the dashboard's feeds, on the new Mac).
+    Do what that script does -- link certifi's bundle where OpenSSL
+    looks -- and, where that is not writable, point SSL_CERT_FILE at it
+    for Sim's process tree. Returns what was done, or ""."""
+    import ssl
+
+    paths = ssl.get_default_verify_paths()
+    if paths.cafile or os.environ.get("SSL_CERT_FILE"):
+        return ""
+    importlib.invalidate_caches()  # certifi may have been installed a moment ago
+    try:
+        import certifi
+    except ImportError:
+        return "no CA certificates, and certifi is not installed"
+    bundle = certifi.where()
+    if dry_run:
+        return f"would link {paths.openssl_cafile} -> {bundle}"
+    target = Path(paths.openssl_cafile)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink():
+            target.unlink()
+        target.symlink_to(bundle)
+        return f"linked {target} -> {bundle}"
+    except OSError:
+        os.environ["SSL_CERT_FILE"] = bundle
+        return f"SSL_CERT_FILE={bundle} for Sim (could not write {target})"
+
+
+def install_tools(*, dry_run: bool, run=subprocess.run) -> tuple[list[str], list[str]]:
+    """`brew install` the tools Sim looks up by name and cannot find.
+    Without Homebrew this only reports: installing Homebrew needs an
+    administrator password, which the loader will not ask for."""
+    missing = sorted({formula for binary, formula in BREW_FORMULAE.items() if not shutil.which(binary)})
+    if not missing:
+        return [], []
+    brew = shutil.which("brew") or next((p for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew")
+                                         if Path(p).is_file()), "")
+    if not brew:
+        say(f"tools missing and no Homebrew to install them: {', '.join(missing)} (https://brew.sh)", "warn")
+        return [], missing
+    say(f"tools missing: {', '.join(missing)}", "step")
+    if dry_run:
+        return missing, []
+    say("installing them with Homebrew (this can take several minutes)", "note")
+    installed, failed = [], []
+    for formula in missing:
+        proc = run([brew, "install", "--quiet", formula], capture_output=True, text=True,
+                   env=dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_ENV_HINTS="1"))
+        (installed if proc.returncode == 0 else failed).append(formula)
+        say(f"  {formula}: {'installed' if proc.returncode == 0 else 'failed'}",
+            "ok" if proc.returncode == 0 else "warn")
+    return installed, failed
+
+
+def ensure_secrets_file(repo: Path, *, dry_run: bool) -> str:
+    """Create the secrets file if there is none, owner-only, and make an
+    existing one owner-only. Sim refuses a group- or world-readable
+    secrets file and exits -- which the watchdog would call a bad image
+    and roll back for. Never reads or prints a value."""
+    data_dir, secrets = runtime_paths(repo)
+    if not secrets.exists():
+        if dry_run:
+            return f"would create {secrets} (mode 600)"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        secrets.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(secrets, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(SECRETS_TEMPLATE)
+        return f"created {secrets} (mode 600) -- put your API keys in it"
+    mode = secrets.stat().st_mode & 0o777
+    if mode & 0o077:
+        if dry_run:
+            return f"would chmod 600 {secrets} (it is {oct(mode)})"
+        secrets.chmod(0o600)
+        return f"made {secrets} owner-only (it was {oct(mode)})"
+    return ""
+
+
+def ensure_git_identity(repo: Path, *, dry_run: bool) -> str:
+    """A known-good tag is an annotated tag, and git refuses to make one
+    with no identity -- which a new machine does not have. Use the
+    newest commit's author, in this repository only."""
+    if git("config", "user.email", cwd=repo).stdout.strip():
+        return ""
+    who = git("log", "-1", "--format=%an%x00%ae", cwd=repo).stdout.strip().split("\x00")
+    name, email = (who + ["", ""])[:2]
+    name, email = name or "Simorgh loader", email or "simloader@localhost"
+    if dry_run:
+        return f"would set this repository's git identity to {name} <{email}>"
+    git("config", "user.name", name, cwd=repo)
+    git("config", "user.email", email, cwd=repo)
+    return f"set this repository's git identity to {name} <{email}>"
+
+
+def provision_fingerprint(repo: Path) -> str:
+    import hashlib
+
+    path = repo / "requirements.txt"
+    body = path.read_bytes() if path.is_file() else b""
+    return hashlib.sha256(body + repr((PROVISION_VERSION, REQUIRED_PACKAGES, BREW_FORMULAE)).encode()).hexdigest()[:16]
+
+
+def provision(repo: Path, notes: Path, *, dry_run: bool = False, force: bool = False,
+              run=subprocess.run) -> tuple[bool, str]:
+    """Set this machine up to run Sim. Returns (ok, why); not ok only
+    when the gate itself cannot run here.
+
+    The cheap checks (secrets file, git identity, CA certificates, the
+    required packages) run on every boot. Installing everything
+    requirements.txt and BREW_FORMULAE name runs once per machine, and
+    again whenever that list changes -- not on every boot, so a tool
+    with no build for this Mac is not retried each time."""
+    done: list[str] = []
+    for step in (ensure_secrets_file(repo, dry_run=dry_run), ensure_git_identity(repo, dry_run=dry_run)):
+        if step:
+            done.append(step)
+    stamp = notes / PROVISION_STAMP
+    fingerprint = provision_fingerprint(repo)
+    try:
+        previous = json.loads(stamp.read_text())
+    except (OSError, ValueError):
+        previous = {}
+    full = force or previous.get("fingerprint") != fingerprint
+    if full:
+        rule("first boot on this machine: setting it up" if not previous else "setting this machine up")
+        installed, failed = install_packages(repo, dry_run=dry_run, run=run)
+        tools_installed, tools_failed = install_tools(dry_run=dry_run, run=run)
+    else:
+        missing = [p for p in REQUIRED_PACKAGES if not package_installed(p)]
+        installed, failed = install_packages_only(missing, dry_run=dry_run, run=run) if missing else ([], [])
+        tools_installed, tools_failed = [], []
+    certificates = ensure_certificates(dry_run=dry_run)
+    if certificates:
+        done.append(certificates)
+    for line in done:
+        say(line, "ok")
+    if dry_run:
+        return True, "dry run"
+    required_failed = [p for p in REQUIRED_PACKAGES if not package_installed(p)]
+    if full:
+        write_note(notes, {"kind": "provisioned", "commit": head(repo), "python": sys.executable,
+                           "installed": installed + tools_installed, "failed": failed + tools_failed,
+                           "done": done})
+        if not required_failed:
+            stamp.parent.mkdir(parents=True, exist_ok=True)
+            stamp.write_text(json.dumps({"fingerprint": fingerprint, "ts": time.time(),
+                                         "failed": failed + tools_failed}, indent=1))
+        if installed or tools_installed:
+            say(f"installed {len(installed) + len(tools_installed)} package(s) and tool(s)", "ok")
+        if failed or tools_failed:
+            say(f"not installed (optional, Sim names them when needed): {', '.join(failed + tools_failed)}", "warn")
+    if required_failed:
+        return False, (f"{sys.executable} has no {', '.join(required_failed)}, and installing failed; "
+                       f"try `{sys.executable} -m pip install {' '.join(required_failed)}`")
+    return True, ""
+
+
+def install_packages_only(requirements: list[str], *, dry_run: bool, run=subprocess.run) -> tuple[list[str], list[str]]:
+    """The required packages alone, on a boot after the first -- someone
+    uninstalled pytest, or SIMORGH_PYTHON now names another Python."""
+    say(f"required Python packages missing: {', '.join(requirements)}", "step")
+    if dry_run:
+        return requirements, []
+    ok, _out = _pip(requirements, run)
+    return (requirements, []) if ok else ([], requirements)
+
+
 def launch_sim(repo: Path, notes: Path, sim_args: list[str], *, argv: list[str] | None = None,
                grace_s: float | None = None) -> int:
     """Run Sim in the foreground until it exits. Its own function so a
@@ -1358,7 +1662,7 @@ def launch_sim(repo: Path, notes: Path, sim_args: list[str], *, argv: list[str] 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Boot Simorgh from a known-good tag, and keep it that way.")
-    parser.add_argument("command", choices=("run", "bless", "status", "rollback"))
+    parser.add_argument("command", choices=("run", "bless", "status", "rollback", "provision"))
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parent))
     parser.add_argument("--notes", default=None,
                          help=f"where decisions are written for Sim to read "
@@ -1372,6 +1676,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-rollbacks", type=int, default=3)
     parser.add_argument("--watchdog", type=float, default=60.0, help="a non-zero exit inside this is a bad boot")
     parser.add_argument("--reason", default="requested by operator")
+    parser.add_argument("--no-provision", action="store_true",
+                        help="skip setting the machine up before `run` (also SIMORGH_NO_PROVISION=1)")
+    parser.add_argument("--dry-run", action="store_true", help="`provision`: say what it would do, change nothing")
     parser.add_argument("sim_args", nargs="*", help="passed through to `python -m simorgh run`")
     args = parser.parse_args(argv)
     repo = Path(args.repo).resolve()
@@ -1383,6 +1690,18 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_bless(repo, notes, full=args.full, timeout_s=args.timeout)
     if args.command == "rollback":
         return cmd_rollback(repo, notes, reason=args.reason)
+    if args.command == "provision":
+        ok, why = provision(repo, notes, dry_run=args.dry_run, force=True)
+        if not ok:
+            say(why, "fail")
+        return 0 if ok else 5
+    if not args.no_provision and os.environ.get("SIMORGH_NO_PROVISION") != "1":
+        ok, why = provision(repo, notes)
+        if not ok:
+            say(f"not booting: {why}", "fail")
+            say("this is the machine, not the image -- nothing is being rolled back", "warn")
+            write_note(notes, {"kind": "unprovisioned", "commit": head(repo), "why": why})
+            return 5
     invoked = list(sys.argv[1:] if argv is None else argv)
     if "run" in invoked:
         invoked.remove("run")
