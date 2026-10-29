@@ -297,6 +297,18 @@ class Compactor:
         if dropped_oldest:
             body = f"[{dropped_oldest} earlier segment(s) omitted -- too large even for summarization]\n\n" + body
         summary_text = (await self._summarize(_COMPACT_PROMPT + body)).strip()
+        if not summary_text:
+            # The summarizer came back empty/whitespace-only. Replacing the
+            # collapsed older segments with nothing would silently destroy
+            # live context, so keep the collapsed segments instead and
+            # report the failure via `cognition.compact.done`.
+            await self._emit_compact_done(
+                sid, layers_applied=("1", "2", "3", "4"),
+                tokens_before=sum(s.tokens for s in pre_collapse),
+                tokens_after=sum(s.tokens for s in collapsed),
+                summary_ref=None, failure="summarizer returned empty output",
+            )
+            return collapsed, False, None
         summary_content = f"[compacted summary of {len(older_elastic)} earlier steps]\n{summary_text}"
         summary_seg = _Segment({"role": "system", "content": summary_content}, estimate_tokens(summary_content))
 
@@ -366,7 +378,7 @@ class Compactor:
 
     async def _emit_compact_done(
         self, session_id: str, *, layers_applied: tuple[str, ...], tokens_before: int,
-        tokens_after: int, summary_ref: str | None,
+        tokens_after: int, summary_ref: str | None, failure: str | None = None,
     ) -> None:
         if self._bus is None:
             return
@@ -375,6 +387,7 @@ class Compactor:
                 topics.COGNITION_COMPACT_DONE, source=self._source, payload={
                     "session_id": session_id, "layer": "5", "layers_applied": list(layers_applied),
                     "tokens_before": tokens_before, "tokens_after": tokens_after, "summary_ref": summary_ref,
+                    "failure": failure,
                 },
             ))
         except Exception:  # noqa: BLE001 -- telemetry must never block compaction itself
