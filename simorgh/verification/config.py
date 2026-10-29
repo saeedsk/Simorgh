@@ -69,6 +69,20 @@ class VerificationConfig:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None = None) -> "VerificationConfig":
         data = dict(data or {})
+        # Reject unknown top-level keys so a typo in [verification] fails
+        # loudly instead of being silently ignored.
+        known = {
+            "rigor", "checklist", "docstring", "invariants", "test_suite",
+            "sandbox_smoke", "trajectory", "review", "plan_review",
+            "action_timeout_seconds", "think_timeout_seconds",
+            "isolated_suite_timeout_seconds", "max_denied_actions",
+        }
+        unknown = sorted(set(data) - known)
+        if unknown:
+            raise ValueError(
+                f"unknown [verification] key(s): {', '.join(unknown)}; "
+                f"known keys: {', '.join(sorted(known))}"
+            )
         kwargs: dict[str, Any] = {}
         if "rigor" in data:
             rigor = data["rigor"]
