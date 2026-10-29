@@ -80,7 +80,7 @@ class Config:
     # it; `research` is a curiosity-weight investigation.
     priority_weights: dict = field(
         default_factory=lambda: {"human": 3, "project": 3, "benchmark": 2, "reflection": 2,
-                                 "assistant": 2, "curiosity": 1, "research": 1}
+                                 "assistant": 2, "planning": 2, "curiosity": 1, "research": 1}
     )
     leader: bool = True
     # A decomposition or re-grounding is a real model call. This was an
