@@ -579,6 +579,7 @@ class Service:
         cfg = self.config
         repo_root = Path(".")
         problems: list[str] = []
+        notes: list[str] = []
         stt = self._injected["recogniser"]
         if stt is None:
             stt, why = await asyncio.to_thread(open_recogniser, cfg, repo_root=repo_root)
@@ -587,8 +588,14 @@ class Service:
         tts = self._injected["synthesiser"]
         if tts is None:
             tts, why = open_synthesiser(cfg, secrets=self._ctx.secrets)
-            if tts is None or why:
-                problems.append(why if tts is None else f"tts {cfg.tts!r} fell back to {getattr(tts, 'name', '?')}: {why}")
+            if tts is None:
+                problems.append(why)
+            elif why:
+                # A fallback still speaks: named in `voice status`, never a
+                # reason to stay off. It was counted as a problem, and on a
+                # new Mac without StyleTTS2 `tts = "elevenlabs"` left the
+                # laptop and every room silent (2026-10-30).
+                notes.append(f"tts {cfg.tts!r} fell back to {getattr(tts, 'name', '?')}: {why}")
         mic = self._injected["microphone"]
         if mic is None:
             if cfg.microphone == "fake":
@@ -611,7 +618,7 @@ class Service:
                     problems.append(why)
         detector_factory = lambda: open_detector(cfg.vad, threshold=cfg.vad_threshold)[0]  # noqa: E731
         vad_name = open_detector(cfg.vad, threshold=cfg.vad_threshold)[0].name
-        self._problems = problems
+        self._problems = problems + notes
         self._engine_names = {"stt": getattr(stt, "name", ""), "tts": getattr(tts, "name", ""),
                               "mic": getattr(mic, "name", ""), "spk": getattr(spk, "name", ""), "vad": vad_name}
         if problems:
