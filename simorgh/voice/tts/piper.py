@@ -85,13 +85,15 @@ class PiperSynthesiser:
         "playful": (0.85, 1.1), "sorry": (0.5, 0.75),
     }
 
-    async def synthesise(self, text: str, *, voice: str = "", speed: float = 1.0, tone: str = "") -> Audio:
+    async def synthesise(self, text: str, *, voice: str = "", speed: float | None = None, tone: str = "") -> Audio:
         """`voice` is ignored: a Piper synthesiser IS one voice, and the
         Kokoro voice id the pipeline passes for every reply means
         nothing here. `tone` sets the expressiveness."""
         def _run() -> Audio:
             config = None
-            rate = speed or self._speed
+            rate = self._speed if speed is None else speed
+            if rate <= 0:
+                raise ValueError(f"speed must be positive, got {rate!r}")
             noise = self.TONE_NOISE.get((tone or "").lower())
             if (rate and rate != 1.0) or noise:
                 try:
