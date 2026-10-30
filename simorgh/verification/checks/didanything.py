@@ -196,6 +196,21 @@ def _steps(req: VerifyRequest) -> list[dict]:
 # blocked.
 
 
+# Phrases that say an EARLIER attempt's edit is already on disk. Used only
+# when `session.py` has sent `complete_log: False`, i.e. this attempt
+# carried an edit forward and its own step list cannot show the write.
+# Each phrase is about the change itself, for the same reason as _DECLINED.
+_ALREADY_APPLIED = (
+    "already applied", "already been applied", "was already applied",
+    "is already applied", "already committed", "already been committed",
+)
+
+
+def _reports_already_applied(req: VerifyRequest) -> bool:
+    answer = str(req.subject.get("result") or "").lower()
+    return any(phrase in answer for phrase in _ALREADY_APPLIED)
+
+
 class DidAnythingCheck:
     name = "did_anything"
     cost = "free"
@@ -223,10 +238,13 @@ class DidAnythingCheck:
         # (`task_writes`, every attempt's write tools, stage 4 item 8):
         # then a retry is judged on the task, not stood down.
         whole = req.subject.get("complete_log", True) or isinstance(req.subject.get("task_writes"), list)
+        # A carried retry is judged here only when its answer says the
+        # earlier attempt's change is already applied; otherwise it is
+        # handed to the semantic checklist as before.
         return (
             req.subject.get("kind") in _CHANGE_KINDS
             and bool(_steps(req))
-            and whole
+            and (whole or _reports_already_applied(req))
         )
 
     async def run(self, req: VerifyRequest, ctx: CheckContext) -> CheckResult:
@@ -238,6 +256,9 @@ class DidAnythingCheck:
         if isinstance(earlier, list) and earlier:
             return CheckResult(status="passed",
                                detail=f"an earlier attempt of this task wrote ({', '.join(sorted(set(earlier)))})")
+        if req.subject.get("complete_log") is False and _reports_already_applied(req):
+            return CheckResult(status="passed",
+                               detail="a carried edit from an earlier attempt is reported as already applied")
         denied = sorted({str(s.get("tool")) for s in steps if s.get("tool") in WRITE_TOOLS and s.get("denied")})
 
         answer = str(req.subject.get("result") or "").lower()
