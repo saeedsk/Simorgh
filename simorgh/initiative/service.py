@@ -100,6 +100,8 @@ class Service:
         self._sought_today = 0
         #: task_id -> the person it was sought for.
         self._seeking: dict[str, str] = {}
+        # when each lookup was issued, so stale ones can be expired
+        self._seeking_at: dict[str, float] = {}
         self.do_not_disturb: set[str] = set()
         #: What was not worth interrupting for, kept for the digest
         #: (stage 6 item 6). `(kind, text)`, oldest first, and how many
@@ -147,6 +149,25 @@ class Service:
         return Health.ok(f"{self._delivered_today} unprompted delivery(ies) today")
 
     # -- what might be worth saying ---------------------------------------------------
+    def _issued_at(self) -> dict[str, float]:
+        # Services built without `__init__` (some tests use `__new__`) still
+        # need the map, so create it on first use.
+        return self.__dict__.setdefault("_seeking_at", {})
+
+    def _expire_seeking(self, now: float) -> None:
+        """Forget research lookups that never came back.
+
+        A task that is never completed would otherwise keep its entry in
+        `_seeking` for the life of the process. Entries with no recorded
+        issue time are left alone.
+        """
+        cutoff = now - 6 * 3600.0
+        issued_at = self._issued_at()
+        for task_id, issued in list(issued_at.items()):
+            if issued < cutoff:
+                issued_at.pop(task_id, None)
+                self._seeking.pop(task_id, None)
+
     async def _on_marked_wrong(self, message: Message) -> None:
         """Somebody said one of these was wrong (stage 10 item 10).
 
@@ -162,6 +183,7 @@ class Service:
         against `initiative.offered`, not from this dict.
         """
         ref = str(message.payload.get("ref") or "").strip()
+        self._expire_seeking(self._ctx.clock.now() if self._ctx is not None else 0.0)
         if ref:
             self.marked_wrong[ref] = str(message.payload.get("why") or "wrong")
 
@@ -244,6 +266,7 @@ class Service:
         ctx = self._ctx
         task_id = uuid.uuid4().hex[:12]
         self._seeking[task_id] = person.name
+        self._issued_at()[task_id] = now
         self._sought_today += 1
         # The sourcebook and `web_search` are fine HERE: this is news
         # about lego robotics, not advice about a person.
@@ -260,6 +283,8 @@ class Service:
         """Something Sim went to find out came back. Offer it."""
         payload = message.payload or {}
         task_id = str(payload.get("task_id") or "")
+        self._expire_seeking(self._ctx.clock.now() if self._ctx is not None else 0.0)
+        self._issued_at().pop(task_id, None)
         person = self._seeking.pop(task_id, "")
         if not person:
             return
