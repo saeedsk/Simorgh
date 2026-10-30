@@ -264,6 +264,9 @@ class Service:
     async def _seek_for(self, person, interest: str, now: float) -> None:
         """One bounded research task about `interest`, for `person`."""
         ctx = self._ctx
+        # enforce the window on the growth path too, not only on completion
+        # or wrong-marks: a stale lookup is dropped before a new one is added
+        self._expire_seeking(now)
         task_id = uuid.uuid4().hex[:12]
         self._seeking[task_id] = person.name
         self._issued_at()[task_id] = now
