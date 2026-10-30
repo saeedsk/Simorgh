@@ -66,3 +66,8 @@ apprise>=1.9
 # but execution's boot probe reports the system degraded, and a new
 # machine without it failed the boot gate (2026-10-29).
 bandit>=1.7
+
+# Room satellites (simorgh/voice/satellite.py): the ESPHome native API
+# the board speaks. Optional and imported only when `[[voice.satellites]]`
+# is configured; without it a configured satellite is refused by name.
+aioesphomeapi
