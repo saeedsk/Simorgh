@@ -96,7 +96,13 @@ class SkillDistillationLiveTestCase(unittest.IsolatedAsyncioTestCase):
         topic = topics.TASK_COMPLETED if succeeded else topics.TASK_FAILED
         payload = {"task_id": task_id, "terminal": True}
         if succeeded:
-            payload.update({"result_summary": "done", "artifacts": [], "verification_ref": None})
+            # Only a task Verification passed is distilled (2026-10-30); its
+            # `verify.result` comes before `task.completed`, as in a real run.
+            await self.driver.publish(self.driver.new(topics.VERIFY_RESULT, {
+                "verification_id": f"v-{task_id}", "task_id": task_id, "verdict": "pass", "checklist": [],
+                "trajectory": {"steps": len(tools), "wasted": 0, "recovered_errors": 0}, "mechanical": {},
+            }))
+            payload.update({"result_summary": "done", "artifacts": [], "verification_ref": f"v-{task_id}"})
         else:
             payload.update({"reason": "failed", "attempts": 1})
         await self.driver.publish(self.driver.new(topic, payload))
