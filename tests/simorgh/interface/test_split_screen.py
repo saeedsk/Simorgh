@@ -342,3 +342,18 @@ class CrewMembersGetNamedBoxes(unittest.IsolatedAsyncioTestCase):
         await emit(topics.CREW_REPORT, {"crew_id": "c1", "handle": "m1", "report": {
             "status": "ok", "summary": "Semis fell 4% on Friday", "steps": 1}})
         self.assertIn("Semis fell 4%", _text(agents.boxes()[0].render(40, 6)))
+
+
+class TheColumnWidth(unittest.TestCase):
+    """The creator, 2026-10-30: "make the right bar wider" -- a fixed 46
+    was a quarter of his 200 columns."""
+
+    def test_a_third_of_the_terminal_by_default_never_under_46_never_over_half(self):
+        from simorgh.interface.splitscreen import side_width
+
+        self.assertEqual(side_width(200), 66)
+        self.assertEqual(side_width(120), 46)
+        self.assertEqual(side_width(80), 40, "never more than half")
+        self.assertEqual(side_width(200, 90), 90, "a configured width is kept")
+        self.assertEqual(side_width(200, 150), 100)
+        self.assertEqual(Config().side_width, 0)

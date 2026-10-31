@@ -49,8 +49,17 @@ from .tui import PANEL_REFRESH_S, PROMPT_GLYPH, Tui, _make_completer, _make_lexe
 
 #: Most transcript lines kept in memory; the Ledger keeps everything.
 TRANSCRIPT_LINES = 5000
-#: Columns the right column takes by default (`[interface] side_width`).
+#: Narrowest the right column is drawn; by default it is a third of the
+#: terminal (`[interface] side_width = 0`), or `side_width` columns.
 SIDE_WIDTH = 46
+
+
+def side_width(columns: int, configured: int = 0) -> int:
+    """The right column's width on a terminal `columns` wide: `configured`
+    when set, else a third of the terminal; never under `SIDE_WIDTH` and
+    never more than half, so the conversation keeps the larger side."""
+    wanted = configured if configured > 0 else columns // 3
+    return max(min(SIDE_WIDTH, columns // 2), min(max(SIDE_WIDTH, wanted), columns // 2))
 #: Fewest rows a box is drawn in (its two borders and two lines).
 MIN_BOX_ROWS = 4
 
@@ -249,10 +258,10 @@ class SplitTui(Tui):
     """`Tui` laid out full screen with a right-hand column of boxes.
     `boxes()` returns the boxes to show, top to bottom (`sidepanel.py`)."""
 
-    def __init__(self, *, boxes: Callable[[], list], side_width: int = SIDE_WIDTH, **kwargs) -> None:
+    def __init__(self, *, boxes: Callable[[], list], side_width: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         self._boxes = boxes
-        self._side_width = max(24, int(side_width))
+        self._side_width = max(0, int(side_width))
         self.panes = Panes()
         self.transcript = Transcript()
         self._real_stdout = None
@@ -407,7 +416,7 @@ class SplitTui(Tui):
         if full == 0 or self.panes.side_hidden or not boxes:
             self._set_columns(cols - 2)
             return self._frame_height(self._conversation(rows=room), room)
-        side_w = min(self._side_width, max(24, cols // 2))
+        side_w = side_width(cols, self._side_width)
         self._set_columns(cols - side_w - 2)
 
         def need(box) -> int:

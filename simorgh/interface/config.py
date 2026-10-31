@@ -74,8 +74,10 @@ class Config:
     # scrollback and mouse selection for the column; PageUp/PageDown
     # scroll. `SIMORGH_LAYOUT=split` in the environment chooses it too.
     layout: str = "inline"
-    # Columns the split screen's right column takes.
-    side_width: int = 46
+    # Columns the split screen's right column takes; 0 (the default) is a
+    # third of the terminal, at least 46 (the creator, 2026-10-30: "make the
+    # right bar wider" -- 46 fixed was a quarter of his 200 columns).
+    side_width: int = 0
     # Redraw-in-place status footer (the creator's own explicit call,
     # 2026-09-06, after being shown the tradeoff against `render.py`'s
     # scrolling-only rule -- see `live_status.py`'s module docstring for
