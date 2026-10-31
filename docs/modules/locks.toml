@@ -22,3 +22,9 @@ by = "claude-agent-boxes"
 task = "crew members get named agent boxes"
 since = "2026-10-31T04:54:08+00:00"
 until = "2026-10-31T12:54:08+00:00"
+
+[locks.orchestration]
+by = "claude-code"
+task = "claims: 'I wrote it myself' is not a file change"
+since = "2026-10-31T04:58:55+00:00"
+until = "2026-10-31T12:58:55+00:00"
