@@ -571,11 +571,15 @@ _MARKER_ARG_HINT.update({
         "configured cap), folder=, account=, unread_only=true. Newest first: when it returns exactly "
         "`limit` messages there are probably more, so raise limit or narrow since before counting. "
         "Example: MAIL_SEARCH: promo since=30 days limit=200. Returns subjects and senders only -- "
-        "bodies are sensitive and come from MAIL_READ, one at a time."
+        "bodies are sensitive and come from MAIL_READ. Each row's `ref` is the reference MAIL_READ takes."
     ),
     "mail_read": (
-        "an [account:folder:uid] reference exactly as MAIL_SEARCH printed it, to read that one "
-        "message's body."
+        # Several on one line (2026-10-30): a program reading a page one
+        # message a call ran out of its 50 calls at message 50 of 200.
+        "an [account:folder:uid] reference exactly as MAIL_SEARCH printed it (a row's `ref`), to read "
+        "that message's body; or up to 20 on ONE line, separated by spaces, each answered under a line "
+        "`=== [account:folder:uid] ===` -- in a run_analysis program, read a page in batches of 20 "
+        "with sim.call(\"mail_read\", message=\" \".join(refs)) rather than one call per message."
     ),
     "mail_unsubscribe": (
         # One LINE: a marker's payload is its first line (cognition/parser.py
