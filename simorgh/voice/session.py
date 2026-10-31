@@ -1576,6 +1576,10 @@ class VoiceSession:
                 who["speaker_probable"] = True
             if identification.reason and (not speaker or identification.probable):
                 who["speaker_note"] = identification.reason
+            if not speaker and identification.runner_up:
+                # The screen names someone on every heard line (the creator,
+                # 2026-10-30): an unplaced voice shows its nearest person.
+                who["speaker_closest"] = identification.runner_up
         if clock.final_at and clock.speech_end and clock.final_at - clock.speech_end >= 8.0:
             from .health import slow_hearing_note
 

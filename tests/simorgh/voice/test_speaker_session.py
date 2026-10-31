@@ -107,6 +107,8 @@ class SpeakerSessionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replies.asked[0][1], "")
         final = [p for p in bus.of(topics.VOICE_TRANSCRIPT) if p.get("session_id")][0]
         self.assertEqual(final["speaker"], ""); self.assertIn("under the threshold", final["speaker_note"])
+        # The screen names the nearest person (2026-10-30).
+        self.assertEqual(final["speaker_closest"], "Ira")
 
     async def test_a_short_turn_is_not_judged(self):
         self.book.enroll("Ira", _vec(0.0))

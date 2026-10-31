@@ -150,7 +150,7 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
             await self._pump()
         text = out.getvalue()
         self.assertIn("listening", text)
-        self.assertIn("you: turn on the kitchen lights", text)
+        self.assertIn("unknown voice: turn on the kitchen lights", text)
         self.assertIn("93%", text)
         self.assertIn("sim: Kitchen lights are on.", text)
         self.assertEqual(text.count("listening"), 1, "the idle transition is not a line of its own")

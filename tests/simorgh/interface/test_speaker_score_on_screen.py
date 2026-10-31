@@ -54,9 +54,22 @@ class ScoreOnScreen(unittest.IsolatedAsyncioTestCase):
         service = _service(Config(show_speaker_score=True))
         lines = await _lines(service, {"text": "hello", "speaker": "", "speaker_score": 0.44, "confidence": 1.0,
                                        "speaker_note": "closest is Saeed at 0.44, under the threshold 0.50",
-                                       "turn": 1})
-        self.assertEqual(lines[0], "🎤 you: hello", "no bare number for a voice with no name")
+                                       "speaker_closest": "Saeed", "turn": 1})
+        self.assertEqual(lines[0], "🎤 unknown voice (closest Saeed, 0.44): hello")
         self.assertIn("closest is Saeed at 0.44", lines[1])
+
+    async def test_every_heard_line_names_who_said_it(self):
+        """The creator, 2026-10-30: every heard line names its speaker --
+        never "you" or "someone"."""
+        service = _service(Config(show_speaker_score=False))
+        cases = [({"speaker": "Ira", "speaker_probable": True}, "🎤 Ira?: hi"),
+                 ({"speaker": ""}, "🎤 unknown voice: hi")]
+        for extra, line in cases:
+            lines = await _lines(service, {"text": "hi", "confidence": 1.0, "turn": 1, **extra})
+            self.assertEqual(lines[0], line)
+        lines = await _lines(service, {"text": "lights on no, off", "confidence": 1.0, "turn": 2, "segments": [
+            {"speaker": "Saeed", "text": "lights on"}, {"speaker": "", "text": "no, off"}]})
+        self.assertEqual(lines[:2], ["🎤 Saeed: lights on", "🎤 unknown voice: no, off"])
 
 
 if __name__ == "__main__":

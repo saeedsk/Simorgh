@@ -1551,16 +1551,14 @@ class Service:
         if isinstance(segments, list) and len(segments) > 1:
             # Two voices in one turn: each gets its line (voice/diarize.py).
             for seg in segments:
-                name = str(seg.get("speaker") or "") or "someone"
+                name = str(seg.get("speaker") or "") or "unknown voice"
                 if seg.get("probable"):
                     name += "?"
                 self._out(render_mod.style(f"🎤 {name}: {str(seg.get('text') or '').strip()}", "cyan", enabled=self._color))
             if p.get("speaker_note"):
                 self._out(render_mod.style(f"  ↳ {p['speaker_note']}", "dim", enabled=self._color))
             return
-        who = str(p.get("speaker") or "") or "you"
-        if p.get("speaker_probable"):
-            who += "?"      # named by the lean rule, under the threshold
+        who = _heard_by(p)
         score = p.get("speaker_score")
         if getattr(self.config, "show_speaker_score", True) and isinstance(score, (int, float)) and p.get("speaker"):
             tail += f"  ({float(score):.2f})"
@@ -2211,6 +2209,22 @@ class Service:
         self._out(render_mod.style(f"🔊 sim: {_untoned(text)}{tail}", "green", enabled=self._color))
         self._invalidate()
         return True
+
+
+def _heard_by(p: dict) -> str:
+    """Who said a heard line, named on every one (the creator, 2026-10-30:
+    "every voice sim hears, when it shows on screen, it should mention the
+    persona name that has said the sentence"). A placed voice is its
+    person, `Saeed?` under the lean rule; an unplaced one says so and
+    names the nearest person. It was "you" for any voice it could not place."""
+    name = str(p.get("speaker") or "")
+    if name:
+        return name + ("?" if p.get("speaker_probable") else "")
+    closest = str(p.get("speaker_closest") or "")
+    score = p.get("speaker_score")
+    if closest and isinstance(score, (int, float)):
+        return f"unknown voice (closest {closest}, {float(score):.2f})"
+    return "unknown voice"
 
 
 __all__ = ["Service", "VERSION"]

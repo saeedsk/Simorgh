@@ -62,7 +62,7 @@ Subscriptions are exactly `Service.consumes` (`service.py:111-131`, pinned by `t
 | `cognition.provider.status` | `messages/cognition.py::CognitionProviderStatus` | service.py:1263 | Provider line |
 | `percept.time.scheduled` | `messages/percept.py::PerceptTimeScheduled` | service.py:1184 | Prints a fired reminder |
 | `benchmark.progress` | `messages/benchmark.py::BenchmarkProgress` | service.py:1178 | Narrates scored cases |
-| `voice.transcript`, `voice.spoken`, `voice.listening` | `messages/voice.py` | service.py:1038, 1135, 1158 | Shows what was heard (one line rewritten in place), said, and the floor state |
+| `voice.transcript`, `voice.spoken`, `voice.listening` | `messages/voice.py` | service.py:1038, 1135, 1158 | Every heard line names who said it (`_heard_by`, 2026-10-30): the person, `Name?` when probable, else `unknown voice (closest <speaker_closest>, <score>)` or `unknown voice` -- never "you"/"someone", including each diarized segment. Shows what was heard (one line rewritten in place), said, and the floor state |
 | `ui.tv.state`, `ui.tv.speech` | `messages/ui.py` | httpapi.py:681-682 | Serves the TV page's state and speech queue |
 | `voice.room.speech` | `messages/voice.py::VoiceRoomSpeech` | httpapi.py `_on_room_speech` | A room satellite's reply piece (stage 13 item 3, 2026-09-26): its ref is listed for `ROOM_SPEECH_TTL_S` (120 s) and served at `GET /api/room/speech?ref=` **without a token** -- the board's media player cannot send one. Only a listed, unexpired ref is served; any other ref is a 404 that never reads the ledger. Producer: Voice (`voice/satellite.py` via the service) |
 | `ui.dash.state`, `ui.dash.key` | `messages/ui.py` | httpapi.py:683-684 | Dashboard state and remote keys for the page |
