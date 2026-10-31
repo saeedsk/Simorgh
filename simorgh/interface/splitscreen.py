@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import sys
 import threading
 from typing import Callable
@@ -48,6 +49,30 @@ from .tui import PANEL_REFRESH_S, PROMPT_GLYPH, Tui, _make_completer, _make_lexe
 TRANSCRIPT_LINES = 5000
 #: Columns the right column takes by default (`[interface] side_width`).
 SIDE_WIDTH = 46
+#: Fewest rows a box is drawn in (its two borders and two lines).
+MIN_BOX_ROWS = 4
+
+
+def box_heights(natural: list[int], room: int) -> list[int]:
+    """Exact heights for boxes stacked in `room` rows, top first: as many as
+    fit at `MIN_BOX_ROWS`, each given its fair share up to what it needs
+    (`natural`), what is left handed out in order, the rest to the last.
+    The heights always sum to `room` (or less, when nothing fits), so the
+    column can never push past the screen -- prompt_toolkit's "Window too
+    small" (live 2026-10-30, the CPU box with all twelve cores)."""
+    fit = min(len(natural), max(0, room // MIN_BOX_ROWS))
+    if fit == 0:
+        return []
+    natural = [max(MIN_BOX_ROWS, n) for n in natural[:fit]]
+    share = room // fit
+    heights = [min(n, share) for n in natural]
+    left = room - sum(heights)
+    for i, n in enumerate(natural):
+        more = min(left, n - heights[i])
+        heights[i] += more
+        left -= more
+    heights[-1] += left
+    return heights
 
 
 class Transcript(io.TextIOBase):
@@ -159,12 +184,18 @@ class SplitTui(Tui):
         """Every print from here on lands in the conversation pane."""
         if self._real_stdout is None:
             self._real_stdout = sys.stdout
+            self._columns_before = os.environ.get("COLUMNS")
             sys.stdout = self.transcript
 
     def _release_stdout(self) -> None:
         if self._real_stdout is not None:
             sys.stdout = self._real_stdout
             self._real_stdout = None
+            before = getattr(self, "_columns_before", None)
+            if before is None:
+                os.environ.pop("COLUMNS", None)
+            else:
+                os.environ["COLUMNS"] = before
 
     def _invalidate(self) -> None:
         app = self._app
@@ -228,7 +259,7 @@ class SplitTui(Tui):
         layout = pt["layout"]
         control = layout.FormattedTextControl(lambda: box.render(width - 2, max(1, height - 2)), focusable=False)
         return self._frame(layout.Window(control, wrap_lines=False), title=self._pane_title(index, box.title).strip(),
-                           focused=self.panes.focus == index, height=pt["D"](preferred=height))
+                           focused=self.panes.focus == index, height=pt["D"].exact(height))
 
     def _conversation(self, *, rows: int):
         pt = _pt()
@@ -247,25 +278,56 @@ class SplitTui(Tui):
         title = "conversation" + (f"  ↑ {self.transcript.scroll} lines up" if self.transcript.scroll else "")
         return self._frame(window, title=self._pane_title(0, title).strip(), focused=self.panes.focus == 0)
 
+    def _bottom_height(self, cols: int) -> int:
+        """Rows under the panes: live rows and any approval, the two rules,
+        the prompt (as many lines as are typed, up to 8), the ribbon."""
+        def lines(fragments) -> int:
+            text = "".join(t for _s, t in fragments)
+            return text.count("\n") + (0 if not text or text.endswith("\n") else 1)
+
+        typed = getattr(getattr(self, "_buffer", None), "text", "")
+        return (lines(self._bottom_rows()) + 2 + min(8, max(1, typed.count("\n") + 1))
+                + max(1, lines(self._footer_rows())))
+
+    def _set_columns(self, width: int) -> None:
+        """Every renderer sizes its lines with `shutil.get_terminal_size`,
+        which reads `COLUMNS` first: set it to the conversation pane's
+        width, so a step line is cut for the pane and not wrapped in it
+        (live 2026-10-30: each `✓ 3.7s` broke onto a line of its own)."""
+        os.environ["COLUMNS"] = str(max(20, width))
+
     def _top(self):
         """The part above the prompt: conversation and boxes, as the focus
         and full-size state say."""
         pt = _pt()
         layout = pt["layout"]
         cols, rows = self._size()
-        room = max(6, rows - 6)
+        room = max(MIN_BOX_ROWS, rows - self._bottom_height(cols))
         boxes = self._box_list()
         full = self.panes.maximised
         if full is not None and full > 0:
+            self._set_columns(cols - 2)
             return self._box_pane(full, boxes[full - 1], width=cols, height=room)
-        conversation = self._conversation(rows=room)
         if full == 0 or self.panes.side_hidden or not boxes:
-            return conversation
+            self._set_columns(cols - 2)
+            return self._frame_height(self._conversation(rows=room), room)
         side_w = min(self._side_width, max(24, cols // 2))
-        each = max(4, room // len(boxes))
-        column = layout.HSplit([self._box_pane(i + 1, box, width=side_w, height=each)
-                                for i, box in enumerate(boxes)], width=pt["D"].exact(side_w))
-        return layout.VSplit([conversation, column])
+        self._set_columns(cols - side_w - 2)
+
+        def need(box) -> int:
+            text = "".join(t for _s, t in box.render(side_w - 2, room))
+            return text.count("\n") + (0 if text.endswith("\n") else 1) + 2
+
+        heights = box_heights([need(b) for b in boxes], room)
+        column = layout.HSplit([self._box_pane(i + 1, box, width=side_w, height=h)
+                                for i, (box, h) in enumerate(zip(boxes, heights))],
+                               width=pt["D"].exact(side_w), height=pt["D"].exact(room))
+        return layout.VSplit([self._frame_height(self._conversation(rows=room), room), column],
+                             height=pt["D"].exact(room))
+
+    def _frame_height(self, container, rows: int):
+        pt = _pt()
+        return pt["layout"].HSplit([container], height=pt["D"].exact(rows))
 
     def _bottom_rows(self):
         cols, _ = self._size()

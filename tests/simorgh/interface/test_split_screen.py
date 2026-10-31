@@ -166,6 +166,27 @@ class PaneFocus(unittest.TestCase):
         self.assertEqual((panes.focus, panes.maximised), (2, None))
 
 
+class BoxHeights(unittest.TestCase):
+    """Live 2026-10-30: the CPU box took all twelve cores' rows, the column
+    passed the bottom of the screen, and prompt_toolkit printed "Window
+    too small"."""
+
+    def test_heights_always_sum_to_the_room(self):
+        from simorgh.interface.splitscreen import box_heights
+
+        for natural, room in (([15, 9, 8], 40), ([15, 9, 8], 20), ([30, 30, 30], 25), ([5], 50)):
+            heights = box_heights(natural, room)
+            self.assertEqual(sum(heights), room, (natural, room, heights))
+
+    def test_the_top_box_gets_what_it_needs_first_and_none_is_squeezed_below_four(self):
+        from simorgh.interface.splitscreen import MIN_BOX_ROWS, box_heights
+
+        self.assertEqual(box_heights([15, 9, 8], 40), [15, 9, 16])
+        self.assertTrue(all(h >= MIN_BOX_ROWS for h in box_heights([30, 30, 30, 30, 30], 14)))
+        self.assertEqual(len(box_heights([30] * 5, 14)), 3, "boxes that cannot fit are left out")
+        self.assertEqual(box_heights([8], 2), [])
+
+
 class TheTranscript(unittest.TestCase):
     def test_it_keeps_lines_from_any_writer_and_follows_the_end(self):
         changes = []
@@ -226,6 +247,9 @@ class EndToEnd(unittest.IsolatedAsyncioTestCase):
             run = asyncio.ensure_future(tui.run())
             try:
                 await asyncio.sleep(0.3)
+                import os
+
+                columns_inside = os.environ.get("COLUMNS")
                 pipe.send_text("hi there\r")
                 await asyncio.sleep(0.4)
                 pipe.send_text("\x1b[Z")        # Shift-Tab
@@ -241,11 +265,16 @@ class EndToEnd(unittest.IsolatedAsyncioTestCase):
             finally:
                 sys.stdout = real_stdout
         drawn = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", screen.getvalue())
+        self.assertNotIn("Window too small", drawn)
+        self.assertEqual(columns_inside, str(120 - 46 - 2), "lines are sized for the conversation pane")
         self.assertEqual(got, ["hi there"])
         self.assertEqual((focus, full), (1, 1))
         for part in ("CPU · GPU", "Memory · numbers", "research · notify", "conversation", "sim: you said hi there"):
             self.assertIn(part, drawn)
         self.assertIs(sys.stdout, real_stdout, "stdout is given back when the screen closes")
+        import os
+
+        self.assertNotEqual(os.environ.get("COLUMNS"), columns_inside, "COLUMNS is given back too")
 
 
 if __name__ == "__main__":
