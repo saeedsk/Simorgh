@@ -22,3 +22,9 @@ by = "claude-tree-style"
 task = "calm transcript grammar: one glyph set, one palette; no nameless crew roots"
 since = "2026-10-31T05:10:42+00:00"
 until = "2026-10-31T13:10:42+00:00"
+
+[locks.orchestration]
+by = "claude-code"
+task = "supervisor closed loop: helpers get the bar, are reviewed, reopened with feedback"
+since = "2026-10-31T05:16:48+00:00"
+until = "2026-10-31T13:16:48+00:00"
