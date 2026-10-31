@@ -37,7 +37,7 @@ class TheCard(unittest.TestCase):
         record = TaskRecord(task_id="926ba8d4abcdef", kind="patch", status="blocked", steps=18)
         with _at(100):
             card = panel.tree_digest(record, elapsed=120.0, detail=HANDOVER).splitlines()
-        self.assertIn("⏸ blocked · 2.0m · 18 steps", card[0])
+        self.assertIn("‖ blocked · 2.0m · 18 steps", card[0])
         self.assertLessEqual(len(card), 1 + panel.GIST_LINES + 1)
         self.assertNotIn("**", "\n".join(card), "markdown marks are not shown raw")
         self.assertNotIn("`", "\n".join(card))
@@ -71,8 +71,10 @@ class OneEndingPerTask(TestTheServiceNarratesAutonomousWork):
         await self._emit(topics.TASK_BLOCKED, {"task_id": "auto-9", "reason": HANDOVER})
         await self._emit(topics.TASK_BLOCKED, {"task_id": "auto-9",
                                                "reason": "verification failed after max revisions"})
-        out = self._out()
-        self.assertEqual(out.count("⏸ blocked"), 1)
+        import re
+
+        out = re.sub(r"\x1b\[[0-9;]*m", "", self._out())      # colour off: the words are the subject
+        self.assertEqual(out.count("‖ blocked"), 1)
         self.assertIn("tasks auto-9", out)
         self.assertNotIn("max revisions", out)
 

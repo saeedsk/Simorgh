@@ -37,6 +37,22 @@ _GPU_UTIL = re.compile(r'"Device Utilization %"\s*=\s*(\d+)')
 _GPU_CORES = re.compile(r'"gpu-core-count"\s*=\s*(\d+)')
 
 
+#: Invisible formatting characters a terminal and prompt_toolkit disagree
+#: about: zero-width joiners and non-joiners, marks and bidi controls.
+_INVISIBLE = re.compile("[\u200b\u200d\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def screen_safe(text: str) -> str:
+    """Text the full screen can draw without losing its columns. Persian
+    writes the zero-width non-joiner (U+200C) inside words -- `بنی‌آدم`,
+    `می‌کند` -- and prompt_toolkit counts it as no column while the
+    terminal's right-to-left shaping does not: every such line pushed the
+    pane's right border out and left stray letters behind on the next
+    redraw (live 2026-10-30, a Saadi couplet). The non-joiner becomes a
+    space (`بنی آدم`, an accepted spelling); the other invisible marks go."""
+    return _INVISIBLE.sub("", text.replace("\u200c", " "))
+
+
 def spark(values, *, width: int, top: float = 100.0) -> str:
     """The last `width` values as block characters, 0..`top`; padded on the
     left with spaces while the history is still filling."""
@@ -260,7 +276,7 @@ class AgentBox:
         room = max(1, height - (1 if self.feed.now_doing else 0))
         out: list[tuple[str, str]] = []
         for style, text in lines[-room:]:
-            out += [(style, fit(" ".join(text.split()), width)), ("", "\n")]
+            out += [(style, fit(" ".join(screen_safe(text).split()), width)), ("", "\n")]
         if self.feed.now_doing:
             out += [("class:side.now", fit("⏺ " + self.feed.now_doing, width)), ("", "\n")]
         if not out:
@@ -270,10 +286,12 @@ class AgentBox:
 
 class AgentFeeds:
     """The interface's view of what each running agent is doing, fed from
-    `task.started` / `task.step` / the task's end. Finished agents leave
-    their box after `linger_s`, so a result can still be read."""
+    `task.started` / `task.step` / the task's end. A finished agent keeps
+    its box for `linger_s` (5 minutes; 20 s was gone before anyone looked,
+    live 2026-10-30), and when more than `limit` want a box the finished
+    ones give way first."""
 
-    def __init__(self, *, linger_s: float = 20.0, clock=time.monotonic, limit: int = 8) -> None:
+    def __init__(self, *, linger_s: float = 300.0, clock=time.monotonic, limit: int = 8) -> None:
         self._feeds: dict[str, AgentFeed] = {}
         self._ended: dict[str, float] = {}
         self._linger_s = linger_s
@@ -316,9 +334,13 @@ class AgentFeeds:
             if now - at > self._linger_s:
                 self._ended.pop(task_id, None)
                 self._feeds.pop(task_id, None)
-        live = sorted(self._feeds.values(), key=lambda f: f.started_at)[-self._limit:]
-        return [AgentBox(f) for f in live]
+        # Running agents first in priority, newest finished after them; drawn
+        # in the order they started.
+        ranked = sorted(self._feeds.values(),
+                        key=lambda f: (f.task_id not in self._ended, self._ended.get(f.task_id, 0.0), f.started_at),
+                        reverse=True)[: self._limit] if len(self._feeds) > self._limit else list(self._feeds.values())
+        return [AgentBox(f) for f in sorted(ranked, key=lambda f: f.started_at)]
 
 
 __all__ = ["AgentBox", "AgentFeed", "AgentFeeds", "HISTORY", "MemoryBox", "ProcessorBox", "Readings",
-           "SystemSampler", "heat", "human_bytes", "spark"]
+           "SystemSampler", "heat", "human_bytes", "screen_safe", "spark"]

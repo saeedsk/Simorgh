@@ -24,6 +24,8 @@ them.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 
 #: The four topics, by value. Written out rather than imported so this
@@ -53,12 +55,17 @@ MAX_CREWS = 50
 #: Members drawn under a running task in the live rows above the prompt.
 MAX_LIVE_MEMBERS = 6
 
-_MARK = {"starting": "○", "running": "…", "waiting": "?", "done": "✓", "failed": "✗",
-         "blocked": "⏸", "cancelled": "⊘"}
+_MARK = {"starting": "◌", "running": "◐", "waiting": "?", "done": "✓", "failed": "✗",
+         "blocked": "‖", "cancelled": "⊘"}
+#: A crew member's mark in the transcript: the root's `●`, hollowed to a
+#: diamond so a helper never reads as a task of its own (`panel.ROOT`).
+MEMBER = "◆"
+#: What orchestration's crew brief opens with (`supervisor.part_brief`):
+#: every member's line read "You are a member of a crew working on a
+#: larger task. Its goal: ..." and none said what it was doing.
+_ONE_JOB = re.compile(r"your one job:\s*", re.I)
 _MARK_ASCII = {"starting": ".", "running": "..", "waiting": "?", "done": "ok", "failed": "FAILED",
                "blocked": "blocked", "cancelled": "cancelled"}
-_AGENT_ICON = {"research": "🔍", "browser": "🌐", "patch": "🔧", "plan": "🗂", "chat": "💬",
-               "voice_chat": "🔊", "verify": "🔎", "skill": "🎓"}
 
 
 @dataclass
@@ -80,7 +87,11 @@ class Member:
     report: dict | None = None
 
     def topic(self) -> str:
-        return " ".join((self.brief or "").split()) or self.brief_ref or "(no brief)"
+        """What this member is doing: its own part of the brief, after the
+        crew boilerplate."""
+        text = " ".join((self.brief or "").split()) or self.brief_ref or "(no brief)"
+        found = _ONE_JOB.search(text)
+        return text[found.end():] if found else text
 
 
 @dataclass
@@ -364,16 +375,15 @@ def _took_cost(member: Member) -> str:
 
 def member_line(member: Member, *, depth: int = 1, unicode: bool = True) -> str:
     """One member, as a branch of its parent's tree:
-    `  ⏺ 🔍 research · price of dishwasher A   ✓ done · 4 steps · $0.01  [h1abc123]`.
+    `  ◆ research · price of dishwasher A        ✓ done · 4 steps · $0.01`.
     Fitted to the real terminal in display columns, the topic giving way first."""
     from .render import display_width, fit, terminal_width
 
     indent = "  " * max(1, depth)
-    head = "⏺ " if unicode else "* "
-    icon = (_AGENT_ICON.get(member.agent, "•") + " ") if unicode else ""
+    head = f"{MEMBER} " if unicode else "* "
     mark = (_MARK if unicode else _MARK_ASCII).get(member.status, "")
-    tail = f"{mark} {_took_cost(member)}  [{member.handle[:8]}]"
-    lead = f"{indent}{head}{icon}{member.agent} · "
+    tail = f"{mark} {_took_cost(member)} · {short_handle(member.handle)}"
+    lead = f"{indent}{head}{member.agent} · "
     width = terminal_width()
     room = width - display_width(lead) - display_width(tail) - 2
     topic = fit(" ".join(member.topic().split()), max(8, room))
@@ -381,8 +391,16 @@ def member_line(member: Member, *, depth: int = 1, unicode: bool = True) -> str:
     return fit(f"{lead}{topic}{' ' * pad}{tail}", width)
 
 
+def short_handle(handle: str) -> str:
+    """A member's name in its tree: `h3` for orchestration's `<crew>-h3`
+    (every member's first eight characters were the crew's -- eight
+    identical `[b1e09ded]`s, live 2026-10-30), else its first eight."""
+    head, sep, tail = handle.rpartition("-")
+    return tail if sep and head and len(tail) <= 4 else handle[:8]
+
+
 def member_note(member: Member, *, depth: int = 1, unicode: bool = True, text: str | None = None) -> str:
-    """What hangs under a member: its last word, behind a `⎿`."""
+    """What hangs under a member: its last word, behind a `│`."""
     from .render import fit, terminal_width
 
     said = " ".join((member.last if text is None else text).split())
@@ -390,7 +408,7 @@ def member_note(member: Member, *, depth: int = 1, unicode: bool = True, text: s
         return ""
     kind = member.last_kind if text is None else ""
     label = {"question": "asks: ", "milestone": "milestone: ", "answer": "told: "}.get(kind, "")
-    corner = "⎿  " if unicode else "`- "
+    corner = "│ " if unicode else "| "
     return fit(f"{'  ' * max(1, depth)}  {corner}{label}{said}", terminal_width())
 
 
@@ -406,7 +424,7 @@ def crew_head(crew: Crew, *, unicode: bool = True) -> str:
     cost = crew.cost_usd()
     if cost:
         parts.append(f"${cost:.2f}")
-    head = "⏺" if unicode else "*"
+    head = "●" if unicode else "*"
     return fit(f"{head} crew {crew.crew_id[:12]} · {' · '.join(parts)}", terminal_width())
 
 
@@ -458,5 +476,5 @@ def live_member_rows(crew: Crew, *, unicode: bool = True, limit: int = MAX_LIVE_
 __all__ = [
     "CANCEL", "Crew", "CrewBook", "FINISHED", "MESSAGE", "MAX_LIVE_MEMBERS", "Member", "REPORT", "SPAWNED",
     "STATUSES", "STREAM_PREFIX", "TOPICS", "crew_head", "crew_id_of_stream", "crew_list", "crew_tree",
-    "fold", "live_member_rows", "member_line", "member_note", "message_lines", "message_text",
+    "fold", "live_member_rows", "member_line", "member_note", "message_lines", "message_text", "short_handle",
 ]

@@ -134,8 +134,8 @@ class TheLinesFitTheTerminal(unittest.TestCase):
         crew = crewview.fold(ROOT, [SimpleNamespace(type=t, payload=p) for t, p in six_member_crew()])
         with _at(120):
             line = crewview.member_line(crew.members["h2bbbbbbbbbb"])
-        self.assertTrue(line.lstrip().startswith("⏺ "), line)
-        for word in ("research", "price of dishwasher B", "done", "4 steps", "$0.01", "[h2bbbbbb]"):
+        self.assertTrue(line.lstrip().startswith("◆ "), line)
+        for word in ("research", "price of dishwasher B", "done", "4 steps", "$0.01", "h2bbbbbb"):
             self.assertIn(word, line)
 
 
@@ -193,7 +193,7 @@ class TheTranscript(unittest.TestCase):
             verdict = tui_is_sane(width=columns).check(record, 0.0)
             self.assertEqual(verdict, "", "\n".join(self.printed))
             self.assertIn("which dishwasher", self.printed[0], "the root is named before its first branch")
-            self.assertEqual(sum(1 for line in self.printed if "[h" in line and "⏺" in line) >= 6, True)
+            self.assertEqual(sum(1 for line in self.printed if "◆" in line) >= 6, True)
 
     def test_progress_hangs_from_its_own_members_branch(self):
         import asyncio
@@ -201,8 +201,8 @@ class TheTranscript(unittest.TestCase):
         with _at(120):
             asyncio.run(self._play())
         for index, line in enumerate(self.printed):
-            if "⎿" in line and "found two retailers" in line:
-                self.assertIn("[h1aaaaaa]", self.printed[index - 1], "the corner hangs under its own branch")
+            if "│" in line and "found two retailers" in line:
+                self.assertIn("h1aaaaaa", self.printed[index - 1], "the note hangs under its own branch")
                 break
         else:
             self.fail("\n".join(self.printed))
@@ -214,7 +214,7 @@ class TheTranscript(unittest.TestCase):
         self.service._book = TaskBook()                               # noqa: SLF001
         with _at(120):
             asyncio.run(self._play())
-        self.assertTrue(self.printed[0].startswith("⏺ crew root0001"), self.printed[0])
+        self.assertTrue(self.printed[0].startswith("● crew root0001"), self.printed[0])
         self.assertFalse(any("? · ?" in line or "(no description)" in line for line in self.printed))
 
     def test_a_crew_message_kind_the_tree_does_not_draw_prints_nothing(self):

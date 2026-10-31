@@ -137,9 +137,25 @@ def breathing_word(word: str, t: float, *, unicode: bool = True) -> list[tuple[s
 
 
 # ------------------------------------------------------------ transcript tree
+# The transcript's glyphs (the creator, 2026-10-30: "the unicode characters
+# used for formatting the main box and keeping the indent and hierarchy are
+# not visually pleasant; the font colour needs artistic harmony"). One
+# quiet set, no emoji -- emoji draw at their own widths and in their own
+# colours, and clashed with every palette:
+#
+#     ● chat · launch 5 agents doing stock market news research…   b1e09ded
+#       ✓ spawn  spawned h1 (research) -- running now                    8.0s
+#       ◆ research · Intel's share drop          ✓ done · 5 steps · $0.006
+#         │ Intel shares fell roughly 20-23% after hours on Thu 29 Oct...
+#       ╰─ ✓ completed · 2.7m · 14 steps
+#
+# Colour is laid on by `render.paint`, by the shape of each line, so these
+# functions stay plain text.
+ROOT = "●"
+RAIL = "│"
+CORNER = "╰─"
 _OK = {True: "✓", False: "✗"}
-_END_ICON = {"completed": "✅", "failed": "❌", "blocked": "⏸", "paused": "⏸"}
-_KIND_ICON = {"research": "🔍", "patch": "🔧", "skill": "🎓", "project": "🗂", "chat": "💬"}
+_END_ICON = {"completed": "✓", "failed": "✗", "blocked": "‖", "paused": "‖"}
 
 
 def _topic(overhead: int) -> int:
@@ -173,14 +189,21 @@ def _took(seconds: float | None) -> str:
 
 def tree_start(record: TaskRecord, *, unicode: bool = True) -> str:
     """The root of a task's tree: kind, who asked, and what it is about."""
-    icon = _KIND_ICON.get(record.kind, "•") if unicode else "*"
-    head = "⏺" if unicode else "*"
-    return _line(f"{head} {icon} {record.kind} · {record.origin} · {record.short_topic()}  [{record.task_id[:8]}]")
+    from .render import display_width, terminal_width
+
+    head = ROOT if unicode else "*"
+    who = "" if record.origin in ("human", "?", "") else f" · {record.origin}"
+    lead = f"{head} {record.kind}{who} · "
+    tail = record.task_id[:8]
+    width = terminal_width()
+    topic = _fit(record.short_topic(), max(8, width - display_width(lead) - len(tail) - 3))
+    pad = max(2, width - display_width(lead) - display_width(topic) - len(tail) - 1)
+    return _line(f"{lead}{topic}{' ' * pad}{tail}")
 
 
 def tree_step(*, tool: str | None, head: str, ok: bool | None, took: float | None,
               width: int | None = None, unicode: bool = True) -> str:
-    """One tool call: `  ⏺ tool(what)  ✓ 0.3s`.
+    """One tool call: `  ✓ tool  what it touched          0.3s`.
 
     Box-drawing rails (`├─`, `╰─`) until 2026-09-12; the creator then
     pasted Claude Code's own transcript as "a perfect example of what
@@ -189,18 +212,16 @@ def tree_step(*, tool: str | None, head: str, ok: bool | None, took: float | Non
     """
     from .render import terminal_width
 
-    width = (terminal_width() - _TREE_OVERHEAD) if width is None else width
-    branch = "  ⏺ " if unicode else "  * "
-    what = f"{tool}({head})" if tool and head else (tool or head)
-    from .render import display_width as _dw
-
-    what = _fit(what, width - _dw(branch) - _dw(f"{_OK.get(ok, '…')} {_took(took)}") - 2)
-    mark = _OK.get(ok, "…") if unicode else {True: "ok", False: "FAILED"}.get(ok, "..")
-    tail = f"{mark} {_took(took)}".rstrip()
     from .render import display_width
 
-    pad = max(1, width - display_width(branch) - display_width(what) - display_width(tail))
-    return _line(f"{branch}{what}{' ' * pad}{tail}")
+    width = (terminal_width() - _TREE_OVERHEAD) if width is None else width
+    mark = _OK.get(ok, "·") if unicode else {True: "ok", False: "FAILED"}.get(ok, "..")
+    branch = f"  {mark} "
+    what = f"{tool}  {head}" if tool and head else (tool or head)
+    tail = _took(took)
+    what = _fit(what, width - display_width(branch) - display_width(tail) - 2)
+    pad = max(2, width - display_width(branch) - display_width(what) - display_width(tail))
+    return _line(f"{branch}{what}{' ' * pad}{tail}".rstrip())
 
 
 def tree_note(lines: list[str], *, unicode: bool = True) -> list[str]:
@@ -211,9 +232,8 @@ def tree_note(lines: list[str], *, unicode: bool = True) -> list[str]:
     # from the call by a `⎿`, the rest sit under it.
     if not lines:
         return []
-    first = "    ⎿  " if unicode else "    `- "
-    rest = "       "
-    return [_line(f"{first}{lines[0]}")] + [_line(f"{rest}{line}") for line in lines[1:]]
+    rail = f"    {RAIL} " if unicode else "    | "
+    return [_line(f"{rail}{line}") for line in lines]
 
 
 def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", unicode: bool = True) -> str:
@@ -243,7 +263,7 @@ def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", uni
 
     icon = _END_ICON.get(record.status, "•") if unicode else ""
     took = f" in {_took(elapsed)}" if elapsed is not None else ""
-    corner = "  ⎿  " if unicode else "  `- "
+    corner = f"  {CORNER} " if unicode else "  `- "
     head = _line(f"{corner}{icon} {record.status}{took}")
     if not detail:
         return head
@@ -351,7 +371,7 @@ def tree_digest(record: TaskRecord, *, elapsed: float | None, detail: str = "", 
         facts.append(_took(elapsed))
     if record.steps:
         facts.append(f"{record.steps} step{'s' if record.steps != 1 else ''}")
-    corner = "  ⎿  " if unicode else "  `- "
+    corner = f"  {CORNER} " if unicode else "  `- "
     indent = "     " if unicode else "      "
     head = _line(f"{corner}{icon} {' · '.join(facts)}".rstrip())
     shown, cut = gist(detail, width=max(24, terminal_width() - len(indent) - 1))
@@ -389,16 +409,16 @@ def inflight_rows(record: TaskRecord, *, now: float, unicode: bool = True) -> li
         return []
     from .render import display_width, terminal_width
 
-    head = "⏺ " if unicode else "* "
-    corner = "  ⎿  " if unicode else "  `- "
-    what = f"{record.tool}({record.detail})" if record.tool and record.detail else (record.tool or record.detail)
+    head = f"{ROOT} " if unicode else "* "
+    corner = f"  {CORNER} " if unicode else "  `- "
+    what = f"{record.tool}  {record.detail}" if record.tool and record.detail else (record.tool or record.detail)
     what = _fit(what, terminal_width() - display_width(head) - 1)
     since = now - record.inflight_since if record.inflight_since is not None else 0.0
     return [[("class:sim.live", f"{head}{what}")],
             [("class:sim.footer", _line(f"{corner}running… {since:.0f}s"))]]
 
 
-_FOOTER_VERB = re.compile(r"^\s*[⏺*]?\s*([A-Za-z][\w-]*?)(?:\.{3}|…)\s*(.*)$")
+_FOOTER_VERB = re.compile(r"^\s*[⏺●*]?\s*([A-Za-z][\w-]*?)(?:\.{3}|…)\s*(.*)$")
 
 
 def footer_row(text: str, *, now: float, unicode: bool = True) -> list[tuple[str, str]]:
@@ -470,7 +490,7 @@ def agent_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list[t
     """One running task in the ribbon, plainly: what it is and its age.
     The breathing and the call in flight live above the prompt."""
     elapsed = now - record.started_at if record.started_at is not None else 0.0
-    mark = "⏺ " if unicode else "* "
+    mark = f"{ROOT} " if unicode else "* "
     return [("class:sim.footer", _line(f"{mark}{record.kind} · {record.short_topic(_topic(_ROW_OVERHEAD))} · {elapsed:.0f}s"))]
 
 

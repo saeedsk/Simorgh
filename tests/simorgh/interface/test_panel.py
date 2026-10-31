@@ -43,38 +43,41 @@ class BreathingTestCase(unittest.TestCase):
 
 class TreeTestCase(unittest.TestCase):
     def test_the_root_names_kind_origin_and_topic(self):
-        record = TaskRecord(task_id="abcdef123456", kind="patch", origin="human", description="add a docstring")
+        record = TaskRecord(task_id="abcdef123456", kind="patch", origin="curiosity", description="add a docstring")
         line = panel.tree_start(record)
-        self.assertTrue(line.startswith("⏺ "))
-        for fragment in ("patch", "human", "add a docstring", "[abcdef12]"):
-            self.assertIn(fragment, line)
+        self.assertTrue(line.startswith("● patch · curiosity · add a docstring"), line)
+        self.assertTrue(line.endswith("abcdef12"), line)
+        mine = panel.tree_start(TaskRecord(task_id="abcdef123456", kind="chat", origin="human", description="hi"))
+        self.assertTrue(mine.startswith("● chat · hi"), "a person's own turn does not say 'human'")
 
     def test_a_step_is_a_branch_with_its_outcome_and_timing_at_the_right(self):
         line = panel.tree_step(tool="read_file", head="simorgh/x.py", ok=True, took=0.31, width=60)
-        self.assertTrue(line.startswith("  ⏺ read_file(simorgh/x.py)"), line)
-        self.assertTrue(line.endswith("✓ 0.3s"))
+        self.assertTrue(line.startswith("  ✓ read_file simorgh/x.py"), line)
+        self.assertTrue(line.endswith("0.3s"))
         self.assertEqual(len(line), 60)
 
     def test_a_failed_step_is_marked_and_a_long_one_is_cut(self):
         line = panel.tree_step(tool="run_tests", head="x" * 200, ok=False, took=42.0, width=60)
         self.assertLessEqual(len(line), 60)
-        self.assertTrue(line.endswith("✗ 42s"))
+        self.assertTrue(line.startswith("  ✗ run_tests"), line)
+        self.assertTrue(line.endswith("42s"))
         self.assertIn("…", line)
 
     def test_ascii_when_unicode_is_off(self):
         line = panel.tree_step(tool="read_file", head="a.py", ok=True, took=1.0, unicode=False)
-        self.assertTrue(line.startswith("  * "))
-        self.assertTrue(line.endswith("ok 1.0s"))
+        self.assertTrue(line.startswith("  ok read_file"), line)
+        self.assertTrue(line.endswith("1.0s"))
+        self.assertTrue(line.isascii())
 
     def test_notes_sit_inside_the_rail(self):
-        self.assertEqual(panel.tree_note(["+x", "-y"]), ["    ⎿  +x", "       -y"])
+        self.assertEqual(panel.tree_note(["+x", "-y"]), ["    │ +x", "    │ -y"])
 
     def test_the_end_closes_the_tree_with_the_outcome_and_duration(self):
         record = TaskRecord(task_id="t1", status="completed")
         line = panel.tree_end(record, elapsed=61.0)
-        self.assertIn("⎿  ✅ completed in 61s", line)
+        self.assertIn("╰─ ✓ completed in 61s", line)
         blocked = panel.tree_end(TaskRecord(task_id="t1", status="blocked"), elapsed=3.0, detail="no budget")
-        self.assertIn("⏸ blocked in 3.0s -- no budget", blocked)
+        self.assertIn("‖ blocked in 3.0s -- no budget", blocked)
 
 
 class SparkAndWaveTestCase(unittest.TestCase):
@@ -109,7 +112,7 @@ class BottomRowsTestCase(unittest.TestCase):
         self.assertIn("".join(ch for _cls, ch in letters).rstrip("…"), panel.BREATH_WORDS)
         self.assertIn("patch · tighten the retry loop · 12s · 2 steps", panel.plain(live))
         ribbon = panel.plain(panel.footer_rows(book, now=12.0, auto="off", posture="guarded", model="GLM-5.3-Flash"))
-        self.assertIn("⏺ patch · tighten the retry loop · 12s", ribbon)
+        self.assertIn("● patch · tighten the retry loop · 12s", ribbon)
         self.assertNotIn("…", ribbon.split("\n")[0], "no breathing in the ribbon")
         self.assertIn("auto off · guarded · GLM-5.3-Flash", ribbon)
 
@@ -122,8 +125,8 @@ class BottomRowsTestCase(unittest.TestCase):
                      detail="python -m pytest tests/simorgh/interface -q")
         rows = panel.live_rows(book, now=3.0)
         text = panel.plain(rows)
-        self.assertTrue(text.startswith("⏺ run_shell(python -m pytest tests/simorgh/interface -q)"), text)
-        self.assertIn("⎿  running… 3s", text)
+        self.assertTrue(text.startswith("● run_shell python -m pytest tests/simorgh/interface -q"), text)
+        self.assertIn("╰─ running… 3s", text)
         self.assertEqual("".join(ch for cls, ch in rows[2] if cls.startswith("class:sim.breath.")).strip(),
                          f"{panel.spark(3.0)} Running…")
         book.on_step("t1", now=4.0, in_flight=False)  # it landed: the block goes, the breathing stays
@@ -220,7 +223,7 @@ class ALongAnswerIsWrappedNotCut(unittest.TestCase):
 
     def test_the_headline_is_still_one_line(self):
         out = panel.tree_end(self._record(), elapsed=1.9, detail="a long answer " * 20)
-        self.assertIn("✅ completed in 1.9s", out.splitlines()[0])
+        self.assertIn("✓ completed in 1.9s", out.splitlines()[0])
         self.assertNotIn("a long answer", out.splitlines()[0],
                          "the status line is a status line; the answer goes underneath")
 

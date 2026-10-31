@@ -93,7 +93,7 @@ class TheCommand(unittest.TestCase):
         with _at(120):
             text = asyncio.run(_run(f"crew {ROOT[:6]}"))
         self.assertIn("price of dishwasher A", text)
-        self.assertIn("⎿", text)
+        self.assertIn("│", text)
         self.assertIn("messages (newest", text)
         self.assertIn("which postcode", text)
 

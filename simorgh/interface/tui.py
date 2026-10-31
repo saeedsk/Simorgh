@@ -110,7 +110,7 @@ def _pt():
         from prompt_toolkit.styles import Style
         # The split screen's (`splitscreen.py`): a full-screen Application.
         from prompt_toolkit import layout
-        from prompt_toolkit.application import Application
+        from prompt_toolkit.application import Application, in_terminal
         from prompt_toolkit.buffer import Buffer
         from prompt_toolkit.data_structures import Point
         from prompt_toolkit.filters import has_completions
@@ -131,7 +131,7 @@ def _pt():
         "layout": layout, "Application": Application, "Buffer": Buffer, "Point": Point,
         "has_completions": has_completions, "ANSI": ANSI, "merge_key_bindings": merge_key_bindings,
         "D": Dimension, "CompletionsMenu": CompletionsMenu, "BeforeInput": BeforeInput,
-        "create_output": create_output, "Frame": Frame,
+        "create_output": create_output, "Frame": Frame, "in_terminal": in_terminal,
     }
 
 

@@ -117,6 +117,81 @@ def color_enabled(mode: str = "auto") -> bool:
     return True
 
 
+# -- the transcript's palette (the creator, 2026-10-30: "the font colour needs
+# artistic harmony") ------------------------------------------------------------
+# One family of soft, desaturated tones on a dark terminal, instead of each
+# whole line in one of eight loud ANSI colours. Structure recedes (rails,
+# ids, timings in dim grey), content reads (topics near-white, detail grey),
+# and colour carries meaning only: an outcome, a tool, a kind of work.
+def _rgb(r: int, g: int, b: int) -> str:
+    return f"\x1b[38;2;{r};{g};{b}m"
+
+
+PALETTE = {
+    "rail": _rgb(78, 78, 78), "meta": _rgb(110, 110, 110), "body": _rgb(178, 178, 178),
+    "topic": _rgb(218, 218, 218), "tool": _rgb(135, 175, 215),
+    "ok": _rgb(135, 175, 135), "fail": _rgb(215, 135, 135), "wait": _rgb(215, 175, 135),
+    "member": _rgb(175, 150, 215),
+}
+_KIND_TONE = {
+    "chat": _rgb(135, 175, 215), "patch": _rgb(215, 175, 135), "research": _rgb(135, 185, 175),
+    "skill": _rgb(175, 150, 215), "project": _rgb(185, 185, 135), "crew": _rgb(175, 150, 215),
+}
+_MARK_TONE = {"✓": "ok", "✗": "fail", "‖": "wait", "⊘": "wait", "?": "wait", "◌": "meta", "◐": "tool", "·": "meta"}
+_ROOT_LINE = re.compile(r"^(●) (\S+)((?: · [\w-]+)?)( · )(.*?)(\s{2,})(\S+)$")
+_STEP_LINE = re.compile(r"^( {2})([✓✗·]) (\S+)(.*?)(?:(\s{2,})(\d[\d.]*[sm]))?$")
+_MEMBER_LINE = re.compile(r"^(\s+)(◆) (\S+)( · )(.*?)(\s{2,})([✓✗◌◐?‖⊘]) (.*)$")
+_RAIL_LINE = re.compile(r"^(\s+)([│|] )(.*)$")
+_END_LINE = re.compile(r"^(\s+)(╰─ )([✓✗‖•]) (.*)$")
+_POINTER_LINE = re.compile(r"^(\s+)(↳ .*)$")
+
+
+def paint(text: str, *, enabled: bool = True) -> str:
+    """The transcript tree in the palette above, by the shape of each line
+    (`panel.py` and `crewview.py` draw them plain). A line of no known
+    shape -- an answer, a notice -- is left as it is."""
+    if not enabled:
+        return text
+    return "\n".join(_paint_line(line) for line in text.split("\n"))
+
+
+def _paint_line(line: str) -> str:
+    P, R = PALETTE, _RESET
+
+    def tone(mark: str) -> str:
+        return P[_MARK_TONE.get(mark, "body")]
+
+    m = _ROOT_LINE.match(line)
+    if m:
+        kind = _KIND_TONE.get(m.group(2), P["topic"])
+        return (f"{kind}{m.group(1)} {m.group(2)}{R}{P['meta']}{m.group(3)}{m.group(4)}{R}"
+                f"{P['topic']}{m.group(5)}{R}{m.group(6)}{P['rail']}{m.group(7)}{R}")
+    m = _MEMBER_LINE.match(line)
+    if m:
+        return (f"{m.group(1)}{P['member']}{m.group(2)} {m.group(3)}{R}{P['meta']}{m.group(4)}{R}"
+                f"{P['body']}{m.group(5)}{R}{m.group(6)}{tone(m.group(7))}{m.group(7)}{R} {P['meta']}{m.group(8)}{R}")
+    m = _END_LINE.match(line)
+    if m:
+        return (f"{m.group(1)}{P['rail']}{m.group(2)}{R}{tone(m.group(3))}{m.group(3)}{R} "
+                f"{P['meta']}{m.group(4)}{R}")
+    m = _STEP_LINE.match(line)
+    if m:
+        took = f"{m.group(5)}{P['meta']}{m.group(6)}{R}" if m.group(6) else ""
+        return (f"{m.group(1)}{tone(m.group(2))}{m.group(2)}{R} {P['tool']}{m.group(3)}{R}"
+                f"{P['body']}{m.group(4)}{R}{took}")
+    m = _RAIL_LINE.match(line)
+    if m and "\x1b" not in m.group(3):
+        return f"{m.group(1)}{P['rail']}{m.group(2)}{R}{P['body']}{m.group(3)}{R}"
+    if m:
+        return f"{m.group(1)}{P['rail']}{m.group(2)}{R}{m.group(3)}"
+    m = _POINTER_LINE.match(line)
+    if m:
+        return f"{m.group(1)}{P['meta']}{m.group(2)}{R}"
+    if line.startswith("     ") and line.strip():
+        return f"{P['body']}{line}{R}"     # a card's gist under its corner
+    return line
+
+
 def style(text: str, color: str, *, enabled: bool = True) -> str:
     if not enabled or color not in _COLORS:
         return text

@@ -357,3 +357,25 @@ class TheColumnWidth(unittest.TestCase):
         self.assertEqual(side_width(200, 90), 90, "a configured width is kept")
         self.assertEqual(side_width(200, 150), 100)
         self.assertEqual(Config().side_width, 0)
+
+
+class PersianDrawsInItsColumns(unittest.TestCase):
+    """Live 2026-10-30: a Saadi couplet -- `بنی‌آدم اعضای یک‌دیگرند` --
+    pushed the pane's right border out and left stray letters on redraw:
+    the zero-width non-joiner counts as no column to prompt_toolkit and
+    not so to the terminal's shaping."""
+
+    def test_invisible_marks_are_made_safe_and_the_words_kept(self):
+        from simorgh.interface.sidepanel import screen_safe
+
+        self.assertEqual(screen_safe("بنی‌آدم"), "بنی آدم")
+        self.assertEqual(screen_safe("a​‎‫b﻿"), "ab")
+        self.assertEqual(screen_safe("plain text"), "plain text")
+
+    def test_the_conversation_pane_draws_safe_text_and_the_log_keeps_the_original(self):
+        t = Transcript()
+        t.log = io.StringIO()
+        t.write("\x1b[32mبنی‌آدم\x1b[0m\n")
+        lines, _ = t.tail(rows=5)
+        self.assertEqual(lines, ["\x1b[32mبنی آدم\x1b[0m"])
+        self.assertEqual(t.log.getvalue(), "بنی‌آدم\n", "the log is colour-free and unaltered")

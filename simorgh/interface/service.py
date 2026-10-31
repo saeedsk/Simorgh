@@ -1287,7 +1287,7 @@ class Service:
         """
         if self._tree_owner == record.task_id:
             return
-        self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
+        self._out(render_mod.paint(panel_mod.tree_start(record, unicode=unicode), enabled=self._color))
         self._tree_owner = record.task_id
 
     async def _on_crew_event(self, message: Message) -> None:
@@ -1320,23 +1320,21 @@ class Service:
         elif self._tree_owner != crew.crew_id:
             # A root this session never saw created (a crew carried over a
             # restart): named by the crew itself, never as `? · ?`.
-            self._out(render_mod.style(crewview_mod.crew_head(crew, unicode=unicode), "cyan", enabled=self._color))
+            self._out(render_mod.paint(crewview_mod.crew_head(crew, unicode=unicode), enabled=self._color))
             self._tree_owner = crew.crew_id
         kind = message.payload.get("kind", "") if message.type == crewview_mod.MESSAGE else ""
         if message.type == crewview_mod.MESSAGE and kind not in ("progress", "milestone", "question", "note"):
             return  # steering, answers and the report-as-message stay in `crew <id>`
         if message.type != crewview_mod.MESSAGE or self._crew_branch_owner != member.handle:
-            colour = {"done": "green", "failed": "red", "cancelled": "yellow", "blocked": "yellow"}.get(
-                member.status, "cyan")
-            self._out(render_mod.style(crewview_mod.member_line(member, depth=depth, unicode=unicode),
-                                       colour, enabled=self._color))
+            self._out(render_mod.paint(crewview_mod.member_line(member, depth=depth, unicode=unicode),
+                                       enabled=self._color))
             self._crew_branch_owner = member.handle
             self._crew_last_note.pop(member.handle, None)
         if message.type == crewview_mod.SPAWNED:
             return
         note = crewview_mod.member_note(member, depth=depth, unicode=unicode)
         if note and self._crew_last_note.get(member.handle) != note:
-            self._out(render_mod.style(note, "dim", enabled=self._color))
+            self._out(render_mod.paint(note, enabled=self._color))
             self._crew_last_note[member.handle] = note
 
     def _narrate_autonomous(self, message: Message, record, took: float | None = None) -> None:
@@ -1349,8 +1347,16 @@ class Service:
         spoken sessions saw only the flat kind."""
         unicode = render_mod.unicode_mode(self.config.unicode) != "off"
         p = message.payload
+        crews = getattr(self, "_crews", None)
+        if (crews is not None and crews.is_member(record.task_id)) or record.kind == "?":
+            # A crew member is drawn under the task that spawned it, from
+            # crew events (`_on_crew_event`); its own task events opened a
+            # root of their own, `● ? · ? · (no description)`, once per
+            # member (live 2026-10-30). A task never seen created has
+            # nothing to name it by either -- the terminal grammar forbids it.
+            return
         if message.type == topics.TASK_STARTED:
-            self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
+            self._out(render_mod.paint(panel_mod.tree_start(record, unicode=unicode), enabled=self._color))
             self._tree_owner = record.task_id
             return
         if message.type == topics.TASK_STEP:
@@ -1363,7 +1369,7 @@ class Service:
             head, sep, diff_body = str(p.get("summary", "")).partition("\n\n--- a/")
             line = panel_mod.tree_step(tool=p.get("tool"), head=head, ok=p.get("ok"), took=took, unicode=unicode)
             self._reopen_tree_if_needed(record, unicode=unicode)
-            self._out(render_mod.style(line, "green" if p.get("ok") else "red", enabled=self._color))
+            self._out(render_mod.paint(line, enabled=self._color))
             if sep:
                 block = render_mod.diff_block((sep[2:] + diff_body).splitlines(), label=head,
                                               enabled=self._color).splitlines()
@@ -1402,10 +1408,9 @@ class Service:
         ended[record.task_id] = record.status
         while len(ended) > 256:
             ended.pop(next(iter(ended)))
-        colour = "green" if record.status == "completed" else "yellow"
         self._reopen_tree_if_needed(record, unicode=unicode)
-        self._out(render_mod.style(panel_mod.tree_digest(record, elapsed=elapsed, detail=detail, unicode=unicode),
-                                   colour, enabled=self._color))
+        self._out(render_mod.paint(panel_mod.tree_digest(record, elapsed=elapsed, detail=detail, unicode=unicode),
+                                   enabled=self._color))
         self._tree_owner = ""
 
     def _device_book(self, ctx=None):
@@ -1492,7 +1497,7 @@ class Service:
         # only as "? · ? · (no description)" (observer round, 2026-09-07).
         self._book.on_created({"task_id": session_id, "kind": "chat", "origin": "human", "description": text})
         if self._live.enabled:
-            self._live.render("⏺ Thinking...  [0s]")
+            self._live.render("● Thinking...  [0s]")
         await self._ctx.bus.publish(self._ctx.bus.new(topics.PERCEPT_TEXT_RECEIVED, {
             "channel": "cli", "text": text, "session_id": session_id,
         }))
@@ -1508,7 +1513,7 @@ class Service:
                 await asyncio.sleep(self.config.narrate_heartbeat_s)
                 elapsed = time.monotonic() - self._turn_started.get(session_id, time.monotonic())
                 if self._live.enabled:
-                    self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
+                    self._live.render(f"● Thinking...  [{elapsed:.0f}s]")
                 else:
                     print(render_mod.style(f"  ... still thinking  [{elapsed:.0f}s]", "dim", enabled=self._color))
 
@@ -2118,19 +2123,19 @@ class Service:
                 if ok is None:
                     verb = verb_for(phase, tool)
                     detail = f" {head}" if head else ""
-                    self._live.render(f"⏺ {verb}...{detail}  [{elapsed:.0f}s]")
+                    self._live.render(f"● {verb}...{detail}  [{elapsed:.0f}s]")
                     return
                 # One branch of the task's tree (`panel.py`): the tool,
                 # what it touched, ✓/✗, and how long it took.
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
                 line = panel_mod.tree_step(tool=tool, head=head, ok=ok, took=took, unicode=unicode)
                 self._reopen_tree_if_needed(record, unicode=unicode)
-                self._out(render_mod.style(line, "green" if ok else "red", enabled=self._color))
+                self._out(render_mod.paint(line, enabled=self._color))
                 if sep:
                     lines = (sep[2:] + diff_body).splitlines()
                     block = render_mod.diff_block(lines, label=head, enabled=self._color).splitlines()
                     self._out("\n".join(panel_mod.tree_note(block, unicode=unicode)))
-                self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
+                self._live.render(f"● Thinking...  [{elapsed:.0f}s]")
                 return
 
             mark = "" if ok is None else (" ok" if ok else " FAILED")
@@ -2146,9 +2151,9 @@ class Service:
         if message.type == topics.TASK_STARTED:
             if self._live.enabled:
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
-                self._out(render_mod.style(panel_mod.tree_start(record, unicode=unicode), "cyan", enabled=self._color))
+                self._out(render_mod.paint(panel_mod.tree_start(record, unicode=unicode), enabled=self._color))
                 self._tree_owner = task_id
-                self._live.render(f"⏺ Thinking...  [{elapsed:.0f}s]")
+                self._live.render(f"● Thinking...  [{elapsed:.0f}s]")
                 return
             text = "thinking..."
         else:  # task.completed
@@ -2157,9 +2162,9 @@ class Service:
                 unicode = render_mod.unicode_mode(self.config.unicode) != "off"
                 detail = p.get("reason") or "" if message.type != topics.TASK_COMPLETED else ""
                 self._reopen_tree_if_needed(record, unicode=unicode)
-                self._out(render_mod.style(
+                self._out(render_mod.paint(
                     panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
-                    "green" if record.status == "completed" else "yellow", enabled=self._color,
+                    enabled=self._color,
                 ))
                 self._tree_owner = ""
             if watched:

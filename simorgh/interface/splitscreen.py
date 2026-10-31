@@ -45,6 +45,7 @@ import sys
 import threading
 from typing import Callable
 
+from .sidepanel import screen_safe
 from .tui import PANEL_REFRESH_S, PROMPT_GLYPH, Tui, _make_completer, _make_lexer, _parse, _pt, _style
 
 #: Most transcript lines kept in memory; the Ledger keeps everything.
@@ -172,6 +173,9 @@ class Transcript(io.TextIOBase):
         self.on_change = on_change
         #: How many lines up from the end the view is; 0 follows new output.
         self.scroll = 0
+        #: Where every finished line is also appended, colour removed: the
+        #: conversation kept outside the screen (`SplitTui.run`).
+        self.log = None
 
     # -- file protocol --------------------------------------------------------------------------
     def writable(self) -> bool:
@@ -195,7 +199,13 @@ class Transcript(io.TextIOBase):
             for chunk in chunks:
                 # A carriage return redraws a line in place on a real
                 # terminal; here the last version of the line is the line.
-                self._lines.append(chunk.rsplit("\r", 1)[-1])
+                line = chunk.rsplit("\r", 1)[-1]
+                self._lines.append(line)
+                if self.log is not None:
+                    try:
+                        self.log.write(re.sub(r"\x1b\[[0-9;]*m", "", line) + "\n")
+                    except (OSError, ValueError):
+                        self.log = None
             if len(self._lines) > self._limit:
                 del self._lines[: len(self._lines) - self._limit]
         if self.on_change is not None:
@@ -217,7 +227,7 @@ class Transcript(io.TextIOBase):
         self.scroll = max(0, min(self.scroll, max(0, len(lines) - 1)))
         end = len(lines) - self.scroll
         start = max(0, end - rows * 3)       # wrapped lines take more than one row
-        return lines[start:end], max(0, end - start - 1)
+        return [screen_safe(line) for line in lines[start:end]], max(0, end - start - 1)
 
 
 def _is_terminal(stream) -> bool:
@@ -274,6 +284,8 @@ class SplitTui(Tui):
     # -- stdout -------------------------------------------------------------------------------------
     def capture_stdout(self) -> None:
         """Every print from here on lands in the conversation pane."""
+        if self.transcript.log is None:
+            self._open_log()
         if self._real_stdout is None:
             self._real_stdout = sys.stdout
             self._columns_before = os.environ.get("COLUMNS")
@@ -362,7 +374,9 @@ class SplitTui(Tui):
     def _box_pane(self, index: int, box, *, width: int, height: int):
         pt = _pt()
         layout = pt["layout"]
-        control = layout.FormattedTextControl(lambda: box.render(width - 2, max(1, height - 2)), focusable=False)
+        control = layout.FormattedTextControl(
+            lambda: [(style, screen_safe(text)) for style, text in box.render(width - 2, max(1, height - 2))],
+            focusable=False)
         return self._frame(layout.Window(control, wrap_lines=False), title=self._pane_title(index, box.title).strip(),
                            focused=self.panes.focus == index, height=pt["D"].exact(height))
 
@@ -476,7 +490,7 @@ class SplitTui(Tui):
         text = self._footer_text()
         if isinstance(text, str):
             text = [("class:sim.footer", text or "")]
-        hint = [("class:pane.hint", "   ⇧Tab focus · ^F full size · ^B side · PgUp/PgDn scroll")]
+        hint = [("class:pane.hint", "   ⇧Tab focus · ^F full · ^B side · PgUp/PgDn · ^O history")]
         return list(text or []) + hint
 
     def _pane_bindings(self):
@@ -517,11 +531,46 @@ class SplitTui(Tui):
         def _down(event) -> None:
             self.transcript.scroll = max(0, self.transcript.scroll - max(1, self._size()[1] // 2))
 
+        @keys.add("c-o")
+        def _history(event) -> None:
+            asyncio.ensure_future(self.show_history())
+
         @keys.add("c-d", filter=pt["Condition"](lambda: not self._buffer.text))
         def _eof(event) -> None:
             event.app.exit(exception=EOFError)
 
         return keys
+
+    async def show_history(self) -> None:
+        """Ctrl-O: the whole conversation, printed into the real terminal --
+        out of the full screen, into the terminal's own scrollback, where it
+        scrolls with the trackpad and selects and copies like any text.
+        Enter comes back. (The creator, 2026-10-30: "I have lost my ability
+        to scroll up in the terminal to see the history ... and copy paste
+        it" -- the full screen draws on the alternate screen, which keeps no
+        scrollback.)"""
+        pt = _pt()
+        terminal = (self._capture.terminal() if self._capture is not None else None) or sys.__stdout__
+        lines = self.transcript.lines()
+        async with pt["in_terminal"]():
+            terminal.write("\n".join(lines) + "\n")
+            where = f"  · also in {self.transcript.log.name}" if self.transcript.log is not None else ""
+            terminal.write(f"\x1b[2m── {len(lines)} lines above: scroll up, select and copy as usual{where}"
+                           f" · Enter returns to Sim ──\x1b[0m\n")
+            terminal.flush()
+            await asyncio.get_running_loop().run_in_executor(None, sys.stdin.readline)
+
+    def _open_log(self) -> None:
+        """`conversation.log` beside the prompt history: every line of the
+        conversation, colour removed, appended across sessions."""
+        base = self._history_path.parent if self._history_path else None
+        if base is None:
+            return
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            self.transcript.log = open(base / "conversation.log", "a", encoding="utf-8", buffering=1)
+        except OSError:
+            self.transcript.log = None
 
     # -- lines --------------------------------------------------------------------------------------
     def _accept(self, buffer) -> bool:
@@ -583,6 +632,9 @@ class SplitTui(Tui):
             except asyncio.CancelledError:
                 pass
             self._release_stdout()
+            if self.transcript.log is not None:
+                self.transcript.log.close()
+                self.transcript.log = None
             # Leave the last of the conversation on the real terminal, so
             # leaving the full screen does not leave a blank one.
             for line in self.transcript.lines()[-20:]:
