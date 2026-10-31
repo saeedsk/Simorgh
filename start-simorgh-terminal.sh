@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 osascript <<EOF
 tell application "Terminal"
     activate
-    do script "cd '$REPO_ROOT' && ./sim.sh run --max-rollbacks 0"
+    do script "cd '$REPO_ROOT' && ./sim.sh --max-rollbacks 0"
 end tell
 EOF
 
