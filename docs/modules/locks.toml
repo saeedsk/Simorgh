@@ -23,12 +23,6 @@ task = "stage 17: mask2/routed presets and their paid measurement"
 since = "2026-10-28T04:36:34+00:00"
 until = "2026-10-28T12:36:34+00:00"
 
-[locks.execution]
-by = "claude"
-task = "container: daemon probe cache misfires when monotonic clock < 60s (fresh boot)"
-since = "2026-10-31T02:48:37+00:00"
-until = "2026-10-31T10:48:37+00:00"
-
 [locks.interface]
 by = "claude-paid"
 task = "stage 19: TUI right-hand agents panel (split screen)"
