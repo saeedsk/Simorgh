@@ -428,6 +428,9 @@ def logo_rows(*, enabled: bool = True, width: int = _RULE_WIDTH) -> list[str]:
 #: screen someone sees is a wall, and `help` is one word away.
 _QUICK_COMMANDS: tuple[tuple[str, str], ...] = _command_help(limit=_SPLASH_COMMANDS)
 
+#: The splash's usage column; a longer usage gets a line of its own.
+_SPLASH_USAGE_WIDTH = 20
+
 
 #: Domain status glyphs. Three states, not two: "nothing set up yet" and
 #: "set up and not answering" are different facts, and showing them the
@@ -803,17 +806,29 @@ def banner(*, enabled: bool = True, unicode: str = "auto") -> str:
         "`help` lists everything; here's where to start:",
         "",
     ]
-    # The name column is as wide as the longest name; the description
-    # gets whatever the terminal has left, and is cut if it does not
-    # fit. At 70 columns eight of these ran past the edge and wrapped
-    # (observer, 2026-09-08).
+    # The usage column is capped, and the description wraps at a word
+    # into what is left, continuation lines aligned under it; a usage
+    # longer than the cap takes a line of its own. At 70 columns eight
+    # of these ran past the edge and wrapped (observer, 2026-09-08);
+    # sizing the column to the longest usage (`effort [low|...|max]
+    # [provider]`, 45 columns) then left 18 for the description and cut
+    # every one to "health, vitals, p…" (the creator, 2026-10-30).
     # ASCII mode means ASCII everywhere, including the cut marker.
+    import textwrap
+
     ellipsis = "…" if unicode != "off" else "..."
-    width = max(len(name) for name, _ in _QUICK_COMMANDS)
+    width = min(_SPLASH_USAGE_WIDTH, max(len(name) for name, _ in _QUICK_COMMANDS))
     room = max(16, banner_width - width - 5)
+    indent = " " * (width + 5)
     for name, desc in _QUICK_COMMANDS:
+        rows = textwrap.wrap(desc, width=room) or [""]
+        if len(name) > width:
+            lines.append("  " + style(name, "cyan", enabled=enabled))
+            lines.extend(indent + row for row in rows)
+            continue
         label = style(name.ljust(width), "cyan", enabled=enabled)
-        lines.append(f"  {label}   {fit(desc, room, ellipsis=ellipsis)}")
+        lines.append(f"  {label}   {rows[0]}")
+        lines.extend(indent + row for row in rows[1:])
     lines.append(rule)
     # Last word on width: nothing in the splash may exceed the terminal.
     # The prose lines are hand-wrapped for 68 and the art has its own

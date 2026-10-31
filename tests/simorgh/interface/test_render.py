@@ -194,6 +194,13 @@ class RenderTestCase(unittest.TestCase):
         for line in render.banner(enabled=False).splitlines():
             self.assertLessEqual(len(line), 80, repr(line))
 
+    def test_banner_quick_commands_wrap_rather_than_cut(self):
+        # The creator, 2026-10-30: the column sized to the longest usage
+        # left 18 columns and every description read "health, vitals, p…".
+        out = " ".join(render.banner(enabled=False, unicode="off").split())
+        for _, desc in render._QUICK_COMMANDS:
+            self.assertIn(" ".join(desc.split()), out)
+
     def test_prompt_banner_shows_the_question_and_every_option(self):
         out = render.prompt_banner("Approve propose_mcp_server?", ["yes", "no"], enabled=False)
         self.assertIn("Approve propose_mcp_server?", out)
