@@ -35,13 +35,29 @@ class BoundLedger:
     def source(self) -> str:
         return self._source
 
-    def _check(self, stream: str) -> None:
+    def _audit_line(self, line: str) -> None:
         if self._audit:
             with open(self._audit, "a") as fh:
-                fh.write(f"{self._source}\t{stream}\n")
-        allowed = writers_for(stream)
+                fh.write(line)
+
+    def _refuse(self, stream: object, reason: str) -> None:
+        # Leave a trace in the audit file before raising, even if the
+        # audit path is set but the write itself is refused.
+        self._audit_line(f"{self._source}\tREFUSED\t{reason}\t{stream!r}\n")
+        raise WriterViolation(f"{self._source} may not write {stream!r} ({reason})")
+
+    def _check(self, stream: str) -> None:
+        self._audit_line(f"{self._source}\t{stream}\n")
+        # Fail closed: an empty or unparseable stream name is refused,
+        # never treated as unowned.
+        if not isinstance(stream, str) or not stream.strip():
+            self._refuse(stream, "empty or unparseable stream name")
+        try:
+            allowed = writers_for(stream)
+        except Exception as exc:
+            self._refuse(stream, f"unparseable stream name: {exc}")
         if allowed is not None and self._source not in allowed:
-            raise WriterViolation(f"{self._source} may not write {stream!r} (writers: {', '.join(sorted(allowed))})")
+            self._refuse(stream, f"writers: {', '.join(sorted(allowed))}")
 
     async def append(self, stream: str, event, **kw):
         self._check(stream)
