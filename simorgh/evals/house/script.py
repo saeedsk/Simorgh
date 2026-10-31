@@ -819,7 +819,9 @@ _FORBIDDEN: tuple[tuple[str, str], ...] = (
 )
 
 #: A line that is only ever a placeholder.
-_EMPTY = ("🔊 sim:", "● ", "⏺", "⎿")
+#: (`●` the root and the answer, `◆` a crew member, `│` a note's rail and
+#: `╰─` a corner since 2026-10-30's glyph set; `⏺`/`⎿` before it.)
+_EMPTY = ("🔊 sim:", "● ", "⏺", "⎿", "◆", "│", "╰─")
 
 
 def printed(*words: str) -> Expectation:

@@ -318,3 +318,4 @@ Lock `evals` (and `simloader` if you touch the bless gate), edit
 is the live check and takes about eight seconds. Commit subject
 `evals: <what changed>`.
 - 2026-09-22: `house.sandbox.Sandbox(recogniser=...)` boots the sandboxed Sim with a REAL recogniser in place of the scripted one. `tools/voice_replay.py` uses it to replay a person's calibration set (`voice calibrate`) through the real listening path -- real whisper, a copy of the real speaker book, the live `[voice]` settings -- and fails when the voice is placed as the person under 90% of takes or a line naming Sim is taken as addressed under 90%. Written after a day of voice features that passed fake-based tests and failed on the creator's first live use.
+- 2026-10-30: `house/script.py` `_EMPTY` (placeholder-only lines `tui_is_sane` rejects) gains the interface's new transcript glyphs `◆`, `│`, `╰─` beside `●`, `⏺`, `⎿`.
