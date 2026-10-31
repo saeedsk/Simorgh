@@ -196,6 +196,22 @@ async def _cancel(bus: BusClient, task_id: str, *, session_id: str) -> Outcome:
     }, render_ok=f"asked {task_id} to stop; it ends after its current step")
 
 
+async def _task_report(ledger, wanted: str) -> Outcome:
+    """`tasks <id>`: one task's whole story from its `task:<id>` stream --
+    what was asked, each step, and the full answer. A background task's
+    card shows two lines of it (`panel.tree_digest`) and points here."""
+    streams = [s for s in await ledger.streams("task:") if s[len("task:"):].startswith(wanted)]
+    exact = [s for s in streams if s == f"task:{wanted}"]
+    streams = exact or streams
+    if not streams:
+        return Outcome(f"no task {wanted!r} -- `tasks all` lists them")
+    if len(streams) > 1:
+        shown = ", ".join(s[len("task:"):][:12] for s in streams[:5])
+        return Outcome(f"{wanted!r} names {len(streams)} tasks ({shown}) -- give more of the id")
+    events = await ledger.read(streams[0])
+    return Outcome(render_mod.task_report(streams[0][len("task:"):], [(e.type, dict(e.payload)) for e in events]))
+
+
 #: How many crews `crew` lists, newest first.
 _CREW_LIST_MAX = 20
 
@@ -503,6 +519,8 @@ async def dispatch(command: Command, *, bus: BusClient, clock, session_id: str, 
             await bus.publish(bus.new(topics.TASK_WAKE, {
                 "task_id": words[1], "why": f"woken by cli:{session_id}"}))
             return Outcome(f"asked {words[1]} to wake; it goes back in the queue if it was waiting")
+        if len(words) == 1 and re.fullmatch(r"[0-9a-f][0-9a-f-]{5,}", words[0]) and ledger is not None:
+            return await _task_report(ledger, words[0])
         if args.strip() == "work":
             return await _request(bus, topics.TASK_WORK_NEXT_REQUEST, {}, timeout=5.0, render=lambda p: (
                 f"working: {p['task_id']}" if p.get("task_id") else f"nothing to work on ({p.get('reason', 'idle')})"

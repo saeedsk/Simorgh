@@ -267,6 +267,101 @@ def tree_end(record: TaskRecord, *, elapsed: float | None, detail: str = "", uni
     return "\n".join([head] + [_line(line) for line in wrapped])
 
 
+#: Most lines a background task's gist takes on screen; the rest is one
+#: command away (`tasks <id>`).
+GIST_LINES = 2
+_MARKDOWN = re.compile(r"(\*\*|__|`|^#+\s*|^\s*[-*\u2022]\s+|^\s*\d+[.)]\s+)", re.M)
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def plan_digest(detail: str) -> str:
+    """A project's decomposition, which arrives as the planner's raw JSON
+    (`{"nodes": [...]}`), as one line a person can read: how many steps of
+    which kind. "" when `detail` is not such a plan."""
+    text = (detail or "").strip()
+    if not text.startswith("{") or '"nodes"' not in text[:200]:
+        return ""
+    import json
+
+    try:
+        nodes = json.loads(text).get("nodes") or []
+    except (ValueError, AttributeError):
+        return ""
+    if not isinstance(nodes, list) or not nodes:
+        return ""
+    counts: dict[str, int] = {}
+    for node in nodes:
+        kind = str(node.get("kind") or "step") if isinstance(node, dict) else "step"
+        counts[kind] = counts.get(kind, 0) + 1
+    plural = {"research": "research", "wait": "waits"}
+    parts = [f"{n} {plural.get(k, k + 'es' if k.endswith('ch') else k + 's') if n != 1 else k}"
+             for k, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    return f"planned {len(nodes)} step{'s' if len(nodes) != 1 else ''}: {', '.join(parts)}"
+
+
+def gist(detail: str, *, width: int, lines: int = GIST_LINES) -> tuple[list[str], bool]:
+    """The first thing a background task said, for its card: markdown
+    marks dropped, whole sentences while they fit in `lines` lines of
+    `width`, the last cut at a word. Returns the lines and whether
+    anything was left out."""
+    import textwrap
+
+    plan = plan_digest(detail)
+    if plan:
+        return [_fit(plan, width)], False
+    flat = " ".join(_MARKDOWN.sub("", detail or "").split())
+    if not flat:
+        return [], False
+    wrapped = textwrap.wrap(flat, width=max(16, width))
+    if len(wrapped) <= lines:
+        return wrapped, False
+    # Prefer ending on a sentence that fits whole.
+    kept = ""
+    for sentence in _SENTENCE.split(flat):
+        trial = f"{kept} {sentence}".strip()
+        if len(textwrap.wrap(trial, width=max(16, width))) > lines:
+            break
+        kept = trial
+    if kept:
+        return textwrap.wrap(kept, width=max(16, width)), True
+    shown = wrapped[:lines]
+    shown[-1] = _fit(shown[-1] + " …", width)
+    return shown, True
+
+
+def tree_digest(record: TaskRecord, *, elapsed: float | None, detail: str = "", unicode: bool = True) -> str:
+    """How a BACKGROUND task ended, as a small card (the creator,
+    2026-10-30: "make the sub task activities presentation pleasant and
+    nice and clean and informative"):
+
+        ⎿  ✅ completed · 4.2m · 18 steps
+           Landed 1 commit on main; the suite's 6 failures also fail on main.
+           ↳ tasks 926ba8d4 for the full report
+
+    Until then it was `tree_end` with the whole answer wrapped under it:
+    a fifteen-line handover for every patch, and a project's raw JSON
+    plan, scrolling the conversation away. A person's own turns still
+    get their whole answer (`tree_end`); this is for work they did not
+    ask to read."""
+    from .render import terminal_width
+
+    icon = _END_ICON.get(record.status, "•") if unicode else ""
+    facts = [record.status]
+    if elapsed is not None:
+        facts.append(_took(elapsed))
+    if record.steps:
+        facts.append(f"{record.steps} step{'s' if record.steps != 1 else ''}")
+    corner = "  ⎿  " if unicode else "  `- "
+    indent = "     " if unicode else "      "
+    head = _line(f"{corner}{icon} {' · '.join(facts)}".rstrip())
+    shown, cut = gist(detail, width=max(24, terminal_width() - len(indent) - 1))
+    out = [head] + [_line(f"{indent}{line}") for line in shown]
+    if cut:
+        arrow = "↳" if unicode else "->"
+        out.append(_line(f"{indent}{arrow} tasks {record.task_id[:12]} for the full report"))
+    return "\n".join(out)
+
+
 # ------------------------------------------------- the live section (above the prompt)
 def running_row(record: TaskRecord, *, now: float, unicode: bool = True) -> list[tuple[str, str]]:
     """One running task: a breathing word (or the tool's verb), then what

@@ -29,7 +29,7 @@ COMMANDS: tuple[tuple[str, str, str], ...] = (
     ("model", "[name|opus|sonnet|haiku]", "which model Sim thinks with: list them, or switch (kept across restarts)"),
     ("effort", "[low|medium|high|xhigh|max] [provider]", "how hard the model thinks: see it, or set it (kept across restarts)"),
     ("capabilities", "", "what Sim can actually reach: Node, Docker, optional packages"),
-    ("tasks", "[all|work|wake <id>|clear]", "see the backlog (all of it), advance the next item, wake a waiting one, or wipe it"),
+    ("tasks", "[all|<id>|work|wake <id>|clear]", "see the backlog (all of it), one task's full report, advance the next item, wake a waiting one, or wipe it"),
     ("cancel", "<task_id>", "stop a running task"),
     ("crew", "[<id>|cancel <handle>]", "agent crews: who works under whom, what they said, and stopping one"),
     ("forget", "[kind] [minutes|Nd] [words]", "forget what Sim remembered in the last minutes (default 2), optionally only records with those words; kind is episodic (the default), semantic, facts, procedural or all "

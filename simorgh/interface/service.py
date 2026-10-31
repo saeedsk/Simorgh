@@ -1309,9 +1309,21 @@ class Service:
             # having -- only the duplicated answer goes. A failure keeps
             # its `reason`: nothing else would say why.
             detail = ""
+        # One ending per task. Planning re-publishes `task.blocked` with its
+        # own reason after the Worker's, and every blocked task printed its
+        # corner twice (live 2026-10-30: "⏸ blocked in 2.0m" and again
+        # "-- verification failed after max revisions").
+        ended = getattr(self, "_ended", None)
+        if ended is None:
+            ended = self._ended = {}
+        if ended.get(record.task_id) == record.status:
+            return
+        ended[record.task_id] = record.status
+        while len(ended) > 256:
+            ended.pop(next(iter(ended)))
         colour = "green" if record.status == "completed" else "yellow"
         self._reopen_tree_if_needed(record, unicode=unicode)
-        self._out(render_mod.style(panel_mod.tree_end(record, elapsed=elapsed, detail=detail, unicode=unicode),
+        self._out(render_mod.style(panel_mod.tree_digest(record, elapsed=elapsed, detail=detail, unicode=unicode),
                                    colour, enabled=self._color))
         self._tree_owner = ""
 
@@ -1954,7 +1966,8 @@ class Service:
             self._refresh_activity_footer()
             if self._narrating(task_id, origin=p.get("origin")):
                 self._out(render_mod.style(
-                    "  queued  " + self._book.get(task_id).short_topic(), "dim", enabled=self._color,
+                    f"  queued  {self._book.get(task_id).kind} · {self._book.get(task_id).short_topic()}",
+                    "dim", enabled=self._color,
                 ))
             return
 

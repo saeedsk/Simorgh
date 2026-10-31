@@ -826,6 +826,49 @@ _STATUS_COLOR = {
 }
 
 
+def task_report(task_id: str, events: list[tuple[str, dict]], *, enabled: bool = True) -> str:
+    """`tasks <id>`: a task as one readable page -- a header (kind, origin,
+    how it ended, how long, how many steps), what it was asked, a line
+    per tool call, and the whole answer wrapped. The card a background
+    task leaves in the transcript is two lines of this."""
+    import textwrap
+
+    width = max(40, terminal_width())
+    # Planning's store writes `created`; the bus record is `task.created`.
+    created = next((p for t, p in events if t in ("created", "task.created")), {})
+    end = next(((t, p) for t, p in reversed(events)
+                if t in ("task.completed", "task.failed", "task.blocked")), None)
+    steps = [p for t, p in events if t == "task.step"]
+    tools = [p for p in steps if p.get("tool")]
+    status = end[0].split(".", 1)[1] if end else "running"
+    icon = {"completed": "✅", "failed": "❌", "blocked": "⏸"}.get(status, "⏺")
+    cost = sum(float(p.get("cost_usd") or 0) for p in steps)
+    facts = [created.get("kind") or "task", created.get("origin") or "", status,
+             f"{len(steps)} step{'s' if len(steps) != 1 else ''}"] + ([f"${cost:.2f}"] if cost else [])
+    lines = [style(fit(f"{icon} {task_id[:12]}  " + " · ".join(f for f in facts if f), width), "cyan",
+                   enabled=enabled)]
+    asked = " ".join(str(created.get("description") or "").split())
+    if asked:
+        lines.append("")
+        lines += textwrap.wrap(asked, width=width - 2, initial_indent="  ", subsequent_indent="  ")[:6]
+    if tools:
+        lines.append("")
+        for p in tools[-30:]:
+            mark = {True: "✓", False: "✗"}.get(p.get("ok"), "·")
+            head = " ".join(str(p.get("summary") or "").split()[:40])
+            lines.append(style(fit(f"  {mark} {p['tool']}  {head}", width), "dim", enabled=enabled))
+        if len(tools) > 30:
+            lines.insert(-30, style(f"  … {len(tools) - 30} earlier call(s)", "dim", enabled=enabled))
+    if end:
+        answer = str(end[1].get("result_summary") or end[1].get("reason") or "").strip()
+        if answer:
+            lines.append("")
+            for paragraph in answer.splitlines():
+                lines += textwrap.wrap(paragraph, width=width - 2, initial_indent="  ",
+                                       subsequent_indent="  ") or [""]
+    return "\n".join(lines)
+
+
 def task_list(tasks: list[dict], projects: list[dict], *, limit: int = 20, enabled: bool = True) -> str:
     """The `tasks` command's real output.
 
