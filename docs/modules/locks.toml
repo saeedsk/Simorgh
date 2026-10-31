@@ -10,3 +10,9 @@ by = "claude-paid"
 task = "record creator decisions: native_graph live, sidecars eval-only"
 since = "2026-10-28T04:36:07+00:00"
 until = "2026-10-28T12:36:07+00:00"
+
+[locks.kernel]
+by = "claude-vault-backup"
+task = "vault backups (vault+key pairs) and automatic recovery"
+since = "2026-10-31T05:35:38+00:00"
+until = "2026-10-31T13:35:38+00:00"
