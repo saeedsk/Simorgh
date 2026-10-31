@@ -153,6 +153,9 @@ class Service:
         # whenever the bucket changes.
         self._distilled_today = 0
         self._distilled_day: int | None = None
+        # Verification's verdict per task (`verify.result`, which comes
+        # before the task's `task.completed`): only a `pass` is distilled.
+        self._verdicts: dict[str, str] = {}
         self._health = HealthMonitor(self.config)
         self._last_health_severity: str | None = None
         self._patterns = PatternMiner(self.config)
@@ -442,10 +445,18 @@ class Service:
         second attempt at the same slug is dropped there rather than
         producing two skills that do the same thing.
         """
+        verdict = self._verdicts.pop(task_id, "")
         if not self.config.distillation_enabled or self._ctx is None:
             return
+        # Solved means VERIFIED, not `task.completed`. A listings-page build
+        # (2026-10-30, task ca3e8e68cc75) completed mid-sentence with nothing
+        # landed and a verdict of insufficient_evidence -- 5 of 6 required
+        # checks unanswered -- and was turned into a skill task that ran 57
+        # steps and asked the creator four times to approve it while his
+        # real request was still being built. "That was a wrong decision."
         candidate = distillation.candidate_for(
-            kind=meta.kind, origin=meta.origin, succeeded=succeeded, description=meta.description,
+            kind=meta.kind, origin=meta.origin, succeeded=succeeded and verdict == "pass",
+            description=meta.description,
             tools=meta.tools_used, existing_skills=self._existing_skills(),
         )
         if candidate is None:
@@ -493,6 +504,10 @@ class Service:
 
     async def _on_verify_result(self, message: Message) -> None:
         p = message.payload
+        if p.get("task_id"):
+            self._verdicts[str(p["task_id"])] = str(p.get("verdict") or "")
+            while len(self._verdicts) > 256:
+                self._verdicts.pop(next(iter(self._verdicts)))
         if p.get("verdict") == "fail" and p.get("task_id"):
             mechanical = p.get("mechanical") or {}
             failed = next((name for name, r in mechanical.items()
