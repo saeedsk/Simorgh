@@ -173,8 +173,30 @@ def from_patterns(patterns) -> list[Candidate]:
             for p in (patterns or ())]
 
 
-def candidates(failures=(), *, denials=None, patterns=(), min_members: int = MIN_MEMBERS,
-               min_repeats: int = 5) -> list[Candidate]:
+def from_benchmark(payloads) -> list[Failure]:
+    """Benchmark candidates (`monitors.benchmark_watch.failing_candidates`)
+    as Failures, so they cluster with live-task failures (stage 8 item 3).
+
+    The suite is the scope, so the task type is `patch:<suite>`, and the
+    case id is the task id: it travels through `Cluster.members` so the
+    proposer can open work against a reproducible case.
+    """
+    out: list[Failure] = []
+    for p in payloads or ():
+        suite, _, case_id = str(p.get("subject") or "").partition("/")
+        if not suite or not case_id:
+            continue
+        out.append(Failure(
+            task_id=case_id,
+            task_type=f"patch:{suite}",
+            failed_check=str(p.get("error_kind") or p.get("failed_check") or ""),
+            reason=str(p.get("reason") or ""),
+        ))
+    return out
+
+
+def candidates(failures=(), *, denials=None, patterns=(), benchmark=(),
+               min_members: int = MIN_MEMBERS, min_repeats: int = 5) -> list[Candidate]:
     """Everything worth a lesson right now, from all three sources,
     strongest first (stage 8 item 3).
 
@@ -182,7 +204,7 @@ def candidates(failures=(), *, denials=None, patterns=(), min_members: int = MIN
     is here; a model is asked one thing afterwards, and only about
     what is already in the list.
     """
-    found = (from_clusters(cluster(failures, min_members=min_members))
+    found = (from_clusters(cluster(list(failures) + from_benchmark(benchmark), min_members=min_members))
              + from_denials(denials, min_repeats=min_repeats)
              + from_patterns(patterns))
     found.sort(key=lambda c: (-c.count, c.source, c.subject, c.what))
