@@ -16,3 +16,9 @@ by = "claude-paid"
 task = "stage 17: mask2/routed presets and their paid measurement"
 since = "2026-10-28T04:36:34+00:00"
 until = "2026-10-28T12:36:34+00:00"
+
+[locks.interface]
+by = "claude-split-screen"
+task = "split-screen layout: right column of boxes (cpu/gpu, memory, agents), focus and full-size keys"
+since = "2026-10-31T04:33:11+00:00"
+until = "2026-10-31T12:33:11+00:00"
