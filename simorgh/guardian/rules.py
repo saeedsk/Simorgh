@@ -408,6 +408,29 @@ def _a_new_test_beside(canonical: str, protected: str, proposal: Proposal) -> bo
     return not target.exists()
 
 
+def _at_boundary(protected: str, path: str) -> bool:
+    """Whether `protected` occurs in `path` at the start of a path
+    component -- the start, or after `/`, a quote, whitespace or a shell
+    operator -- not inside a longer name. A plain substring check matched
+    Sim's own data directory: `~/.simorgh/execution/worktrees/<task>`
+    contains `simorgh/execution/`, so every `run_shell` that named its own
+    task's worktree was denied as an edit of Execution (live 2026-10-30).
+    `subagents/` held `agents/` the same way. Real repo paths still match:
+    `simorgh/execution/tools.py`, `/Users/x/ws/Simorgh/simorgh/execution/
+    tools.py`, and a protected file inside a worktree's own checkout. An
+    entry that begins with `/` (`/.ssh/`) carries its own boundary."""
+    if protected.startswith("/"):
+        return protected in path
+    start = 0
+    while True:
+        at = path.find(protected, start)
+        if at < 0:
+            return False
+        if at == 0 or not (path[at - 1].isalnum() or path[at - 1] in "._-"):
+            return True
+        start = at + 1
+
+
 class ProtectedRule:
     name = "protected"
     layer = "protected"
@@ -466,8 +489,7 @@ class ProtectedRule:
             path_lower = path.lower()
             ask = tuple(ctx.config.ask_subjects)
             for protected in ctx.config.protected_subjects:
-                protected_lower = protected.lower()
-                if protected in path or protected in canonical or protected_lower in path_lower or protected_lower in canonical_lower:
+                if any(_at_boundary(protected.lower(), text) for text in (path_lower, canonical_lower)):
                     if _a_new_test_beside(canonical, protected, proposal):
                         continue
                     if protected in ask:
