@@ -188,7 +188,10 @@ class Service:
         await self._release_dead_leases(ctx)
         self._intake = Intake(self._store, dedupe_threshold=self.config.dedupe_similarity_threshold,
                               max_backlog=self.config.max_backlog,
-                              autonomous_origins=tuple(self.config.autonomous_origins))
+                              autonomous_origins=tuple(self.config.autonomous_origins),
+                              protected=self._guardian_protected,
+                              self_growth=self.config.autonomous_self_growth,
+                              max_open_autonomous_projects=self.config.max_open_autonomous_projects)
         self._scheduler = Scheduler(
             self._store, ctx.bus, ctx.clock, source=ctx.source,
             priority_weights=self.config.priority_weights, lease_seconds=self.config.lease_seconds,
@@ -258,6 +261,24 @@ class Service:
 
     # -- intake ---------------------------------------------------------------------
 
+    async def _guardian_protected(self) -> tuple[str, ...]:
+        """Guardian's protected paths, as it last wrote them to
+        `guardian:protected` at its start -- Guardian's list, never a copy
+        (the stream Execution's landing check reads too). Empty when
+        Guardian has not written it."""
+        try:
+            events = await self._ctx.ledger.read("guardian:protected")
+        except Exception:  # noqa: BLE001 -- no stream yet is no list yet
+            return ()
+        latest = next((e for e in reversed(events) if e.type == "subjects"), None)
+        return tuple(latest.payload.get("protected_subjects") or ()) if latest is not None else ()
+
+    async def _refused(self, origin: str, why: str) -> None:
+        """Sim's own idea, not worth a task (`worth.py`): logged and said
+        quietly, the way a deferral is."""
+        self._ctx.logger.info("planning.candidate_refused", origin=origin, reason=why)
+        await self._notice("debug", f"not starting a {origin} task: {why}")
+
     async def _on_goal_stated(self, message: Message) -> None:
         p = message.payload
         result = await self._intake.on_goal_stated(
@@ -266,6 +287,8 @@ class Service:
         )
         if result.task is not None:
             await self._announce_created(result.task)
+        elif result.refused:
+            await self._refused(p["origin"], result.refused)
         else:
             await self._notice("debug", f"duplicate goal, matches task {result.duplicate_of}")
 
@@ -276,6 +299,8 @@ class Service:
         )
         if result.task is not None:
             await self._announce_created(result.task)
+        elif result.refused:
+            await self._refused("curiosity", result.refused)
         else:
             await self._notice("debug", f"duplicate candidate, matches task {result.duplicate_of}")
 
@@ -308,6 +333,9 @@ class Service:
             self._ctx.logger.info("planning.candidate_deferred", origin=p.get("origin", "curiosity"),
                                   reason=result.deferred)
             payload = {"task_id": None, "deferred": result.deferred}
+        elif result.refused:
+            await self._refused(p.get("origin", "human"), result.refused)
+            payload = {"task_id": None, "refused": result.refused}
         else:
             payload = {"task_id": result.duplicate_of, "deduplicated_against": result.duplicate_of}
         # `task.create` is legitimately used both ways: as a request, by
@@ -1618,7 +1646,22 @@ class Service:
         state.status = planmode.APPROVED
         children_ids: list[str] = []
         id_by_step = {}
+        project = await self._store.get(state.task_id)
+        origin = project.origin if project is not None else "project"
+        skipped: set[str] = set()
         for step in state.steps:
+            # A step of Sim's OWN project is judged like any idea of its
+            # own (`worth.py`): a patch Guardian will deny, or growth tuning
+            # itself, is not created -- and nor is a step that needed its
+            # result, which would wait forever or run without its input.
+            # A person's project is never judged.
+            why = await self._intake.not_worth(kind=step.kind, subject=step.subject, origin=origin)
+            if not why and skipped.intersection(step.depends_on):
+                why = f"it depends on {', '.join(sorted(skipped.intersection(step.depends_on)))}, not started"
+            if why:
+                skipped.add(step.step_id)
+                await self._refused(origin, f"plan {state.plan_id} step {step.step_id}: {why}")
+                continue
             deps = tuple(id_by_step.get(d, d) for d in step.depends_on)
             child = await self._store.create(
                 kind=step.kind, description=step.description, subject=step.subject, origin="project",

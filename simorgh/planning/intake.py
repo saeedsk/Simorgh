@@ -10,9 +10,12 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass
 
+from typing import Awaitable, Callable
+
 from .dedupe import is_duplicate
-from .model import Scope, Task
+from .model import TERMINAL_STATUSES, Scope, Task
 from .store import TaskStore
+from .worth import refusal
 
 
 _WAITING = frozenset({"pending", "available", "blocked"})
@@ -28,15 +31,62 @@ class IntakeResult:
     # How much work was already waiting when this was accepted, so the
     # reply can say "queued behind N" instead of nothing.
     backlog: int = 0
+    # Why an autonomous idea was not worth a task at all (`worth.py`):
+    # Guardian would deny it, it is growth tuning itself, or another
+    # autonomous project is still open. Never set for a human's request.
+    refused: str | None = None
 
 
 class Intake:
     def __init__(self, store: TaskStore, *, dedupe_threshold: float, max_backlog: int = 0,
-                 autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project", "assistant")) -> None:
+                 autonomous_origins: tuple[str, ...] = ("curiosity", "reflection", "research", "project", "assistant"),
+                 protected: Callable[[], Awaitable[tuple[str, ...]]] | None = None,
+                 self_growth: bool = False, max_open_autonomous_projects: int = 1) -> None:
         self._store = store
         self._threshold = dedupe_threshold
         self._max_backlog = max(0, int(max_backlog))
         self._autonomous = frozenset(autonomous_origins)
+        # Guardian's protected paths, read from `guardian:protected` (the
+        # list is Guardian's, never a copy). None: no check.
+        self._protected = protected
+        self._self_growth = bool(self_growth)
+        self._max_projects = max(0, int(max_open_autonomous_projects))
+
+    async def not_worth(self, *, kind: str, subject: str | None, origin: str) -> str:
+        """Why Sim's own idea is not worth a task (`worth.refusal`), or "".
+        A human's request -- or a benchmark's -- is never judged."""
+        if origin not in self._autonomous:
+            return ""
+        protected: tuple[str, ...] = ()
+        if self._protected is not None:
+            try:
+                protected = tuple(await self._protected() or ())
+            except Exception:  # noqa: BLE001 -- an unreadable list only skips that one check
+                protected = ()
+        return refusal(kind=kind, subject=subject, protected=protected, self_growth=self._self_growth)
+
+    def _project_refusal(self, origin: str) -> str:
+        """An autonomous project waits while `max_open_autonomous_projects`
+        autonomous projects (or their steps) are still open: five
+        overlapping self-improvement projects ran in one evening
+        (2026-10-30). 0 disables it."""
+        if not self._max_projects or origin not in self._autonomous:
+            return ""
+        tasks = self._store.index.tasks
+        open_projects = {
+            t.id for t in tasks.values()
+            if t.kind == "project" and t.origin in self._autonomous and t.status not in TERMINAL_STATUSES
+        }
+        # A decomposed project is `completed`; its steps carry the work on.
+        open_projects |= {
+            t.parent_id for t in tasks.values()
+            if t.origin == "project" and t.parent_id and t.status not in TERMINAL_STATUSES
+            and (parent := tasks.get(t.parent_id)) is not None and parent.origin in self._autonomous
+        }
+        if len(open_projects) < self._max_projects:
+            return ""
+        return (f"{len(open_projects)} autonomous project(s) still open, at the [planning] "
+                f"max_open_autonomous_projects of {self._max_projects} -- finish those first")
 
     def backlog(self) -> int:
         """Tasks waiting for a worker: pending, available, or blocked."""
@@ -139,6 +189,8 @@ class Intake:
         dup = self._find_duplicate(goal, origin=origin)
         if dup:
             return IntakeResult(None, duplicate_of=dup)
+        if wants_project and (why := self._project_refusal(origin)):
+            return IntakeResult(None, refused=why)
         if wants_project:
             task = await self._store.create(
                 # `risk` is caller-supplied (task.create.v1.json already has the
@@ -165,6 +217,9 @@ class Intake:
         dup = self._find_duplicate(description, origin=origin, subject=subject)
         if dup:
             return IntakeResult(None, duplicate_of=dup)
+        why = await self.not_worth(kind=kind, subject=subject, origin=origin)
+        if why:
+            return IntakeResult(None, refused=why)
         deferred = self._deferral(origin)
         if deferred:
             return IntakeResult(None, deferred=deferred)
@@ -225,6 +280,8 @@ class Intake:
 
     async def on_research_follow_up(self, *, research_task_id: str, subject: str, description: str) -> Task | None:
         if self._find_duplicate(description, subject=subject):
+            return None
+        if await self.not_worth(kind="patch", subject=subject, origin="research"):
             return None
         if self._deferral("research"):
             return None

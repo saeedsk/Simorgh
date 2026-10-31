@@ -18,7 +18,8 @@ Planning owns the task queue: every task's lifecycle as an event-sourced `task:<
 | `simorgh/planning/dag.py` | dependency validation (unknown id, cycle), dependents, readiness |
 | `simorgh/planning/decomposer.py` | `parse_steps` (numbered-list regex) and `decompose` via `purpose="decompose"` |
 | `simorgh/planning/dedupe.py` | `difflib` fuzzy duplicate test (threshold 0.45) |
-| `simorgh/planning/intake.py` | maps goals, candidates, patterns and follow-ups to tasks; dedupe and backlog bound |
+| `simorgh/planning/intake.py` | maps goals, candidates, patterns and follow-ups to tasks; dedupe, backlog bound, and the worth gate (`not_worth`, the open-project cap) |
+| `simorgh/planning/worth.py` | `refusal(kind, subject, protected, self_growth)`: whether Sim's OWN code-changing idea is worth a task -- not on a Guardian-protected path, not growth tuning `simorgh/growth/` itself (2026-10-30) |
 | `simorgh/planning/model.py` | `Task`, `Scope`, `Step`, `Lease`, statuses, kinds, origins, the transition table |
 | `simorgh/planning/planmode.py` | `PlanState`, the approval matrix, plan diff, human-approval timeout |
 | `simorgh/planning/reground.py` | staleness rule and the `STILL_VALID` check via `purpose="reground"` |
@@ -97,6 +98,7 @@ Requests it makes: `cognition.think` (`purpose="decompose"` on replan, `purpose=
 | Stream | Named in | Also read by | Retention |
 |---|---|---|---|
 | `task:<id>` | simorgh/planning/store.py:211 | written also by orchestration (the Worker appends `task.step` events); read by interface, orchestration (resume, progress), verification, growth, benchmark | forever (no `task:` entry in DEFAULT_RETENTION) |
+| `guardian:protected` | simorgh/planning/service.py `_guardian_protected` (read only) | written by guardian at start; read also by execution (landing check) | Guardian's |
 | `planning:index` (snapshot key, not an event stream) | simorgh/planning/store.py:178 | - | snapshot, rewritten every 500 events and on clear |
 
 Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus partition keys; `dependency_failed:` is a note prefix (`model.py:34`). Nothing writes a `plan:` stream, although `planmode.py`'s docstring says the plan is recorded there (see Known issues).
@@ -110,6 +112,8 @@ Not streams: `plan:{id}`, `project:{id}` and `task:{id}` in `service.py` are bus
 | `lease_seconds` | `600.0` | yes |
 | `max_task_attempts` | `3` | NO (declared, never read) |
 | `max_backlog` | `40` | yes |
+| `autonomous_self_growth` | `false` | yes (2026-10-30): an autonomous patch/skill on `simorgh/growth/` is refused at intake unless true |
+| `max_open_autonomous_projects` | `1` | yes (2026-10-30): an autonomous project is refused while this many autonomous projects, or their steps, are open; 0 disables |
 | `max_blocked_retries` | `9` | yes |
 | `blocked_retry_delay_seconds` | `300.0` | yes |
 | `continuation_delay_seconds` | `10.0` | yes |
@@ -165,6 +169,8 @@ A mined pattern (`reflect.patterns.found`) becomes a `research` task that asks f
 - `tasks clear` forgets every record and the forgetting survives a restart; the streams themselves remain.
 - While the system is paused nothing is offered; while `autonomous_paused`, tasks of `autonomous_origins` are not offered.
 - In `single` mode a lease found at boot belonged to a dead process and is released at once (`_release_dead_leases`), so a restart resumes a task without waiting out `lease_seconds`. In `local-multi` it stands.
+
+- The worth gate (2026-10-30, the creator: "fix sim's logic to not start bogus, useless tasks"). Only autonomous origins are judged; a human's or benchmark's request never is. A patch or skill whose subject is under one of Guardian's protected paths (read from `guardian:protected`, matched as a case-folded substring like Guardian's `ProtectedRule`) is refused: Sim's own tasks may not edit them. A patch or skill on `simorgh/growth/` is refused unless `autonomous_self_growth`. An autonomous project is refused while `max_open_autonomous_projects` are open (a decomposed project counts while its steps run). At plan approval a step of an autonomous project is skipped by the same rule, and so is a step that depends on a skipped one. A refusal is logged (`planning.candidate_refused`), noticed at `debug`, and a `task.create` request is answered `{task_id: null, refused: <why>}`. Already-queued tasks are not touched.
 
 ## Contract tests
 

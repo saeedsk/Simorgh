@@ -20,6 +20,15 @@ class Config:
     # curiosity, reflection, research follow-ups and project steps wait.
     # 0 disables the cap.
     max_backlog: int = 40
+    # Sim's own ideas that are not worth a task (`worth.py`, 2026-10-30,
+    # the creator: "fix sim's logic to not start bogus, useless tasks").
+    # An autonomous patch on Sim's growth machinery (`simorgh/growth/`) is
+    # refused unless this is true: an evening of it left dead code.
+    autonomous_self_growth: bool = False
+    # At most this many autonomous projects (with their steps) open at
+    # once; five overlapping self-improvement projects ran in one evening.
+    # 0 disables it. A person's project is never counted or held.
+    max_open_autonomous_projects: int = 1
     max_blocked_retries: int = 9
     blocked_retry_delay_seconds: float = 300.0
     # A task that only ran out of steps comes back this soon, with a
