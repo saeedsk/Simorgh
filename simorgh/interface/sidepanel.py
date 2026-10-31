@@ -307,6 +307,9 @@ class AgentFeeds:
         feed.lines.append(("class:side.end", f"{icon} {status}  {' '.join(str(detail or '').split())[:200]}"))
         self._ended[task_id] = self._clock()
 
+    def ids(self) -> set[str]:
+        return set(self._feeds)
+
     def boxes(self) -> list[AgentBox]:
         now = self._clock()
         for task_id, at in list(self._ended.items()):

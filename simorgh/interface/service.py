@@ -212,9 +212,6 @@ class Service:
         self._tui = None            # the prompt_toolkit prompt, when available
         # What each running agent has done lately: the split screen's agent
         # boxes (`sidepanel.AgentFeeds`). Fed whichever layout is in use.
-        from . import sidepanel as _sidepanel
-
-        self._agents = _sidepanel.AgentFeeds()
         self._sampler = None        # `sidepanel.SystemSampler`, split screen only
         self._last_done = None      # (word, elapsed, clock) of the turn that just finished, until the next line
         self._recent_text: deque = deque(maxlen=12)  # what was said lately, for tidy's names and terms
@@ -874,17 +871,46 @@ class Service:
         except (AttributeError, ValueError):
             return False
 
+    def _agent_feeds(self):
+        """What each running agent has done lately: the split screen's agent
+        boxes (`sidepanel.AgentFeeds`), fed whichever layout is in use.
+        Made on first use, so a Service built without `__init__` (several
+        tests do) still has one."""
+        feeds = self.__dict__.get("_agents")
+        if feeds is None:
+            from . import sidepanel
+
+            feeds = self.__dict__["_agents"] = sidepanel.AgentFeeds()
+        return feeds
+
+    def _feed_crew_member(self, message: Message, member) -> None:
+        """A crew member's box in the split screen, named by its agent and
+        brief -- the interface never sees a member's `task.created`, so
+        without this its box read `? · (no description)`. Its tool calls
+        arrive as its own `task.step` (`_feed_agent`, keyed by handle)."""
+        title = f"{member.agent} · {activity_mod.short_title(member.topic(), limit=36)}"
+        if message.type == crewview_mod.SPAWNED:
+            self._agent_feeds().started(member.handle, title)
+        elif message.type == crewview_mod.MESSAGE and member.last:
+            self._agent_feeds().step(member.handle, tool=None, summary=f"» {member.last}", ok=True, title=title)
+        elif message.type in (crewview_mod.REPORT, crewview_mod.CANCEL):
+            report = member.report or {}
+            self._agent_feeds().ended(member.handle, {"done": "completed"}.get(member.status, member.status),
+                               str(report.get("summary") or report.get("result") or ""))
+
     def _feed_agent(self, task_id: str, *, tool=None, summary: str = "", ok=None) -> None:
         """An agent's box in the split screen: every running task but a chat
         turn, whose steps are already the conversation."""
         record = self._book.get(task_id)
         if record.kind == "chat":
             return
-        title = f"{record.kind} · {record.short_topic(36)}"
+        if record.kind == "?" and task_id not in self._agent_feeds().ids():
+            return      # not seen created, and no crew spawn opened its box: nothing to name it by
+        title = "" if record.kind == "?" else f"{record.kind} · {record.short_topic(36)}"
         if tool is None and not summary:
-            self._agents.started(task_id, title)
+            self._agent_feeds().started(task_id, title)
             return
-        self._agents.step(task_id, tool=tool, summary=summary, ok=ok, title=title)
+        self._agent_feeds().step(task_id, tool=tool, summary=summary, ok=ok, title=title)
 
     def _split_tui(self):
         """The full-screen layout with a right-hand column (`splitscreen.py`),
@@ -896,7 +922,7 @@ class Service:
         self._sampler = sidepanel.SystemSampler()
 
         def boxes() -> list:
-            return [sidepanel.ProcessorBox(self._sampler), sidepanel.MemoryBox(self._sampler)] + self._agents.boxes()
+            return [sidepanel.ProcessorBox(self._sampler), sidepanel.MemoryBox(self._sampler)] + self._agent_feeds().boxes()
 
         return splitscreen.SplitTui(
             boxes=boxes, side_width=self.config.side_width,
@@ -1275,6 +1301,8 @@ class Service:
         speaks its branch is drawn again first -- the same rule
         `_reopen_tree_if_needed` keeps for whole trees."""
         found = self._crews.on_event(message.type, message.payload, ts=getattr(message, "ts", None))
+        if found is not None and found[1] is not None:
+            self._feed_crew_member(message, found[1])
         if found is None or not self.config.narrate:
             return
         crew, member = found
@@ -2047,7 +2075,7 @@ class Service:
                 topics.TASK_FAILED: "failed",
                 topics.TASK_BLOCKED: "blocked",
             }[message.type])
-            self._agents.ended(task_id, finished.status,
+            self._agent_feeds().ended(task_id, finished.status,
                                panel_mod.plan_digest(str(p.get("result_summary") or ""))
                                or str(p.get("result_summary") or p.get("reason") or ""))
             if task_id not in self._pending_turns and task_id not in self._watched_tasks:

@@ -279,3 +279,66 @@ class EndToEnd(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NothingWritesUnderTheScreen(unittest.TestCase):
+    """Live 2026-10-30: writes that bypassed `sys.stdout` landed on top of
+    the full screen -- the memory box's last line a column into the
+    conversation, `12.1GB of ██.0GB`."""
+
+    def test_a_raw_descriptor_write_lands_in_the_transcript_and_the_descriptor_comes_back(self):
+        import os
+        import time
+
+        from simorgh.interface.splitscreen import FdCapture
+
+        t = Transcript()
+        read_fd, write_fd = os.pipe()
+        capture = FdCapture(t.write, fds=(write_fd,))
+        capture.start()
+        os.write(write_fd, b"from a C library\n")
+        for _ in range(50):
+            if t.lines():
+                break
+            time.sleep(0.01)
+        capture.stop()
+        self.assertEqual(t.lines(), ["from a C library"])
+        os.write(write_fd, b"after\n")
+        self.assertEqual(os.read(read_fd, 64), b"after\n")
+        os.close(read_fd)
+        os.close(write_fd)
+
+    def test_cursor_codes_are_dropped_and_colour_kept(self):
+        t = Transcript()
+        t.write("\x1b[?25l\x1b[2K\rThinking...\n\x1b[31mred\x1b[0m\n")
+        self.assertEqual(t.lines(), ["Thinking...", "\x1b[31mred\x1b[0m"])
+
+
+class CrewMembersGetNamedBoxes(unittest.IsolatedAsyncioTestCase):
+    """A crew member's box is named by its agent and brief: the interface
+    never sees a member's `task.created`, so it read `? · (no description)`."""
+
+    async def asyncSetUp(self):
+        from .test_activity import TestTheServiceNarratesAutonomousWork
+
+        self.case = TestTheServiceNarratesAutonomousWork("run")
+        await self.case.asyncSetUp()
+
+    async def asyncTearDown(self):
+        await self.case.asyncTearDown()
+
+    async def test_spawn_steps_and_report(self):
+        from simorgh.contracts import topics
+
+        emit, agents = self.case._emit, self.case.service._agent_feeds()  # noqa: SLF001
+        await emit(topics.CREW_SPAWNED, {"crew_id": "c1", "handle": "m1", "parent": "c1", "agent": "research",
+                                         "brief_ref": "semiconductor moves this week", "report_policy": "progress",
+                                         "budget": {}})
+        await emit(topics.TASK_STEP, {"task_id": "m1", "step_no": 1, "phase": "act", "tool": "web_search",
+                                      "summary": "8 results for semis", "ok": True})
+        (box,) = agents.boxes()
+        self.assertEqual(box.title, "research · semiconductor moves this week")
+        self.assertIn("✓ web_search", _text(box.render(40, 6)))
+        await emit(topics.CREW_REPORT, {"crew_id": "c1", "handle": "m1", "report": {
+            "status": "ok", "summary": "Semis fell 4% on Friday", "steps": 1}})
+        self.assertIn("Semis fell 4%", _text(agents.boxes()[0].render(40, 6)))

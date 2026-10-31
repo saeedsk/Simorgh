@@ -37,8 +37,10 @@ Ctrl-C cancel-then-exit, completion, history -- is the same object's
 from __future__ import annotations
 
 import asyncio
+import codecs
 import io
 import os
+import re
 import sys
 import threading
 from typing import Callable
@@ -75,6 +77,78 @@ def box_heights(natural: list[int], room: int) -> list[int]:
     return heights
 
 
+#: Every escape sequence but colour (SGR, `...m`): cursor moves, line clears,
+#: cursor hide/show. Captured from a writer that thinks it owns a terminal,
+#: they would redraw parts of the screen the app owns.
+_NOT_COLOUR = re.compile(r"\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b[=>78]")
+
+
+class FdCapture:
+    """Points file descriptors (stdout and stderr, 1 and 2) at a pipe
+    whose reader feeds `sink`, so a write that bypasses `sys.stdout` -- a
+    logging handler holding the old stream, a C library, a child process
+    that inherited the terminal -- lands in the conversation pane instead
+    of on top of the full screen. Live 2026-10-30, before this: the memory
+    box's last line drawn a column into the conversation, `12.1GB of
+    ██.0GB`, `sim 1043% cpu 82.3GB` -- the screen overwritten from below.
+
+    `terminal()` is a private copy of the real terminal, for the app to
+    draw on. `stop()` puts every descriptor back."""
+
+    def __init__(self, sink, *, fds: tuple[int, ...] = (1, 2)) -> None:
+        self._sink = sink
+        self._fds = fds
+        self._saved: dict[int, int] = {}
+        self._reader = None
+        self._read_fd = -1
+        self._terminal = None
+
+    def terminal(self):
+        return self._terminal
+
+    def start(self) -> None:
+        if self._saved:
+            return
+        self._terminal = os.fdopen(os.dup(self._fds[0]), "w", encoding="utf-8", errors="replace")
+        read_fd, write_fd = os.pipe()
+        for fd in self._fds:
+            self._saved[fd] = os.dup(fd)
+            os.dup2(write_fd, fd)
+        os.close(write_fd)
+        self._read_fd = read_fd
+        self._reader = threading.Thread(target=self._pump, name="splitscreen-capture", daemon=True)
+        self._reader.start()
+
+    def _pump(self) -> None:
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        while True:
+            try:
+                chunk = os.read(self._read_fd, 4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            self._sink(decoder.decode(chunk))
+
+    def stop(self) -> None:
+        for fd, saved in self._saved.items():
+            try:
+                os.dup2(saved, fd)
+            finally:
+                os.close(saved)
+        self._saved.clear()
+        try:
+            os.close(self._read_fd)
+        except OSError:
+            pass
+        if self._terminal is not None:
+            try:
+                self._terminal.close()
+            except OSError:
+                pass
+            self._terminal = None
+
+
 class Transcript(io.TextIOBase):
     """A file-like sink for `sys.stdout` that keeps lines for the
     conversation pane. Safe to write from any thread; `on_change` is
@@ -105,6 +179,7 @@ class Transcript(io.TextIOBase):
     def write(self, text: str) -> int:
         if not text:
             return 0
+        text = _NOT_COLOUR.sub("", text)
         with self._lock:
             chunks = (self._partial + text.replace("\r\n", "\n")).split("\n")
             self._partial = chunks.pop()
@@ -134,6 +209,13 @@ class Transcript(io.TextIOBase):
         end = len(lines) - self.scroll
         start = max(0, end - rows * 3)       # wrapped lines take more than one row
         return lines[start:end], max(0, end - start - 1)
+
+
+def _is_terminal(stream) -> bool:
+    try:
+        return bool(stream is not None and stream.isatty())
+    except (AttributeError, ValueError):
+        return False
 
 
 class Panes:
@@ -175,6 +257,7 @@ class SplitTui(Tui):
         self.transcript = Transcript()
         self._real_stdout = None
         self._app = None
+        self._capture: FdCapture | None = None
         #: A terminal to draw on instead of the real one (tests).
         self.input = None
         self.output = None
@@ -185,12 +268,25 @@ class SplitTui(Tui):
         if self._real_stdout is None:
             self._real_stdout = sys.stdout
             self._columns_before = os.environ.get("COLUMNS")
+            if self.output is None and _is_terminal(sys.__stdout__):
+                # A real terminal: take the descriptors too, so nothing can
+                # write under the screen. A test's injected terminal needs
+                # no such thing.
+                sys.stdout.flush()
+                self._capture = FdCapture(self.transcript.write)
+                try:
+                    self._capture.start()
+                except OSError:
+                    self._capture = None
             sys.stdout = self.transcript
 
     def _release_stdout(self) -> None:
         if self._real_stdout is not None:
             sys.stdout = self._real_stdout
             self._real_stdout = None
+            if self._capture is not None:
+                self._capture.stop()
+                self._capture = None
             before = getattr(self, "_columns_before", None)
             if before is None:
                 os.environ.pop("COLUMNS", None)
@@ -358,7 +454,8 @@ class SplitTui(Tui):
         ])
         body = layout.FloatContainer(content=root, floats=[
             layout.Float(xcursor=True, ycursor=True, content=pt["CompletionsMenu"](max_height=12))])
-        output = self.output or pt["create_output"](stdout=self._real_stdout or sys.__stdout__)
+        terminal = self._capture.terminal() if self._capture is not None else None
+        output = self.output or pt["create_output"](stdout=terminal or self._real_stdout or sys.__stdout__)
         return pt["Application"](
             input=self.input,
             layout=layout.Layout(body, focused_element=prompt),
@@ -483,4 +580,4 @@ class SplitTui(Tui):
                 print(line)
 
 
-__all__ = ["Panes", "SIDE_WIDTH", "SplitTui", "TRANSCRIPT_LINES", "Transcript"]
+__all__ = ["FdCapture", "Panes", "SIDE_WIDTH", "SplitTui", "TRANSCRIPT_LINES", "Transcript"]
