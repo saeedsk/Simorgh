@@ -210,6 +210,12 @@ class Service:
         self._booted = threading.Event()
         self._dashboard_line = ""
         self._tui = None            # the prompt_toolkit prompt, when available
+        # What each running agent has done lately: the split screen's agent
+        # boxes (`sidepanel.AgentFeeds`). Fed whichever layout is in use.
+        from . import sidepanel as _sidepanel
+
+        self._agents = _sidepanel.AgentFeeds()
+        self._sampler = None        # `sidepanel.SystemSampler`, split screen only
         self._last_done = None      # (word, elapsed, clock) of the turn that just finished, until the next line
         self._recent_text: deque = deque(maxlen=12)  # what was said lately, for tidy's names and terms
         self._tui_task = None
@@ -868,9 +874,53 @@ class Service:
         except (AttributeError, ValueError):
             return False
 
+    def _feed_agent(self, task_id: str, *, tool=None, summary: str = "", ok=None) -> None:
+        """An agent's box in the split screen: every running task but a chat
+        turn, whose steps are already the conversation."""
+        record = self._book.get(task_id)
+        if record.kind == "chat":
+            return
+        title = f"{record.kind} · {record.short_topic(36)}"
+        if tool is None and not summary:
+            self._agents.started(task_id, title)
+            return
+        self._agents.step(task_id, tool=tool, summary=summary, ok=ok, title=title)
+
+    def _split_tui(self):
+        """The full-screen layout with a right-hand column (`splitscreen.py`),
+        when `[interface] layout = "split"`; None for the inline prompt."""
+        if str(self.config.layout).strip().lower() != "split":
+            return None
+        from . import sidepanel, splitscreen
+
+        self._sampler = sidepanel.SystemSampler()
+
+        def boxes() -> list:
+            return [sidepanel.ProcessorBox(self._sampler), sidepanel.MemoryBox(self._sampler)] + self._agents.boxes()
+
+        return splitscreen.SplitTui(
+            boxes=boxes, side_width=self.config.side_width,
+            on_line=self._handle_line_guarded, on_interrupt=self._cancel_current_turn,
+            footer_text=self._panel_text, live_text=self._live_text, history_path=self._history_path(),
+            root=Path.cwd(), on_answer=self._answer_from_picker)
+
+    async def _sample_system(self) -> None:
+        """One reading a second for the split screen's CPU/GPU and memory
+        boxes; the GPU read (`ioreg`) runs off the loop."""
+        while self._sampler is not None and not self._stop_repl.is_set():
+            try:
+                await asyncio.to_thread(self._sampler.sample)
+            except Exception:  # noqa: BLE001 -- a failed reading is a gap, never a crash
+                pass
+            self._invalidate()
+            await asyncio.sleep(1.0)
+
     async def _tui_main(self) -> None:
         if self._wait_for_boot:
             await self._await_boot()
+        split = self._split_tui()
+        if split is not None:
+            split.capture_stdout()       # the banner opens the conversation pane
         print(render_mod.banner(enabled=self._color, unicode=render_mod.unicode_mode(self.config.unicode)))
         if self._dashboard_line:
             print(self._dashboard_line)
@@ -882,7 +932,7 @@ class Service:
         # Redirecting rather than silencing keeps every "Thinking... [4s]"
         # call site working, now rendered in the toolbar.
         self._live.redirect(self._set_footer)
-        self._tui = tui.Tui(
+        self._tui = split or tui.Tui(
             on_line=self._handle_line_guarded,
             on_interrupt=self._cancel_current_turn,
             footer_text=self._panel_text,
@@ -891,6 +941,7 @@ class Service:
             root=Path.cwd(),
             on_answer=self._answer_from_picker,
         )
+        sampling = asyncio.ensure_future(self._sample_system()) if split is not None else None
         try:
             await self._tui.run()
         except asyncio.CancelledError:
@@ -898,6 +949,8 @@ class Service:
         except Exception as exc:  # noqa: BLE001 -- the prompt dying must not take the process with it
             print(render_mod.notice("error", f"[prompt error] {exc!r}", "interface", enabled=self._color))
         finally:
+            if sampling is not None:
+                sampling.cancel()
             self._stop_repl.set()
             await self._request_stop()
 
@@ -1976,12 +2029,14 @@ class Service:
         took: float | None = None
         if message.type == topics.TASK_STARTED:
             self._book.on_started(task_id, now=now)
+            self._feed_agent(task_id)
         elif message.type == topics.TASK_STEP:
             in_flight = p.get("ok") is None
             if not in_flight:
                 took = self._book.step_took(task_id, now=now)
             head = str(p.get("summary", "")).partition("\n\n--- a/")[0]
             self._crews.on_step(task_id, p)
+            self._feed_agent(task_id, tool=p.get("tool"), summary=head, ok=p.get("ok"))
             self._book.on_step(
                 task_id, now=now, phase=p.get("phase", ""), verb=verb_for(p.get("phase", ""), p.get("tool")),
                 in_flight=in_flight, tool=str(p.get("tool") or ""), detail=head,
@@ -1992,6 +2047,9 @@ class Service:
                 topics.TASK_FAILED: "failed",
                 topics.TASK_BLOCKED: "blocked",
             }[message.type])
+            self._agents.ended(task_id, finished.status,
+                               panel_mod.plan_digest(str(p.get("result_summary") or ""))
+                               or str(p.get("result_summary") or p.get("reason") or ""))
             if task_id not in self._pending_turns and task_id not in self._watched_tasks:
                 self._unclaimed_endings[task_id] = message
                 while len(self._unclaimed_endings) > 64:

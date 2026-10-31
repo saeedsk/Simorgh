@@ -4,6 +4,8 @@ this session (see the spec's own §12/header note)."""
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +67,15 @@ class Config:
     # dependency is missing or stdout is not a terminal, so turning
     # this off is only for preferring the plain prompt on purpose.
     rich_prompt: bool = True
+    # "inline" (the prompt under the terminal's own scrollback) or "split":
+    # full screen, the conversation on the left and a column of boxes on
+    # the right -- CPU/GPU history, memory, one per running agent
+    # (`splitscreen.py`; the creator, 2026-10-30). Split gives up native
+    # scrollback and mouse selection for the column; PageUp/PageDown
+    # scroll. `SIMORGH_LAYOUT=split` in the environment chooses it too.
+    layout: str = "inline"
+    # Columns the split screen's right column takes.
+    side_width: int = 46
     # Redraw-in-place status footer (the creator's own explicit call,
     # 2026-09-06, after being shown the tradeoff against `render.py`'s
     # scrolling-only rule -- see `live_status.py`'s module docstring for
@@ -177,6 +188,8 @@ class Config:
             narrate_heartbeat_s=float(data.get("narrate_heartbeat_s", default.narrate_heartbeat_s)),
             boot_wait_s=float(data.get("boot_wait_s", default.boot_wait_s)),
             rich_prompt=bool(data.get("rich_prompt", default.rich_prompt)),
+            layout=str(os.environ.get("SIMORGH_LAYOUT") or data.get("layout", default.layout)),
+            side_width=int(data.get("side_width", default.side_width)),
             live_status=str(data.get("live_status", default.live_status)),
             prompt_timeout_s=float(data.get("prompt_timeout_s", default.prompt_timeout_s)),
             vitals_idle_reprint_s=float(data.get("vitals_idle_reprint_s", default.vitals_idle_reprint_s)),

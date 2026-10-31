@@ -108,6 +108,19 @@ def _pt():
         from prompt_toolkit.filters import Condition
         from prompt_toolkit.patch_stdout import patch_stdout
         from prompt_toolkit.styles import Style
+        # The split screen's (`splitscreen.py`): a full-screen Application.
+        from prompt_toolkit import layout
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.buffer import Buffer
+        from prompt_toolkit.data_structures import Point
+        from prompt_toolkit.filters import has_completions
+        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.key_binding import merge_key_bindings
+        from prompt_toolkit.layout.dimension import Dimension
+        from prompt_toolkit.layout.menus import CompletionsMenu
+        from prompt_toolkit.layout.processors import BeforeInput
+        from prompt_toolkit.output import create_output
+        from prompt_toolkit.widgets import Frame
     except ImportError as exc:  # pragma: no cover -- exercised by `available()`
         raise PromptToolkitMissing(str(exc)) from exc
     return {
@@ -115,6 +128,10 @@ def _pt():
         "FileHistory": FileHistory, "InMemoryHistory": InMemoryHistory, "KeyBindings": KeyBindings,
         "Lexer": Lexer, "patch_stdout": patch_stdout, "Style": Style,
         "Condition": Condition,
+        "layout": layout, "Application": Application, "Buffer": Buffer, "Point": Point,
+        "has_completions": has_completions, "ANSI": ANSI, "merge_key_bindings": merge_key_bindings,
+        "D": Dimension, "CompletionsMenu": CompletionsMenu, "BeforeInput": BeforeInput,
+        "create_output": create_output, "Frame": Frame,
     }
 
 
@@ -346,6 +363,22 @@ def _style():
         "completion-menu.completion.current": "bg:#00afd7 #000000 bold",
         "completion-menu.meta.completion": "bg:#1c1c1c #808080",
         "completion-menu.meta.completion.current": "bg:#0087af #000000",
+        # The split screen's right column (`sidepanel.py`, `splitscreen.py`).
+        "side.label": "#808080",
+        "side.value": "#d0d0d0",
+        "side.dim": "#5f5f5f",
+        "side.calm": "#5fafaf",
+        "side.busy": "#d7af5f",
+        "side.hot": "#ff5f5f bold",
+        "side.ok": "#87af87",
+        "side.bad": "#d75f5f",
+        "side.end": "#00afd7",
+        "side.now": "#d0d0d0 bold",
+        "frame.border": "#3a3a3a",
+        "frame.label": "#9e9e9e",
+        "pane.focused frame.border": "#00afd7",
+        "pane.focused frame.label": "#00afd7 bold",
+        "pane.hint": "#5f5f5f",
     })
 
 
@@ -502,6 +535,30 @@ class Tui:
 
     def _build_session(self):
         pt = _pt()
+        bindings = self._key_bindings()
+        history = pt["FileHistory"](str(self._history_path)) if self._history_path else pt["InMemoryHistory"]()
+        return pt["PromptSession"](
+            message=self._message,
+            history=history,
+            completer=_make_completer(self._root),
+            lexer=_make_lexer(),
+            style=_style(),
+            bottom_toolbar=self._toolbar,
+            complete_while_typing=True,
+            key_bindings=bindings,
+            multiline=False,          # Enter submits; c-j / M-Enter insert newlines
+            mouse_support=False,      # keeps terminal scrollback and copy/paste working
+            # 6 until 2026-09-12: six blank lines between the prompt and
+            # the ribbon, always (the creator's screenshot). 0: the
+            # completion menu floats over the ribbon while it is open.
+            reserve_space_for_menu=0,
+            refresh_interval=PANEL_REFRESH_S,
+        )
+
+    def _key_bindings(self):
+        """The prompt's own keys -- the picker's arrows, newline, Ctrl-C --
+        shared by the inline prompt and the split screen (`splitscreen.py`)."""
+        pt = _pt()
         bindings = pt["KeyBindings"]()
 
         # Only while a picker is up: otherwise the arrows are history
@@ -548,24 +605,7 @@ class Tui:
                 return
             self._on_interrupt()
 
-        history = pt["FileHistory"](str(self._history_path)) if self._history_path else pt["InMemoryHistory"]()
-        return pt["PromptSession"](
-            message=self._message,
-            history=history,
-            completer=_make_completer(self._root),
-            lexer=_make_lexer(),
-            style=_style(),
-            bottom_toolbar=self._toolbar,
-            complete_while_typing=True,
-            key_bindings=bindings,
-            multiline=False,          # Enter submits; c-j / M-Enter insert newlines
-            mouse_support=False,      # keeps terminal scrollback and copy/paste working
-            # 6 until 2026-09-12: six blank lines between the prompt and
-            # the ribbon, always (the creator's screenshot). 0: the
-            # completion menu floats over the ribbon while it is open.
-            reserve_space_for_menu=0,
-            refresh_interval=PANEL_REFRESH_S,
-        )
+        return bindings
 
     def _message(self):
         """Above the input: the live section (`panel.live_rows` -- the
@@ -585,6 +625,13 @@ class Tui:
         return (live + [("class:sim.rule", "─" * max(10, cols - 1) + "\n")]
                 + self._picker_rows()
                 + [("class:sim.prompt", f"{PROMPT_GLYPH} ")])
+
+    def _live_rows(self) -> list:
+        """The live section alone (no rule, no prompt), for the split screen."""
+        try:
+            return list(self._live_text() or [])
+        except Exception:  # noqa: BLE001 -- a broken live row must not take the screen down
+            return []
 
     def _toolbar(self):
         """The activity panel under the input, behind a rule of its own:
