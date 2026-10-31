@@ -138,6 +138,7 @@ class Service:
                             tool_index=self.config.tool_index, supervisor=self.config.supervisor,
                             supervisor_approach=self.config.supervisor_approach,
                             supervisor_lessons=self.config.supervisor_lessons,
+                            supervisor_members=self.config.supervisor_members,
                             telemetry=getattr(ctx, "telemetry", None))
             await worker.start()
             self._workers.append(worker)

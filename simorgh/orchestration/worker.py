@@ -155,7 +155,7 @@ class Worker:
         tool_routing: str = "off", route_params: tuple[int, int, float] = (3, 3, 0.15),
         route_embed_timeout_s: float = 0.3,
         fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0, tool_index: bool = False, supervisor: bool = False,
-        supervisor_approach: bool = True, supervisor_lessons: bool = True,
+        supervisor_approach: bool = True, supervisor_lessons: bool = True, supervisor_members: bool = True,
     ) -> None:
         self._review_benchmark = review_benchmark
         self._attempt_limits = attempt_limits
@@ -216,6 +216,7 @@ class Worker:
             # `[orchestration] tool_index` (2026-10-27, toolindex.py).
             tool_index=tool_index, supervisor=supervisor,
             supervisor_approach=supervisor_approach, supervisor_lessons=supervisor_lessons,
+            supervisor_members=supervisor_members,
             **runner_kwargs,
         )
         self._subs: list = []

@@ -150,6 +150,8 @@ class CrewMember:
     reported_step: int = 0
     reported_at: float = 0.0
     task: object = None           # the asyncio task running it, in this process
+    session: object = None        # its child session, in this process: what `reopen` continues
+    reopened: int = 0             # how many times its parent sent it back to improve its work
 
 
 class Crew:
@@ -551,6 +553,18 @@ class Crew:
         await self.set_status(handle, _status_of(report, cancelled=bool(member and member.cancel_reason)))
         self._notify()
 
+    async def reopen(self, handle: str, reason: str = "reopened") -> None:
+        """A finished member goes back to work (its parent's feedback, through
+        `send_agent`): `running` again, its old report no longer the answer.
+        It is the same member, so it takes no new place under the cap."""
+        member = self.members.get(handle)
+        if member is None:
+            raise CrewRefused(f"{handle} is not in this crew")
+        member.status, member.report, member.collected = "running", None, False
+        member.reopened += 1
+        await self._record(MEMBER_STATUS_CHANGED, {"handle": handle, "status": "running", "reason": reason})
+        self._notify()
+
     # -- blackboard ----------------------------------------------------------------------
 
     async def board_put(self, handle: str, key: str, value: str) -> str:
@@ -626,6 +640,11 @@ class Crew:
                 handle = str(p.get("handle") or "")
                 if handle in crew.members:
                     crew.members[handle].status = str(p.get("status") or "")
+                    if p.get("reason") == "reopened":
+                        # Sent back to improve its work (`reopen`): the report
+                        # before it is not its answer any more.
+                        crew.members[handle].report = None
+                        crew.members[handle].reopened += 1
                 elif handle == crew.root:
                     crew.root_await = _await_of(p) if p.get("status") == "waiting" else None
             elif e.type == topics.CREW_MESSAGE:

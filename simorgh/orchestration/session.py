@@ -195,6 +195,7 @@ from simorgh.contracts.scratch import SCRATCH_PREFIX, is_scratch  # noqa: F401 -
 from simorgh.contracts.envelope import Event, Message
 
 from . import routing as routing_mod
+from . import supervisor as supervisor_mod
 from . import toolindex
 from simorgh.contracts.messages.memory import EMBED_MAX_TEXTS
 from . import scaffolds
@@ -840,6 +841,7 @@ class SessionRunner:
         route_none_margin: float = 0.15, route_groups=None, route_embed=None, route_embed_timeout_s: float = 0.3,
         fact_lines: tuple[int, int] = (8, 8), mask_after_steps: int = 0, tool_index: bool = False,
         supervisor: bool = False, supervisor_approach: bool = True, supervisor_lessons: bool = True,
+        supervisor_members: bool = True,
     ) -> None:
         #: `[orchestration] supervisor_approach` and `supervisor_lessons`
         #: (stage 19): with the supervisor on, the bar also says HOW the job
@@ -849,6 +851,9 @@ class SessionRunner:
         #: supervisor off.
         self._approach = bool(supervisor_approach)
         self._lessons_on = bool(supervisor_lessons)
+        #: `[orchestration] supervisor_members` (2026-10-30): a crew member's
+        #: answer is reviewed against its own bar, and sent back to it.
+        self._members_reviewed = bool(supervisor_members)
         self._lessons: list | None = None
         #: `[orchestration] tool_index` (2026-10-27, `toolindex.py`): the
         #: index of loadable tools, `tool_more{tool|need}`, and the check on
@@ -2845,14 +2850,20 @@ class SessionRunner:
                 return crew_id
         return ""
 
-    def _start_member(self, crew: Crew, member, child: Session, brief: str, parent: Session | None) -> None:
-        member.task = asyncio.ensure_future(self._run_member(crew, member, child, brief, parent))
+    def _start_member(self, crew: Crew, member, child: Session, brief: str, parent: Session | None,
+                      *, reopened: bool = False) -> None:
+        member.session = child
+        member.task = asyncio.ensure_future(self._run_member(crew, member, child, brief, parent, reopened=reopened))
 
-    async def _run_member(self, crew: Crew, member, child: Session, brief: str, parent: Session | None) -> Outcome:
+    async def _run_member(self, crew: Crew, member, child: Session, brief: str, parent: Session | None,
+                          *, reopened: bool = False) -> Outcome:
         """Run one member to its report. A crash of the process (the task
         cancelled under it) files nothing: the member is still `running`
-        on `crew:<id>`, and a restart resumes it."""
+        on `crew:<id>`, and a restart resumes it. `reopened`: its parent
+        sent it back with feedback, already on its messages; it goes on
+        from where it was, and its report's cost is this run's alone."""
         started = time.monotonic()
+        usd_before, tokens_before = child.spent_usd, child.spent_tokens
         try:
             async with crew.slot(member):
                 if crew.is_cancelled(member.handle):
@@ -2860,16 +2871,21 @@ class SessionRunner:
                 elif member.agent.startswith(A2A_PREFIX):
                     outcome = await self._run_remote(crew, member, child, brief)
                 else:
-                    outcome = await self.run(child, user_text=brief)
+                    outcome = await self.run(child, user_text="" if reopened else brief)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 -- a member that dies still reports
             outcome = Outcome("failed", reason=f"the member stopped: {type(exc).__name__}: {exc}")
+        usd, tokens = child.spent_usd - usd_before, child.spent_tokens - tokens_before
         if parent is not None:
-            parent.spent_usd += child.spent_usd
-            parent.spent_tokens += child.spent_tokens
+            parent.spent_usd += usd
+            parent.spent_tokens += tokens
         status = self._report_status(outcome, member)
         text = (outcome.result_summary or "").strip()
+        if status == "ok" and child.last_review:
+            # Still below its bar after the supervisor's rounds: the parent
+            # reads what is missing, and can send it back (`send_agent`).
+            text = f"{text}\n\n{supervisor_mod.review_note(child.last_review)}"
         if status != "ok":
             said = text or member.last_progress
             text = f"{outcome.reason or outcome.kind}" + (f"\n\n{said}" if said else "")
@@ -2887,8 +2903,8 @@ class SessionRunner:
             return ref
 
         report = await build_report(
-            text, status=status, steps=child.budget.steps_used, tokens=child.spent_tokens,
-            cost_usd=child.spent_usd, wall_s=time.monotonic() - started,
+            text, status=status, steps=child.budget.steps_used, tokens=tokens,
+            cost_usd=usd, wall_s=time.monotonic() - started,
             questions_unanswered=member.questions_unanswered, put_blob=put if self._ledger is not None else None)
         await crew.file_report(member.handle, report, owned=owned)
         if member.background:
@@ -3296,6 +3312,22 @@ class SessionRunner:
             agent, brief, isolation = self._remote_profile(wanted), brief_text, "fresh"
         else:
             agent = _agents.AGENTS[wanted]
+        # The supervisor's bar goes with the helper (2026-10-30): the part of
+        # the split this brief is, its criterion AND how it is measured, and
+        # the standard its report is reviewed against -- a helper that does
+        # not know what will be refused cannot meet it.
+        part = None
+        if not remote and self._reviews_member_of(session):
+            from . import supervisor
+
+            index = supervisor.match_part(brief_text, session.split, session.parts_taken.values()) \
+                if session.split else None
+            part = session.split[index] if index is not None else None
+            if part is not None and part.get("criterion") and part["criterion"] not in brief_text:
+                brief_text = brief_text + supervisor.bar_text([part["criterion"]])
+            elif supervisor.MEMBER_STANDARD not in brief_text:
+                brief_text = brief_text + " " + supervisor.MEMBER_STANDARD
+        if not remote:
             brief = self._brief(session, brief_text, crew=True)
         try:
             member = await crew.admit(
@@ -3305,11 +3337,23 @@ class SessionRunner:
                 requester=session.speaker, requester_channel=session.channel,
                 data=_data_classes(args.get("data")) if remote else ())
         except CrewRefused as exc:
-            return False, f"spawn: refused -- {exc}"
+            done = [m.handle for m in crew.children(session.task_id) if is_terminal(m.status) and m.session]
+            hint = (f" To improve a part a member already reported on, send it back instead -- "
+                    f"send_agent{{\"to\": \"<handle>\", \"text\": \"what is missing\"}} reopens it with its "
+                    f"findings and takes no new place ({', '.join(done)})" if done else "")
+            return False, f"spawn: refused -- {exc}{hint}"
         member.job = brief_text
         child = self._member_session(session, member, agent, job=brief_text)
+        if part is not None:
+            session.parts_taken[member.handle] = session.split.index(part)
+            if part.get("criterion"):
+                child.acceptance = [part["criterion"]]
         self._start_member(crew, member, child, brief, session)
         return True, self._spawned_line(crew, member, policy)
+
+    def _reviews_member_of(self, parent: Session) -> bool:
+        """Whether a member `parent` starts is held to the supervisor's bar."""
+        return self._supervisor and self._members_reviewed and parent.depth < self._max_depth
 
     @staticmethod
     def _spawned_line(crew: Crew, member, policy: str) -> str:
@@ -3446,12 +3490,54 @@ class SessionRunner:
         if kind not in allowed:
             return False, f"send_agent: to {to} you may send {', '.join(allowed)}, not {kind!r}"
         if is_terminal(crew.members[to].status) if to in crew.members else False:
-            return False, f"send_agent: {to} has already finished ({crew.members[to].status})"
+            if to in kids and kind == "steer":
+                return await self._reopen_member(session, crew, crew.members[to], text)
+            return False, (f"send_agent: {to} has already finished ({crew.members[to].status})"
+                           + ("; send it a steer to reopen it with what is missing" if to in kids else ""))
         reply_to = crew.questions.get(to, 0) if kind == "answer" else 0
         if len(text) > 1200:
             text = text[:1199] + "…"
         payload = await crew.send(me, to, kind, text, reply_to=reply_to)
         return True, f"sent to {to} ({kind} #{payload['seq']})"
+
+    async def _reopen_member(self, session: Session, crew: Crew, member, text: str) -> tuple[bool, str]:
+        """A finished member sent back by its parent with what is missing
+        (2026-10-30, the creator: "if bar raiser don't accept the result,
+        there should be closed loop feedback to agent so agent knows what was
+        missing to go and improve it"). It goes on with everything it already
+        found, under the same handle and place in the crew: no new member
+        starting over from the brief, and nothing more counted against the cap."""
+        child = member.session
+        if child is None or member.agent.startswith(A2A_PREFIX):
+            return False, (f"send_agent: {member.handle} has already finished ({member.status}) and cannot be "
+                           "reopened from here; spawn a member for what is missing")
+        if member.cancel_reason:
+            return False, f"send_agent: {member.handle} was cancelled ({member.cancel_reason})"
+        if member.reopened >= supervisor_mod.MAX_REOPENS:
+            return False, (f"send_agent: {member.handle} was already sent back {member.reopened} times; "
+                           "answer with what you have and say what is still missing")
+        if crew.exhausted:
+            return False, f"send_agent: the crew budget is spent ({crew.exhausted})"
+        await crew.reopen(member.handle)
+        # On `crew:<id>` for the record (and the crew view); the member reads
+        # it once, as the reopen message below, not again from its inbox.
+        await crew.send(session.task_id, member.handle, "steer", text, deliver=False)
+        # Its own steps again (it may have used them all), and its review
+        # rounds again: this is new work against the same bar.
+        child.budget.max_steps = child.budget.steps_used + max(3, self._delegate_max_steps // 2)
+        # Its dollars and tokens likewise: what it had, on top of what it
+        # spent, never past what the crew has left.
+        left = crew.remaining()
+        if child.budget.max_usd:
+            child.budget.max_usd = child.spent_usd + min(child.budget.max_usd, left.usd or child.budget.max_usd)
+        if child.budget.max_tokens:
+            child.budget.max_tokens = child.spent_tokens + min(child.budget.max_tokens,
+                                                               left.tokens or child.budget.max_tokens)
+        child.member_reviews, child.last_review, child.goal_checked_at = 0, None, -1
+        child.messages.append({"role": "user", "content": supervisor_mod.reopen_message(text, sender=session.task_id)})
+        self._start_member(crew, member, child, member.brief, session, reopened=True)
+        return True, (f"reopened {member.handle} with your feedback; it goes on from what it found. "
+                      "await_agents collects its new report.")
 
     async def _cancel_agent(self, session: Session, args: dict) -> tuple[bool, str]:
         crew = self._crew_of(session)
@@ -4357,10 +4443,21 @@ class SessionRunner:
 
     def _start_goal(self, session: Session) -> None:
         """The turn's first tool call: the supervisor sets the bar beside it."""
-        if (not self._supervisor or session.profile.scaffold != "chat" or session.goal_task is not None
-                or session.acceptance):
+        if (not self._supervisor or not (session.profile.scaffold == "chat" or self._reviews_member(session))
+                or session.goal_task is not None or session.acceptance):
             return
         session.goal_task = asyncio.ensure_future(self._write_criteria(session))
+
+    def _reviews_member(self, session: Session) -> bool:
+        """Whether the supervisor holds this crew member to its own bar
+        (`[orchestration] supervisor_members`, 2026-10-30): its answer is
+        reviewed before it reports, and below the bar it is sent back. Not a
+        member of a crew started from outside (`spawn_external`, an A2A
+        caller): its caller sets the bar and judges the result."""
+        if not (self._supervisor and self._members_reviewed and session.crew_member):
+            return False
+        crew = self._crew_of(session)
+        return not (crew is not None and crew.external)
 
     async def _supervisor_think(self, session: Session, prompt: str) -> str:
         req = Message.new(
@@ -4423,7 +4520,8 @@ class SessionRunner:
         bar = criteria
         asked = getattr(bar, "approach", "direct")
         approach = supervisor.effective_approach(
-            asked, voice=session.channel == "voice", crews=self._crews_for_bar(session),
+            # A member of a spoken turn's crew already runs in the background.
+            asked, voice=session.channel == "voice" and not session.crew_member, crews=self._crews_for_bar(session),
             compute=supervisor.ANALYSIS_TOOL in session.offered)
         split = (list(getattr(bar, "split", ()) or ())
                  if approach in (*supervisor.SPLIT_APPROACHES, "background") else [])
@@ -4612,13 +4710,18 @@ class SessionRunner:
         `last`: the turn has no step left, so below the bar is only said
         (True), and an answer already judged since the last tool keeps
         that verdict (stage 19 item 7b)."""
-        if not self._supervisor or not session.acceptance or session.profile.scaffold != "chat":
+        member = self._reviews_member(session)
+        if not self._supervisor or not session.acceptance or not (session.profile.scaffold == "chat" or member):
             return False
         ran = sum(1 for s in session.steps if getattr(s, "tool", None))
         if ran <= session.goal_checked_at:
             return last and session.last_verdict == "below_bar"
         session.goal_checked_at = ran
         from . import supervisor
+
+        # A member is sent back at most MEMBER_REVIEW_ROUNDS times; the review
+        # after that is only recorded, and goes up with its report.
+        final = member and session.member_reviews >= supervisor.MEMBER_REVIEW_ROUNDS
 
         # Stage 19: the method first. What ran against the approach the bar
         # set is checked without a think; only a turn that followed it (or
@@ -4637,9 +4740,11 @@ class SessionRunner:
             method = supervisor.method_summary(session.approach, why=session.approach_why, split=session.split,
                                                steps=since)
         if review is None:
+            crew = self._crew_of(session)
+            reports = supervisor.reports_text(crew.children(session.task_id)) if crew is not None else ""
             review = supervisor.parse_review(await self._supervisor_think(session, supervisor.review_prompt(
                 request=session.user_text, criteria=session.acceptance, steps=session.steps, answer=text,
-                method=method)))
+                method=method, reports=reports)))
         verdict = review["verdict"]
         unmet = review.get("unmet") or []
         summary = (f"supervisor: {verdict.replace('_', ' ')}"
@@ -4653,7 +4758,10 @@ class SessionRunner:
         self._telemetry.event("orchestration.supervisor", trace_id=session.trace or session.task_id,
                               span_id=uuid.uuid4().hex, ts=_epoch(self._clock) or None,
                               attrs={"verdict": verdict, "unmet": len(unmet), "criteria": len(session.acceptance),
-                                     "principle": review.get("principle", ""), "approach": session.approach})
+                                     "principle": review.get("principle", ""), "approach": session.approach,
+                                     **({"member": True, "round": session.member_reviews + 1} if member else {})})
+        if member:
+            session.last_review = dict(review) if verdict == "below_bar" else None
         if self._lessons_on:
             # Below the bar, then met: the order worked, so it is a lesson.
             if verdict == "below_bar":
@@ -4670,8 +4778,17 @@ class SessionRunner:
             # No step is left to follow an order: the caller continues the
             # job in the background instead (`_continue_unmet`).
             return True
+        if final:
+            # Out of rounds: the report goes up as it is, and its parent
+            # reads this review with it (`_run_member`).
+            return False
         session.messages.append({"role": "assistant", "content": text})
-        session.messages.append({"role": "user", "content": supervisor.order_message(review)})
+        if member:
+            session.member_reviews += 1
+            session.messages.append({"role": "user", "content": supervisor.member_order_message(
+                review, round_no=session.member_reviews, rounds=supervisor.MEMBER_REVIEW_ROUNDS)})
+        else:
+            session.messages.append({"role": "user", "content": supervisor.order_message(review)})
         return True
 
     async def _checkpoint_critic(self, session: Session, note) -> None:

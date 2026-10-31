@@ -358,22 +358,108 @@ def analysis_hint(refs=()) -> str:
 _METHOD_HINT = (f" Compute it with {ANALYSIS_TOOL} over the full data (sim.rows over a result's ref, sim.call to "
                 "page or loop), never by reading a listing.")
 
+#: The standard a helper's report is held to (2026-10-30, the creator: "wouldn't it be more effective if bar
+#: raiser tells the agents what it is that it looking for, and the standard it [expects]"). Five research
+#: helpers were refused by the bar raiser round after round -- "2 items, one dated by URL alone", "snippets
+#: only" -- because none of them had been told what would be refused. The principles a report is judged by
+#: (Dive Deep, Earn Trust, Insist on the Highest Standards, Deliver Results), in a helper's terms.
+MEMBER_STANDARD = (
+    "The standard your report is reviewed against before it reaches your parent: every figure, date and claim "
+    "comes from a tool result in this job and names its source; read the pages that carry the answer, do not "
+    "rest it on search snippets alone, and say plainly where you could not; date each item from the page "
+    "itself, not from its URL; where sources disagree, give each with its source; and end by stating, for each "
+    "criterion, met or not met with its evidence."
+)
+
+#: How many times a member's answer is held below the bar and sent back to it
+#: before it reports anyway, with the review attached for its parent.
+MEMBER_REVIEW_ROUNDS = 2
+#: How many times a parent may reopen one finished member with feedback.
+MAX_REOPENS = 2
+
+
+def _full(criterion: str) -> str:
+    """A criterion as a helper is told it: what done is AND how it is measured."""
+    text = criterion[len("done when: "):] if criterion.startswith("done when: ") else criterion
+    return text.replace(" -- measured by: ", " (measured by: ", 1) + (")" if " -- measured by: " in text else "")
+
+
+def bar_text(criteria) -> str:
+    """The bar a helper is held to, as its brief carries it."""
+    listed = "; ".join(f"{i}. {_full(c)}" for i, c in enumerate(criteria, 1) if c)
+    return ((f" Your supervisor's bar for this part: {listed}." if listed else "") + f" {MEMBER_STANDARD}")
+
 
 def part_brief(part: dict, *, request: str = "") -> str:
-    """What one crew member is told: its part, its criterion, its method."""
-    crit = short(part.get("criterion") or "")
-    return (f"{part['brief']}" + (f" Done when: {crit}." if crit else "")
+    """What one crew member is told: its part, its criterion with its
+    measure, its method, and the standard its report is reviewed against."""
+    crit = part.get("criterion") or ""
+    return (f"{part['brief']}" + bar_text([crit] if crit else [])
             + (_METHOD_HINT if part.get("approach") == "compute" else "")
             + " Report progress with report_progress at each milestone; end with the result and its evidence."
             + (f" (One part of: {request[:300]})" if request else ""))
 
 
+def match_part(brief: str, split, taken) -> int | None:
+    """Which part of the split a spawned `brief` is: the most similar part not
+    yet taken (the model rewords the brief it was given), else the first part
+    not taken, else None."""
+    from .routing import cosine, lexical_embed
+
+    free = [i for i in range(len(split)) if i not in set(taken)]
+    if not free:
+        return None
+    query = lexical_embed(brief)
+    scored = [(cosine(query, lexical_embed(str(split[i].get("brief") or ""))), -i, i) for i in free]
+    best = max(scored)
+    return best[2] if best[0] > 0 else free[0]
+
+
+def member_order_message(review: dict, *, round_no: int, rounds: int) -> str:
+    """The review of a helper's answer, sent back to the same helper."""
+    return (order_message(review)
+            + f" (Review {round_no} of {rounds}: after the last one your report goes to your parent as it is, "
+              "with this review attached.)")
+
+
+def review_note(review: dict) -> str:
+    """What a parent reads with a report the supervisor still holds below the
+    bar after its rounds: what is missing, so it can send the member back."""
+    unmet = "; ".join(review.get("unmet") or [])
+    return ("Supervisor's review of this report: BELOW THE BAR"
+            + (f" ({review['principle']})" if review.get("principle") else "") + ". "
+            + (f"{review['feedback']} " if review.get("feedback") else "")
+            + (f"Not met: {unmet}. " if unmet else "")
+            + (f"Missing: {review['next']}." if review.get("next") else "")).strip()
+
+
+def reopen_message(text: str, *, sender: str) -> str:
+    """A finished member, sent back by its parent with feedback."""
+    return (f"Your parent ({sender}) read your report and sent it back -- it is not done yet:\n{text}\n"
+            "Keep your earlier findings, do what is missing with your tools, then give your whole report again "
+            "(not only the new part), with each criterion met or not met and its evidence.")
+
+
+def reports_text(members, *, each: int = 1500, total: int = 6000) -> str:
+    """The helpers' reports in full (up to `each` characters each), for the
+    review: the step log carries only a line of each."""
+    from .crew import render_report
+
+    parts = []
+    for member in members:
+        if getattr(member, "report", None) is None:
+            continue
+        text = render_report(member)
+        parts.append(text if len(text) <= each else text[:each - 1] + "…")
+    return "\n\n".join(parts)[:total]
+
+
 def whole_brief(request: str, criteria, *, inner: str = "") -> str:
     """What one background member is told when the job is not split."""
-    done = "; ".join(short(c) for c in criteria)
+    done = "; ".join(_full(c) for c in criteria)
     return (request[:600] + (f" Done when: {done}." if done else "")
             + (_METHOD_HINT if inner in ("compute", *SPLIT_APPROACHES) else "")
-            + " End with the result and its evidence.")
+            + f" {MEMBER_STANDARD}")
 
 
 def _spawn_line(brief: str, *, background: bool = False) -> str:
@@ -434,14 +520,28 @@ def trajectory(steps) -> str:
     return "\n".join(lines)[-4000:] or "(no tool ran)"
 
 
-def review_prompt(*, request: str, criteria: list[str], steps, answer: str, method: str | None = None) -> str:
+#: Added to the review when the job's helpers have reported: a short report
+#: is fixed by the helper that wrote it, not by a fresh one that starts over.
+REVIEW_REPORTS = (
+    "\nWhen a helper's report is what falls short, next is: send_agent to that helper's handle with exactly "
+    "what is missing -- it reopens with everything it already found. Never spawn a new helper for a part a "
+    "helper already reported on."
+)
+
+
+def review_prompt(*, request: str, criteria: list[str], steps, answer: str, method: str | None = None,
+                  reports: str = "") -> str:
     """`method`: None is the review as it was; a string (maybe empty) adds
-    the method check, with the approach and what ran when there is one."""
+    the method check, with the approach and what ran when there is one.
+    `reports`: the helpers' reports in full (`reports_text`)."""
     listed = "\n".join(f"- {c}" for c in criteria)
     return (REVIEW_PROMPT.format(principles=principles_text()) + (REVIEW_METHOD if method is not None else "")
+            + (REVIEW_REPORTS if reports else "")
             + f"\n\nThe request:\n{request[:800]}\n\nSuccess criteria:\n{listed}\n\n"
             + (f"The approach the bar set, and what ran:\n{method}\n\n" if method else "")
-            + f"What the tools returned:\n{trajectory(steps)}\n\nThe answer about to be given:\n{answer[:1200]}")
+            + f"What the tools returned:\n{trajectory(steps)}\n\n"
+            + (f"The helpers' reports, in full:\n{reports}\n\n" if reports else "")
+            + f"The answer about to be given:\n{answer[:1200]}")
 
 
 def _ran(steps, tool: str) -> list:
@@ -585,7 +685,7 @@ def continuation_brief(request: str, criteria, *, why: str, steps=(), refs=(), a
     """The background member's brief: the job, its bar, what was tried, and
     the results in hand -- everything the turn knew, so it carries on
     rather than starting again."""
-    done = "; ".join(short(c) for c in criteria)
+    done = "; ".join(_full(c) for c in criteria)
     tried = "\n".join(f"- {s}" for s in strategies_tried(steps))
     held = ", ".join(r for r in list(refs)[-6:] if r)
     return (f"Carry on with this job; the turn that started it {why}. The job: {request[:600]}"
@@ -594,7 +694,8 @@ def continuation_brief(request: str, criteria, *, why: str, steps=(), refs=(), a
             + (f"\nResults in hand, readable in full with {ANALYSIS_TOOL} inputs=[...]: {held}." if held else "")
             + (_METHOD_HINT if approach in ("compute", *SPLIT_APPROACHES) else "")
             + "\nFinish the whole job; never ask the person whether to go on. End with the result for each "
-              "criterion and its evidence.")
+              "criterion and its evidence."
+            + f"\n{MEMBER_STANDARD}")
 
 
 # -- lessons (stage 19 item 6, `[orchestration] supervisor_lessons`) ---------
@@ -674,9 +775,12 @@ def lessons_text(lessons) -> str:
 
 
 __all__ = ["ANALYSIS_TOOL", "APPROACHES", "APPROACH_PROMPT", "Bar", "CRITERIA_INTRO", "CRITERIA_PROMPT",
-           "LESSONS_STREAM", "LESSON_EVENT", "LESSON_HIT_EVENT", "MAX_CRITERIA", "MAX_LESSONS", "MAX_SPLIT",
-           "PART_AGENT", "PRINCIPLES", "REVIEW_METHOD", "REVIEW_PROMPT", "SPLIT_APPROACHES", "VERDICTS",
-           "CONTINUES_ACK", "analysis_hint", "approach_step", "continuation_brief", "strategies_tried", "criteria_message", "criteria_prompt", "effective_approach",
-           "fold_lessons", "implied_criteria", "lessons_text", "make_lesson", "method_check", "method_summary",
-           "order_message", "parse_criteria", "parse_review", "part_brief", "principles_text", "recall_lessons",
-           "review_prompt", "short", "trajectory", "whole_brief"]
+           "LESSONS_STREAM", "LESSON_EVENT", "LESSON_HIT_EVENT", "MAX_CRITERIA", "MAX_LESSONS", "MAX_REOPENS",
+           "MAX_SPLIT", "MEMBER_REVIEW_ROUNDS", "MEMBER_STANDARD", "PART_AGENT", "PRINCIPLES", "REVIEW_METHOD",
+           "REVIEW_PROMPT", "REVIEW_REPORTS", "SPLIT_APPROACHES", "VERDICTS",
+           "CONTINUES_ACK", "analysis_hint", "approach_step", "bar_text", "continuation_brief", "strategies_tried",
+           "criteria_message", "criteria_prompt", "effective_approach",
+           "fold_lessons", "implied_criteria", "lessons_text", "make_lesson", "match_part", "member_order_message",
+           "method_check", "method_summary", "order_message", "parse_criteria", "parse_review", "part_brief",
+           "principles_text", "recall_lessons", "reopen_message", "reports_text", "review_note", "review_prompt",
+           "short", "trajectory", "whole_brief"]

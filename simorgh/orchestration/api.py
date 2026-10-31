@@ -349,6 +349,13 @@ class Session:
     last_verdict: str = ""
     continued_as: str = ""
     go_on_nudged_at: int = -1
+    #: The supervisor over a crew member (`[orchestration] supervisor_members`,
+    #: 2026-10-30): how many of its answers were held below the bar, and the
+    #: newest review, which goes up with its report when the rounds run out.
+    #: On a parent: which split part each spawned member took (handle -> index).
+    member_reviews: int = 0
+    last_review: dict | None = None
+    parts_taken: dict = field(default_factory=dict)
     #: Which embedder routed the turn: `memory:<model>/<dimension>`
     #: (Memory's, over `memory.embed`), `lexical` (the stand-in) or
     #: `injected`; and, when Memory's was wanted and the turn went

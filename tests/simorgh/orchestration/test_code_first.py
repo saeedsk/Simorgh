@@ -422,8 +422,15 @@ class AParallelJobRunsAtOnce(unittest.TestCase):
         for part in ("first source result", "second source result", "third source result"):
             self.assertIn(part, outcome.result_summary)
         self.assertFalse(any(s.summary.startswith("supervisor: approach not followed") for s in session.steps))
-        self.assertIn("started together: yes", cognition.review_prompts[0])
-        self.assertIn("3 member(s) spawned of 3 parts", cognition.review_prompts[0])
+        # Each member's answer is reviewed against its own part too
+        # (`supervisor_members`); the parent's review is the one that
+        # judges the method, and it reads the members' reports in full.
+        parent = [p for p in cognition.review_prompts if "Expected approach" in p]
+        self.assertEqual(len(parent), 1)
+        self.assertIn("started together: yes", parent[0])
+        self.assertIn("3 member(s) spawned of 3 parts", parent[0])
+        self.assertIn("The helpers' reports, in full", parent[0])
+        self.assertEqual(len(cognition.review_prompts), 4, "three members' reviews and the parent's")
 
 
 # -- item 7: a spoken job goes to the background ----------------------------------------

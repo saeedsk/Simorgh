@@ -272,6 +272,12 @@ class Config:
     # `supervisor:lessons`, recalled into the bar for a similar job.
     supervisor_approach: bool = True
     supervisor_lessons: bool = True
+    # 2026-10-30, read only with the supervisor on: every crew member's
+    # answer is reviewed against its own bar before it reports, and below
+    # the bar the feedback goes back to that member (at most
+    # `supervisor.MEMBER_REVIEW_ROUNDS` times). Off: members report as they
+    # were, and only the parent's answer is reviewed.
+    supervisor_members: bool = True
     #: What `from_mapping` had to ignore, logged by the service at start.
     problems: tuple[str, ...] = ()
 
