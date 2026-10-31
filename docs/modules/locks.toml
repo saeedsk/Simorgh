@@ -12,10 +12,10 @@ since = "2026-10-28T04:36:07+00:00"
 until = "2026-10-28T12:36:07+00:00"
 
 [locks.domains]
-by = "claude-paid"
-task = "mail_search group_by=sender over the whole range"
-since = "2026-10-28T08:08:27+00:00"
-until = "2026-10-28T16:08:27+00:00"
+by = "claude-mail-batch"
+task = "pim: mail_search rows carry ref; mail_read takes several refs"
+since = "2026-10-31T03:16:19+00:00"
+until = "2026-10-31T11:16:19+00:00"
 
 [locks.evals]
 by = "claude-paid"
@@ -28,3 +28,9 @@ by = "claude-paid"
 task = "stage 19: TUI right-hand agents panel (split screen)"
 since = "2026-10-28T08:19:44+00:00"
 until = "2026-10-28T16:19:44+00:00"
+
+[locks.orchestration]
+by = "claude-mail-batch"
+task = "mail_read hint: several refs per call"
+since = "2026-10-31T03:16:19+00:00"
+until = "2026-10-31T11:16:19+00:00"
