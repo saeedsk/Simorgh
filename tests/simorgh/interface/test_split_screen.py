@@ -100,14 +100,44 @@ class Boxes(unittest.TestCase):
         text = _text(ProcessorBox(self.sampler).render(40, 5))
         self.assertIn("+2 more cores", text)
 
-    def test_a_hot_core_is_drawn_hot(self):
-        styles = {s for s, t in ProcessorBox(self.sampler).render(40, 10) if "90%" in t}
-        self.assertEqual(styles, {"class:side.value"})
-        self.assertEqual(sidepanel.heat(90), "class:side.hot")
+    def test_each_block_glows_in_the_colour_of_its_own_sample(self):
+        """The creator, 2026-10-30: "strange colour-changing mode ... make
+        them super beautiful with harmonic glowing colours". A block takes
+        its own sample's colour; the row no longer flips with the latest."""
+        from simorgh.interface.sidepanel import glow, glow_spark
+
+        blocks = glow_spark([0, 50, 100], width=3)
+        self.assertEqual([t for _s, t in blocks], ["▁", "▅", "█"])
+        self.assertEqual([s for s, _t in blocks], [glow(0), glow(50), glow(100)])
+        self.assertEqual(len({s for s, _t in blocks}), 3, "three loads, three colours")
+        self.assertTrue(glow_spark([10], width=4)[0][0] == "class:side.rail", "unfilled history is a faint rail")
+
+    def test_the_glow_is_one_continuous_gradient(self):
+        from simorgh.interface.sidepanel import GLOW_STOPS, glow
+
+        def rgb(style):
+            h = style.split("#", 1)[1][:6]
+            return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+        self.assertEqual(rgb(glow(0)), GLOW_STOPS[0][1])
+        self.assertEqual(rgb(glow(100)), GLOW_STOPS[-1][1])
+        steps = [rgb(glow(v)) for v in range(0, 101)]
+        jumps = [max(abs(a - b) for a, b in zip(x, y)) for x, y in zip(steps, steps[1:])]
+        self.assertLess(max(jumps), 20, "no sudden colour jumps between neighbouring loads")
+        self.assertIn("bold", glow(90, bold=True))
+
+    def test_the_memory_bar_warms_as_it_fills(self):
+        from simorgh.interface.sidepanel import glow_bar
+
+        bar = glow_bar(50, width=10)
+        filled = [s for s, t in bar if t == "━"]
+        self.assertEqual(len(filled), 5)
+        self.assertNotEqual(filled[0], filled[-1], "a gradient, not one colour")
+        self.assertEqual(bar[-1], ("class:side.rail", "─" * 5))
 
     def test_the_memory_box_is_numbers(self):
         text = _text(MemoryBox(self.sampler).render(40, 8))
-        for part in ("RAM", "75%", "24.0GB of 32.0GB", "swap", "512MB", "sim", "400MB"):
+        for part in ("RAM", "75%", "24.0GB of 32.0GB", "swap", "512MB", "sim", "400MB", "━"):
             self.assertIn(part, text)
 
     def test_no_box_line_overruns_its_width(self):

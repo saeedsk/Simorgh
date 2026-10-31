@@ -367,6 +367,7 @@ def _style():
         "side.label": "#808080",
         "side.value": "#d0d0d0",
         "side.dim": "#5f5f5f",
+        "side.rail": "#303446",
         "side.calm": "#5fafaf",
         "side.busy": "#d7af5f",
         "side.hot": "#ff5f5f bold",

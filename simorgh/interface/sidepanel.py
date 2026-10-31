@@ -64,6 +64,57 @@ def spark(values, *, width: int, top: float = 100.0) -> str:
     return " " * max(0, width - len(chars)) + "".join(chars)
 
 
+#: The glow: one continuous gradient from rest to full load (the creator,
+#: 2026-10-30: "the cpu usage bar colours are a strange colour-changing
+#: mode -- make them super beautiful with harmonic glowing colours"). Each
+#: block of a history takes the colour of its OWN sample, so a minute of
+#: load reads as a band of light; it used to take the colour of the latest
+#: sample, and the whole row flipped teal-amber-red every second.
+#: Deep indigo at rest, through teal and mint, to amber and a soft coral.
+GLOW_STOPS: tuple[tuple[float, tuple[int, int, int]], ...] = (
+    (0.00, (58, 70, 120)),
+    (0.30, (52, 150, 175)),
+    (0.55, (110, 215, 185)),
+    (0.78, (240, 200, 115)),
+    (1.00, (255, 120, 125)),
+)
+
+
+def glow(value: float, *, bold: bool = False) -> str:
+    """The prompt_toolkit style for a percentage on the glow gradient."""
+    t = max(0.0, min(1.0, float(value) / 100.0))
+    for (t0, c0), (t1, c1) in zip(GLOW_STOPS, GLOW_STOPS[1:]):
+        if t <= t1:
+            f = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
+            r, g, b = (round(a + (c - a) * f) for a, c in zip(c0, c1))
+            return f"fg:#{r:02x}{g:02x}{b:02x}" + (" bold" if bold else "")
+    r, g, b = GLOW_STOPS[-1][1]
+    return f"fg:#{r:02x}{g:02x}{b:02x}" + (" bold" if bold else "")
+
+
+def glow_spark(values, *, width: int, top: float = 100.0) -> list[tuple[str, str]]:
+    """`spark`, one fragment per block in the colour of its own sample; the
+    part of the row history has not filled yet is a faint dotted rail."""
+    tail = list(values)[-width:] if width > 0 else []
+    out: list[tuple[str, str]] = []
+    if width - len(tail) > 0:
+        out.append(("class:side.rail", "┈" * (width - len(tail))))
+    for v in tail:
+        pct = 0.0 if top <= 0 else max(0.0, min(100.0, 100.0 * float(v) / top))
+        out.append((glow(pct), _BLOCKS[min(len(_BLOCKS) - 1, int(round(pct / 100.0 * (len(_BLOCKS) - 1))))]))
+    return out
+
+
+def glow_bar(pct: float, *, width: int) -> list[tuple[str, str]]:
+    """A level bar: the filled part a gradient up to `pct` along the glow,
+    so a fuller bar reaches warmer colours; the rest a faint rail."""
+    filled = max(0, min(width, int(round(width * pct / 100.0))))
+    out = [(glow(100.0 * (i + 1) / max(1, width)), "━") for i in range(filled)]
+    if width - filled:
+        out.append(("class:side.rail", "─" * (width - filled)))
+    return out
+
+
 def heat(value: float) -> str:
     """The style class for a percentage: calm, busy, hot."""
     return "class:side.hot" if value >= 85 else "class:side.busy" if value >= 50 else "class:side.calm"
@@ -193,9 +244,9 @@ class ProcessorBox:
 
         def row(label: str, series, *, extra: str = "") -> None:
             now = series[-1] if series else 0.0
-            graph = spark(series, width=max(4, spark_w - len(extra)))
-            out.extend([("class:side.label", f"{label:<{label_w}}"), (heat(now), graph),
-                        ("class:side.value", f"{now:>4.0f}%"), ("class:side.dim", extra), ("", "\n")])
+            out.append(("class:side.label", f"{label:<{label_w}}"))
+            out.extend(glow_spark(series, width=max(4, spark_w - len(extra))))
+            out.extend([(glow(now, bold=True), f"{now:>4.0f}%"), ("class:side.dim", extra), ("", "\n")])
 
         if "cpu" in r.missing:
             out.append(("class:side.dim", r.missing["cpu"] + "\n"))
@@ -230,14 +281,13 @@ class MemoryBox:
         if r.mem_used is not None and r.mem_total:
             pct = 100.0 * r.mem_used / r.mem_total
             bar_w = max(4, width - 18)
-            filled = int(round(bar_w * pct / 100.0))
-            out += [("class:side.label", "RAM  "), (heat(pct), "█" * filled), ("class:side.dim", "░" * (bar_w - filled)),
-                    ("class:side.value", f" {pct:3.0f}%\n"),
+            out += [("class:side.label", "RAM  "), *glow_bar(pct, width=bar_w),
+                    (glow(pct, bold=True), f" {pct:3.0f}%\n"),
                     ("class:side.dim", f"     {human_bytes(r.mem_used)} of {human_bytes(r.mem_total)}\n")]
         if r.swap_used is not None:
             out += [("class:side.label", "swap "), ("class:side.value", f"{human_bytes(r.swap_used)}\n")]
         if r.cpu:
-            out += [("class:side.label", "cpu  "), (heat(r.cpu[-1]), f"{r.cpu[-1]:.0f}%"),
+            out += [("class:side.label", "cpu  "), (glow(r.cpu[-1], bold=True), f"{r.cpu[-1]:.0f}%"),
                     ("class:side.dim", f"  of {len(r.cores)} cores\n")]
         if r.load is not None:
             out += [("class:side.label", "load "), ("class:side.value", "  ".join(f"{v:.2f}" for v in r.load)),
@@ -343,4 +393,4 @@ class AgentFeeds:
 
 
 __all__ = ["AgentBox", "AgentFeed", "AgentFeeds", "HISTORY", "MemoryBox", "ProcessorBox", "Readings",
-           "SystemSampler", "heat", "human_bytes", "screen_safe", "spark"]
+           "GLOW_STOPS", "SystemSampler", "glow", "glow_bar", "glow_spark", "heat", "human_bytes", "screen_safe", "spark"]
