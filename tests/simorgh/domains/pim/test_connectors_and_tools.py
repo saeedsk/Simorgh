@@ -468,6 +468,50 @@ class MailToolTestCase(_ToolCase):
         self.assertTrue(result.ok, result.error)
         self.assertIn("booking is confirmed", result.output)
 
+    async def test_every_row_carries_the_reference_mail_read_takes(self):
+        """Live 2026-10-30: a program rebuilt the reference from fields a
+        later row did not carry and sent `[None:None:None]` 71 times."""
+        tools = self._tools()
+        result = await tools["mail_search"].run({}, ctx=_ctx())
+        for row in result.metadata["rows"]:
+            self.assertEqual(row["ref"], f"[{row['account']}:{row['folder']}:{row['uid']}]")
+        opened = await tools["mail_read"].run({"message": result.metadata["rows"][0]["ref"]}, ctx=_ctx())
+        self.assertTrue(opened.ok, opened.error)
+
+    async def test_missing_parts_take_defaults_and_a_missing_uid_says_what_to_pass(self):
+        tools = self._tools()
+        opened = await tools["mail_read"].run({"message": "[None:None:1]"}, ctx=_ctx())
+        self.assertTrue(opened.ok, opened.error)
+        self.assertIn("booking is confirmed", opened.output)
+        refused = await tools["mail_read"].run({"message": "[None:None:None]"}, ctx=_ctx())
+        self.assertFalse(refused.ok)
+        self.assertIn("`ref`", refused.error)
+        self.assertNotIn("no mail account", refused.error)
+
+    async def test_one_call_reads_several_messages(self):
+        """Live 2026-10-30: one message a call, a program's 50 calls read 50
+        of 200 and called the rest unreadable."""
+        from simorgh.domains.pim.tools import MAIL_READ_BATCH
+
+        tools = self._tools()
+        result = await tools["mail_read"].run(
+            {"message": "[fastmail:INBOX:1] [fastmail:INBOX:2], [fastmail:INBOX:999]"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual((result.metadata["read"], result.metadata["failed"]), (2, 1))
+        blocks = result.output.split("=== ")[1:]
+        self.assertEqual(len(blocks), 3)
+        self.assertTrue(blocks[0].startswith("[fastmail:INBOX:1] ===") and "booking is confirmed" in blocks[0])
+        self.assertIn("210 pounds", blocks[1])
+        self.assertIn("could not read", blocks[2])
+        too_many = " ".join(f"[fastmail:INBOX:{i}]" for i in range(MAIL_READ_BATCH + 1))
+        self.assertFalse((await tools["mail_read"].run({"message": too_many}, ctx=_ctx())).ok)
+
+    async def test_a_batch_is_withheld_like_one_message(self):
+        tools = super()._tools(connectors={"fastmail": FakeImap("fastmail", MESSAGES)})
+        result = await tools["mail_read"].run({"message": "1 2"}, ctx=_ctx())
+        self.assertTrue(result.metadata["withheld"])
+        self.assertNotIn("booking is confirmed", result.output)
+
 
 class MailPrivacyTestCase(_ToolCase):
     """Bodies are `sensitive`. The gate is in the tool rather than in

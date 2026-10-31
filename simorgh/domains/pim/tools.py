@@ -251,7 +251,11 @@ class MailSearchTool(_PimTool):
                      f"narrower ranges with since= and say how many you saw.")
         if problems:
             body += "\n\ncould not read:\n" + "\n".join(f"- {p}" for p in problems)
-        rows = [{"uid": m.uid, "account": m.account, "folder": m.folder, "subject": m.subject,
+        # `ref` is what mail_read takes, ready-made: a program that rebuilt it
+        # from fields a later row did not carry sent `[None:None:None]` 71
+        # times (live 2026-10-30).
+        rows = [{"ref": f"[{m.account}:{m.folder}:{m.uid}]", "uid": m.uid, "account": m.account,
+                 "folder": m.folder, "subject": m.subject,
                  "from": m.sender, "date": m.date.isoformat() if m.date else "",
                  "unread": m.unread, "attachments": m.has_attachments} for m in messages]
         # Subjects and senders are `personal` and go in rows so
@@ -308,11 +312,27 @@ def _sender_table(counts: dict, top: int) -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:top]
 
 
+#: Most messages one mail_read opens. A program over a page of mail
+#: (`run_analysis`, `sim.call`) has `workbench_max_calls` calls a run: one
+#: message a call read 50 of 200 and called the other 150 unreadable
+#: (live 2026-10-30, task cef68b40).
+MAIL_READ_BATCH = 20
+#: Least of each body a batch shows: the batch shares one body's budget.
+_BATCH_MIN_CHARS = 1000
+
+
+def _references(text) -> list[str]:
+    """The references in mail_read's one line: space- or comma-separated,
+    brackets optional."""
+    return [r for r in (p.strip().strip("[]") for p in re.split(r"[\s,]+", str(text or ""))) if r]
+
+
 class MailReadTool(_PimTool):
     name = "mail_read"
     description = (
-        "Open one message and read its body. Takes the [account:folder:uid] reference "
-        "mail_search printed."
+        "Open a message and read its body. Takes the [account:folder:uid] reference "
+        f"mail_search printed (a row's `ref`), or up to {MAIL_READ_BATCH} of them on one line, separated "
+        "by spaces; each message then starts with a line `=== [account:folder:uid] ===`."
     )
     read_only = True
     reversibility = "read_only"
@@ -325,20 +345,12 @@ class MailReadTool(_PimTool):
         connectors = self._of_kind("imap")
         if not connectors:
             return self._nothing_configured("imap")
-        reference = str(args.get("message") or "").strip().strip("[]")
-        if not reference:
+        references = _references(args.get("message"))
+        if not references:
             return ToolResult.refused("refused: no message given")
-        parts = reference.split(":")
-        if len(parts) == 3:
-            account, folder, uid = parts
-        elif len(parts) == 2:
-            account, folder, uid = "", parts[0], parts[1]
-        else:
-            account, folder, uid = "", "INBOX", parts[0]
-        account = account or next(iter(sorted(connectors)))
-        if account not in connectors:
-            return ToolResult.refused(f"refused: no mail account {account!r}; "
-                                                f"configured: {', '.join(sorted(connectors))}")
+        if len(references) > MAIL_READ_BATCH:
+            return ToolResult.refused(f"refused: {len(references)} references; mail_read opens at most "
+                                      f"{MAIL_READ_BATCH} a call -- split them")
 
         # A body is `sensitive`. The gate is here rather than in the
         # caller because the caller is a model, and by the time it could
@@ -350,13 +362,37 @@ class MailReadTool(_PimTool):
                 output=(f"Message bodies are classed 'sensitive' and this session may not show "
                         f"them (`[execution] pim_cloud_llm_may_see` = {list(allowed)}). "
                         f"mail_search gives you the subject and sender; the person can read "
-                        f"{reference} themselves, or add 'sensitive' to that setting."),
+                        f"{' '.join(references)} themselves, or add 'sensitive' to that setting."),
                 metadata={"withheld": True, "privacy": "sensitive"})
 
+        max_chars = int(getattr(self._config, "pim_body_max_chars", 20_000))
+        if len(references) == 1:
+            return await self._read_one(references[0], connectors, max_chars)
+        share = max(_BATCH_MIN_CHARS, max_chars // len(references))
+        blocks, read = [], 0
+        for reference in references:
+            result = await self._read_one(reference, connectors, share)
+            meta = result.metadata or {}
+            label = (f"[{meta['account']}:{meta['folder']}:{meta['uid']}]" if result.ok else f"[{reference}]")
+            read += bool(result.ok)
+            blocks.append(f"=== {label} ===\n" + (result.output if result.ok else f"could not read: {result.error}"))
+        return ToolResult(ok=read > 0, output="\n\n".join(blocks),
+                          error=None if read else "no message could be read",
+                          metadata={"privacy": "sensitive", "withheld": False, "read": read,
+                                    "failed": len(references) - read})
+
+    async def _read_one(self, reference: str, connectors: dict, max_chars: int) -> ToolResult:
+        account, folder, uid = _reference(reference, connectors)
+        if not uid:
+            # `[None:None:None]`: a program built it from row fields that
+            # were not there (live 2026-10-30).
+            return ToolResult.refused(f"refused: {reference!r} names no message uid; pass a mail_search "
+                                      f"row's `ref` as it is, e.g. [{account}:{folder}:301592]")
+        if account not in connectors:
+            return ToolResult.refused(f"refused: no mail account {account!r}; "
+                                                f"configured: {', '.join(sorted(connectors))}")
         try:
-            message = await connectors[account].fetch_body(
-                uid, folder=folder,
-                max_chars=int(getattr(self._config, "pim_body_max_chars", 20_000)))
+            message = await connectors[account].fetch_body(uid, folder=folder, max_chars=max_chars)
         except BudgetExhausted as exc:
             return ToolResult.from_exception(exc, f"refused: {exc}", default="refused")
         except Exception as exc:  # noqa: BLE001
@@ -522,16 +558,23 @@ class MailUnsubscribeTool(_PimTool):
                           side_effects=tuple(effects), metadata={"rows": rows, "done": done, "privacy": "personal"})
 
 
+#: A reference part a program filled from a field its row did not have.
+_MISSING = frozenset({"", "none", "null", "undefined"})
+
+
 def _reference(reference: str, connectors: dict) -> tuple[str, str, str]:
-    """`account:folder:uid`, `folder:uid` or `uid`, as mail_read reads it."""
-    parts = reference.split(":")
+    """`account:folder:uid`, `folder:uid` or `uid`, as mail_read reads it.
+    A missing part (`[None:None:301592]`) takes its default: the first
+    account, the inbox; a missing uid stays empty for the caller to refuse."""
+    parts = [p.strip() for p in reference.split(":")]
+    parts = ["" if p.lower() in _MISSING else p for p in parts]
     if len(parts) == 3:
         account, folder, uid = parts
     elif len(parts) == 2:
         account, folder, uid = "", parts[0], parts[1]
     else:
         account, folder, uid = "", "INBOX", parts[0]
-    return account or next(iter(sorted(connectors))), folder, uid
+    return account or next(iter(sorted(connectors))), folder or "INBOX", uid
 
 
 class RemindTool(_PimTool):
