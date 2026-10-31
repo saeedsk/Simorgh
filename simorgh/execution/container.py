@@ -105,7 +105,10 @@ class RunContainerTool:
         # path is `procs.run_child` (stage 7 item 8).
         self._injected = runner is not None
         self._runner = runner or subprocess.run
-        self._daemon_checked_at = 0.0
+        # None, not 0.0: time.monotonic() counts from boot on macOS, so a
+        # 0.0 stamp reads as "checked moments ago" for the first minute
+        # after a reboot and the cached False refuses every run.
+        self._daemon_checked_at: float | None = None
         self._daemon_ok = False
 
     async def run(self, args: dict, *, ctx: ToolContext) -> ToolResult:
@@ -220,7 +223,7 @@ class RunContainerTool:
 
     def _daemon_available(self) -> bool:
         now = time.monotonic()
-        if now - self._daemon_checked_at < _DAEMON_CACHE_S:
+        if self._daemon_checked_at is not None and now - self._daemon_checked_at < _DAEMON_CACHE_S:
             return self._daemon_ok
         try:
             completed = self._runner(

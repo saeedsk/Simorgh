@@ -190,6 +190,17 @@ class RunContainerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ok)
         self.assertIn("daemon is not running", result.error)
 
+    async def test_the_first_probe_runs_even_just_after_boot(self):
+        # time.monotonic() counts from boot on macOS. A 0.0 "last checked"
+        # stamp read as fresh for the first minute and refused every run.
+        from unittest import mock
+
+        with mock.patch("simorgh.execution.container.time.monotonic", return_value=5.0):
+            result = await self._tool().run({"image": "python:3.12-slim", "command": ["true"]},
+                                            ctx=_ctx(Config(repo_root=self.root)))
+        self.assertTrue(result.ok, result.error)
+        self.assertIsNotNone(self.docker.argv_for("info"))
+
     async def test_no_docker_at_all_is_a_clean_refusal(self):
         tool = RunContainerTool(Config(repo_root=self.root), docker_path="", runner=self.docker)
         tool._docker = ""
