@@ -87,7 +87,10 @@ class RenderTestCase(unittest.TestCase):
         self.assertIn("bus: 18 published, 6 delivered", out)
 
     def test_banner_names_the_system_and_a_real_command(self):
-        out = render.banner(enabled=False)
+        from unittest import mock
+
+        with mock.patch.object(render, "terminal_width", return_value=160):
+            out = render.banner(enabled=False)
         self.assertIn("SIMORGH", out)
         self.assertIn("status", out)  # a real, always-working command
         # A command with an argument hint, so the splash is showing the
@@ -191,15 +194,27 @@ class RenderTestCase(unittest.TestCase):
         # No wide-terminal assumption -- a redirected/piped session (this
         # trial's own earlier mistake: buffered, hard to eyeball) still
         # gets something readable in a standard 80-column window.
-        for line in render.banner(enabled=False).splitlines():
+        from unittest import mock
+
+        with mock.patch.object(render, "terminal_width", return_value=80):
+            out = render.banner(enabled=False)
+        for line in out.splitlines():
             self.assertLessEqual(len(line), 80, repr(line))
 
-    def test_banner_quick_commands_wrap_rather_than_cut(self):
-        # The creator, 2026-10-30: the column sized to the longest usage
-        # left 18 columns and every description read "health, vitals, p…".
-        out = " ".join(render.banner(enabled=False, unicode="off").split())
-        for _, desc in render._QUICK_COMMANDS:
-            self.assertIn(" ".join(desc.split()), out)
+    def test_banner_quick_commands_are_one_whole_line_each(self):
+        # The creator, 2026-10-30: cut to the 68-column banner every
+        # description read "health, vitals, p…"; wrapped, the splash
+        # doubled. One line each, whole, wherever the terminal allows.
+        from unittest import mock
+
+        for columns in (100, 160):
+            with mock.patch.object(render, "terminal_width", return_value=columns):
+                out = render.banner(enabled=False, unicode="off").splitlines()
+            for name, desc in render._QUICK_COMMANDS:
+                row = [line for line in out if line.startswith("  " + name.split()[0] + " ")]
+                self.assertEqual(len(row), 1, (columns, name))
+                self.assertTrue(row[0].endswith(desc), (columns, row[0]))
+                self.assertLessEqual(len(row[0]), columns)
 
     def test_prompt_banner_shows_the_question_and_every_option(self):
         out = render.prompt_banner("Approve propose_mcp_server?", ["yes", "no"], enabled=False)
