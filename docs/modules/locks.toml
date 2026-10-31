@@ -17,12 +17,6 @@ task = "stage 17: mask2/routed presets and their paid measurement"
 since = "2026-10-28T04:36:34+00:00"
 until = "2026-10-28T12:36:34+00:00"
 
-[locks.interface]
-by = "claude-agent-boxes"
-task = "crew members get named agent boxes"
-since = "2026-10-31T04:54:08+00:00"
-until = "2026-10-31T12:54:08+00:00"
-
 [locks.orchestration]
 by = "claude-code"
 task = "claims: 'I wrote it myself' is not a file change"
