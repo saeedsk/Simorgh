@@ -118,14 +118,30 @@ ANALYSIS_TOOL = "run_analysis"
 #: `CHAT_CREW_AGENTS`); it has the code tools (`profiles.CODE_TOOLS`).
 PART_AGENT = "research"
 
-APPROACH_PROMPT = (
+#: The scope rule (2026-10-30): "every item the request covers" is what the
+#: request names, not the most a tool could reach. "summarize my emails"
+#: got a bar of every message in the box, each with its own gist; three
+#: reviews held a fair digest of the newest page below it while Sim
+#: widened to 200 messages, filled its context and hit the program's call
+#: cap, and never answered (live, task cef68b40).
+SCOPE_RULE = (
+    "Scope: cover what the request names -- \"all of them\", \"the past month\" -- and no more. When it names "
+    "no scope or count, the bar is a sensible default the person would expect at a glance (the newest or "
+    "unread page, the current period, the top few), and one criterion is that the answer states that scope "
+    "and offers to go wider. Never set a bar that needs everything a source holds, or one item-by-item "
+    "result for more items than fit in one answer, unless the request asks for exactly that.\n"
+)
+
+APPROACH_PROMPT = SCOPE_RULE + (
     "Then choose the approach: HOW the job is done, fastest, with an exact answer. Judge by the shape of the "
     "job, never by its subject:\n"
     "- direct: one or a few tool calls answer it, and the answer reads straight off what they return.\n"
     "- compute: a program over the full data (the run_analysis tool). Choose it when the job covers more "
     "items than one page of a tool's result shows; when the answer is a count, rank, total, average, dedupe "
     "or comparison over many items; when the same step repeats for each item; or when it joins two sources. "
-    "Reading a listing and counting by eye is never the method.\n"
+    "Reading a listing and counting by eye is never the method. A program counts, filters and joins; it "
+    "cannot read for meaning, so a job whose result is judgment over each item's text (a gist, a summary, "
+    "a verdict) is not compute: it is direct over the scope, or parallel when the items are many.\n"
     "- parallel: 2 to 6 independent parts, each run at the same time by its own helper. Choose it when the "
     "parts do not depend on each other: the same work for each of several items or sources, several options "
     "to compare, or more steps than one helper can take in this turn while the parts could run side by side.\n"
@@ -164,7 +180,11 @@ REVIEW_METHOD = (
     "full data (a run_analysis result), is below_bar, and next is: run_analysis over that listing's ref. "
     "If the bar set an approach (helpers in parallel, a program, the background) and the assistant did the "
     "job another, slower way, that is below_bar too (Bias for Action; Customer Obsession when the person "
-    "waited longer than needed), and next names what to start."
+    "waited longer than needed), and next names what to start.\n"
+    "Scope is judged by the request, not the criteria alone. When the request named no scope, an answer "
+    "that covers a sensible default scope, says which, and offers to go wider meets that part, even if a "
+    "criterion asks for every item a source holds; never order the assistant to widen past what the person "
+    "asked for."
 )
 
 #: Most criteria a job carries; more is a plan, not a checklist.

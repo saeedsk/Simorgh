@@ -202,6 +202,18 @@ class TheApproachIsParsedAndRendered(unittest.TestCase):
         for word in DOMAIN_WORDS:
             self.assertNotIn(word, added, word)
 
+    def test_an_unscoped_job_gets_a_default_scope_not_everything(self):
+        # Live 2026-10-30 (task cef68b40): an unscoped "summarize" got a bar of
+        # every item a source held, each with its own gist, as a program;
+        # three reviews held a fair digest below it and no answer went out.
+        prompt = supervisor.criteria_prompt("r", [], approach=True)
+        for rule in ("names no scope or count", "sensible default", "states that scope",
+                     "Never set a bar that needs everything a source holds", "cannot read for meaning"):
+            self.assertIn(rule, prompt)
+        self.assertNotIn(supervisor.SCOPE_RULE, supervisor.criteria_prompt("r", []), "off is the prompt as it was")
+        self.assertIn("never order the assistant to widen past what the person asked for",
+                      supervisor.REVIEW_METHOD)
+
     def test_the_approach_is_what_the_turn_can_take(self):
         eff = supervisor.effective_approach
         self.assertEqual(eff("compute", voice=False, crews=True, compute=True), "compute")
