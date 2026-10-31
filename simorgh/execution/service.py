@@ -941,6 +941,15 @@ class Service:
                 return await self._resolve_arg_refs(proposal.get("args")), (str(task_id) if task_id else None), dict(scope)
         return None, None, {}
 
+    async def _fetch_recorded_args(self, action_id: str) -> dict | None:
+        """The proposal's arguments exactly as Guardian recorded them, blob
+        refs left as refs."""
+        for event in await self._ctx.ledger.read(f"action:{action_id}"):
+            if event.type == "received":
+                args = event.payload["proposal"].get("args")
+                return dict(args) if isinstance(args, dict) else None
+        return None
+
     async def _resolve_arg_refs(self, args: dict | None) -> dict | None:
         """Guardian records an oversized argument (a patch's whole file
         body) as a blob ref, since the Ledger refuses it inline. The
@@ -964,6 +973,18 @@ class Service:
         now = self._ctx.clock.now()
         args, task_id, scope = await self._fetch_proposal(action_id)
         outcome = self._verifier.verify(approved, args, now=now)
+        if not outcome.ok and outcome.reason == "mismatch":
+            # A `blob:<sha>` argument is either one Guardian spilled (read
+            # back above) or the argument itself -- `recall_result` takes a
+            # stored result's ref, and reading it back made every recall
+            # fail as "signature mismatch" (live 2026-10-30). Both versions
+            # are Guardian's own record; whichever the token signed is the
+            # one that runs.
+            recorded = await self._fetch_recorded_args(action_id)
+            if recorded is not None and recorded != args:
+                again = self._verifier.verify(approved, recorded, now=now)
+                if again.ok:
+                    args, outcome = recorded, again
 
         await self._ctx.ledger.append(f"action:{action_id}", self._event(
             f"action:{action_id}", "verified", {"outcome": outcome.ok, "reason": outcome.reason},
