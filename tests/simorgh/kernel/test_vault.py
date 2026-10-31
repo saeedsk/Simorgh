@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import tempfile
 import time
+import shutil
 import unittest
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from simorgh.kernel.vault import (
     VaultKeyFileUnsafe,
     VaultSecretStore,
     VaultUnavailable,
+    backup_dir,
 )
 
 
@@ -131,6 +133,7 @@ class VaultRoundTripTestCase(unittest.TestCase):
     def test_a_wrong_key_refuses_rather_than_returning_garbage(self):
         vault1 = self._vault()
         vault1.put("token:x", "token", {"value": "abc"})
+        shutil.rmtree(backup_dir(self.path))   # no backup to recover from
         other_keyring = _FakeKeyring()  # a different key entirely
         with self.assertRaises(VaultUnavailable):
             Vault(self.path, keyring_module=other_keyring)
@@ -150,6 +153,9 @@ class AnExistingVaultIsNeverOrphanedTestCase(unittest.TestCase):
         written = _FakeKeyring()
         Vault(self.path, keyring_module=written).put("imap:gmail", "password", {"password": "app-pw"})
         self.original = written
+        # The refusal is for a vault NOTHING can open: no backup either
+        # (recovery from one has its own case below).
+        shutil.rmtree(backup_dir(self.path))
 
     def test_an_unreadable_keychain_refuses_and_writes_no_key_file(self):
         with self.assertRaises(VaultUnavailable) as caught:
@@ -175,6 +181,96 @@ class AnExistingVaultIsNeverOrphanedTestCase(unittest.TestCase):
         self.key_path.chmod(0o600)
         vault = Vault(self.path, keyring_module=_FakeKeyring(broken=True))
         self.assertEqual(vault.open("imap:gmail")["password"], "app-pw")
+
+
+class BackupAndRecoveryTestCase(unittest.TestCase):
+    """The creator, 2026-10-30: "we need a backup mechanism for Sim to be
+    able to recover in similar cases (automatically) -- we were lucky that
+    the MacBook Pro had a copy of the vault". A backup is the vault AND its
+    key; a vault that will not open is recovered from them without a person."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "vault.bin"
+        self.keyring = _FakeKeyring()
+        self.clock = _FakeClock()
+        vault = Vault(self.path, keyring_module=self.keyring, clock=self.clock)
+        vault.put("imap:gmail", "password", {"password": "app-pw"})
+
+    def _backups(self):
+        return sorted(backup_dir(self.path).iterdir())
+
+    def test_each_version_is_kept_with_its_key_privately(self):
+        import stat
+
+        (backup,) = self._backups()
+        self.assertTrue((backup / "vault.bin").is_file() and (backup / "key").is_file())
+        for p in (backup_dir(self.path), backup, backup / "vault.bin", backup / "key"):
+            self.assertEqual(p.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO), 0, p)
+
+    def test_reading_does_not_make_backups_only_changing_does(self):
+        vault = Vault(self.path, keyring_module=self.keyring, clock=self.clock)
+        for _ in range(5):
+            self.clock.now += 1
+            vault.open("imap:gmail")          # rewrites last_used_at
+        self.assertEqual(len(self._backups()), 1)
+        self.clock.now += 1
+        vault.put("token:x", "token", {"value": "v"})
+        self.assertEqual(len(self._backups()), 2)
+
+    def test_only_the_newest_ten_are_kept(self):
+        from simorgh.kernel.vault import MAX_BACKUPS
+
+        vault = Vault(self.path, keyring_module=self.keyring, clock=self.clock)
+        for i in range(MAX_BACKUPS + 5):
+            self.clock.now += 1
+            vault.put("token:x", "token", {"value": str(i)})
+        self.assertEqual(len(self._backups()), MAX_BACKUPS)
+
+    def test_a_lost_key_is_found_in_a_backup_and_put_back(self):
+        broken = _FakeKeyring(broken=True)      # the keychain cannot be read; no key file
+        vault = Vault(self.path, keyring_module=broken)
+        self.assertEqual(vault.open("imap:gmail")["password"], "app-pw")
+        self.assertIn("restored it from backup", vault.recovered)
+        self.assertEqual(vault.key_source, "file")
+        self.assertEqual(Vault(self.path, keyring_module=broken).recovered, "", "the restored key opens it next time")
+
+    def test_a_replaced_keychain_key_is_put_right(self):
+        replaced = _FakeKeyring()
+        replaced.set_password("simorgh-vault", "vault-key", "22" * 32)   # some other key
+        vault = Vault(self.path, keyring_module=replaced)
+        self.assertEqual(vault.open("imap:gmail")["password"], "app-pw")
+        self.assertEqual(vault.key_source, "keyring")
+        self.assertEqual(replaced.get_password("simorgh-vault", "vault-key"),
+                         self.keyring.get_password("simorgh-vault", "vault-key"))
+
+    def test_a_corrupt_vault_is_set_aside_and_the_backup_restored(self):
+        self.path.write_bytes(b"aes256gcm-v1\n" + b"\x00" * 64)
+        vault = Vault(self.path, keyring_module=self.keyring)
+        self.assertEqual(vault.open("imap:gmail")["password"], "app-pw")
+        self.assertIn("restored backup", vault.recovered)
+        self.assertTrue(list(self.path.parent.glob("vault.bin.unreadable-*")), "the bad file is kept, not deleted")
+
+    def test_a_key_moved_aside_by_hand_is_tried_too(self):
+        key = self.keyring.get_password("simorgh-vault", "vault-key")
+        shutil.rmtree(backup_dir(self.path))
+        aside = self.path.with_name("vault.bin.key.bak-20261030-223141")
+        aside.write_text(key)
+        aside.chmod(0o600)
+        vault = Vault(self.path, keyring_module=_FakeKeyring(broken=True))
+        self.assertEqual(vault.open("imap:gmail")["password"], "app-pw")
+        self.assertIn("vault.bin.key.bak-20261030-223141", vault.recovered)
+
+    def test_a_recovery_is_logged(self):
+        lines = []
+
+        class _Log:
+            def warning(self, event, **f):
+                lines.append((event, f))
+
+        Vault(self.path, keyring_module=_FakeKeyring(broken=True), logger=_Log())
+        self.assertIn("vault_recovered", [e for e, _ in lines])
 
 
 class KeyringFallbackTestCase(unittest.TestCase):
@@ -331,6 +427,7 @@ class NeverLeaksTestCase(unittest.TestCase):
     def test_a_decrypt_failure_message_never_contains_the_key(self):
         vault1 = Vault(self.path, keyring_module=_FakeKeyring())
         vault1.put("token:x", "token", {"value": "v"})
+        shutil.rmtree(backup_dir(self.path))
         other = _FakeKeyring()
         other.set_password("simorgh-vault", "vault-key", "11" * 32)  # a different key entirely
         try:

@@ -37,8 +37,10 @@ in-memory only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import stat as stat_module
 import time
 from dataclasses import dataclass, field
@@ -51,6 +53,10 @@ _UNSAFE_MODE_BITS = stat_module.S_IRWXG | stat_module.S_IRWXO
 _ALGO = "aes256gcm-v1"
 _KEYRING_SERVICE = "simorgh-vault"
 _KEYRING_USERNAME = "vault-key"
+#: Backups kept: `vault-backups/` beside the vault, the newest this many
+#: distinct versions of the credentials, each a vault AND its key.
+MAX_BACKUPS = 10
+BACKUP_DIR_NAME = "vault-backups"
 
 
 def default_vault_path() -> Path:
@@ -182,9 +188,161 @@ def _load_or_create_key(path: Path, *, keyring_module=None) -> tuple[bytes, str]
     return new_key, "file"
 
 
+# -- backups and recovery (2026-10-30) ---------------------------------------------
+# The creator, after the vault's key was lost and Gmail with it: "we need a
+# backup mechanism for Sim to be able to recover in similar cases
+# (automatically); we were lucky that the MacBook Pro had a copy of the
+# vault". A copy of the vault alone recovers nothing -- the day's vault was
+# right there on disk, unreadable without its key -- so a backup is the PAIR:
+# the encrypted vault and the key that opens it, 0600 in a 0700 directory
+# beside the vault. That is the same protection as the key-file fallback the
+# vault already allows; the keychain still holds the live key.
+
+
+def backup_dir(path: Path) -> Path:
+    return path.parent / BACKUP_DIR_NAME
+
+
+def _fingerprint(records: dict) -> str:
+    """What the credentials ARE, without when each was last used: `open()`
+    rewrites the vault on every read, and a backup per read would push the
+    real versions out within minutes."""
+    def strip(record):
+        meta = {k: v for k, v in (record.get("_meta") or {}).items() if k != "last_used_at"}
+        return {**{k: v for k, v in record.items() if k != "_meta"}, "_meta": meta}
+
+    body = json.dumps({k: strip(v) for k, v in records.items()}, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()[:16]
+
+
+def _backups(path: Path) -> list[Path]:
+    """Backup directories, newest first."""
+    root = backup_dir(path)
+    if not root.is_dir():
+        return []
+    return sorted((d for d in root.iterdir() if (d / "vault.bin").is_file() and (d / "key").is_file()),
+                  key=lambda d: d.name, reverse=True)
+
+
+def _backup(path: Path, key: bytes, records: dict, *, clock=time.time) -> Path | None:
+    """Keep this version of the vault with its key, unless the newest
+    backup already holds the same credentials. Never raises: a backup that
+    cannot be written must not stop the vault working."""
+    if not records or not path.is_file():
+        return None
+    try:
+        print_ = _fingerprint(records)
+        existing = _backups(path)
+        if existing and existing[0].name.endswith(f"-{print_}"):
+            return None
+        root = backup_dir(path)
+        root.mkdir(parents=True, exist_ok=True)
+        root.chmod(0o700)
+        stamp = time.strftime("%Y%m%dT%H%M%S", time.localtime(clock()))
+        target = root / f"{stamp}-{print_}"
+        target.mkdir(exist_ok=True)
+        target.chmod(0o700)
+        shutil.copyfile(path, target / "vault.bin")
+        (target / "vault.bin").chmod(0o600)
+        key_file = target / "key"
+        key_file.write_text(key.hex())
+        key_file.chmod(0o600)
+        for old in _backups(path)[MAX_BACKUPS:]:
+            shutil.rmtree(old, ignore_errors=True)
+        return target
+    except OSError:
+        return None
+
+
+def _opens(key: bytes, vault_path: Path) -> dict | None:
+    """The records `key` decrypts from `vault_path`, or None."""
+    try:
+        raw = vault_path.read_bytes()
+        header, blob = raw.split(b"\n", 1)
+        if header.decode("ascii", "replace") != _ALGO:
+            return None
+        return json.loads(_decrypt(key, blob).decode("utf-8"))
+    except Exception:  # noqa: BLE001 -- not this key, or not a vault
+        return None
+
+
+def _candidate_keys(path: Path) -> list[tuple[str, bytes]]:
+    """Keys that might open the vault: each backup's (newest first), then
+    any key file left beside it under another name (`vault.bin.key.bak-*`,
+    `.orphaned-*`) -- where a person or a previous repair moved one aside."""
+    out: list[tuple[str, bytes]] = []
+    for d in _backups(path):
+        try:
+            out.append((f"backup {d.name}", bytes.fromhex((d / "key").read_text().strip())))
+        except (OSError, ValueError):
+            continue
+    for f in sorted(path.parent.glob(path.name + ".key.*")):
+        try:
+            out.append((f.name, bytes.fromhex(f.read_text().strip())))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def _restore_key(path: Path, key: bytes, keyring_module) -> str:
+    """Put a key that is known to open the vault back where the vault looks
+    first: the keychain when it can be written, else the key file (a file
+    that held some other key is moved aside, never deleted)."""
+    if keyring_module is not None and not _keyring_disabled():
+        try:
+            keyring_module.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, key.hex())
+            if keyring_module.get_password(_KEYRING_SERVICE, _KEYRING_USERNAME) == key.hex():
+                return "keyring"
+        except Exception:  # noqa: BLE001 -- fall back to the file
+            pass
+    key_path = path.with_suffix(path.suffix + ".key")
+    if key_path.is_file() and key_path.read_text().strip() != key.hex():
+        key_path.replace(key_path.with_name(f"{key_path.name}.replaced-{time.strftime('%Y%m%dT%H%M%S')}"))
+    key_path.write_text(key.hex())
+    key_path.chmod(0o600)
+    return "file"
+
+
+def recover(path: Path, *, keyring_module=None) -> tuple[bytes, str, dict, str] | None:
+    """Open a vault the live key cannot: `(key, key_source, records, what
+    was done)`, or None when nothing on disk can.
+
+    First a key that opens the CURRENT vault (a backup's, or one moved
+    aside) -- the vault is fine, only its key went missing or was replaced;
+    the key is put back. Failing that, the newest backup whose own key opens
+    it -- the vault itself is unreadable; it is moved aside (never deleted)
+    and the backup restored."""
+    if path.is_file() and path.stat().st_size > 0:
+        for name, key in _candidate_keys(path):
+            records = _opens(key, path)
+            if records is not None:
+                source = _restore_key(path, key, keyring_module)
+                return key, source, records, f"the vault's key was missing or wrong; restored it from {name}"
+    for d in _backups(path):
+        try:
+            key = bytes.fromhex((d / "key").read_text().strip())
+        except (OSError, ValueError):
+            continue
+        records = _opens(key, d / "vault.bin")
+        if records is None:
+            continue
+        if path.exists():
+            path.replace(path.with_name(f"{path.name}.unreadable-{time.strftime('%Y%m%dT%H%M%S')}"))
+        shutil.copyfile(d / "vault.bin", path)
+        path.chmod(0o600)
+        source = _restore_key(path, key, keyring_module)
+        return key, source, records, f"the vault could not be opened; restored backup {d.name}"
+    return None
+
+
 class Vault:
     """The multi-value store. `path` holds the encrypted blob; nothing
-    is decrypted until `open()` is called for one credential id."""
+    is decrypted until `open()` is called for one credential id.
+
+    Every version of the credentials is backed up with its key
+    (`vault-backups/`), and a vault that will not open is recovered from
+    those backups automatically (`recover`), with a warning naming what was
+    restored. Only when nothing on disk can open it does it raise."""
 
     def __init__(self, path: Path, *, keyring_module=None, clock=time.time, logger=None) -> None:
         self._path = path
@@ -195,8 +353,19 @@ class Vault:
                 import keyring as keyring_module  # noqa: PLC0414
             except ImportError:
                 keyring_module = None
-        self._key, self._key_source = _load_or_create_key(path, keyring_module=keyring_module)
-        self._records: dict[str, dict] = self._read()
+        #: What automatic recovery did at open, "" when nothing was needed.
+        self.recovered = ""
+        try:
+            self._key, self._key_source = _load_or_create_key(path, keyring_module=keyring_module)
+            self._records: dict[str, dict] = self._read()
+        except VaultUnavailable:
+            found = recover(path, keyring_module=keyring_module)
+            if found is None:
+                raise
+            self._key, self._key_source, self._records, self.recovered = found
+            if logger is not None:
+                logger.warning("vault_recovered", detail=self.recovered)
+        _backup(path, self._key, self._records, clock=clock)
         if logger is not None and self._key_source == "file":
             logger.warning(
                 "vault_key_fallback_to_file",
@@ -242,6 +411,7 @@ class Vault:
         tmp.write_bytes(_ALGO.encode("ascii") + b"\n" + blob)
         tmp.chmod(0o600)
         tmp.replace(self._path)
+        _backup(self._path, self._key, self._records, clock=self._clock)
 
     def list(self) -> list[Credential]:
         out = []
