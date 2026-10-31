@@ -349,7 +349,79 @@ async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, a
     return {"detail": detail, "spent_usd": round(spent, 6), "proposed": proposed, "passed_over": passed}
 
 
-__all__ = ["AGENTS_DIR", "DEFAULT_COOLDOWN_S", "DEFAULT_MAX_PER_NIGHT", "DEFAULT_TIMEOUT_S",
+# -- case-subject patch tasks ------------------------------------------------
+
+#: A materialised SWE-bench checkout. A case there is worked in place and
+#: never in a Sim worktree: a worktree of this repository does not contain
+#: it (`orchestration/session.py::_uses_worktree` gives the same answer).
+CASE_ROOT = "workspace/swebench/"
+#: The topic a proposed effect travels on. Guardian is the only subscriber;
+#: a case patch is adopted through it like every other effect, never directly.
+ACTION_PROPOSED = "action.proposed"
+
+
+def case_subject(suite: str, case_id: str) -> str:
+    """The subject a case-level patch task is opened on: `suite/case-id`."""
+    return f"{(suite or '').strip().strip('/')}/{(case_id or '').strip()}"
+
+
+def uses_worktree(path: str) -> bool:
+    """Whether a patch against `path` gets a Sim worktree. Nothing under
+    `workspace/swebench/` does."""
+    norm = (path or "").replace("\\", "/").lstrip("/")
+    return not norm.startswith(CASE_ROOT)
+
+
+def case_patch_request(cluster, *, baseline: dict | None = None) -> dict | None:
+    """The case-subject patch task a benchmark cluster asks for, or None.
+
+    `cluster` carries `suite`, `case_id`, `what`, `count`, `refs` (the
+    evidence) and, optionally, `path` (the case's checkout). A cluster
+    without a suite, a case id or evidence refs asks for nothing.
+    """
+    suite = str(getattr(cluster, "suite", "") or "").strip()
+    case_id = str(getattr(cluster, "case_id", "") or "").strip()
+    refs = tuple(r for r in (getattr(cluster, "refs", ()) or ()) if r)
+    if not suite or not case_id or not refs:
+        return None
+    workdir = str(getattr(cluster, "path", "") or "").strip()
+    if workdir:
+        needs_worktree = uses_worktree(workdir)
+    else:
+        # No path named: a SWE-bench suite is a checkout, anything else is the repo.
+        needs_worktree = not suite.lower().startswith("swebench")
+    what = str(getattr(cluster, "what", "") or "")[:300]
+    return {
+        "kind": "patch",
+        "subject": case_subject(suite, case_id),
+        "uses_worktree": needs_worktree,
+        "workdir": workdir,
+        "what": what,
+        "count": int(getattr(cluster, "count", 0) or 0),
+        "refs": refs,
+        "baseline": dict(baseline or {}),
+        "cause": cause_tag(what),
+    }
+
+
+async def open_case_patch(publish: Callable[[str, dict], Awaitable[None]], cluster, *,
+                          baseline: dict | None = None) -> dict:
+    """Open a case-subject patch task by publishing it on `action.proposed`.
+
+    `publish(topic, payload)` is the bus. Nothing here applies a patch:
+    the request goes to Guardian, which gates it like every other effect.
+    A publish failure propagates to the caller.
+    """
+    request = case_patch_request(cluster, baseline=baseline)
+    if request is None:
+        return {"ok": False, "reason": "needs a suite, a case id and evidence refs"}
+    payload = {"tool": "patch_case", "args": {**request, "refs": list(request["refs"])}}
+    await publish(ACTION_PROPOSED, payload)
+    return {"ok": True, "subject": request["subject"], "uses_worktree": request["uses_worktree"]}
+
+
+__all__ = ["AGENTS_DIR", "CASE_ROOT", "DEFAULT_COOLDOWN_S", "DEFAULT_MAX_PER_NIGHT", "DEFAULT_TIMEOUT_S",
            "DEFAULT_USD_PER_DRAFT", "MAX_RULE_CHARS", "ProposeConfig", "SIMILAR", "agent_names",
            "cause_tag", "clean", "draft_prompt", "propose_config", "propose_from",
-           "refused_recently", "similarity", "unsafe"]
+           "refused_recently", "similarity", "unsafe", "ACTION_PROPOSED", "case_subject", "case_patch_request",
+           "open_case_patch", "uses_worktree"]
