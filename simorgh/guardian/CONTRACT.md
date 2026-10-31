@@ -70,7 +70,7 @@ Wire deny layers (`service.py::_wire_layer`): `mode`, `protected`, `reversibilit
 | `guardian:daily` | simorgh/guardian/service.py (`DAILY_STREAM`; `approved` {tool, day} when a person says yes to a `daily_human_tools` call) | folded by Guardian at start (`_load_daily`) | guardian's |
 | `execution:tools` | simorgh/execution/service.py (writer) | read by Guardian at start (`_replay_tool_registrations`, `service.py::TOOLS_STREAM`); also orchestration and interface | 30d |
 
-Events Guardian writes on `action:<id>`: `received` (the proposal, oversize string args spilled to blobs), `decided` (kind, layer, notes), `duplicate`, `answered`.
+Events Guardian writes on `action:<id>`: `received` (the proposal, oversize string args spilled to blobs), `decided` (kind, layer, notes), `duplicate`, `answered`. A token issued after a person's answer (`_on_prompt_answered`) is over the REAL arguments: each `blob:<sha256>` in the recorded copy is read back first (`_unspilled`), as Execution does before verifying -- since 2026-10-30; hashing the ref made every human-approved action with an argument over the inline threshold (a skill's or a patch's whole file) fail at Execution as `signature mismatch`.
 
 ## Config
 

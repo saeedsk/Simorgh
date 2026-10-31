@@ -27,6 +27,10 @@ from .posture import Posture
 from .registry import ToolRegistry
 from .tokens import TokenIssuer
 
+#: The Ledger's blob ref, as `_spill_oversized_args` writes it (and
+#: Execution's `_BLOB_REF` reads it).
+_BLOB_REF = re.compile(r"^blob:[0-9a-f]{64}$")
+
 REJECTED_STREAM = "guardian:rejected"
 TRUST_STREAM = "guardian:trust"
 #: Execution's record of every tool it registered
@@ -514,7 +518,14 @@ class Service:
             ))
             return
 
-        token, expires_at, args_sha256 = self._tokens.issue(action_id, proposal["tool"], proposal["args"])
+        # The token is over the REAL arguments: the recorded proposal has any
+        # long one spilled to a `blob:` ref, and Execution hashes the body it
+        # reads back. Hashing the ref made every approved action with an
+        # argument over the inline threshold (a skill's or a patch's whole
+        # file) fail at Execution as "signature mismatch" -- twice in one
+        # evening for an `apply_skill` the creator said yes to (2026-10-30).
+        args = await self._unspilled(proposal.get("args"))
+        token, expires_at, args_sha256 = self._tokens.issue(action_id, proposal["tool"], args)
         await self._ctx.ledger.append(stream, self._event(stream, "answered", {"answer": answer, "outcome": "approved"}))
         if proposal.get("tool") in self._config.daily_human_tools:
             await self._record_daily(str(proposal["tool"]))
@@ -638,6 +649,18 @@ class Service:
             else:
                 spilled[key] = value
         return {**proposal, "args": spilled}
+
+    async def _unspilled(self, args):
+        """`_spill_oversized_args` undone: each `blob:<sha256>` argument read
+        back from the Ledger, as Execution does before it verifies."""
+        if not isinstance(args, dict):
+            return args
+        out: dict = {}
+        for key, value in args.items():
+            if isinstance(value, str) and _BLOB_REF.match(value):
+                value = (await self._ctx.ledger.get_blob(value)).decode("utf-8")
+            out[key] = value
+        return out
 
     @staticmethod
     def _fingerprint(payload: dict) -> str:
