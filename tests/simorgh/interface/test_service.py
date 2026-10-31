@@ -178,11 +178,11 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text.count("Kitchen lights are on."), 1)
         self.assertIn("interrupted", text)
 
-    async def test_on_the_live_screen_a_spoken_reply_turns_green_when_speech_ends(self):
-        """The creator, 2026-09-19: words, the green line and the speech came
-        one after another. On the live screen the reply stays in the grey
-        live rows while it is spoken and prints green when `voice.spoken`
-        says the speech ended -- once."""
+    async def test_on_the_live_screen_a_spoken_reply_prints_before_it_is_said(self):
+        """The creator, 2026-10-30: "sim first say the message then show the
+        text on screen, the order should be reverse". On the live screen the
+        green line prints at `turn.completed`, before speech; `voice.spoken`
+        adds nothing -- once."""
         import contextlib
         import io
         from unittest import mock
@@ -196,16 +196,39 @@ class InterfaceTestCase(unittest.IsolatedAsyncioTestCase):
                 "session_id": "v2", "task_id": "v2", "text": "The kettle is on.", "channel": "voice",
                 "kind": "chat", "floor": False, "tool_steps": 0}))
             await self._pump()
-            rows = "".join(t for row in self.service._streaming_rows() for _s, t in row)  # noqa: SLF001
             before = out.getvalue()
             await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
                 "text": "The kettle is on.", "seconds": 1.1, "engine": "styletts2", "device": "laptop",
                 "interrupted": False}))
             await self._pump()
-        self.assertIn("The kettle is on.", rows)
-        self.assertNotIn("sim: The kettle is on.", before)
+        self.assertIn("sim: The kettle is on.", before)
         self.assertEqual(out.getvalue().count("sim: The kettle is on."), 1)
         self.assertEqual(self.service._streaming_rows(), [])  # noqa: SLF001
+
+    async def test_a_reply_dropped_after_it_printed_says_so_under_it(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        live = mock.MagicMock()
+        live.enabled = True
+        self.service._live = live  # noqa: SLF001
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            await self.other.publish(self.other.new(topics.VOICE_TRANSCRIPT, {
+                "text": "hi", "confidence": 0.9, "seconds": 1.0, "engine": "w", "device": "d",
+                "session_id": "d1", "turn": 7}))
+            await self.other.publish(self.other.new(topics.TURN_COMPLETED, {
+                "session_id": "d1", "task_id": "d1", "text": "Hello there.", "channel": "voice",
+                "kind": "chat", "floor": False, "tool_steps": 0}))
+            await self._pump()
+            await self.other.publish(self.other.new(topics.VOICE_SPOKEN, {
+                "text": "", "seconds": 0.0, "engine": "", "device": "d", "interrupted": False,
+                "dropped": True, "reason": "moved on", "turn": 7}))
+            await self._pump()
+        text = out.getvalue()
+        self.assertEqual(text.count("Hello there."), 1)
+        self.assertIn("(not spoken -- moved on)", text)
 
     async def test_a_dropped_reply_marks_its_own_line_not_the_oldest(self):
         """Live 2026-09-19: a drop for one turn marked "Yes, I'm here!" (another

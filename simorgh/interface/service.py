@@ -284,6 +284,9 @@ class Service:
         # Spoken replies that ended before their `turn.completed` arrived (a
         # short streamed reply can): already printed, so not queued again.
         self._voice_spoken_early = 0
+        # Spoken replies already printed at `turn.completed`, newest last:
+        # a drop that arrives after its line is printed notes it below.
+        self._voice_printed: list[str] = []
         # Voice's turn number -> the chat session id (`voice.transcript`).
         self._turn_sessions: dict = {}
         # Sessions whose reply Voice dropped before the reply was finished.
@@ -1187,7 +1190,7 @@ class Service:
         returned early for anything not in `_pending_turns` or
         `_watched_tasks`, so every autonomous task -- nearly all of them
         -- ran completely silently."""
-        if task_id in self._pending_turns or task_id in self._watched_tasks:
+        if task_id in self._pending_turns or task_id in self._watched_tasks or origin == "voice":
             return True
         return bool(self.config.narrate_autonomous)
 
@@ -1270,7 +1273,11 @@ class Service:
             self._tree_owner = record.task_id
             return
         if message.type == topics.TASK_STEP:
-            if not self.config.narrate_steps or p.get("ok") is None:
+            # A spoken turn is the household's own conversation, not
+            # background work: its steps always print (the creator,
+            # 2026-10-30: "when sim performs I like to see the steps it is
+            # taking, make sim verbose"). `narrate_steps` quiets the rest.
+            if not (self.config.narrate_steps or record.origin == "voice") or p.get("ok") is None:
                 return  # a step in flight breathes in the footer; the branch prints when it lands
             head, sep, diff_body = str(p.get("summary", "")).partition("\n\n--- a/")
             line = panel_mod.tree_step(tool=p.get("tool"), head=head, ok=p.get("ok"), took=took, unicode=unicode)
@@ -1624,6 +1631,13 @@ class Service:
             # (live 2026-09-19).
             why = " ".join(str(message.payload.get("reason") or "").split())
             tail = f"  (not spoken -- {why})" if why else "  (not spoken)"
+            if owner and owner in self._voice_printed:
+                # Its line is already on screen (printed before speech):
+                # say under it that nobody heard it.
+                self._voice_printed.remove(owner)
+                self._voice_replies_shown = max(0, self._voice_replies_shown - 1)
+                self._out(render_mod.style(f"  🔇{tail}", "dim", enabled=self._color))
+                return
             if owner and self._voice_reply_settled(owner, tail=tail):
                 return
             if owner:
@@ -2148,11 +2162,14 @@ class Service:
                 if fut is not None and not fut.done():
                     fut.set_result(p.get("text", ""))
                 return
-            self._streaming[session_id] = text
-            self._voice_speaking.append((session_id, text))
+            # The words go on screen first, then Sim says them -- the creator,
+            # 2026-10-30: "sim first say the message then show the text on
+            # screen, the order should be reverse". Until then the reply sat
+            # in the grey live rows and printed green only when speech ended
+            # (2026-09-19's order).
+            self._streaming.pop(session_id, None)
+            self._print_voice_reply(session_id, text)
             self._invalidate()
-            asyncio.get_running_loop().call_later(_SPEAKING_FALLBACK_S + 0.4 * len(text.split()),
-                                                  self._voice_reply_settled, session_id, "")
         elif p.get("channel") == "voice" and text and not p.get("cancelled"):
             # A spoken reply is on screen as soon as it exists, while Sim is
             # still saying it. It used to wait for `voice.spoken`, which is
@@ -2160,11 +2177,18 @@ class Service:
             # transcript appears only after sim has finished saying the
             # whole message". `_on_voice_spoken` then only notes an
             # interruption.
-            self._out(render_mod.style(f"🔊 sim: {text}", "green", enabled=self._color))
-            self._voice_replies_shown += 1
+            self._print_voice_reply(str(p.get("session_id") or ""), text)
         fut = self._pending_turns.get(p.get("session_id", ""))
         if fut is not None and not fut.done():
             fut.set_result(p.get("text", ""))
+
+    def _print_voice_reply(self, session_id: str, text: str) -> None:
+        """A spoken reply's green line, printed before it is said;
+        `_on_voice_spoken` then only notes an interruption or a drop."""
+        self._out(render_mod.style(f"🔊 sim: {_untoned(text)}", "green", enabled=self._color))
+        self._voice_replies_shown += 1
+        if session_id:
+            self._voice_printed = [*self._voice_printed, session_id][-16:]
 
     def _voice_reply_settled(self, session_id: str | None = None, tail: str = "", said: str = "") -> bool:
         """Print a spoken reply green and take it out of the live rows: the

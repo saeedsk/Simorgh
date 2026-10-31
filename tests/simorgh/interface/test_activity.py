@@ -209,6 +209,21 @@ class TestTheServiceNarratesAutonomousWork(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(self._out(), before)
 
+    async def test_a_spoken_turn_prints_its_steps_even_by_default(self):
+        """The creator, 2026-10-30: "when sim performs I like to see the
+        steps it is taking". `narrate_steps` quiets background work, not
+        the household's own spoken conversation."""
+        # A voice turn's record gets `origin: "voice"` from its transcript
+        # (`_on_voice_transcript`), not from `task.created`.
+        self.service._book.on_created({"task_id": "voice-5", "kind": "chat", "origin": "voice",  # noqa: SLF001
+                                       "description": "summarize my emails"})
+        await self._emit(topics.TASK_STARTED, {"task_id": "voice-5", "worker_id": "w1"})
+        await self._emit(topics.TASK_STEP, {
+            "task_id": "voice-5", "step_no": 1, "phase": "act",
+            "summary": "40 message(s)", "tool": "mail_search", "ok": True,
+        })
+        self.assertIn("mail_search", self._out())
+
     async def test_its_outcome_is_narrated(self):
         await self._emit(topics.TASK_CREATED, {
             **_created("auto-3"), "depends_on": [], "mode": "execute", "risk": "low",
