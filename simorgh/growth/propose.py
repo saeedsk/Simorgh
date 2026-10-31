@@ -40,6 +40,7 @@ paid call, and paid work at night is approved explicitly.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -66,6 +67,11 @@ DEFAULT_TIMEOUT_S = 60.0
 SIMILAR = 0.8
 #: Sources whose `subject` is a kind of work (a denial's is a tool).
 _WORK_SOURCES = ("failures", "patterns")
+#: How long after a Guardian refusal (a policy whose status is `refused`)
+#: the same area is left alone. Re-proposing the same kind of rule to a
+#: Guardian that just refused it nightly is the 10-identical-denial loop;
+#: a refusal is an answer, and the cooldown is how it is remembered.
+DEFAULT_COOLDOWN_S = 3 * 24 * 3600.0
 
 #: `think(prompt) -> reply payload` (`cognition.think.reply`, or an
 #: error reply with `ok: false`).
@@ -209,6 +215,37 @@ def _cost(reply: dict, fallback: float) -> float:
         return fallback
 
 
+def refused_recently(store, task_type: str, *, now: float | None = None,
+                     cooldown_s: float = DEFAULT_COOLDOWN_S) -> bool:
+    """True when a rule for `task_type` was refused within the cooldown.
+
+    A refused policy carries no refusal timestamp of its own, so its
+    `proposed_at` stands in: that is when the refusal happened, to the
+    resolution the store keeps.
+    """
+    ts = time.time() if now is None else float(now)
+    for policy in store.all():
+        if (policy.kind == "rule" and policy.task_type == task_type
+                and policy.status == "refused" and policy.proposed_at
+                and ts - policy.proposed_at <= cooldown_s):
+            return True
+    return False
+
+
+def _pick_area(candidates, *, weak=()):
+    """Candidates reordered: weakest-area candidates first.
+
+    `weak` is `diagnose.weakest_areas`' output (`WeakArea`, or anything
+    with `.archetype`); a candidate whose subject names one of those
+    archetypes (e.g. `patch:simorgh/growth`) is the nightly loop's
+    target and moves to the front, so the budget is spent where the
+    competence table says the work is worst. The rest keep their order.
+    """
+    weak_rank = {name: i for i, name in enumerate(getattr(a, "archetype", "") for a in weak)}
+    return sorted(candidates or (),
+                  key=lambda c: weak_rank.get((c.subject or "").strip(), len(weak_rank)))
+
+
 def _blocking(store, task_type: str, text: str):
     """The existing rule `text` duplicates, if any: proposed, live, or
     refused -- a refused text stays refused."""
@@ -222,9 +259,18 @@ def _blocking(store, task_type: str, text: str):
     return None
 
 
-async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, agents) -> dict:
+async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, agents,
+                       weak_areas=(), now: float | None = None,
+                       cooldown_s: float = DEFAULT_COOLDOWN_S) -> dict:
     """Draft and propose rules from tonight's candidates; the night
-    step's result (`{detail, spent_usd, proposed, passed_over}`)."""
+    step's result (`{detail, spent_usd, proposed, passed_over}`).
+
+    `weak_areas` is `diagnose.weakest_areas(table)`; candidates in those
+    areas are considered first. An area the Guardian refused within
+    `cooldown_s` is passed over entirely, so one refusal is not re-asked
+    every night until it becomes ten.
+    """
+    candidates = _pick_area(candidates, weak=weak_areas)
     agents = frozenset(agents or ())
     proposed: list[str] = []
     passed: list[str] = []
@@ -252,6 +298,10 @@ async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, a
         refs = tuple(r for r in (getattr(cand, "refs", ()) or ()) if r)
         if not refs:
             passed.append(f"{label} -- no evidence refs to cite")
+            continue
+        if refused_recently(store, agent, now=now, cooldown_s=cooldown_s):
+            passed.append(f"{label} -- {agent} was refused within the "
+                          f"{cooldown_s / 86400:.0f}d cooldown; not re-asking tonight")
             continue
         tag = cause_tag(cand.what)
         if any(p.kind == "rule" and p.task_type == agent and (p.status == "proposed" or p.live)
@@ -299,6 +349,7 @@ async def propose_from(candidates, store, think: Think, cfg: ProposeConfig, *, a
     return {"detail": detail, "spent_usd": round(spent, 6), "proposed": proposed, "passed_over": passed}
 
 
-__all__ = ["AGENTS_DIR", "DEFAULT_MAX_PER_NIGHT", "DEFAULT_TIMEOUT_S", "DEFAULT_USD_PER_DRAFT",
-           "MAX_RULE_CHARS", "ProposeConfig", "SIMILAR", "agent_names", "cause_tag", "clean",
-           "draft_prompt", "propose_config", "propose_from", "similarity", "unsafe"]
+__all__ = ["AGENTS_DIR", "DEFAULT_COOLDOWN_S", "DEFAULT_MAX_PER_NIGHT", "DEFAULT_TIMEOUT_S",
+           "DEFAULT_USD_PER_DRAFT", "MAX_RULE_CHARS", "ProposeConfig", "SIMILAR", "agent_names",
+           "cause_tag", "clean", "draft_prompt", "propose_config", "propose_from",
+           "refused_recently", "similarity", "unsafe"]
