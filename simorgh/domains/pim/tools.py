@@ -163,6 +163,18 @@ _BACK = {"day": 1, "week": 7, "month": 30, "year": 365}
 MAX_COUNTED = 5000
 
 
+def _count(value, default: int) -> int:
+    """A number argument as a model or a marker sends it: `200`, `"200"`,
+    or `"200 group_by=sender"` (an option the line did not split off,
+    live 2026-10-30, which raised ValueError); no digits is the default."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    match = re.match(r"\s*(\d+)", str(value or ""))
+    return int(match.group(1)) if match else default
+
+
 def since_of(text: str, *, now: datetime) -> datetime:
     """Where a `since=` reaches back to. "30 days", "past month", "last 2
     weeks" look BACK from now; anything else ("this week", "yesterday", an
@@ -204,7 +216,7 @@ class MailSearchTool(_PimTool):
             return ToolResult.refused(f"refused: no mail account {wanted!r}; "
                                                 f"configured: {', '.join(sorted(connectors))}")
         chosen = {wanted: connectors[wanted]} if wanted else connectors
-        limit = max(1, min(int(args.get("limit") or 20),
+        limit = max(1, min(_count(args.get("limit"), 20),
                            int(getattr(self._config, "pim_max_results", 50))))
         since = None
         if args.get("since"):
@@ -270,7 +282,7 @@ class MailSearchTool(_PimTool):
         """`group_by=sender`: messages per sender over the whole range, every
         account, every page -- the answer to "who sends me the most"."""
         cap = MAX_COUNTED
-        top = max(1, min(int(args.get("top") or 10), 100))
+        top = max(1, min(_count(args.get("top"), 10), 100))
         totals: dict[str, int] = {}
         matched = counted = 0
         problems = []

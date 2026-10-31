@@ -46,6 +46,9 @@ class MarkerTextReachesItsField(unittest.TestCase):
                          {"query": "", "since": "this week", "unread_only": True})
         self.assertEqual(_args("mail_search", "invoice from Hydro One"), {"query": "invoice from Hydro One"})
         self.assertEqual(toolargs.args_from_text("mail_search", "promo limit=50"), {"query": "promo", "limit": 50})
+        # Live 2026-10-30: group_by stayed inside the limit -> int() crashed.
+        self.assertEqual(_args("mail_search", "since=30 days limit=200 group_by=sender top=10"),
+                         {"query": "", "since": "30 days", "limit": 200, "group_by": "sender", "top": 10})
 
     def test_the_contract_table_agrees(self):
         self.assertEqual(toolargs.args_from_text("remember", "Iris likes owls"), {"fact": "Iris likes owls"})

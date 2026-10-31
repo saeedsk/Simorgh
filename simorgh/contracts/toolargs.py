@@ -263,8 +263,11 @@ def key_values(text: str) -> dict:
 #: at all -- the whole line was the query, and Sim told the creator it had
 #: used a 30-day filter and a limit of 200 when the tool got neither
 #: (live 2026-10-28).
+#: `group_by`/`top` (2026-10-30): `MAIL_SEARCH: since=30 days limit=200
+#: group_by=sender` left `group_by=sender` inside the limit, and the tool
+#: died on `int('200 group_by=sender')`.
 MARKER_OPTIONS: dict[str, tuple[str, ...]] = {
-    "mail_search": ("since", "limit", "folder", "account", "unread_only"),
+    "mail_search": ("since", "limit", "folder", "account", "unread_only", "group_by", "top"),
 }
 
 

@@ -449,6 +449,14 @@ class MailToolTestCase(_ToolCase):
         self.assertEqual(since_of("last 2 weeks", now=now), datetime(2026, 10, 14, 12, tzinfo=timezone.utc))
         self.assertEqual(since_of("this week", now=now), datetime(2026, 10, 26, tzinfo=timezone.utc))
 
+    async def test_a_limit_with_text_after_it_is_read_not_a_crash(self):
+        """Live 2026-10-30: `limit` arrived as "200 group_by=sender"."""
+        result = await self._tools()["mail_search"].run({"limit": "2 group_by=sender"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(result.metadata["messages"], 2)
+        result = await self._tools()["mail_search"].run({"limit": "lots"}, ctx=_ctx())
+        self.assertTrue(result.ok, result.error)
+
     async def test_an_unknown_account_lists_the_real_ones(self):
         result = await self._tools()["mail_search"].run({"account": "gmail"}, ctx=_ctx())
         self.assertFalse(result.ok)
