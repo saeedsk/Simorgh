@@ -77,7 +77,16 @@ _RULES: tuple[tuple[str, tuple[str, ...], tuple[re.Pattern, ...]], ...] = (
         # something did not invent having changed anything.
         ("apply_source_patch", "apply_skill", "git_commit"),
         (
-            re.compile(r"\b(?:i|we)(?:'ve| have)?\s+(?:then\s+)?(?:added|updated|edited|modified|changed|written|wrote|created|implemented|fixed)\b", re.I),
+            re.compile(r"\b(?:i|we)(?:'ve| have)?\s+(?:then\s+)?(?:added|updated|edited|modified|changed|implemented|fixed)\b", re.I),
+            # "wrote" and "created" only with something file-like after
+            # them. In a chat the reply itself is writing: "I can't launch
+            # agents, so I wrote it myself" (live 2026-10-30, a short
+            # story) is not a claim to have touched the repository.
+            re.compile(r"\b(?:i|we)(?:'ve| have)?\s+(?:then\s+)?(?:written|wrote|created)\s+"
+                       r"(?:[\w'-]+\s+){0,3}?(?:files?|tests?|modules?|functions?|class(?:es)?|scripts?|patch(?:es)?|config|docstrings?|code)\b", re.I),
+            re.compile(r"\b(?:i|we)(?:'ve| have)?\s+(?:then\s+)?(?:written|wrote|created)\s+"
+                       r"(?:[\w'-]+\s+){0,3}?`?[\w./-]*(?:/|\.(?:py|md|toml|json|ya?ml|txt|sh|js|ts|html|css)\b)", re.I),
+            re.compile(r"\b(?:i|we)(?:'ve| have)?\s+(?:then\s+)?(?:written|wrote)\s+(?:it|them|this|that)\s+(?:to|into)\b", re.I),
             # No passive form here on purpose. "the docstring was added"
             # is just as often a description of somebody else's commit
             # from 2024 as a claim about this session, and there is no

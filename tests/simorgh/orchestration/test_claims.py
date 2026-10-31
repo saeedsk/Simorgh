@@ -90,6 +90,26 @@ class TestNotPunishingHonestAnswers(unittest.TestCase):
         self.assertEqual(unsupported_claims("", [], PATCH_TOOLS), [])
         self.assertEqual(unsupported_claims("   ", [_Step("read_file")], PATCH_TOOLS), [])
 
+    def test_writing_the_reply_itself_is_not_a_file_change(self) -> None:
+        """Live 2026-10-30: a chat asked for five agents to write a short
+        story, had no `spawn`, and answered "so I wrote it myself" -- then
+        was blocked for claiming an edit. The story was the reply."""
+        for text in ("I can't launch agents from this chat, so I wrote it myself.",
+                     "I wrote you a short story about a lighthouse.",
+                     "I've created a poem for the occasion."):
+            with self.subTest(text=text):
+                self.assertEqual(unsupported_claims(text, [], PATCH_TOOLS), [])
+
+    def test_writing_a_file_is_still_a_claim(self) -> None:
+        for text in ("I wrote tests/simorgh/test_parser.py for it.",
+                     "I've created a new module for the parser.",
+                     "I wrote the unit tests and they cover both cases.",
+                     "I wrote it to notes.md.",
+                     "We created `config.toml` with the defaults."):
+            with self.subTest(text=text):
+                self.assertIn("says it changed a file, and no edit was applied",
+                              unsupported_claims(text, [_Step("read_file")], PATCH_TOOLS))
+
     def test_describing_someone_elses_change(self) -> None:
         self.assertEqual(
             unsupported_claims(
