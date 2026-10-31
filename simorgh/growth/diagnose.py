@@ -219,5 +219,59 @@ def _norm(text: str) -> str:
     return " ".join((text or "").lower().split())[:120]
 
 
-__all__ = ["Candidate", "Cluster", "Failure", "GENERAL_ACROSS", "MIN_MEMBERS", "candidate_prompt",
-           "candidates", "cluster", "from_clusters", "from_denials", "from_patterns", "phrasing_prompt"]
+#: An archetype with fewer outcomes than this is noise, not evidence:
+#: 0/1 reads as "never succeeds" and would top the list forever.
+WEAK_MIN_SAMPLES = 3
+
+#: Only scoped patch archetypes (patch:<scope>) are ranked. The unscoped
+#: "patch" row is a legacy grab-bag and would distort the ranking.
+WEAK_PREFIX = "patch:"
+
+#: Pseudo-observations at 50% that a rate is shrunk toward. Few samples
+#: pull the rate toward even odds; many let the observed rate speak.
+WEAK_PRIOR_N = 3.0
+
+
+@dataclass(frozen=True)
+class WeakArea:
+    """One weak archetype: its shrunk rate, its raw rate, and how many
+    outcomes (decayed weight) the rate rests on."""
+
+    archetype: str
+    rate: float
+    raw_rate: float
+    n: float
+
+
+def weakest_areas(table, *, k: int = 2, min_samples: int = WEAK_MIN_SAMPLES,
+                  prefix: str = WEAK_PREFIX, prior_n: float = WEAK_PRIOR_N) -> list[WeakArea]:
+    """Bottom-k scoped archetypes by empirical success rate, weighted by
+    sample count (cross-domain loop entry point).
+
+    `table` is a built CompetenceTable (the caller decides the window,
+    e.g. the last 5000 learn:outcomes). Archetypes with fewer than
+    `min_samples` outcomes are excluded as noise. Rates are shrunk toward
+    0.5 by `prior_n` pseudo-observations, so n=3 at 0/3 ranks below a
+    well-measured 0.4 but above a 0/50 that has real evidence behind it.
+    """
+    rows: list[WeakArea] = []
+    for name in sorted(table.state().get("by_type", {})):
+        if not name.startswith(prefix):
+            continue
+        stats = table.get(name)
+        if stats is None:
+            continue
+        n = float(stats.n)
+        if n < min_samples or n <= 0:
+            continue
+        succ = float(stats.successes_w)
+        raw = succ / n
+        shrunk = (succ + prior_n * 0.5) / (n + prior_n)
+        rows.append(WeakArea(archetype=name, rate=round(shrunk, 4), raw_rate=round(raw, 4), n=round(n, 2)))
+    rows.sort(key=lambda r: (r.rate, -r.n, r.archetype))
+    return rows[:max(0, k)]
+
+
+__all__ = ["Candidate", "Cluster", "Failure", "GENERAL_ACROSS", "MIN_MEMBERS", "WEAK_MIN_SAMPLES",
+           "WeakArea", "candidate_prompt", "candidates", "cluster", "from_clusters", "from_denials",
+           "from_patterns", "phrasing_prompt", "weakest_areas"]
