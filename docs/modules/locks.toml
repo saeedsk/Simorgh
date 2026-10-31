@@ -30,7 +30,7 @@ since = "2026-10-28T08:19:44+00:00"
 until = "2026-10-28T16:19:44+00:00"
 
 [locks.orchestration]
-by = "claude-paid"
-task = "a cut tool result keeps its closing notes"
-since = "2026-10-28T08:08:28+00:00"
-until = "2026-10-28T16:08:28+00:00"
+by = "claude-supervisor-scope"
+task = "supervisor: default scope for unscoped jobs; compute not for per-item judgment"
+since = "2026-10-31T03:12:32+00:00"
+until = "2026-10-31T11:12:32+00:00"
