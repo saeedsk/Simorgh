@@ -24,10 +24,10 @@ since = "2026-10-28T04:36:34+00:00"
 until = "2026-10-28T12:36:34+00:00"
 
 [locks.execution]
-by = "claude-paid"
-task = "stage 19: workbench (data + sqlite + tool bridge for code)"
-since = "2026-10-28T08:14:07+00:00"
-until = "2026-10-28T16:14:07+00:00"
+by = "claude"
+task = "container: daemon probe cache misfires when monotonic clock < 60s (fresh boot)"
+since = "2026-10-31T02:48:37+00:00"
+until = "2026-10-31T10:48:37+00:00"
 
 [locks.interface]
 by = "claude-paid"
