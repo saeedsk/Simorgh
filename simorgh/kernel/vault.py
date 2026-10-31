@@ -130,20 +130,32 @@ def _load_or_create_key(path: Path, *, keyring_module=None) -> tuple[bytes, str]
     """The 32-byte vault key, and where it came from ("keyring" or
     "file") for the one-time startup notice. Tries keyring first;
     never raises for keyring being unusable, only for a genuinely
-    unsafe key FILE."""
+    unsafe key FILE.
+
+    A new key is made only when there is no vault yet. With a vault on
+    disk, a key that cannot be found is an error, never a fresh start: a
+    new key cannot open the old vault, and writing it (to the keychain or
+    the key file) loses the old one for good. Live 2026-10-30: a boot that
+    could not read the keychain wrote a new `vault.bin.key`, the Gmail
+    password in the vault became unreadable, and mail stopped."""
+    has_vault = path.is_file() and path.stat().st_size > 0
+    keyring_said = "keyring disabled (SIMORGH_VAULT_NO_KEYRING)" if _keyring_disabled() else "no keyring module"
     if keyring_module is not None and not _keyring_disabled():
         try:
             stored = keyring_module.get_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
-        except Exception:  # noqa: BLE001 -- any backend failure means "try the file"
+            keyring_said = "no keychain entry"
+        except Exception as exc:  # noqa: BLE001 -- any backend failure means "try the file"
             stored = None
+            keyring_said = f"keychain unreadable ({exc.__class__.__name__})"
         if stored:
             return bytes.fromhex(stored), "keyring"
-        try:
-            new_key = os.urandom(32)
-            keyring_module.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, new_key.hex())
-            return new_key, "keyring"
-        except Exception:  # noqa: BLE001 -- fall through to the file
-            pass
+        if not has_vault:
+            try:
+                new_key = os.urandom(32)
+                keyring_module.set_password(_KEYRING_SERVICE, _KEYRING_USERNAME, new_key.hex())
+                return new_key, "keyring"
+            except Exception:  # noqa: BLE001 -- fall through to the file
+                pass
 
     key_path = path.with_suffix(path.suffix + ".key")
     if key_path.is_file():
@@ -157,6 +169,12 @@ def _load_or_create_key(path: Path, *, keyring_module=None) -> tuple[bytes, str]
                 )
         return bytes.fromhex(key_path.read_text().strip()), "file"
 
+    if has_vault:
+        raise VaultUnavailable(
+            f"{path} exists but its key was not found ({keyring_said}; no {key_path}). Refusing to make a "
+            f"new key, which would leave the vault unreadable for good. Put the key back: the macOS keychain "
+            f"item service '{_KEYRING_SERVICE}', account '{_KEYRING_USERNAME}', or the key file {key_path}"
+        )
     new_key = os.urandom(32)
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_text(new_key.hex())

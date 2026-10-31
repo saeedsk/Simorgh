@@ -136,6 +136,47 @@ class VaultRoundTripTestCase(unittest.TestCase):
             Vault(self.path, keyring_module=other_keyring)
 
 
+class AnExistingVaultIsNeverOrphanedTestCase(unittest.TestCase):
+    """Live 2026-10-30: a boot that could not read the keychain wrote a new
+    `vault.bin.key`; the vault -- the Gmail password in it -- could no
+    longer be opened by any key, and mail stopped. With a vault on disk, a
+    missing key is an error, never a new key."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "vault.bin"
+        self.key_path = self.path.with_suffix(".bin.key")
+        written = _FakeKeyring()
+        Vault(self.path, keyring_module=written).put("imap:gmail", "password", {"password": "app-pw"})
+        self.original = written
+
+    def test_an_unreadable_keychain_refuses_and_writes_no_key_file(self):
+        with self.assertRaises(VaultUnavailable) as caught:
+            Vault(self.path, keyring_module=_FakeKeyring(broken=True))
+        self.assertIn("Refusing to make a new key", str(caught.exception))
+        self.assertFalse(self.key_path.exists(), "no key file may be written beside an existing vault")
+
+    def test_an_empty_keychain_refuses_and_stores_no_new_key(self):
+        empty = _FakeKeyring()
+        with self.assertRaises(VaultUnavailable):
+            Vault(self.path, keyring_module=empty)
+        self.assertIsNone(empty.get_password("simorgh-vault", "vault-key"), "the keychain is not overwritten")
+        self.assertFalse(self.key_path.exists())
+
+    def test_the_original_key_still_opens_it_afterwards(self):
+        with self.assertRaises(VaultUnavailable):
+            Vault(self.path, keyring_module=_FakeKeyring(broken=True))
+        self.assertEqual(Vault(self.path, keyring_module=self.original).open("imap:gmail")["password"], "app-pw")
+
+    def test_a_key_file_restored_beside_the_vault_is_used(self):
+        key = self.original.get_password("simorgh-vault", "vault-key")
+        self.key_path.write_text(key)
+        self.key_path.chmod(0o600)
+        vault = Vault(self.path, keyring_module=_FakeKeyring(broken=True))
+        self.assertEqual(vault.open("imap:gmail")["password"], "app-pw")
+
+
 class KeyringFallbackTestCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -290,8 +331,10 @@ class NeverLeaksTestCase(unittest.TestCase):
     def test_a_decrypt_failure_message_never_contains_the_key(self):
         vault1 = Vault(self.path, keyring_module=_FakeKeyring())
         vault1.put("token:x", "token", {"value": "v"})
+        other = _FakeKeyring()
+        other.set_password("simorgh-vault", "vault-key", "11" * 32)  # a different key entirely
         try:
-            Vault(self.path, keyring_module=_FakeKeyring())  # a different, fresh key
+            Vault(self.path, keyring_module=other)
         except VaultUnavailable as exc:
             self.assertNotIn("v", str(exc).split()[-1])  # crude but real: no raw key hex leaks
         else:
